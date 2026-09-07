@@ -240,14 +240,16 @@ func auditMarketDataReceiptsBuffered(dir string) (*MarketDataReceiptAudit, error
 		}
 	}
 
-	events := make([]informationEvent, 0, result.Schedules+result.Receipts+result.Decisions)
+	scheduleEvents := make([]informationEvent, 0, result.Schedules)
+	receiptEvents := make([]informationEvent, 0, result.Receipts)
+	decisionEvents := make([]informationEvent, 0, result.Decisions)
 	for offset := 0; offset < len(schedulesRaw); offset += marketDataScheduleRecordBytes {
 		record := decodeObservation(schedulesRaw[offset : offset+marketDataScheduleRecordBytes])
 		validateObservation(result, record, links, symbols, false)
 		if activity := linkActivity[record.linkID]; activity != nil {
 			activity.Schedules++
 		}
-		events = append(events, informationEvent{ordinal: record.eventOrdinal, kind: eventSchedule, observation: record})
+		scheduleEvents = append(scheduleEvents, informationEvent{ordinal: record.eventOrdinal, kind: eventSchedule, observation: record})
 	}
 	for offset := 0; offset < len(receiptsRaw); offset += marketDataReceiptRecordBytes {
 		record := decodeObservation(receiptsRaw[offset : offset+marketDataReceiptRecordBytes])
@@ -255,7 +257,7 @@ func auditMarketDataReceiptsBuffered(dir string) (*MarketDataReceiptAudit, error
 		if activity := linkActivity[record.linkID]; activity != nil {
 			activity.Receipts++
 		}
-		events = append(events, informationEvent{ordinal: record.eventOrdinal, kind: eventReceipt, observation: record})
+		receiptEvents = append(receiptEvents, informationEvent{ordinal: record.eventOrdinal, kind: eventReceipt, observation: record})
 	}
 	for offset := 0; offset < len(decisionsRaw); offset += marketDataDecisionRecordBytes {
 		record := decodeDecision(decisionsRaw[offset : offset+marketDataDecisionRecordBytes])
@@ -280,10 +282,14 @@ func auditMarketDataReceiptsBuffered(dir string) (*MarketDataReceiptAudit, error
 				break
 			}
 		}
-		events = append(events, informationEvent{ordinal: record.eventOrdinal, kind: eventDecision, decision: record})
+		decisionEvents = append(decisionEvents, informationEvent{ordinal: record.eventOrdinal, kind: eventDecision, decision: record})
 	}
 
-	sort.Slice(events, func(i, j int) bool { return events[i].ordinal < events[j].ordinal })
+	// Merged in the same order the streaming auditor merges, rather than
+	// sorted. Sorting would silently repair an evidence file whose records are
+	// stored out of event order, so the oracle would accept evidence the
+	// production path rejects; RT-007 records the divergence that showed this.
+	events := mergeInformationEvents(scheduleEvents, receiptEvents, decisionEvents)
 	schedules := make(map[scheduleKey]observationRecord, result.Schedules)
 	sources := make(map[sourceKey]struct{}, result.Schedules)
 	frontiers := make(map[linkKey]auditedFrontier)
@@ -366,6 +372,30 @@ func auditMarketDataReceiptsBuffered(dir string) (*MarketDataReceiptAudit, error
 		result.ScheduleMismatch == 0 && result.MissingDueReceipt == 0 && result.BadEventOrder == 0 &&
 		result.DecisionWithoutLink == 0 && result.BadDecisionFrontier == 0 && result.FutureDecisionUse == 0
 	return result, nil
+}
+
+// mergeInformationEvents reproduces the streaming auditor's three-way merge: at
+// each step the stream whose head carries the strictly smallest event ordinal
+// wins, with ties resolved in schedule, receipt, decision order. It preserves
+// the order records are stored in, so a file written out of event order stays
+// out of order here too and BadEventOrder reports it.
+func mergeInformationEvents(schedules, receipts, decisions []informationEvent) []informationEvent {
+	streams := [3][]informationEvent{schedules, receipts, decisions}
+	merged := make([]informationEvent, 0, len(schedules)+len(receipts)+len(decisions))
+	for {
+		selected := -1
+		for index, stream := range streams {
+			if len(stream) == 0 || (selected >= 0 && stream[0].ordinal >= streams[selected][0].ordinal) {
+				continue
+			}
+			selected = index
+		}
+		if selected < 0 {
+			return merged
+		}
+		merged = append(merged, streams[selected][0])
+		streams[selected] = streams[selected][1:]
+	}
 }
 
 // evidenceRecordStream reads one fixed-width sidecar without materializing the

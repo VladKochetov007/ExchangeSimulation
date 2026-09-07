@@ -353,6 +353,132 @@ Discriminating test: the runs already emit market-data receipts
 decision events to the receipt of the observation they cite and assert the
 receipt precedes the decision. Cheap, and uses evidence that already exists.
 
+**H-011 update — PREREGISTERED 2026-09-07, before E-012 was designed or run.**
+
+Reading `analysis/receipts.go` before writing anything showed that the project
+has already built the check H-011 asked for, and built it stronger than this
+note assumed. `MarketDataReceiptAudit` carries `FutureDecisionUse` and
+`BadDecisionFrontier`, and both feed `Valid`. The mechanism is not a timestamp
+comparison. Each decision record cites a *frontier*: an ordinal, a delivery
+timestamp, and a 16-byte digest. The auditor recomputes that digest itself, as a
+hash chain over every receipt delivered on that `(client, link)` in receipt
+order, and rejects the decision unless the cited triple equals the chain the
+receipt stream independently produces. An actor therefore cannot cite an
+observation the receipt file does not contain, cannot cite one further ahead
+than the receipts that precede its decision in the global event order, and
+cannot cite the right ordinal with the wrong content.
+
+Writing a competing causality checker would have duplicated this. It is recorded
+as prior art, not re-derived. What is worth stating is the boundary of what it
+proves, because that boundary is what remains open:
+
+1. It constrains what a decision *cites*, not what the deciding code *read*. An
+   actor that consulted a shared structure directly and then honestly reported
+   its inbox frontier would pass every check. The record layer cannot see this;
+   only the static argument in E-011 stage 1 can, and that argument is about
+   reachability, not about every call site.
+2. It covers only instrumented decisions. `-record-market-data-receipts`
+   requires an explicit `-market-data-receipt-roles` list, so an un-audited role
+   emits no decision record and contributes nothing to check or to violation.
+   Coverage is therefore a property of the run configuration, not of the code.
+3. `FutureDecisionUse` is only evaluated when `frontierOrdinal > 0`. A decision
+   taken before any observation arrived is checked by the frontier-equality test
+   alone.
+
+Status of H-011: **SUPPORTED WITHIN TESTED SCOPE, by the project's own
+instrument rather than by this audit** — with limits 1-3 as the residual. Limit
+2 is measurable and is deferred to a later experiment.
+
+**H-012 — the participant-information audit has two independent
+implementations, and they are known to agree only on clean evidence.**
+Origin: `AuditMarketDataReceipts` delegates to `auditMarketDataReceiptsStreaming`;
+`auditMarketDataReceiptsBuffered` is retained and documented as "a review oracle
+while the production path moves to bounded streaming".
+`TestAuditMarketDataEvidenceStreamingMatchesBufferedOracle` compares them on one
+valid fixture. `TestAuditMarketDataEvidenceCatchesAdversarialMutations` runs six
+faults, but through the streaming path only. So the oracle is exercised where
+the two paths are least likely to differ, and not exercised where they are most
+likely to differ.
+
+Why divergence is plausible rather than pedantic: the two are not a refactor of
+each other. `DuplicateSource` is a map lookup in the buffered path and an
+external merge sort over spilled runs in the streaming path. `MissingDueReceipt`
+is a map iteration over retained schedules in one and a disk-backed scan in the
+other. Different algorithms answering the same question is exactly where a
+detector loses sensitivity silently.
+
+Why it matters beyond tidiness: `Valid` is a gate on evidence the campaign
+relies on. If the two disagree under fault, then whether a fault is caught
+depends on which path ran, and the buffered function's standing as a review
+oracle is not established.
+
+Prediction, recorded before running: I expect agreement on the majority of
+faults, with the divergence risk concentrated in `DuplicateSource` and
+`MissingDueReceipt`. A run in which every fault produces byte-identical audit
+structs falsifies H-012 within the tested fault set and *strengthens* the
+oracle's standing. A single divergence is a finding.
+Falsifier: all faults produce `reflect.DeepEqual` audit results.
+
+**E-012 — H-012, the two participant-information audit implementations under
+fault.** Preregistered above, before the test was written.
+Artifact: `analysis/economic_audit_receipt_oracle_test.go`.
+Base: `a666d02faede3d40f046b11e60eb672c59386a94`.
+Reproduce: `go test ./analysis/ -run TestAuditMarketDataEvidenceOracleAgreesUnderFaults -v`.
+
+Method: fifteen fault injections into the V2 evidence fixture, each rewriting
+every file digest so the auditor must catch broken semantics rather than a
+checksum, driven through `auditMarketDataReceiptsStreaming` (the production
+path) and `auditMarketDataReceiptsBuffered` (the retained review oracle), with
+the full audit structs compared. A clean control is included, and every fault is
+required to be detected by *both* — a fault neither notices is an audit-coverage
+gap, not an agreement result, and the test says so.
+
+Result: **H-012 SUPPORTED.** Two divergences, in different classes.
+
+*Divergence 1, a disagreement about validity.* Swapping the two schedule
+*records* wholesale changes only the order the file stores them in: the multiset
+of event ordinals is untouched and every record stays internally consistent. On
+the base revision the streaming auditor reported `Valid=false`
+(`BadEventOrder=2`) and the buffered oracle reported `Valid=true`, with every
+counter zero. The mechanism: the buffered path collected all three record kinds
+into one slice and `sort.Slice`d it by event ordinal, which *repairs* a file
+stored out of order before any check sees it; the streaming path merges the
+three files as stored and therefore observes the disorder. An oracle that
+accepts evidence the production path rejects cannot serve as a review oracle,
+which is the role its own comment assigns it. Recorded as RT-007 and fixed on
+the audit branch by replacing the sort with the same three-way merge the
+streaming auditor performs — smallest head wins, ties in schedule, receipt,
+decision order. Discrimination check: with the fix reverted the new test fails on
+this fault and on "global event order is permuted"; with it applied all fifteen
+pass, and the pre-existing `analysis` suite still passes.
+
+*Divergence 2, a disagreement about classification only.* Reordering the two
+schedules' per-link ordinals is rejected by both, but the streaming path calls
+it `receipt_without_schedule` twice while the oracle calls it
+`receipt_without_schedule` once and `schedule_receipt_mismatch` once. The
+mechanism is deliberate: the streaming spill is bounded, so it appends a
+schedule only while its per-link ordinal is in sequence, and a receipt whose
+schedule was dropped has no schedule to compare against; the oracle keeps every
+schedule in a map, so the schedule is present but wrong. Not fixed — this is
+what bounded memory costs, and erasing it would make the oracle a copy rather
+than an independent view. It is *pinned* in the test with its exact counters, so
+a change that turns it into a disagreement about validity fails loudly, and
+every other counter is still compared exactly.
+
+*Prediction accuracy, recorded because it was wrong.* The preregistration named
+`DuplicateSource` and `MissingDueReceipt` as the likely divergence sites, on the
+reasoning that those two use genuinely different algorithms (external merge sort
+versus map; disk scan versus map iteration). Both agreed on every fault. The
+real divergences were in traversal order and in schedule retention — neither
+predicted. The hypothesis was supported and the mechanism reasoning was not: I
+looked for divergence where the *data structures* differ, and it was where the
+*control flow* differs. Sorting versus merging is not an implementation detail
+of a checker whose subject is order.
+
+Scope: fifteen faults on a two-record fixture, one link topology. It does not
+establish equivalence in general; it establishes that the specific permissive
+gap is closed and that the remaining difference is bounded and named.
+
 ---
 
 ## F. Findings
@@ -367,6 +493,14 @@ See `research/red-team-findings.md` for the full records.
   not yet established, so "edge case" is a classification, not a safety claim.
   See H-008 below for the work that would close it.
 - **RT-003** — bounded no-violation results (INV-2, INV-5, INV-6, identity).
+- **RT-006** — latency is delivered as configured across 225 link x channel
+  rows; no unearned speed advantage. Transport only.
+- **RT-007** — the participant-information audit's retained review oracle
+  accepted evidence the production auditor rejects, because it sorted the event
+  stream instead of merging it. REAL BUG, layer = evidence/detector, severity
+  medium, **not reachable in campaign output** (only the streaming path is
+  called). Fixed on the audit branch; regression is a fifteen-fault differential
+  between the two implementations.
 
 **H-009 — a bankrupt account's spot wallet is not seized, so the insurance fund
 absorbs a deficit an aggregate-solvent account could have covered.**
@@ -420,13 +554,35 @@ relisting under a reused symbol, the execution path from admission to clearing,
 negative and zero price domains at settlement.
 
 Owner decisions outstanding: RT-002 disposition (per-position truncation vs a
-book-level carry, as futures already do).
+book-level carry, as futures already do); H-009 (whether a bankrupt account's
+spot wallet should be seized before the insurance fund absorbs the deficit).
 
-Next, in priority order: H-004 (liquidation / debt extinguishment), then H-005
-(double collateral release), then H-008 (RT-002 residual characterisation), then
-H-006 (detector sensitivity to a mis-directed transfer, via controlled
-mutations).
+H-004, H-005, H-006, H-010, H-011 and H-012 are now closed within their tested
+scope; E-008, E-009, E-010, E-011 and E-012 hold the evidence.
+
+Next, in priority order:
+
+1. **H-013 — decision-record coverage is a property of the run configuration,
+   not of the code.** `-record-market-data-receipts` requires an explicit
+   `-market-data-receipt-roles` list, so an un-audited participant class emits
+   no decision record and can neither pass nor fail the causality check. The
+   fairness claim in RT-006 and the causality guarantee in H-011 therefore cover
+   whatever fraction of the 27 participant classes that list names. Measuring
+   that fraction is cheap — read the roles flag used by the campaign's own run
+   scripts and compare it against the class table — and it converts "decisions
+   are causal" into "decisions are causal for N of 27 classes", which is the
+   honest form of the claim.
+2. **H-008** — RT-002 residual: sign, bound, accumulation, extraction.
+3. The execution path from admission to fill to clearing, which no experiment
+   here has touched.
 
 Reproduction: worktree `redteam/economic-audit` on `a666d02`; build
 `cmd/multivenue` and `cmd/mvanalyze`; run dev-607 seed 607 for 7h to reach
-expiry; `mvanalyze -metric conservation` for the identity.
+expiry; `mvanalyze -metric conservation` for the identity. The evidence-audit
+differential needs no run: `go test ./analysis/ -run
+TestAuditMarketDataEvidenceOracleAgreesUnderFaults -v`.
+
+Base check performed this session: `feature/r2-cdf-survival-successor` is still
+at `a666d02` (2026-09-03) and is the most recent scientific line;
+`autoresearch/ffa-ecology-gen0` remains at `230e78f` (2026-08-31). The audit is
+not reported against a stale base.

@@ -284,3 +284,81 @@ stochastic latency profile the configured `delay` is not the expected delivered
 mean, and `market_data_scale`, `cross_venue_base_latency` and the remote-feed
 table each have their own rule. Reporting either pass would have produced a
 false fairness finding.
+
+## RT-007 — The participant-information audit's review oracle accepted evidence the production auditor rejects
+
+**Classification.** REAL BUG. Layer = evidence/detector, not economics.
+Severity medium. **Not reachable in campaign output**: `AuditMarketDataReceipts`
+calls only the streaming path, so no reported audit result is affected. The
+exposure is to review, which is where a detector's own correctness is decided.
+
+**Base.** `a666d02faede3d40f046b11e60eb672c59386a94`.
+
+**What the two functions are.** `analysis/receipts.go` holds two full
+implementations of the V2 participant-information audit.
+`auditMarketDataReceiptsStreaming` is production. `auditMarketDataReceiptsBuffered`
+is retained, in its own words, as "a review oracle while the production path
+moves to bounded streaming ... making semantic comparison against the prior
+implementation straightforward in tests and review."
+
+**What was wrong.** They did not agree on what valid evidence is. The buffered
+path collected schedules, receipts and decisions into one slice and sorted it by
+event ordinal:
+
+```go
+sort.Slice(events, func(i, j int) bool { return events[i].ordinal < events[j].ordinal })
+```
+
+Sorting repairs a file whose records are stored out of event order before any
+check can observe it. The streaming path merges the three files as stored, so it
+sees the disorder and raises `bad_global_event_order`. `BadEventOrder` feeds
+`Valid`.
+
+**Minimal reproduction.** Swap the two schedule *records* wholesale in the
+fixture. Nothing else changes: the multiset of event ordinals is identical, and
+every record stays internally consistent — only the storage order moves.
+
+| | `Valid` | `BadEventOrder` |
+|---|---|---|
+| streaming (production) | `false` | 2 |
+| buffered (oracle), base | **`true`** | 0 |
+| buffered (oracle), fixed | `false` | 2 |
+
+**Why it matters.** The oracle is strictly more permissive about record
+ordering than the code it is meant to check. An engineer comparing a change to
+the streaming path against this oracle would read a correct streaming rejection
+as a streaming regression, and would have no way to see that the oracle had
+silently repaired the input. A checker whose subject is order must not sort its
+input.
+
+**Fix (audit branch).** Replace the sort with the same three-way merge the
+streaming auditor performs: at each step the stream whose head carries the
+strictly smallest event ordinal wins, ties resolved in schedule, receipt,
+decision order. The oracle then traverses exactly the order production does.
+
+**Regression.** `analysis/economic_audit_receipt_oracle_test.go`,
+`TestAuditMarketDataEvidenceOracleAgreesUnderFaults`: fifteen fault injections
+driven through both implementations, each rewriting every file digest so a
+checksum cannot stand in for a semantic catch. It asserts that the two never
+disagree about `Valid`, that every other counter matches exactly, and that each
+fault is caught by both — a fault neither notices is recorded as a coverage gap
+rather than as agreement. Discriminating: with the fix reverted it fails on two
+faults; with it applied all fifteen pass and the pre-existing `analysis` suite
+is unchanged.
+
+**One divergence remains, deliberately.** Reordering two schedules' per-link
+ordinals is rejected by both but classified differently — the streaming spill is
+bounded and retains a schedule only while its ordinal is in sequence, so a
+receipt whose schedule was dropped reads as `receipt_without_schedule`, while
+the oracle's full map reads it as `schedule_receipt_mismatch`. That is what
+bounded memory costs, not a defect, and erasing it would turn the oracle into a
+copy. It is pinned in the test with its exact counters so that a change turning
+it into a disagreement about validity fails loudly.
+
+**Prior art not duplicated.** The project already checks decision causality, and
+more strongly than this audit assumed: each decision cites a frontier whose
+16-byte digest the auditor recomputes as a hash chain over the receipts
+delivered on that link, so an actor cannot cite an observation the receipt
+stream does not contain or one ahead of its own decision. See the H-011 entry in
+`research/economic-correctness-research-note.md` for the three limits that
+remain.
