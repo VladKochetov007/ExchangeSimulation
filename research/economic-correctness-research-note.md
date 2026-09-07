@@ -710,6 +710,87 @@ until the expected count arrives or a deadline passes, so a shortfall is a real
 shortfall. The general lesson matches RT-006's: when the observable is produced
 asynchronously, an instrument that samples once measures the scheduler.
 
+**H-018 — an order outlives the instrument it rests on, or an unfilled
+remainder outlives its order.**
+The remaining exits from the reservation lifecycle after E-015 and E-016, chosen
+because each one terminates an order through a path the *order itself* did not
+initiate:
+- (a) immediate-or-cancel filled in part, remainder killed by the venue;
+- (b) a resting order on a dated instrument that reaches expiry with a
+  settlement price available;
+- (c) the same, but with **no** settlement price available, so the contract
+  enters the settlement-pending state instead of settling.
+
+Why (b) and (c) matter more than (a): an expiry is the one termination where the
+*instrument* disappears. If a book is dropped while orders rest on it, the
+earmark has nothing left to point at and no later cancel can reach it —
+buying power removed permanently, with no event to explain it. Case (c) is
+sharper still, because the contract does not settle: the code must cancel
+resting orders on the first pass and must not cancel them again on the retries,
+and `ReleasePerp` clamps at zero, so a double release would leave no trace.
+
+Predicted observable, recorded before running: (a) is exact, for the same
+reason E-015 found the partial paths exact. For (b) and (c) I expect the orders
+to be cancelled and the earmark released — the settlement-pending branch visibly
+sorts client IDs before cancelling, which is the signature of someone who has
+already thought about this path — but I expect the **retry** case to be the
+weakest link, because `CheckExpiries` is called repeatedly and only the first
+pass is guarded.
+Falsifier: every path releases the earmark exactly once and leaves it at the
+idle baseline.
+Mechanism family: state-machine leak, lifecycle boundary.
+
+**E-017 — H-018, termination the order did not initiate.**
+Preregistered above. Artifact:
+`tests/economic_audit_lifecycle_termination_test.go`.
+Base: `a666d02faede3d40f046b11e60eb672c59386a94`.
+Reproduce: `go test ./tests/ -run 'TestAuditImmediateOrCancel|TestAuditExpiryDoesNotStrand' -v`.
+
+Result: **H-018 FALSIFIED WITHIN TESTED SCOPE**, including the retry case the
+preregistration singled out as the likely weak link.
+
+- **immediate-or-cancel, half filled and half killed**: the earmark returns to
+  the idle baseline, the client tracks no orders, available never exceeds
+  balance.
+- **dated future reaching expiry with a settlement price**, order still resting:
+  cancelled, earmark released to the idle baseline, client stops tracking it,
+  perp available never exceeds perp balance, and a `ForcedCancelNotification`
+  for that exact order ID is delivered.
+- **the same with no settlement price**, so the contract enters
+  settlement-pending rather than settling: identical outcome, and three further
+  `CheckExpiries` passes leave the earmark unchanged and the perp balance
+  non-negative.
+
+The prediction that the retry path would leak was wrong, and the reason is
+visible: `cancelClientOrdersOnBook` looks each order up in the live book and
+skips it when it is no longer there, and `client.RemoveOrder` has already
+removed it, so a second pass finds nothing to release. The pending branch also
+sorts client IDs before cancelling, so the cancellation order does not depend on
+map iteration.
+
+*Method note.* The first attempt backdated the expiry and placed the order
+afterwards; every placement was refused with `INSTRUMENT_EXPIRED`, which would
+have "passed" a test that never exercised its own premise. The fixture now moves
+a controllable clock forward instead, so the order is admitted while the
+contract is live and the expiry happens under it. An expired-instrument refusal
+is itself correct behaviour — it is simply not what H-018 asks about.
+
+**Plateau, and the reframe it forces.** E-015, E-016 and E-017 are three
+consecutive falsifications on the same surface: every exit from an order's life
+returns collateral exactly, notifies the owner, and orders its evidence
+deterministically. That is a plateau in the skill's sense — repeated valid runs
+finding nothing — and the response is a representation change rather than more
+cases in the same frame.
+
+Every invariant tested so far has been **single-account, single-instrument,
+single-book**. The untested surface is the coupling *between* books through a
+shared account: cross-margin between `ABC-PERP` and a dated `ABC-FUT`, an option
+exercised against a live hedge, collateral held in CDF while trading `ABC/CDF`,
+a mark on one instrument feeding a liquidation on another. Those are exactly the
+places where every per-book invariant can hold and the system still leaks,
+because no single book owns the identity that would catch it. Registered as
+H-019 and taken next.
+
 ---
 
 ## F. Findings
@@ -803,20 +884,22 @@ Owner decisions outstanding: RT-002 disposition (per-position truncation vs a
 book-level carry, as futures already do); H-009 (whether a bankrupt account's
 spot wallet should be seized before the insurance fund absorbs the deficit).
 
-H-004, H-005, H-006, H-010 through H-017 are now closed within their tested
-scope; E-008 through E-016 hold the evidence. Three of them (H-013, H-016,
+H-004, H-005, H-006, H-010 through H-018 are now closed within their tested
+scope; E-008 through E-017 hold the evidence. Three of them (H-013, H-016,
 H-017) were closed by falsification — the risk they named was already
 foreclosed — and those are recorded in as much detail as the confirmed ones.
 
 Next, in priority order:
 
-1. **H-018 — the remaining execution-path surfaces.** E-015 and E-016 closed
-   admission refusal, partial fill and self-trade prevention. Untouched:
-   immediate-or-cancel with a partially filled remainder, market orders that
-   exhaust the book, and an order whose instrument expires or is delisted while
-   it rests. There is no amend path at all, which is worth stating positively:
-   queue position cannot be bought by modification because modification does not
-   exist.
+1. **H-019 — cross-book value flow through a shared account.** The execution
+   path has plateaued: E-015, E-016 and E-017 are three consecutive
+   falsifications, and every invariant tested so far has been single-account,
+   single-instrument, single-book. The untested surface is the coupling between
+   books through one account — cross-margin between `ABC-PERP` and a dated
+   `ABC-FUT`, an option exercised against a live hedge, collateral held in CDF
+   while trading `ABC/CDF`, a mark on one instrument driving a liquidation on
+   another. A per-book invariant can hold everywhere and the system still leak,
+   because no single book owns the identity that would catch it.
 2. **RETIRED — H-013 — decision-record coverage is a property of the run
    configuration, not of the code.** `-record-market-data-receipts` requires an explicit
    `-market-data-receipt-roles` list, so an un-audited participant class emits

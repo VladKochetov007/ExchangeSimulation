@@ -496,3 +496,31 @@ class in code that delivers correctly. `enqueueResponse` appends to an outbox
 drained by a separate goroutine, so a non-blocking read races delivery instead of
 observing it. When the observable is produced asynchronously, an instrument that
 samples once measures the scheduler.
+
+## RT-010 (continued) — Termination the order did not initiate
+
+`tests/economic_audit_lifecycle_termination_test.go`. An immediate-or-cancel
+remainder killed by the venue, and a resting order on a dated future that
+reaches expiry — with a settlement price and without one, so the contract enters
+settlement-pending instead of settling.
+
+Expiry is the sharp case: the instrument disappears, so an earmark left behind
+has nothing to point at and no later cancel can reach it. All three release the
+earmark to the idle baseline, stop tracking the order, keep available at or
+below balance, and deliver a `ForcedCancelNotification` for the exact order ID.
+Three further `CheckExpiries` passes on the pending contract change nothing —
+`cancelClientOrdersOnBook` looks each order up in the live book and
+`client.RemoveOrder` has already removed it, so the retry finds nothing to
+release. The audit predicted the retry path would be the weak link. It was not.
+
+**Method note.** The first attempt backdated the expiry and placed the order
+afterwards, so every placement was refused with `INSTRUMENT_EXPIRED` and the
+test would have "passed" without ever exercising its premise. The fixture now
+advances a controllable clock so the order is admitted while the contract is
+live.
+
+**Plateau.** Three consecutive falsifications on the execution path. Every
+invariant tested to date has been single-account, single-instrument,
+single-book, and that frame is now exhausted. The next work is cross-book value
+flow through a shared account (H-019), where a per-book invariant can hold
+everywhere and the system still leak.
