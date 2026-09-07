@@ -642,3 +642,54 @@ Not decided here.
 price. `expiryUnavailableRetryForever` shows the condition is anticipated and
 unbounded in duration. Whether the campaign's configurations produce it is not
 tested and must not be assumed from this experiment.
+
+## RT-013 — Funding is not invariant under account partition
+
+**Classification.** EDGE CASE by magnitude. Recorded because it is the **second**
+instance of the RT-008 mechanism family, which makes it a pattern rather than a
+one-off. No value is lost: the residual is booked to exchange revenue.
+
+**Base.** `a666d02faede3d40f046b11e60eb672c59386a94`.
+
+**Mechanism.** `settleFunding` charges each position
+`TryMulDiv(positionValue, rate, 10000)` **per position**. Truncation is
+subadditive, so the same exposure spread over more accounts is charged less. The
+code already accounts for the two sides not netting — `netExchangeFlow` is
+accumulated explicitly, validated, and routed to exchange revenue with the
+comment that on a real venue this is the insurance fund's residual.
+
+**Measured** (`tests/economic_audit_funding_partition_test.go`), with the other
+side held in a single account in both arms so only the partition differs:
+
+| split side | one account | eight accounts | exchange residual |
+|---|---:|---:|---:|
+| payer (long) | pays 8801 | **8800** | 0 → **-1** |
+| receiver (short) | receives 8801 | **8800** | 0 → **+1** |
+
+**Fragmentation is not an unconditional advantage.** It moves the rounding away
+from the fragmented side's cash flow in both directions: it reduces the
+magnitude of whatever that side pays *or* receives. It helps a payer and hurts a
+receiver, and the choice reverses when the funding rate does. The hypothesis
+predicted the payer half; the receiver half is measured, not assumed.
+
+**Magnitude, stated before the structural claim.** One quote unit in 8801, or
+0.011%, bounded by about one unit per extra account per settlement.
+Economically negligible.
+
+**Why it is recorded anyway.** RT-008 found the same shape in fees. Two
+independent instances make the generalisation worth writing down: **every
+per-item integer charge in this system is partition-dependent**, because each
+truncates per item and truncation is subadditive. Margin and settlement use the
+same `MulDiv` idiom and have not been checked from this angle.
+
+**Two invalid fixtures preceded the valid one, and either would have closed the
+hypothesis as falsified.** The first used a mark of 100 USD, where
+`AbsMulDiv(size, mark, precision)` divides the size by ten and absorbs the leg
+differences before the bps step sees them — it reported exact equality. The
+second scanned leg sizes in steps of one, which the same division also swallows:
+zero differences across forty offsets. Setting the mark equal to
+`BTC_PRECISION`, so position value *is* the raw size and the bps step is the only
+truncation, gives thirty-one differing partitions in the same scan. **A null
+result from an instrument that cannot resolve the effect is not a null result** —
+the third such near-miss in this audit, after RT-006's latency expectations and
+RT-010's asynchronous outbox.

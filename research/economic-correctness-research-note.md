@@ -976,6 +976,88 @@ condition is anticipated and unbounded in duration. Whether the campaign's own
 configurations ever produce it is *not* tested here and should not be assumed
 from this experiment.
 
+**H-021 — funding cost depends on how many accounts a position is spread over.**
+New mechanism family for this campaign: a *recurring* transfer between actors,
+rather than a one-off event at a lifecycle boundary. Funding is the purest
+actor-versus-actor flow in the model — longs pay shorts every interval — so if
+it is not partition-invariant, the unfairness compounds every interval instead
+of happening once.
+
+Mechanism: `settleFunding` computes each position's payment as
+`TryMulDiv(positionValue, rate, 10000)` **per position**, then aggregates a
+client's hedge legs. Integer truncation is subadditive, so the same total
+exposure split across N accounts pays `sum_i trunc(v_i·r/1e4)`, which is at most
+`trunc((sum_i v_i)·r/1e4)` and generally less. The code already recognises that
+the two sides need not net: `netExchangeFlow` is accumulated explicitly,
+validated, and routed to exchange revenue with the comment that on real
+exchanges this is the insurance fund's residual. So the residual is *accounted*.
+The question this asks is whether it is *neutral*.
+
+Why it is a fairness question and not bookkeeping: if splitting reduces what a
+payer pays, an actor able to open several accounts pays less funding for the
+same exposure than one who cannot, every interval, forever. The counterparty
+does not gain it — the exchange residual absorbs the difference — so it is not a
+transfer between traders but a discount on an obligation, available only to
+whoever fragments.
+
+Predicted observable, recorded before running: with a positive funding rate,
+total funding paid by N split longs is **less than or equal to** that paid by
+one long of the same size, the deficit appears in the exchange residual, and it
+is bounded by roughly one quote unit per extra account. Symmetrically, a split
+*receiver* should receive less, which would make fragmentation good for payers
+and bad for receivers.
+Falsifier: the two arms pay exactly the same, which would mean funding is
+computed on an aggregate or the rounding is compensated.
+Mechanism family: quantization asymmetry, recurring transfer.
+
+**E-020 — H-021, funding under account partition.**
+Preregistered above. Artifact:
+`tests/economic_audit_funding_partition_test.go`.
+Base: `a666d02faede3d40f046b11e60eb672c59386a94`.
+Reproduce: `go test ./tests/ -run TestAuditFundingIsNotInvariant -v`.
+
+Result: **H-021 SUPPORTED in direction, and its "unconditional advantage"
+framing FALSIFIED by the symmetric arm.**
+
+| split side | one account | eight accounts | exchange residual |
+|---|---:|---:|---:|
+| payer (long) | pays 8801 | pays **8800** | 0 → **-1** |
+| receiver (short) | receives 8801 | receives **8800** | 0 → **+1** |
+
+Fragmentation moves the rounding away from the fragmented side's cash flow in
+*both* directions. It reduces the magnitude of whatever that side pays or
+receives, so it helps a payer and hurts a receiver. The preregistration
+predicted the payer half and guessed the receiver half; both are now measured
+rather than assumed. It is therefore not a free-money mechanism: an actor
+choosing to fragment must know which side of the funding flow it is on, and the
+choice reverses when the rate does.
+
+The residual is booked, not lost — `netExchangeFlow` is accumulated explicitly,
+validated, and routed to exchange revenue — so this is a transfer, not a leak.
+What is new is that the residual's *sign* is set by which side is more
+fragmented, which makes it a population property rather than a wash.
+
+*Two invalid fixtures before the valid one, recorded because either would have
+produced a confident "falsified".* The first used a mark of 100 USD, where
+`AbsMulDiv(size, mark, precision)` divides the size by ten and absorbs the leg
+differences before the bps step ever sees them; it reported equality and would
+have closed H-021 as falsified. The second scanned leg sizes in steps of one,
+which the same division also swallows: 0 differences in 40 offsets. Setting the
+mark equal to `BTC_PRECISION`, so position value *is* the raw size and the bps
+step is the only truncation, gives 31 differing partitions in the same 40-offset
+scan. A null result from an instrument that cannot resolve the effect is not a
+null result.
+
+**Magnitude, stated before any structural claim.** One quote unit in 8801, or
+0.011%, bounded by about one unit per extra account per settlement. Economically
+negligible. It is recorded for a different reason: it is the same mechanism
+family as RT-008 in fees, and two independent instances make the generalisation
+worth stating — **every per-item integer charge in this system is
+partition-dependent**, because every one of them truncates per item and
+truncation is subadditive. Fees and funding are the two found so far; margin and
+settlement use the same `MulDiv` idiom and have not been checked from this
+angle.
+
 ---
 
 ## F. Findings
@@ -992,6 +1074,12 @@ See `research/red-team-findings.md` for the full records.
 - **RT-003** — bounded no-violation results (INV-2, INV-5, INV-6, identity).
 - **RT-006** — latency is delivered as configured across 225 link x channel
   rows; no unearned speed advantage. Transport only.
+- **RT-013** — funding is not invariant under account partition: the more
+  fragmented side gets the rounding, so splitting helps a payer and hurts a
+  receiver, and the exchange residual absorbs the difference. EDGE CASE by
+  magnitude (1 unit in 8801, bounded by one unit per extra account per
+  settlement); recorded because it is the second instance of the RT-008
+  mechanism family and establishes it as a pattern.
 - **RT-012** — a position on a settlement-pending contract suspends liquidation
   of the entire account: the margin profile fails closed and the caller skips
   the client. The account is frozen, not privileged (new orders are refused),
@@ -1097,6 +1185,11 @@ Next, in priority order:
    `continue`), so exposure in a second quote asset is invisible to the first
    one's risk check; and an option exercised against a live hedge. The
    settlement-pending question is closed as RT-012.
+2. **H-022 — the partition-dependence pattern.** RT-008 (fees) and RT-013
+   (funding) are the same mechanism seen twice. Margin and settlement use the
+   same per-item `MulDiv` idiom and have not been checked from this angle; a
+   sweep of every per-item integer charge would either close the pattern or find
+   the instance where the magnitude matters.
 2. **RETIRED — H-013 — decision-record coverage is a property of the run
    configuration, not of the code.** `-record-market-data-receipts` requires an explicit
    `-market-data-receipt-roles` list, so an un-audited participant class emits
