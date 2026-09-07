@@ -2008,6 +2008,104 @@ construction, and every ratio printed as `inf`. The tool now strips the index,
 and classes that genuinely have one participant per venue — `perp_maker` — are
 reported as "no yardstick" instead of being given a ratio against zero.
 
+**H-032 — RT-022's venue effect is a matching-rule effect, not a venue
+mystery.** Self-correction, raised by attacking E-032 rather than extending it.
+
+E-032 reported that a class's result varies across venues and framed the venues
+as "genuinely different environments". Checking the configuration *after*
+reporting — which is the wrong order and is recorded as such — shows the
+heterogeneity is **deliberate and explicit**:
+
+| venue | matching rule | funding interval |
+|---|---|---|
+| north | `price_time` | 28 800 s (8 h) |
+| central | `pro_rata` | 3 600 s (1 h) |
+| south | `pro_rata` | 7 200 s (2 h) |
+
+So a venue effect is not a discovery; the campaign built three different venues
+on purpose, and a class-level number aggregated across them is *designed* to mix
+three matching rules and three funding intervals. E-032's magnitude measurement
+stands; its framing overstated the novelty and is corrected below.
+
+The configuration also hands over a decomposition E-032 did not use. North is
+the only price-time venue; central and south are both pro-rata and differ only in
+funding interval. Therefore:
+
+- `central` vs `south` isolates the **funding interval** (1 h vs 2 h),
+- `north` vs the mean of the two pro-rata venues isolates the **matching rule**,
+  confounded only by north's longer funding interval.
+
+Predicted observable, recorded before recomputing: for `triangle_arb` the
+matching-rule axis is several times larger than the funding-interval axis, and
+the sign is consistent across the liquidity-taking classes — price-time
+advantages an actor that wants a determinate queue position, pro-rata dilutes it.
+Falsifier: the two axes are comparable in size, or the sign of the matching-rule
+axis differs across classes with similar execution needs, either of which would
+mean the split explains nothing and the venue term is genuinely unattributed.
+
+**E-033 — H-032, decomposing the venue effect, and a correction to RT-022.**
+Preregistered above. Artifact: `research/tools/venueeffect/main.go`.
+Base: `a666d02faede3d40f046b11e60eb672c59386a94`.
+Run: `clock-control-5h-101.json`, seed 607, 5 simulated hours.
+
+**First, the correction to E-032, and the process error behind it.** E-032
+framed the venues as "genuinely different environments" as though that were a
+discovery. The configuration says so explicitly, and I read it only *after*
+reporting:
+
+| venue | matching rule | funding interval |
+|---|---|---|
+| north | `price_time` | 8 h |
+| central | `pro_rata` | 1 h |
+| south | `pro_rata` | 2 h |
+
+The heterogeneity is deliberate. E-032's magnitudes stand; its framing implied an
+unnoticed confound where the campaign had made a design choice. **Read the
+configuration before characterising what a measurement means, not after.**
+
+**Second, the decomposition — which fails, and the failure is the finding.**
+North is the only price-time venue and central/south are both pro-rata, so
+`central − south` isolates the funding interval while `north −
+mean(pro-rata)` was intended to isolate the matching rule.
+
+| class | rule axis | funding axis | mean | rule as % |
+|---|---:|---:|---:|---:|
+| `triangle_arb` | +991 791 | −254 891 | 13 597 138 | +7.29% |
+| `imbalance_maker` | +122 266 | −124 211 | −483 679 | +25.28% |
+| `option_dealer` | +12 854 | +1 206 | 61 391 | +20.94% |
+| `abc_cdf_spot_maker` | +415 725 | **−3 279 751** | −2 100 770 | +19.79% |
+| `noise_flow` | −584 037 | **+1 221 324** | −9 649 395 | −6.05% |
+| `vanna_volga_desk` | −10 479 | −693 | −34 451 | −30.42% |
+| `fixed_distance_maker` | −33 264 | −26 444 | −558 857 | −5.95% |
+
+**H-032 MIXED, and both halves of the prediction fail.** The prediction was that
+the rule axis would dominate and that its sign would be consistent across
+liquidity-taking classes. Neither holds: for `abc_cdf_spot_maker` and
+`noise_flow` the *funding* axis is several times the rule axis, and the rule
+axis's sign splits across classes that are not obviously different in execution
+needs — `abc_cdf_spot_maker` gains on price-time while `fixed_distance_maker`
+loses.
+
+**What the numbers actually establish.** North differs from the pro-rata venues
+in **both** rule and funding interval, so the "rule axis" is contaminated by an
+8 h-versus-1.5 h funding difference. The one clean contrast — `central` versus
+`south`, identical rules, 1 h versus 2 h funding — shows a funding term that is
+frequently *larger* than the quantity being attributed to the rule. The
+decomposition therefore cannot separate the two effects, and neither can any
+single run of this configuration.
+
+**The finding is that the venue design confounds matching rule with funding
+interval.** Attributing a measured venue effect to either is unsupported, and the
+campaign's three venues do not contain the cell — price-time with a short funding
+interval — that would break the confound. Recorded as RT-023, and RT-022 is
+amended to say that its environment term is real but **unattributable**, not that
+it is a matching-rule effect.
+
+**Scope.** One configuration, one seed. Whether the per-class signs are stable
+across seeds is not measured, and with a single run they could as easily be
+sampling noise as structure. That check is the natural next experiment and this
+one does not substitute for it.
+
 ---
 
 ## F. Findings
@@ -2024,11 +2122,15 @@ See `research/red-team-findings.md` for the full records.
 - **RT-003** — bounded no-violation results (INV-2, INV-5, INV-6, identity).
 - **RT-006** — latency is delivered as configured across 225 link x channel
   rows; no unearned speed advantage. Transport only.
-- **RT-022** — venue placement carries an environment term in the campaign's own
-  comparisons. `triangle_arb`'s result differs by **8.23%** across the three
-  venues (north +14 258 332 vs central +13 139 095) while same-venue clones
-  differ by 0.03%. Expected physics for venue-local strategies, but it means any
-  cross-class comparison that does not control for venue carries that term.
+- **RT-023** — the venue design **confounds matching rule with funding
+  interval**: north is the only price-time venue and also the only 8-hour funding
+  venue, so no venue effect can be attributed to either. The one clean contrast
+  (central vs south, same rule, 1 h vs 2 h) often shows a larger term than the
+  one being attributed to the rule. Single seed.
+- **RT-022** (amended by E-033) — venue placement carries an environment term:
+  `triangle_arb` differs by **8.23%** across venues against 0.03% between
+  same-venue clones. The term is real and previously unquantified, but it is
+  **unattributable** — the venues differ deliberately in both rule and funding.
   **Methodological, not an economics defect.**
 - **RT-021** — the index that anchors every mark has no staleness bound: a venue
   that goes one-sided stops updating without losing its vote, so two silent

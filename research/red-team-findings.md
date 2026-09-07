@@ -1293,3 +1293,51 @@ per venue, the within-venue spread was zero by construction, and every ratio
 printed `inf`. The tool now strips the index, and a class that genuinely has one
 participant per venue is reported as "no yardstick" rather than given a ratio
 against zero.
+
+## RT-023 — The venue design confounds matching rule with funding interval
+
+**Classification.** Methodological. Makes RT-022's environment term real but
+**unattributable**. Single configuration, single seed.
+
+**Base.** `a666d02faede3d40f046b11e60eb672c59386a94`.
+
+| venue | matching rule | funding interval |
+|---|---|---|
+| north | `price_time` | 8 h |
+| central | `pro_rata` | 1 h |
+| south | `pro_rata` | 2 h |
+
+North is the only price-time venue **and** the only long-funding venue. Any
+north-versus-others contrast therefore mixes the two, and the campaign's three
+venues do not contain the cell that would break it — price-time with a short
+funding interval.
+
+**The one clean contrast shows the confound is not negligible.** `central` versus
+`south` holds the rule fixed and varies only funding, 1 h against 2 h:
+
+| class | rule axis (contaminated) | funding axis (clean) | mean |
+|---|---:|---:|---:|
+| `triangle_arb` | +991 791 | −254 891 | 13 597 138 |
+| `abc_cdf_spot_maker` | +415 725 | **−3 279 751** | −2 100 770 |
+| `noise_flow` | −584 037 | **+1 221 324** | −9 649 395 |
+| `imbalance_maker` | +122 266 | −124 211 | −483 679 |
+| `fixed_distance_maker` | −33 264 | −26 444 | −558 857 |
+
+For `abc_cdf_spot_maker` and `noise_flow` the funding term alone is several
+times the quantity being attributed to the matching rule. Attributing a venue
+effect to either factor is unsupported.
+
+**A prediction that failed, recorded as such.** H-032 predicted the rule axis
+would dominate and that its sign would be consistent across liquidity-taking
+classes. Neither holds: the funding axis is larger for several classes, and the
+rule axis's sign splits across classes with similar execution needs —
+`abc_cdf_spot_maker` gains where `fixed_distance_maker` loses.
+
+**Process error recorded with the finding.** RT-022 framed the venues as
+"genuinely different environments" as though discovering it. The configuration
+states the heterogeneity explicitly and I read it only after reporting. **Read
+the configuration before characterising what a measurement means.**
+
+**Scope.** One configuration, one seed. Whether the per-class signs are stable
+across seeds is not measured; with a single run they could as easily be sampling
+noise as structure.

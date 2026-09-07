@@ -102,8 +102,12 @@ func main() {
 	sort.Strings(roles)
 
 	detail := flag.Lookup("detail").Value.String() == "true"
-	fmt.Printf("%-28s %10s %10s %12s %12s %7s\n",
-		"role", "venues", "n/venue", "between", "within", "ratio")
+	// The campaign configures north as price_time and central/south as pro_rata,
+	// with funding intervals of 8h, 1h and 2h. That yields a decomposition the
+	// raw spread hides: central vs south isolates the funding interval, and
+	// north vs the pro-rata mean isolates the matching rule.
+	fmt.Printf("%-24s %8s %12s %12s %12s %10s\n",
+		"role", "n/venue", "rule axis", "funding axis", "mean", "rule %")
 	fmt.Println("  between = max-min of the per-venue means; within = mean per-venue max-min")
 	type reported struct {
 		role                   string
@@ -179,11 +183,33 @@ func main() {
 	}
 	sort.Slice(rows, func(i, j int) bool { return rows[i].ratio > rows[j].ratio })
 	for _, r := range rows {
-		ratio := fmt.Sprintf("%.2f", r.ratio)
-		if math.IsInf(r.ratio, 1) {
-			ratio = "inf"
+		venues := byRole[r.role]
+		mean := func(id string) (float64, bool) {
+			values := venues[id]
+			if len(values) == 0 {
+				return 0, false
+			}
+			sum := 0.0
+			for _, v := range values {
+				sum += v
+			}
+			return sum / float64(len(values)), true
 		}
-		fmt.Printf("%-28s %10d %10d %12.2f %12.2f %7s\n",
-			r.role, r.venues, r.perVenue, r.between, r.within, ratio)
+		north, okN := mean("north")
+		central, okC := mean("central")
+		south, okS := mean("south")
+		if !okN || !okC || !okS {
+			continue
+		}
+		proRata := (central + south) / 2
+		ruleAxis := north - proRata
+		fundingAxis := central - south
+		overall := (north + central + south) / 3
+		rulePct := math.Inf(1)
+		if overall != 0 {
+			rulePct = 100 * ruleAxis / math.Abs(overall)
+		}
+		fmt.Printf("%-24s %8d %12.0f %12.0f %12.0f %9.2f%%\n",
+			r.role, r.perVenue, ruleAxis, fundingAxis, overall, rulePct)
 	}
 }
