@@ -973,3 +973,40 @@ Nothing in the code states the choice.
 the book a trade belongs to is the file it is written in. Either mistake yields a
 confident empty result. Caught by reading one raw line, which is the standing
 rule from RT-014.
+
+## RT-017 — Valuation discipline is inversely ordered to authority
+
+**Classification.** Structural observation over RT-015 and RT-016, not a new
+instance. **Owner decision.** No new mechanism; what is new is the ordering.
+
+**Base.** `a666d02faede3d40f046b11e60eb672c59386a94`.
+
+Three parts of this system value the same account, and they do not use the same
+price:
+
+| valuation | decision it feeds | price | staleness discipline | provenance |
+|---|---|---|---|---|
+| `MarkedAccount` via `populationValuationSpec` | scoring; moves no money | live two-sided ABC/USD mid | bounded window; fails closed on a non-positive mark | records `markSource` |
+| `buildAccountMarginProfile` | liquidation | stored funding mark via `riskMark` | fails closed on a settlement-pending sibling | none |
+| `validateCrossMarginCollateral` | how much leverage an actor may take | static oracle pinned to the bootstrap constant | **none; the concept is absent on this path** | none |
+
+**Care decreases as authority increases.** The path that moves no money records
+where its price came from and refuses to report on a stale one. The path that
+decides leverage reads a constant fixed before the simulation began.
+
+**Measured** (`tests/economic_audit_valuation_triad_test.go`), one account, one
+instant, 10 ABC held, market at 25 000 against a 50 000 bootstrap:
+
+- scoring equity at the live mark: **250 000 USD**
+- scoring equity at the bootstrap mark: 500 000 USD
+- borrow admitted against the same 10 ABC: **500 000 USD — 2× live equity**
+
+**The 2× is a demonstration, not a campaign claim.** It uses a 50% price move to
+make the mechanism visible. The measured ABC excursion in the control
+configuration is 1.06% (RT-016), so the campaign-scale gap is about one percent.
+The test labels the extreme as such.
+
+**Why record the ordering separately.** A reviewer looking for where valuation
+discipline is weakest should look where the consequences are largest. In this
+system that is exactly where it is absent, and neither RT-015 nor RT-016 says so
+on its own.

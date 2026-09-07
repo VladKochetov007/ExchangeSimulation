@@ -1445,6 +1445,82 @@ confident "no trades found" or a silently empty band. Checking one raw line
 before trusting the aggregate caught it, which is now the standing rule from
 E-022.
 
+**H-025 — the three valuations of an account rank in care opposite to their
+authority.**
+RT-015 and RT-016 each found the borrow gate disagreeing with the risk engine.
+This closes the frame by adding the third valuation and asking a structural
+question rather than another instance question: *does the system's care about
+pricing an account increase with the consequence of the decision it feeds?*
+
+The three:
+
+1. **`MarkedAccount`** (`exchange/valuation.go`) — telemetry and scoring. Its own
+   comment says it is "intended for research/risk telemetry rather than order
+   admission" and that "the caller supplies every conversion into one reporting
+   asset because the venue does not invent an FX graph".
+2. **`buildAccountMarginProfile`** — liquidation. Values positions through
+   `riskMark`, which reads each instrument's stored funding mark and fails closed
+   when no valid mark exists.
+3. **`validateCrossMarginCollateral`** — leverage. Reads
+   `BorrowingConfig.PriceSource`, which the campaign fills with a static oracle
+   pinned to the bootstrap price.
+
+Predicted ordering, recorded before checking the campaign's caller: care
+*decreases* as authority increases. The scoring path, which moves no money,
+should be the most careful; the borrow gate, which decides how much leverage an
+actor may take, the least.
+
+Discriminating observations: (a) what mark the campaign supplies to
+`MarkedAccount`, and whether it carries provenance and a staleness bound; (b)
+whether the same account, at the same instant, is valued differently by
+`MarkedAccount` and by the borrow gate, and by how much.
+Falsifier: the scoring path is as loose as the borrow gate, or the borrow gate
+carries an equivalent staleness discipline.
+Mechanism family: valuation disagreement, structural.
+
+**E-026 — H-025, the three valuations side by side.**
+Preregistered above. Artifact:
+`tests/economic_audit_valuation_triad_test.go`.
+Base: `a666d02faede3d40f046b11e60eb672c59386a94`.
+Reproduce: `go test ./tests/ -run TestAuditTheSameAccountIsValued -v`.
+
+Result: **H-025 SUPPORTED, including the predicted ordering.** The prediction was
+recorded before reading `populationValuationSpec`, which turned out to be the
+most disciplined of the three.
+
+| valuation | decision it feeds | price it uses | staleness discipline | provenance |
+|---|---|---|---|---|
+| `MarkedAccount` via `populationValuationSpec` | scoring, moves no money | live two-sided ABC/USD mid | bounded window, fails closed on a non-positive mark | records `markSource`, distinguishing `two_sided_ABC_USD_mid` from `recent_…` and from `bootstrap_manifest` |
+| `buildAccountMarginProfile` | liquidation | instrument's stored funding mark via `riskMark`, live-book fallback only before the first update | fails closed on a settlement-pending sibling | none recorded |
+| `validateCrossMarginCollateral` | how much leverage an actor may take | static oracle pinned to the bootstrap constant | **none — the concept does not exist on this path** | none |
+
+**Care decreases as authority increases.** The path that moves no money records
+where its price came from and refuses to report on a stale one. The path that
+decides how much leverage an actor may take reads a constant fixed before the
+simulation started.
+
+Measured on one account at one instant, 10 ABC held, market at 25 000 against a
+50 000 bootstrap:
+
+- scoring equity at the live mark: **250 000 USD**
+- scoring equity at the bootstrap mark: 500 000 USD
+- borrow admitted against the same 10 ABC: **500 000 USD — 2× the account's live
+  equity**
+
+**Magnitude discipline, applied prospectively.** That 2× uses a 50% price move to
+make the mechanism visible. The measured ABC excursion in the control
+configuration is **1.06%** (E-025), so the campaign-scale gap between the
+scoring valuation and the borrowing valuation is about one percent, not a
+factor of two. The extreme is a demonstration, not a claim about the campaign,
+and it is labelled as such in the test.
+
+**What is new here beyond RT-015 and RT-016.** Those were two instances of one
+subsystem disagreeing with another. This is the structural statement: the
+disagreement is not random, it is ordered, and it is ordered the wrong way
+round. A reviewer looking for where valuation discipline is weakest should look
+where the consequences are largest, and in this system that is exactly where the
+discipline is absent. Recorded as RT-017.
+
 ---
 
 ## F. Findings
@@ -1461,6 +1537,12 @@ See `research/red-team-findings.md` for the full records.
 - **RT-003** — bounded no-violation results (INV-2, INV-5, INV-6, identity).
 - **RT-006** — latency is delivered as configured across 225 link x channel
   rows; no unearned speed advantage. Transport only.
+- **RT-017** — the system holds three valuations of an account, and their
+  pricing discipline is **inversely ordered to their authority**: the scoring
+  path records provenance and bounds staleness, the risk engine uses a live mark
+  and fails closed, and the borrow gate — which sets leverage — reads a constant
+  fixed before the run. Structural observation over RT-015 and RT-016 rather
+  than a new instance. **Owner decision.**
 - **RT-016** — the borrow gate prices collateral from a static oracle pinned to
   the bootstrap price, so a 50% fall in ABC leaves borrowing power unchanged at
   twice the collateral's worth. **Latent, not live**: measured excursion in the
