@@ -362,3 +362,87 @@ delivered on that link, so an actor cannot cite an observation the receipt
 stream does not contain or one ahead of its own decision. See the H-011 entry in
 `research/economic-correctness-research-note.md` for the three limits that
 remain.
+
+## RT-008 — The taker fee depends on how the counterparty's liquidity was sliced
+
+**Classification.** EDGE CASE by magnitude at campaign prices; the *mechanism*
+is real, directional, and invisible to every existing check. Disposition open:
+fee semantics are the owner's to decide, and aggregating a fee across a match
+would be a change to scientific economics.
+
+**Base.** `a666d02faede3d40f046b11e60eb672c59386a94`.
+
+**Mechanism.** `PercentageFee{InQuote: true}` charges
+`trunc(trunc(qty*price/basePrecision) * bps / 10000)` **per execution**. Integer
+truncation is subadditive, so for any partition of a quantity into fills,
+`sum_i fee(q_i) <= fee(sum_i q_i)`. The same exposure taken as N executions can
+therefore only ever cost less than the same exposure taken as one.
+
+**Why it is a fairness question, not a rounding nit.** The taker does not choose
+the partition — the resting side does. Two takers submitting the identical order
+at the identical price pay different fees depending on whether the book in front
+of them was one large order or many small clips.
+
+**Why no detector sees it.** The fee that is not charged is never moved. The
+conservation tracker compares recorded movements against holdings, and both are
+consistent; the identity `InternalNet + ExchangeTake + OpenLinearValue = 0` also
+balances. The shortfall exists only against a counterfactual, which is precisely
+the class RT-004 established the tracker is blind to.
+
+**Measured magnitude** (`tests/economic_audit_fee_partition_test.go`):
+
+| arm | one execution | ten executions | shortfall |
+|---|---:|---:|---:|
+| 100 USD, clip 150 001 | 75 | 70 | 5 (6.67%) |
+| 50 000 USD (ABC bootstrap), minimum clip | 25 000 | 25 000 | 0 |
+| 50 000 USD, clip chosen to maximise truncation | 25 009 | 25 000 | 9 (0.036%) |
+
+**The 6.67% row is a small-fixture artefact and must not be quoted as a campaign
+number.** At the campaign's price level the charge reduces to `qty/40` quote
+units, so a ten-way slice can lose at most `trunc(39/4) = 9` units — derived
+first, then confirmed exactly. At a round minimum clip nothing is lost.
+
+**Latent boundary.** A fill pays nothing when its trade value falls below
+`10000/bps` quote units. At 5 bps and the ABC venue minimum of 0.001 base, that
+is every price up to **19.00 USD**. ABC bootstraps at 50 000 and CDF at 3 000,
+so the free-fill regime is **not reachable in the campaign**. It is recorded
+because it follows from the fee model and the minimum order size together, and a
+future low-priced instrument would cross it with no warning.
+
+**Regression.** The test does not demand a policy. It pins the shape: that
+slicing can never make the taker pay *more* (a reversal would mean the fee had
+become superadditive, which no rounding rule produces by accident), and that the
+shortfall stays within the derived per-execution bound.
+
+## RT-009 — A hidden order keeps full time priority over displayed size
+
+**Classification.** INTENDED MODEL ASSUMPTION, and **NOT EXERCISED**. No
+campaign result depends on it.
+
+**Mechanism.** `matching.makerAvailable` throttles an iceberg to its display
+tranche and returns the full remainder for everything else, hidden orders
+included. Both matchers use it. So at one price a hidden order carries exactly
+the time priority a displayed order of the same size carries, while contributing
+nothing to the public snapshot.
+
+**Measured** (`tests/economic_audit_hidden_priority_test.go`): a hidden clip
+resting first took the entire incoming fill (1 000 000 base units); the
+displayed clip resting behind it sold nothing; the public ask level showed only
+the displayed clip throughout.
+
+**Why it is recorded.** Real venues subordinate hidden size to displayed size at
+the same price precisely because otherwise displaying is irrational — a
+participant who shows size gives information away and receives nothing for it.
+Under this model `Hidden` weakly dominates `Normal`: identical fills, less
+information leaked. Any actor using `Normal` would be handicapped with no
+compensating benefit.
+
+**Reachability.** Nothing in the tree constructs a non-Normal order.
+`BaseActor.SubmitOrderFull`, the only route from an actor to a visibility other
+than `Normal`, has no callers anywhere, tests included. Icebergs are modelled
+correctly by contrast: `refreshIcebergTranche` unlinks and re-links the order, so
+a refreshed tranche goes to the back of its price level and loses time priority.
+
+**What this finding is for.** Not a request to change the matcher. It makes
+enabling hidden orders a deliberate act with a known consequence instead of a
+silent one, and the test fails loudly if the rule changes in either direction.

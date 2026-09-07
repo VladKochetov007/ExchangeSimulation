@@ -479,6 +479,128 @@ Scope: fifteen faults on a two-record fixture, one link topology. It does not
 establish equivalence in general; it establishes that the specific permissive
 gap is closed and that the remaining difference is bounded and named.
 
+**H-013 — decision-record coverage is a property of the run configuration.**
+Status: **FALSIFIED WITHIN TESTED SCOPE as a vacuous-pass risk; the residual is
+documentation, not a defect.** The concern was that a role list which names
+nothing real would produce zero decision records and a vacuously `Valid` audit.
+The project already forecloses this, in three places:
+`NormalizeConfig` rejects a receipt role that is not an unnumbered role class,
+that is duplicated, or that has no explicit nonzero delayed link
+(`simulations/multivenue/sim.go:1249`); and `validateMarketDataReceiptCoverage`
+rejects a run where an audited role has no participants or feed sessions at all,
+or where the number of instrumented links does not equal the number of
+participants — its comment states the reason exactly: "Evidence that silently
+covers only a subset of a role is worse than no claim of an information boundary
+at all."
+What remains true and is not a bug: roles *absent* from the list emit no
+decision records, so the causality guarantee is scoped to the listed classes.
+Every role class that has decision instrumentation also has its own test that
+enables receipts for it alone (`simulations/multivenue/*_test.go`), so the
+per-class check is exercised; what no single run establishes is all classes at
+once. Recorded as scope, not as a finding.
+
+**H-014 — a hidden order pays nothing for being hidden.**
+Origin: `matching.makerAvailable` returns the full remainder for `Normal` and
+`Hidden` alike, and only icebergs are throttled to their display tranche. Both
+matchers use it. So at one price a hidden order has exactly the time priority a
+displayed order of the same size would have, while contributing nothing to the
+public snapshot.
+Why it is a fairness question: real venues subordinate hidden size to displayed
+size at the same price precisely because otherwise displaying is irrational. If
+hiding costs nothing, `Hidden` weakly dominates `Normal` — same fills, less
+information leaked — and any actor using `Normal` is handicapped for no
+compensating benefit.
+Predicted observable: a hidden order resting ahead of a displayed order at the
+same price takes the whole fill.
+Falsifier: displayed size is served first at equal price.
+
+**H-015 — the fee charged on one economic exposure depends on how the
+counterparty sliced it.**
+Representation change: stop looking at a fill and look at the *partition* of a
+quantity into fills. Fee is computed per execution from an integer
+multiply-divide, and integer division truncates. Truncation is subadditive:
+`sum_i trunc(f(q_i)) <= trunc(f(sum_i q_i))`, with the gap growing as the
+partition gets finer. So the same exposure, taken as N small fills instead of
+one, should cost *less* in fees, and the shortfall lands on the exchange's fee
+revenue.
+Why this is an actor-fairness question and not a rounding nit: a participant's
+cost would then depend on a decision the *counterparty* made — how finely to
+slice — and an actor that deliberately slices into minimum-size clips pays
+systematically less than one that trades the same quantity at once. At a fine
+enough partition each slice's fee truncates to zero and the trade becomes free.
+That is a free-money mechanism reachable with no special privileges, only order
+sizing.
+Predicted observable, recorded before measuring: total fee across N equal
+partial fills is **less than or equal to** the fee on one aggregate fill, with
+equality only when no truncation occurs, and the deficit appears in
+`ExchangeBalance.FeeRevenue`, not in a counterparty's balance.
+Cheapest discriminating test: fill the same total quantity against the same
+resting price twice — once as one execution, once as N — and compare the fee
+totals and the exchange's fee revenue. Deterministic, no simulation run needed.
+Falsifier: the two totals are equal for every partition, which would mean the
+fee is computed on an aggregate or that the rounding is compensated.
+Mechanism family: quantization asymmetry.
+
+**E-013 — H-015, fee dependence on the partition of a fill.** Preregistered
+above. Artifact: `tests/economic_audit_fee_partition_test.go`.
+Base: `a666d02faede3d40f046b11e60eb672c59386a94`.
+Reproduce: `go test ./tests/ -run 'TestAuditTakerFee|TestAuditFeeVanishes' -v`.
+
+Method: the same total quantity is taken against the same resting price twice,
+once as one execution and once as ten, and the exchange's collected fee revenue
+is compared. Deterministic; no simulation run.
+
+Result: **H-015 SUPPORTED, direction as predicted, magnitude much smaller than
+the first fixture suggested.**
+
+| arm | one execution | ten executions | shortfall |
+|---|---:|---:|---:|
+| 100 USD, clip 150 001 | 75 | 70 | 5 (6.67%) |
+| 50 000 USD, minimum clip | 25 000 | 25 000 | 0 |
+| 50 000 USD, worst-case clip | 25 009 | 25 000 | 9 (0.036%) |
+
+*The first row is not a campaign number and must not be quoted as one.* At the
+campaign's own price level the charge reduces to `qty/40` quote units, so the
+loss for a ten-way slice is `trunc((qty mod 40)/4) <= 9` units — derived first,
+then confirmed exactly. At a round minimum clip nothing is lost at all.
+
+What is nonetheless real, and is why this is recorded rather than dropped:
+the effect is **one-directional**. Truncation is subadditive, so slicing can only
+ever reduce the fee, never raise it. The shortfall is not paid by a counterparty
+— it never reaches `ExchangeBalance.FeeRevenue` — so **no conservation check can
+see it**: the money that is not charged is simply not moved. This is the same
+structural blind spot RT-004 established for the conservation tracker, reached
+from a different direction.
+
+The fairness content: a taker does not choose the partition, the resting side
+does. Two takers submitting identical orders at identical prices pay different
+fees depending on whether the book in front of them was one large order or many
+small ones.
+
+*The latent boundary.* A fill pays no fee at all when its trade value is below
+`10000/bps` quote units. At 5 bps and the ABC venue minimum of 0.001, that is
+every price up to **19.00 USD** — measured, not derived by hand. ABC bootstraps
+at 50 000 and CDF at 3 000, so **the free-fill regime is not reachable in the
+campaign**. It is recorded because it is a property of the fee model and the
+minimum order size together, and a future low-priced instrument would cross it
+silently.
+
+**E-014 — H-014, hidden orders and queue priority.**
+Artifact: `tests/economic_audit_hidden_priority_test.go`.
+Reproduce: `go test ./tests/ -run TestAuditHiddenOrder -v`.
+
+Result: **H-014 SUPPORTED.** A hidden clip resting first took the entire
+incoming fill (1 000 000 base units) while the displayed clip resting behind it
+sold nothing, and the public ask level showed only the displayed clip
+throughout. Hiding costs no queue position.
+
+**Reachability: NOT EXERCISED.** No simulation constructs a non-Normal order,
+and `BaseActor.SubmitOrderFull` — the only route from an actor to a visibility
+other than `Normal` — has no callers anywhere in the tree, tests included. The
+asymmetry is latent, so no campaign result depends on it. Recorded as RT-009 so
+that enabling hidden orders is a deliberate act with a known consequence rather
+than a silent one.
+
 ---
 
 ## F. Findings
@@ -495,6 +617,15 @@ See `research/red-team-findings.md` for the full records.
 - **RT-003** — bounded no-violation results (INV-2, INV-5, INV-6, identity).
 - **RT-006** — latency is delivered as configured across 225 link x channel
   rows; no unearned speed advantage. Transport only.
+- **RT-008** — the taker fee depends on how the counterparty's liquidity was
+  sliced, always in the taker's favour, and no conservation check can see the
+  shortfall. EDGE CASE by magnitude at campaign prices (<=9 quote units in
+  25 009, 0.036%); the free-fill boundary below 19.00 USD is **not reachable**
+  at ABC 50 000 / CDF 3 000. Disposition open — fee semantics are the owner's.
+- **RT-009** — a hidden order keeps full time priority over displayed size at
+  the same price, so `Hidden` weakly dominates `Normal`. INTENDED MODEL
+  ASSUMPTION, and **NOT EXERCISED**: nothing in the tree constructs a non-Normal
+  order.
 - **RT-007** — the participant-information audit's retained review oracle
   accepted evidence the production auditor rejects, because it sorted the event
   stream instead of merging it. REAL BUG, layer = evidence/detector, severity
@@ -557,13 +688,18 @@ Owner decisions outstanding: RT-002 disposition (per-position truncation vs a
 book-level carry, as futures already do); H-009 (whether a bankrupt account's
 spot wallet should be seized before the insurance fund absorbs the deficit).
 
-H-004, H-005, H-006, H-010, H-011 and H-012 are now closed within their tested
-scope; E-008, E-009, E-010, E-011 and E-012 hold the evidence.
+H-004, H-005, H-006, H-010, H-011, H-012, H-013, H-014 and H-015 are now closed
+within their tested scope; E-008 through E-014 hold the evidence.
 
 Next, in priority order:
 
-1. **H-013 — decision-record coverage is a property of the run configuration,
-   not of the code.** `-record-market-data-receipts` requires an explicit
+1. **H-016 — the execution path from admission to clearing.** Still untouched:
+   partial-fill collateral release, post-only and FOK admission under a racing
+   book, and amend semantics (there is no amend path, which is itself worth
+   stating: priority cannot be bought by modification because modification does
+   not exist).
+2. **RETIRED — H-013 — decision-record coverage is a property of the run
+   configuration, not of the code.** `-record-market-data-receipts` requires an explicit
    `-market-data-receipt-roles` list, so an un-audited participant class emits
    no decision record and can neither pass nor fail the causality check. The
    fairness claim in RT-006 and the causality guarantee in H-011 therefore cover
@@ -572,9 +708,7 @@ Next, in priority order:
    scripts and compare it against the class table — and it converts "decisions
    are causal" into "decisions are causal for N of 27 classes", which is the
    honest form of the claim.
-2. **H-008** — RT-002 residual: sign, bound, accumulation, extraction.
-3. The execution path from admission to fill to clearing, which no experiment
-   here has touched.
+3. **H-008** — RT-002 residual: sign, bound, accumulation, extraction.
 
 Reproduction: worktree `redteam/economic-audit` on `a666d02`; build
 `cmd/multivenue` and `cmd/mvanalyze`; run dev-607 seed 607 for 7h to reach
