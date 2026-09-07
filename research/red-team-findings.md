@@ -693,3 +693,82 @@ truncation, gives thirty-one differing partitions in the same scan. **A null
 result from an instrument that cannot resolve the effect is not a null result** —
 the third such near-miss in this audit, after RT-006's latency expectations and
 RT-010's asynchronous outbox.
+
+## RT-014 — The cost of leverage depends on how much is borrowed
+
+**Classification.** REAL BUG, layer = economics, severity **high in kind**:
+reachable by every actor with no special access, recurring every simulated
+minute, and it changes relative performance directly because a carry or basis
+strategy's economics are set by its funding cost. Campaign-scale magnitude is
+**not yet measured** and must not be assumed in either direction.
+
+**Base.** `a666d02faede3d40f046b11e60eb672c59386a94`.
+
+**Mechanism.** `chargeCollateralInterestLocked` computes, once per simulated
+minute per client per asset,
+
+```go
+interest, ok := etypes.TryMulDiv(borrowed, e.CollateralRate, collateralInterestDenominator)
+...
+if interest <= 0 { continue }
+```
+
+with `collateralInterestDenominator = 365*24*3600*10000/60 = 5_256_000_000`. At
+the default 500 bps that is `borrowed / 10_512_000`. A debt below **10_512_000
+quote units — 105.12 USD** rounds to zero and is skipped, and nothing is carried
+forward, so the exemption repeats every minute forever. Bisection confirms the
+boundary exactly: the largest interest-free debt is 10_511_999 and the first
+charged debt is 10_512_000.
+
+**Delivered rate against configured rate**, one simulated day of charges:
+
+| borrowed (USD) | delivered, of the configured 500 bps |
+|---:|---:|
+| 50 | 0.0 |
+| 100 | 0.0 |
+| 105 | 0.0 |
+| 200 | 262.8 |
+| 1 000 | 473.0 |
+| 10 000 | 499.3 |
+| 100 000 | 499.8 |
+| 1 000 000 | 500.0 |
+
+A 200 USD borrower pays 2.6%; a 1 000 000 USD borrower pays 5.0%. The
+configured rate is not the delivered rate, and the gap is a function of the
+principal.
+
+**Under account partition**, the same 1000 USD of debt over one simulated day:
+
+| held as | interest collected | annualised |
+|---|---:|---:|
+| one account of 1000 USD | 12 960 | 4.730% |
+| ten accounts of 100 USD | **0** | **0.000%** |
+
+**Why this is worse in kind than RT-008 and RT-013.** Those move at most one
+quote unit per item — a rounding transfer, negligible in magnitude. This forgives
+the *entire* charge below a threshold and delivers a materially wrong rate across
+two decades of principal above it, with no residual accumulated.
+
+**Reachability.** Borrowing is enabled in the campaign
+(`ex.EnableBorrowing`, `simulations/multivenue/sim.go:2878`, limits of
+20 000 000 USD and 20 000 ABC) and `ChargeCollateralInterest` runs as a
+deterministic phase job (`exchange/exchange.go:1347`). The mechanism is live.
+What is **not** established is the distribution of debt sizes actors actually
+carry; at large debts the delivered rate is within 0.2 bps of configured, so the
+practical impact could be small. Measuring that distribution from an existing run
+is the next step and is cheap.
+
+**Disposition.** Not fixed here. The rate's rounding rule is scientific
+economics — accumulating the sub-unit remainder, charging per second instead of
+per minute, or scaling the denominator are all defensible and they are the
+owner's choice. The tests pin the current behaviour and the exact threshold so
+any change is visible.
+
+**Fixture note.** The first two runs reported zero interest for *every*
+principal, which read as the threshold swallowing everything. It was the
+fixture: the 500 bps default is applied inside `ConfigureAutomation`, not in the
+constructor, so an exchange built with `NewExchange` alone carries
+`CollateralRate == 0` and charges nothing. The campaign reaches the default the
+same way the corrected fixture does. Worth knowing in its own right: any code
+that builds an exchange without configuring automation charges no interest at
+all.

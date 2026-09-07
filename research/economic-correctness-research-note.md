@@ -1058,6 +1058,115 @@ truncation is subadditive. Fees and funding are the two found so far; margin and
 settlement use the same `MulDiv` idiom and have not been checked from this
 angle.
 
+**H-022 — the partition-dependence pattern, swept.**
+RT-008 (fees) and RT-013 (funding) are the same mechanism twice. The
+generalisation to test: *every per-item integer charge in this system is
+partition-dependent, because each truncates per item and truncation is
+subadditive.* The instrument is the search unit here, not another single case —
+a sweep over the charge sites, reporting for each whether it is
+partition-invariant and what the deviation is bounded by.
+
+Charge sites found by grepping the `MulDiv`/`MulBps` idiom: `PercentageFee`
+(RT-008), `settleFunding` (RT-013), maintenance and warning margin in
+`buildAccountMarginProfile`, option premium and settlement in
+`instrument/option.go`, and **collateral interest** in
+`exchange/collateral_interest.go`.
+
+Collateral interest is singled out before measuring, because reading it suggests
+a different *kind* of failure from the previous two. It computes
+`interest = TryMulDiv(borrowed, CollateralRate, collateralInterestDenominator)`
+per client per asset, with
+`collateralInterestDenominator = 365*24*3600*10000/60 = 5_256_000_000`, and then
+
+    if interest <= 0 { continue }
+
+At the default 500 bps that makes `interest = borrowed / 10_512_000`, so a debt
+below 10_512_000 quote units — **105.12 USD at `USD_PRECISION`** — rounds to zero
+and is skipped. The charge runs once per simulated minute, so the exemption does
+not accumulate into a later payment: it isforgiven, every minute, forever.
+
+Why this would be categorically worse than RT-008 and RT-013: those move at most
+one quote unit per item, a rounding transfer. This one would forgive the *entire*
+charge below a threshold, so a borrower who splits one loan across enough
+accounts pays **nothing at all** rather than slightly less. That is a free-money
+mechanism at full economic scale rather than a sub-unit artefact.
+
+Predicted observable, recorded before running: one account borrowing an amount
+above the threshold accrues interest per minute; the same total split into
+sub-threshold pieces accrues exactly zero. Effect size to be measured as an
+annualised percentage of principal, not as raw units, so it can be compared
+against the 5% the rate is supposed to charge.
+Falsifier: the split arm accrues the same interest as the whole arm, or the
+sub-threshold case accrues a residual that is carried forward.
+Mechanism family: quantization asymmetry, threshold exemption.
+
+**E-021 — H-022, the partition sweep, and what it found in collateral interest.**
+Preregistered above. Artifact:
+`tests/economic_audit_interest_threshold_test.go`.
+Base: `a666d02faede3d40f046b11e60eb672c59386a94`.
+Reproduce: `go test ./tests/ -run 'TestAuditCollateralInterest|TestAuditDeliveredInterestRate' -v`.
+
+Result: **H-022 SUPPORTED, and collateral interest is a categorically worse
+instance than the two that motivated the sweep.**
+
+`chargeCollateralInterestLocked` computes
+`interest = TryMulDiv(borrowed, CollateralRate, 5_256_000_000)` once per
+simulated minute per client per asset, then `if interest <= 0 { continue }`. At
+the default 500 bps that is `borrowed / 10_512_000`, so a debt below
+**10_512_000 quote units = 105.12 USD** is charged nothing, and the shortfall is
+not carried forward. The bisection confirms the boundary exactly: the largest
+interest-free debt is 10_511_999 units and the first charged debt is 10_512_000.
+
+Partition arm, one simulated day (1440 charges) on 1000 USD of debt:
+
+| held as | interest collected | annualised |
+|---|---:|---:|
+| one account of 1000 USD | 12 960 | **4.730%** |
+| ten accounts of 100 USD | **0** | **0.000%** |
+
+**The generalisation that does not need an actor to open several accounts.** The
+delivered rate is a function of the size of the debt:
+
+| borrowed (USD) | delivered, of the configured 500 bps |
+|---:|---:|
+| 50 | 0.0 |
+| 100 | 0.0 |
+| 105 | 0.0 |
+| 200 | 262.8 |
+| 1 000 | 473.0 |
+| 10 000 | 499.3 |
+| 100 000 | 499.8 |
+| 1 000 000 | 500.0 |
+
+A 200 USD borrower pays 2.6% where a 1 000 000 USD borrower pays 5.0%. Every
+actor faces this, with no special access: **the cost of leverage depends on how
+much is borrowed, in a way the configuration does not state.** That is directly
+a relative-performance distortion between actors, because a carry or basis
+strategy's economics are set by its funding cost.
+
+Why this is worse in kind than RT-008 and RT-013. Those move at most one quote
+unit per item — a rounding transfer. This forgives the *whole* charge below a
+threshold and delivers a materially wrong rate for two decades of principal
+above it, every minute, without accumulating a residual.
+
+**Reachability.** Borrowing is enabled in the campaign
+(`ex.EnableBorrowing` at `simulations/multivenue/sim.go:2878`, with limits of
+20 000 000 USD and 20 000 ABC), and `ChargeCollateralInterest` runs as a
+deterministic phase job (`exchange/exchange.go:1347`), so the mechanism is live.
+The *magnitude* in campaign runs depends on the debt sizes actors actually
+carry, which this experiment has **not** measured; at large debts the delivered
+rate is within 0.2 bps of configured. This must not be reported as either
+material or immaterial for the campaign without that measurement.
+
+*Fixture note.* The first two runs reported zero interest for every principal,
+including 1000 USD, which read as "the threshold swallows everything". It was
+the fixture: the 500 bps default is applied inside `ConfigureAutomation`, not in
+the constructor, so an exchange built with `NewExchange` alone carries
+`CollateralRate == 0` and charges nothing at all. The campaign reaches the
+default the same way the corrected fixture now does. Worth recording in its own
+right as a trap for any code that builds an exchange without configuring
+automation.
+
 ---
 
 ## F. Findings
@@ -1074,6 +1183,12 @@ See `research/red-team-findings.md` for the full records.
 - **RT-003** — bounded no-violation results (INV-2, INV-5, INV-6, identity).
 - **RT-006** — latency is delivered as configured across 225 link x channel
   rows; no unearned speed advantage. Transport only.
+- **RT-014** — collateral interest is forgiven entirely below 105.12 USD of
+  debt, and the delivered rate rises with principal from 0 bps to the configured
+  500. The cost of leverage depends on how much is borrowed. Reachable by every
+  actor; borrowing is enabled in the campaign and the charge runs as a phase
+  job. **The strongest economic finding of this audit.** Campaign-scale
+  magnitude not yet measured.
 - **RT-013** — funding is not invariant under account partition: the more
   fragmented side gets the rounding, so splitting helps a payer and hurts a
   receiver, and the exchange residual absorbs the difference. EDGE CASE by
