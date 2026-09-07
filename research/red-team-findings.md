@@ -1483,3 +1483,49 @@ marks. **One additional field — the population's net base-asset position at ea
 capture — makes the gap computable directly**, with no regression and no
 valuation surgery. That is the useful output of these three experiments, and it
 is small enough to be worth doing.
+
+## RT-025 — The live conservation check is silenced by the logging configuration
+
+**Classification.** REAL BUG, layer = evidence/detector. Same shape as RT-001,
+one layer up. **Owner decision** on the remedy.
+
+**Base.** `a666d02faede3d40f046b11e60eb672c59386a94`.
+
+`verifyConservation` runs on every automation tick in the venue's
+`PostDerivativeMarkHook`:
+
+```go
+violations := v.Exchange.VerifyConservation()
+if len(violations) == 0 { return }
+log := v.makerStateLog
+if log.sink == nil && log.inner == nil { return }   // violations discarded
+for _, violation := range violations {
+    log.LogEvent(now, 0, "conservation_violation", violation)
+}
+```
+
+`makerStateLog` is assigned only when `LogMode == "full"` or a checkpoint sink
+exists (`sim.go:2718`). Otherwise it is the zero `venueLogger`, the guard
+returns, and **the violations are computed and thrown away**.
+
+**Measured.** A `-log-mode none` run writes `greeks.json`,
+`terminal-outcome.json`, `latency.json`, `manifest.json` — and **no `venues/`
+directory**. `terminal-outcome.json` has no conservation field. `sim.go:4117` is
+the only emission path in the tree. Under logs off, a violation leaves **no trace
+anywhere**: no counter, no error, no flag.
+
+**Why it is the same defect as RT-001.** The exchange takes explicit care to keep
+recording independent of logging, and says why on `logBalanceChange`: "a movement
+that happens while no logger is attached is still a movement, and leaving it out
+of the running total would make the verification depend on the logging
+configuration." Recording is independent. **Reporting the violation is not.**
+
+**Scope, including about this audit's own evidence.** The campaign configures
+`"log_mode": "full"`, so its headline runs do report violations. Every logs-off
+run does not — performance work, ablations, and **the last eight experiments in
+this audit**, which were unknowingly unverified on this axis. Stated plainly
+because it applies to my own runs as much as anyone's.
+
+**Remedy is the owner's.** Surfacing a violation count in
+`terminal-outcome.json`, or failing the run outright, both change what a run
+reports.

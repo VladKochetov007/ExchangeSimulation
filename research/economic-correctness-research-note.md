@@ -2443,6 +2443,52 @@ at each capture — would make the gap computable directly, with no regression a
 no valuation surgery. That is a concrete, small instrumentation request and it is
 the useful output of these three experiments.
 
+**H-037 / E-038 — the live conservation check is silenced by the logging
+configuration.**
+Found by reframing after three failed routes to the population gap: instead of
+building a new check, ask what the *existing* one does. `verifyConservation` runs
+on every automation tick in the venue's `PostDerivativeMarkHook`.
+
+    func (v *Venue) verifyConservation(now int64) {
+        violations := v.Exchange.VerifyConservation()
+        if len(violations) == 0 { return }
+        log := v.makerStateLog
+        if log.sink == nil && log.inner == nil { return }   // <-- here
+        for _, violation := range violations {
+            log.LogEvent(now, 0, "conservation_violation", violation)
+        }
+    }
+
+`makerStateLog` is assigned only when `LogMode == "full"` or a checkpoint sink
+exists (`sim.go:2718`). Otherwise it is the zero `venueLogger` and the guard
+returns — **the violations are computed and discarded**.
+
+Measured: a run with `-log-mode none` writes `greeks.json`,
+`terminal-outcome.json`, `latency.json` and `manifest.json` and **no `venues/`
+directory at all**. `terminal-outcome.json` carries `status`,
+`terminal_population_captured`, `terminal_risk_captured` and
+`strict_population_accounting` — and **no conservation field**. `LogEvent` at
+`sim.go:4117` is the *only* emission path in the tree. So under logs-off there is
+no counter, no error, no flag: a violation leaves no trace anywhere.
+
+**Why this is the same defect as RT-001, one layer up.** The exchange goes to
+explicit trouble to keep *recording* independent of logging, and says why on
+`logBalanceChange`: "a movement that happens while no logger is attached is still
+a movement, and leaving it out of the running total would make the verification
+depend on the logging configuration." The recording is independent. The
+**reporting of the resulting violation is not.**
+
+**Reachability and scope.** The campaign's own configuration sets
+`"log_mode": "full"`, so its headline runs do report violations. The gap is real
+for every logs-off run — which includes performance work, ablations run without
+logs, and **every run this audit performed in its last eight experiments**. Those
+runs were, unknowingly, unverified on this axis. That is worth stating plainly
+about my own evidence rather than only about someone else's.
+
+Recorded as RT-025. Disposition is the owner's: surfacing the count in
+`terminal-outcome.json`, or failing the run, are both changes to what a run
+reports and neither is mine to make.
+
 ---
 
 ## F. Findings
@@ -2459,6 +2505,13 @@ See `research/red-team-findings.md` for the full records.
 - **RT-003** — bounded no-violation results (INV-2, INV-5, INV-6, identity).
 - **RT-006** — latency is delivered as configured across 225 link x channel
   rows; no unearned speed advantage. Transport only.
+- **RT-025** — the live conservation check is **silenced by the logging
+  configuration**: `verifyConservation` computes violations every tick and
+  discards them when no venue logger exists, which is the case for every
+  `log_mode: none` run. No counter, no error, no field in
+  `terminal-outcome.json`. Same defect shape as RT-001, one layer up. The
+  campaign runs `log_mode: full` so its headline runs are covered; **this
+  audit's own last eight runs were not**. **Owner decision.**
 - **RT-024** — the population ledger **closes**. Participant net change plus the
   venue take leaves a residual whose implied base inventory is 8 185-8 239 ABC
   per head against a 10 000 endowment — revaluation, not unaccounted value.
