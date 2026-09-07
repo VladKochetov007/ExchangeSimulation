@@ -1384,3 +1384,42 @@ replicated, and larger than the unattributable rule term for both.
 **Scope.** Four seeds, one configuration, 5 simulated hours each. Sign stability
 at n=4 is weak on its own; it carries here because the small-magnitude classes
 visibly fail it.
+
+## RT-024 — The population ledger closes
+
+**Classification.** Bounded no-violation result, plus a reusable screen. No
+population-level closure check existed before this; `StrictPopulationAccounting`
+requires only that every participant *has* an initial and terminal marked
+account, which is completeness, not a sum.
+
+**Base.** `a666d02faede3d40f046b11e60eb672c59386a94`.
+`clock-control-5h-101.json`, seed 607, 5 simulated hours.
+
+    residual = Σ (terminal equity − initial equity) + fee revenue + insurance fund
+
+| venue | participant net | venue take | residual | implied ABC | per head |
+|---|---:|---:|---:|---:|---:|
+| central | −373 509 674 | 1 115 991 | −372 393 683 | 708 579 | **8 239** |
+| north | −371 756 050 | 1 136 102 | −370 619 948 | 705 204 | **8 200** |
+| south | −371 024 227 | 1 101 923 | −369 922 304 | 703 877 | **8 185** |
+
+ABC drifted **−1.051%** over the run. Dividing each residual by that drift gives
+the inventory it implies: **8 185–8 239 ABC per participant**, against a
+configured maker endowment of 10 000. With 86 participants per venue of whom
+only the makers are endowed at that level, an implied average slightly under
+10 000 is what a closed ledger should produce. The residual is revaluation of a
+net-long population, not unaccounted value.
+
+**Instrument note, the ninth, and the most misleading yet.** The first version
+reported the residual as a percentage of gross participant flow and printed
+**−82%**, which reads as catastrophic. Gross flow is itself dominated by the same
+revaluation, so normalising by it makes any revaluation look total. The mark
+drift is the correct normaliser because dividing by it yields implied inventory,
+a quantity checkable against a configured number. **Do not normalise by a
+quantity that contains the effect being measured.**
+
+**Limit, as preregistered.** The screen separates revaluation from an accounting
+gap by magnitude and consistency, not exactly. A gap smaller than the ~2%
+difference between the implied 8 200 and the endowed 10 000 would be invisible.
+Closing that needs per-account inventory, which `MarkedAccountSnapshot` does not
+carry — every field it reports is already valued at marks.

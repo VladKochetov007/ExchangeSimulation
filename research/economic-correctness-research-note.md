@@ -2194,6 +2194,85 @@ than the confounded one for the classes where it matters.
 at n=4 is a weak test individually; it is meaningful here because the
 small-magnitude classes visibly fail it.
 
+**H-034 — the population's gains and losses do not close against the venue's
+take.**
+New lens after the venue thread completed: every invariant this audit has
+checked is per-account or per-book. This one is **population-level**. E-032's
+table showed `triangle_arb` ending +13.6 M while `elastic_supplier` ends
+−10.6 M and `noise_flow` −9.6 M. Someone is paying for that, and whether the
+totals close is a question no per-account check can answer.
+
+The identity, per venue and in the report asset:
+
+    Σ_participants (terminal equity − initial equity)
+      + venue fee revenue + venue insurance fund
+      = revaluation of the population's net inventory
+
+The left side is what the accounts and the venue ledger say. The right side is
+the only legitimate source of a non-zero total: participants are net long the
+base asset, so a price change lifts or drops everyone's marked equity at once
+without anyone trading. `ParticipantAccountSnapshot` records the `marks` each row
+was valued at precisely so this term can be separated — its comment says so.
+
+`StrictPopulationAccounting` is already on, but it only requires that every
+participant *has* an initial and terminal marked account. It is a completeness
+guarantee, not a sum check, and no closure check exists in `analysis/`.
+
+Predicted observable, recorded before running: the residual is small relative to
+gross flows and has the sign of the mark drift, since RT-016 measured ABC moving
+about 1% over five hours. A residual that is large relative to gross flows, or
+whose sign contradicts the mark drift, is unaccounted value at the population
+level.
+Falsifier: residual within a fraction of a percent of gross participant flow, and
+consistent with the measured mark change.
+Scope stated in advance: the reported residual mixes true revaluation with any
+accounting gap, and this experiment separates them only by magnitude and sign,
+not exactly. It is a screen, not a proof.
+Mechanism family: population-level closure.
+
+**E-035 — H-034, does the population's ledger close?**
+Preregistered above. Artifact: `research/tools/populationclosure/main.go`.
+Base: `a666d02faede3d40f046b11e60eb672c59386a94`.
+Run: `clock-control-5h-101.json`, seed 607, 5 simulated hours, `-log-mode none`.
+Reproduce: `go run research/tools/populationclosure/main.go -file <logdir>/greeks.json`.
+
+Result: **H-034 FALSIFIED. The population ledger closes.**
+
+| venue | participant net | venue take | residual | implied ABC | per head |
+|---|---:|---:|---:|---:|---:|
+| central | −373 509 674 | 1 115 991 | −372 393 683 | 708 579 | **8 239** |
+| north | −371 756 050 | 1 136 102 | −370 619 948 | 705 204 | **8 200** |
+| south | −371 024 227 | 1 101 923 | −369 922 304 | 703 877 | **8 185** |
+
+Mark drift over the run: ABC **−1.051%**, CDF +0.083%, USD flat.
+
+Dividing each venue's residual by the mark drift gives the base-asset inventory
+that residual implies: **8 185 to 8 239 ABC per participant**, against a
+configured maker endowment of `10 000 * mvBasePrecision`
+(`simulations/multivenue/sim.go`, `mmBalances`). Not every one of the 86
+participants per venue is endowed at that level — takers and noise traders hold
+less or none — so an implied average slightly below 10 000 is exactly what a
+closed ledger should produce. The residual is revaluation of a large net-long
+inventory, not unaccounted value.
+
+**The instrument error, and it is the ninth.** The first version of this tool
+reported the residual as a percentage of gross participant flow and printed
+**−82%**, which reads as catastrophic. Gross participant flow is itself dominated
+by the same revaluation, so normalising by it makes any revaluation look total.
+The correct normaliser is the mark drift, because dividing by it yields a
+quantity — implied inventory — that can be checked against a configured number.
+**Do not normalise by a quantity that contains the effect being measured.**
+
+**What the experiment leaves open, as preregistered.** The screen separates
+revaluation from an accounting gap only by magnitude and consistency, not
+exactly. A gap smaller than the ~2% difference between the implied 8 200 and the
+endowed 10 000 would be invisible to it. Closing that would need per-account
+inventory in the artifact, which `MarkedAccountSnapshot` does not carry — it
+reports `SpotEquity`, `PerpCashEquity`, `DerivativeUnrealized` and
+`OptionMarketValue`, all already valued at marks.
+
+Recorded as RT-024: a bounded no-violation result plus a reusable screen.
+
 ---
 
 ## F. Findings
@@ -2210,6 +2289,10 @@ See `research/red-team-findings.md` for the full records.
 - **RT-003** — bounded no-violation results (INV-2, INV-5, INV-6, identity).
 - **RT-006** — latency is delivered as configured across 225 link x channel
   rows; no unearned speed advantage. Transport only.
+- **RT-024** — the population ledger **closes**. Participant net change plus the
+  venue take leaves a residual whose implied base inventory is 8 185-8 239 ABC
+  per head against a 10 000 endowment — revaluation, not unaccounted value.
+  Bounded no-violation result; the screen is reusable.
 - **RT-023** — the venue design **confounds matching rule with funding
   interval**: north is the only price-time venue and also the only 8-hour funding
   venue, so no venue effect can be attributed to either. The one clean contrast
