@@ -2489,6 +2489,86 @@ Recorded as RT-025. Disposition is the owner's: surfacing the count in
 `terminal-outcome.json`, or failing the run, are both changes to what a run
 reports and neither is mine to make.
 
+**H-038 — RT-001 and RT-025 are two instances of a class: checks whose only
+output is a log line.**
+Change the search unit. RT-001 found a movement recorded only when a logger was
+attached; RT-025 found a violation reported only when a logger was attached. Two
+instances of one shape, found a campaign apart and by unrelated routes, is reason
+to look for the shape itself rather than wait for a third to surface.
+
+The shape: a check computes a negative result — a violation, an unavailable
+price, a failed invariant — and the **only** thing it does with that result is
+emit a log event. Whether the finding survives then depends on the logging
+configuration, which is a deployment choice rather than a property of the run.
+Such a check is not a check; it is telemetry that happens to be shaped like one.
+
+The sweep: every call site that emits an event whose name marks a failure —
+`*_violation`, `*_failed`, `*_unavailable`, `*_error`, `reject*` — and then ask
+of each whether anything else observes the same condition: a returned error, a
+counter, a field in `terminal-outcome.json`, a test.
+
+Predicted observable, recorded before sweeping: a handful of sites, most of them
+legitimate — a rejected order is *returned to the caller* as well as logged, so
+the caller observes it regardless of logging. The interesting residue is the
+sites where the log really is the only consumer, and I expect one or two beyond
+the two already known.
+Falsifier: every failure-shaped event has a second observer, which would make
+RT-001 and RT-025 a coincidence of two rather than a class.
+Mechanism family: detector reachability, systematic sweep.
+
+**E-039 — H-038, sweeping for checks whose only output is a log line.**
+Preregistered above. Method: enumerate every `LogEvent` whose event name marks a
+failure (`*_violation`, `*_failed`, `*_unavailable`, `*_error`), then ask of each
+whether any second observer sees the same condition — a returned error, a
+counter, a state flag, a field in `terminal-outcome.json`.
+
+Result: **H-038 SUPPORTED. The class has four members and every one of them has
+the identical shape.**
+
+| site | event | second observer? |
+|---|---|---|
+| `simulations/multivenue/sim.go:4117` | `conservation_violation` | none — RT-025 |
+| `exchange/collateral_interest.go:138` | `margin_interest_failed` | **none** |
+| `exchange/exchange.go:2426` | `funding_settlement_failed` | **none** |
+| `exchange/expiry.go:78` | `price_unavailable` | partial |
+
+All four are literally `if log != nil { log.LogEvent(...) }` and nothing else:
+no counter, no error returned to a caller who acts on it, no field in any
+artifact. `ChargeCollateralInterest` swallows its error and calls the reporter;
+`CheckAndSettleFunding` reports and continues to the next contract.
+
+**The economically material one is the interest failure.** RT-014 established
+that collateral interest is a live, material charge — borrowing is enabled and
+the delivered rate reaches ~458 bps of a configured 500. If
+`chargeCollateralInterestLocked` returns an error, the sweep is abandoned, *no
+interest is charged that minute*, and under a logs-off run there is no trace at
+all. Free leverage for as long as the condition persists, with nothing to say it
+happened.
+
+`price_unavailable` is the partial case and the distinction matters. On the
+expiry path the condition also sets `settlementPending`, which is durable state
+that gates admission (RT-012) — so it has a second observer. On the
+**liquidation** path it does not: `buildAccountMarginProfile` fails,
+`CheckLiquidations` calls the reporter and `continue`s, and the account is simply
+not risk-assessed. RT-012 measured that consequence; this adds that even the
+diagnostic disappears when logs are off.
+
+**The contrast case that shows this is not universal.** Order rejections use
+`rejectWithLog`, which logs *and returns the rejection to the caller*. The caller
+observes it regardless of logging configuration. That is what a check with a
+second observer looks like, and it is why the four above stand out rather than
+being the house style.
+
+**Prediction accuracy.** I predicted "one or two beyond the two already known";
+there are three. Close, and recorded as approximately right rather than rounded
+to correct.
+
+**What this changes.** RT-001 and RT-025 were two findings a campaign apart,
+reached by unrelated routes. They are one defect class with four known members,
+all silenced together by a single deployment flag. Recorded as RT-026; the
+remedy — a counter, an error, or a field in `terminal-outcome.json` — is one
+decision covering all four rather than four separate fixes.
+
 ---
 
 ## F. Findings
@@ -2505,6 +2585,12 @@ See `research/red-team-findings.md` for the full records.
 - **RT-003** — bounded no-violation results (INV-2, INV-5, INV-6, identity).
 - **RT-006** — latency is delivered as configured across 225 link x channel
   rows; no unearned speed advantage. Transport only.
+- **RT-026** — RT-001 and RT-025 are members of a **class**: four checks whose
+  only output is a log line, silenced together by one deployment flag —
+  `conservation_violation`, `margin_interest_failed`,
+  `funding_settlement_failed`, and `price_unavailable` on the liquidation path.
+  The interest one is economically material per RT-014. One remedy covers all
+  four. **Owner decision.**
 - **RT-025** — the live conservation check is **silenced by the logging
   configuration**: `verifyConservation` computes violations every tick and
   discards them when no venue logger exists, which is the case for every

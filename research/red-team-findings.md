@@ -1529,3 +1529,47 @@ because it applies to my own runs as much as anyone's.
 **Remedy is the owner's.** Surfacing a violation count in
 `terminal-outcome.json`, or failing the run outright, both change what a run
 reports.
+
+## RT-026 — Four checks whose only output is a log line
+
+**Classification.** Defect class, generalising RT-001 and RT-025. **Owner
+decision**, and one decision covers all four members.
+
+**Base.** `a666d02faede3d40f046b11e60eb672c59386a94`.
+
+Method: enumerate every `LogEvent` whose name marks a failure, then ask whether
+any second observer sees the same condition — a returned error, a counter, a
+state flag, an artifact field.
+
+| site | event | second observer? |
+|---|---|---|
+| `simulations/multivenue/sim.go:4117` | `conservation_violation` | none (RT-025) |
+| `exchange/collateral_interest.go:138` | `margin_interest_failed` | **none** |
+| `exchange/exchange.go:2426` | `funding_settlement_failed` | **none** |
+| `exchange/expiry.go:78` | `price_unavailable` | partial |
+
+Every one is `if log != nil { log.LogEvent(...) }` and nothing else.
+`ChargeCollateralInterest` swallows its error and calls the reporter;
+`CheckAndSettleFunding` reports and continues to the next contract.
+
+**The material one is the interest failure.** RT-014 established collateral
+interest as a live charge — borrowing is enabled, delivered rate ≈458 bps of a
+configured 500. If `chargeCollateralInterestLocked` errors, the sweep is
+abandoned, no interest is charged that minute, and under logs-off there is no
+trace at all: free leverage for as long as the condition lasts, with nothing to
+say it happened.
+
+**`price_unavailable` is the partial case, and the split matters.** On the expiry
+path the condition also sets `settlementPending`, durable state that gates
+admission (RT-012) — a real second observer. On the **liquidation** path it does
+not: the margin profile fails, `CheckLiquidations` reports and `continue`s, the
+account goes un-assessed. RT-012 measured that consequence; this adds that the
+diagnostic also disappears when logs are off.
+
+**The contrast case.** Order rejections use `rejectWithLog`, which logs **and
+returns the rejection to the caller**. The caller observes it whatever the
+logging configuration. That is what a check with a second observer looks like,
+and it is why these four stand out rather than being the house style.
+
+**Prediction accuracy.** The sweep was preregistered expecting "one or two beyond
+the two already known". There are three — approximately right, recorded as such.
