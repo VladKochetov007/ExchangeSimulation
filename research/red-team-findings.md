@@ -772,3 +772,47 @@ constructor, so an exchange built with `NewExchange` alone carries
 same way the corrected fixture does. Worth knowing in its own right: any code
 that builds an exchange without configuring automation charges no interest at
 all.
+
+## RT-014 (continued) — Measured at campaign scale
+
+`research/tools/interestscan/main.go`, run against
+`research/configs/clock-control-5h-101.json`, seed 607, 30 simulated minutes,
+`-log-mode full`. Development configuration; no holdout used.
+
+The charge is `floor(borrowed·rate/denominator)` per minute, so an observed
+amount `A` bounds the debt that produced it and bounds the delivered rate from
+below by `A/(A+1)`.
+
+| asset | charged per minute | occurrences | implied debt (raw units) | delivered ≥ |
+|---|---:|---:|---|---:|
+| ABC | 1 | 76 | [10 512 000, 21 024 000) | **50.0%** |
+| ABC | 2 | 18 | [21 024 000, 31 536 000) | **66.7%** |
+| ABC | 3 | 16 | [31 536 000, 42 048 000) | **75.0%** |
+
+76 borrow events, 110 charges, 160 quote units collected. **Every debt in the
+run sits in the three lowest buckets, so the delivered rate is roughly 250–430
+bps against a configured 500.** This is not a threshold curiosity at campaign
+scale — it is the operating regime, and borrowers are under-charged by 15–50%
+of their interest every minute of the run.
+
+**The threshold is denominated in raw asset units.** All borrowing here is in
+ABC, not USD, and the same constant `10 512 000` applies to both. At
+`BTC_PRECISION` that is 0.105 ABC, worth about **5 256 USD** at the 50 000
+bootstrap — fifty times the 105.12 USD ceiling the same constant imposes on a
+USD loan. Two actors with identical dollar leverage pay materially different
+rates depending on which asset they borrowed. A single shared constant produces
+a per-asset inequity, and it was invisible from the USD-only fixture.
+
+**Scope.** One config, one seed, 30 simulated minutes. Debts may grow over a
+five-hour run and move accounts into buckets where the delivered rate approaches
+the configured one. Not measured; not assumed either way.
+
+**Instrument note — the fourth in this audit, and the most dangerous.** The
+first scan reported 110 charges totalling **zero** quote units, which reads as
+"the campaign pays no interest at all". False: the venue logger wraps every
+payload one level deeper than the emitting struct suggests
+(`data.payload.amount`, not `data.amount`), so the parser read zero for every
+record. One look at a raw line settled it. With RT-006's expectation model,
+RT-010's asynchronous outbox and RT-013's price conversion, that is four
+instruments returning confident wrong answers, three of them nulls. **Read one
+raw record before trusting any aggregate computed over it.**

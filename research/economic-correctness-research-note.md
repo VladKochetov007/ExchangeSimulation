@@ -1167,6 +1167,60 @@ default the same way the corrected fixture now does. Worth recording in its own
 right as a trap for any code that builds an exchange without configuring
 automation.
 
+**E-022 — RT-014 at campaign scale: the measurement the finding was missing.**
+Artifact: `research/tools/interestscan/main.go` (Go, per the project's rule that
+data processing stays out of Python).
+Base: `a666d02faede3d40f046b11e60eb672c59386a94`.
+Run: `research/configs/clock-control-5h-101.json`, seed 607, 30 simulated
+minutes, `-log-mode full`. Development configuration; no holdout was used.
+Reproduce: build `cmd/multivenue`, run as above, then
+`go run research/tools/interestscan/main.go -dir <logdir>`.
+
+The charge is `floor(borrowed·rate/denominator)` per minute, so an observed
+amount `A` bounds the debt that produced it and therefore bounds the delivered
+rate from below by `A/(A+1)`. That is enough to decide severity without
+reconstructing every account's debt path.
+
+Result:
+
+| asset | charged per minute | occurrences | implied debt (raw units) | delivered ≥ |
+|---|---:|---:|---|---:|
+| ABC | 1 | 76 | [10 512 000, 21 024 000) | **50.0%** |
+| ABC | 2 | 18 | [21 024 000, 31 536 000) | **66.7%** |
+| ABC | 3 | 16 | [31 536 000, 42 048 000) | **75.0%** |
+
+76 borrow events, 110 interest charges, 160 quote units collected in total.
+Every debt in the run sits in the three lowest charge buckets, so **the
+delivered rate is roughly 250–430 bps against a configured 500**. Borrowers are
+systematically under-charged by 15–50% of their interest, every minute, for the
+whole run. RT-014 is therefore not a threshold curiosity at campaign scale; it
+is the operating regime.
+
+**The part the USD framing missed.** All borrowing in this run is in **ABC**,
+not USD, and the threshold is denominated in *raw asset units*: 10 512 000 units
+regardless of what a unit is worth. At `BTC_PRECISION` that is 0.105 ABC, which
+at the 50 000 bootstrap is about **5 256 USD** of interest-free debt — fifty
+times the 105.12 USD ceiling that the same constant imposes on a USD loan. Two
+actors with the same dollar leverage pay materially different rates depending on
+which asset they borrowed. That is a per-asset inequity produced by a single
+shared constant, and it was invisible from the USD-only fixture in E-021.
+
+**Scope.** One config, one seed, 30 simulated minutes. Debts may grow over a
+five-hour run and push accounts into higher buckets where the delivered rate
+approaches the configured one; that is not measured here and must not be assumed
+in either direction.
+
+*Fourth instrument near-miss, and the most dangerous so far.* The first scan
+reported **110 charges totalling zero quote units**, which reads as "the campaign
+pays no interest at all" — a dramatic finding, and false. The venue logger wraps
+every event payload one level deeper than the emitting struct suggests
+(`data.payload.amount`, not `data.amount`), so the parser silently read zero for
+every record. The raw line settled it in one look. Recording it because the
+failure mode is now a pattern in this audit: RT-006's expectation model,
+RT-010's asynchronous outbox, RT-013's price conversion, and now a schema
+mismatch — four instruments that returned a confident wrong answer, three of
+them nulls. **Read one raw record before trusting any aggregate over it.**
+
 ---
 
 ## F. Findings
@@ -1187,8 +1241,11 @@ See `research/red-team-findings.md` for the full records.
   debt, and the delivered rate rises with principal from 0 bps to the configured
   500. The cost of leverage depends on how much is borrowed. Reachable by every
   actor; borrowing is enabled in the campaign and the charge runs as a phase
-  job. **The strongest economic finding of this audit.** Campaign-scale
-  magnitude not yet measured.
+  job. **The strongest economic finding of this audit.** Measured at campaign
+  scale in E-022: in a 30-minute dev run every debt sat in the three lowest
+  charge buckets, so the delivered rate was 250-430 bps against a configured
+  500. The threshold is denominated in raw asset units, so it is worth about
+  5 256 USD on ABC against 105.12 USD on USD.
 - **RT-013** — funding is not invariant under account partition: the more
   fragmented side gets the rounding, so splitting helps a payer and hurts a
   receiver, and the exchange residual absorbs the difference. EDGE CASE by
