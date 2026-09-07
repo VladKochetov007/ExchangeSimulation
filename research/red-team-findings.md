@@ -1423,3 +1423,35 @@ gap by magnitude and consistency, not exactly. A gap smaller than the ~2%
 difference between the implied 8 200 and the endowed 10 000 would be invisible.
 Closing that needs per-account inventory, which `MarkedAccountSnapshot` does not
 carry — every field it reports is already valued at marks.
+
+## RT-024 (addendum) — why the exact version cannot be built from the current surface
+
+An attempt to replace RT-024's magnitude screen with an exact check failed, and
+the reason is worth recording because it bounds what any future population check
+can do.
+
+The plan: run the simulation, then value the terminal population a second time at
+the **initial** marks, so revaluation is zero by construction and the residual is
+pure accounting. Measured residual: **−1.27 M USD per venue** against a take of
+1.12 M — which reads as a large unaccounted gap.
+
+**It is not one.** `MarkedAccount` passes the supplied `AccountValuationSpec`
+only to `valueWallet` and `valueIsolated`, the spot and perp *balances*.
+Derivative exposure is valued through `riskMark(book.Instrument, book)`, which
+reads the instrument's stored marks and **ignores the spec**. Fixing the spec
+removes wallet revaluation only; the residual is the derivative revaluation the
+method was meant to eliminate. The harness did remove 99.4% of the change RT-024
+measured — −373.5 M down to −2.39 M — but the remainder is precisely the term
+that mattered.
+
+**What would be needed**: a valuation entry point accepting derivative marks as
+well as asset marks, so an account can be revalued at a fixed point in price
+space. It does not exist, and adding one is a change to a scientific-branch
+surface this audit does not make.
+
+**A collision risk, checked and cleared.** Client IDs come from a *per-venue*
+counter, so all three venues use 1..86, and every tool here that keys an initial
+value by client ID alone collides across venues. Measured: all 86 shared IDs
+carry the same role and the same initial equity on all three venues, so the
+lookup returns the correct value and RT-022, RT-023, RT-024 and E-034 are
+unaffected. Recorded because the next tool to key by client ID needs to know.

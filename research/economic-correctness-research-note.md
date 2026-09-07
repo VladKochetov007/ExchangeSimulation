@@ -2273,6 +2273,85 @@ reports `SpotEquity`, `PerpCashEquity`, `DerivativeUnrealized` and
 
 Recorded as RT-024: a bounded no-violation result plus a reusable screen.
 
+**H-035 — the population ledger closes *exactly*, not merely to within the
+revaluation estimate.**
+RT-024 left a stated hole: its screen separates revaluation from an accounting
+gap only by magnitude, so a gap smaller than the ~2% between the implied 8 200
+ABC per head and the endowed 10 000 is invisible to it. That is a wide door, and
+the class of defect it hides — value created or destroyed at the population level
+— is exactly the class no per-account invariant can see.
+
+Representation change: **hold the marks fixed instead of estimating their
+effect.** `MarkedAccount(clientID, spec)` is exported and the caller supplies the
+spec, so the terminal population can be valued a second time at the *initial*
+marks. Revaluation is then identically zero by construction and the residual is
+whatever the accounting actually leaves over:
+
+    residual_fixed = Σ (terminal equity at INITIAL marks − initial equity)
+                     + fee revenue + insurance fund
+
+This needs a harness rather than an artifact, because the second valuation has to
+happen while the terminal state is still live. `Sim`, `NewSim`, `Run` and
+`MarkedAccount` are all exported, so the harness is a reader of the same public
+surface the campaign uses, not a fork of it.
+
+Predicted observable, recorded before running: `residual_fixed` is a small
+multiple of the smallest quote unit per venue — not zero, because fees and
+settlement truncate per item (RT-008, RT-013, RT-014 all leave sub-unit residue)
+— and orders of magnitude below the −370 M revaluation term the screen was
+measuring. Anything larger is unaccounted value and the size of it is the finding.
+Falsifier: `residual_fixed` is comparable to the revaluation term, which would
+mean the fixed-mark valuation has not actually removed it and the harness is
+wrong rather than the ledger.
+Mechanism family: population-level closure, exact.
+
+**E-036 — H-035, exact population closure. METHOD INVALID.**
+Preregistered above. Artifact: `research/tools/fixedmarkclosure/main.go`.
+Base: `a666d02faede3d40f046b11e60eb672c59386a94`.
+Run: `clock-control-5h-101.json`, seed 607, 5 simulated hours.
+
+The plan was to remove revaluation by construction: run the simulation, then
+value the terminal population a second time at the **initial** marks, so the
+residual would be pure accounting. Measured:
+
+| venue | change at initial marks | venue take | residual |
+|---|---:|---:|---:|
+| central | −238 730 230 755 | 111 599 100 195 | −127 131 130 560 |
+| north | −242 546 516 137 | 113 610 202 087 | −128 936 314 050 |
+| south | −239 410 592 406 | 110 192 269 985 | −129 218 322 421 |
+
+That is −1.27 M USD per venue against a take of 1.12 M, which read as a large
+unaccounted gap. **It is not a finding; the method does not do what it claims.**
+
+`MarkedAccount` passes the supplied `spec` only to `valueWallet` and
+`valueIsolated` — the spot and perp *balances*. Derivative exposure is valued
+through `riskMark(book.Instrument, book)`, which reads the instrument's own
+stored marks and **ignores the spec entirely**
+(`exchange/valuation.go`). Fixing the spec's asset marks therefore removes
+wallet revaluation and leaves derivative revaluation untouched, so the residual
+is the derivative revaluation the method was supposed to eliminate. The harness
+did work — it removed 99.4% of the change RT-024 measured, −373.5 M down to
+−2.39 M — but the part it could not remove is exactly the part that matters.
+
+**What would be needed.** A valuation entry point that accepts derivative marks
+as well as asset marks, so a caller can revalue a whole account at a fixed point
+in price space. That does not exist and building one is a change to a
+scientific-branch surface, which this audit does not make.
+
+**A collision risk, checked and cleared.** Client IDs are allocated by a
+*per-venue* counter (`v.nextClient++`), so all three venues use 1..86 and every
+tool in this audit that keys an initial value by client ID alone — `venueeffect`,
+`populationclosure`, this harness — collides across venues. Measured directly:
+all 86 shared IDs carry the **same role and the same initial equity** on all
+three venues, so the collision returns the correct value in every case and
+RT-022, RT-023, RT-024 and E-034 are unaffected. Recorded because the check was
+not obvious and the next tool to key by client ID needs to know.
+
+**Standing result unchanged.** RT-024's screen remains the population-level check,
+with its stated limit: it separates revaluation from an accounting gap by
+magnitude and consistency, not exactly. H-035 does not close that gap and the
+note does not claim it does.
+
 ---
 
 ## F. Findings
@@ -2292,7 +2371,10 @@ See `research/red-team-findings.md` for the full records.
 - **RT-024** — the population ledger **closes**. Participant net change plus the
   venue take leaves a residual whose implied base inventory is 8 185-8 239 ABC
   per head against a 10 000 endowment — revaluation, not unaccounted value.
-  Bounded no-violation result; the screen is reusable.
+  Bounded no-violation result; the screen is reusable. **E-036 attempted an
+  exact version and the method was invalid**: `AccountValuationSpec` reaches only
+  wallet balances, while derivative exposure is valued from the instruments'
+  own marks, so fixing the spec cannot remove derivative revaluation.
 - **RT-023** — the venue design **confounds matching rule with funding
   interval**: north is the only price-time venue and also the only 8-hour funding
   venue, so no venue effect can be attributed to either. The one clean contrast
