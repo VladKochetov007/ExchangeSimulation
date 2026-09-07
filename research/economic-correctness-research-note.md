@@ -878,6 +878,104 @@ question**, not a bug to fix here: partial-close ordering and cross-book seizure
 are scientific economics and the owner's to decide. Conservation is intact and
 no value is created — the fund absorbed the shortfall exactly.
 
+**H-020 — a position on a settlement-pending contract makes the whole account
+unliquidatable.**
+Invert the lens used for RT-011. There the question was which book pays; here it
+is whether any book can be made to pay at all.
+
+Mechanism: `buildAccountMarginProfile` fails the entire profile closed when any
+sibling exposure sits on a settlement-pending contract — "Retained pending
+exposure is not an economic zero. No valid mark exists, so fail the whole account
+profile closed instead of allowing active sibling risk to ignore it." That
+reasoning is sound for *measuring* risk. But the caller in `CheckLiquidations`
+treats the error as a diagnostic, not as a breach: it calls
+`reportPriceUnavailable` and `continue`s to the next client. Failing closed on
+the measurement therefore fails *open* on the action.
+
+A dated contract enters that state whenever it reaches expiry with no settlement
+price, and the retry policy is `expiryUnavailableRetryForever`, so it can stay
+there indefinitely while its positions are retained.
+
+Consequence if true: an account holding any position on such a contract cannot be
+liquidated on any symbol, however far underwater its other positions are, until
+the pending contract settles. Two actors with identical losing positions get
+different treatment — one is closed out, the other is not — and the difference is
+whether they happen to hold an expired contract awaiting a price. That is an
+unearned advantage granted by the venue, and it is the strongest form of the
+unfairness this campaign is looking for, because it converts a data-availability
+gap into an economic privilege.
+
+Predicted observable, recorded before running: with a deeply underwater
+`ABC-PERP` position and any position on a settlement-pending `ABC-FUT`,
+`CheckLiquidations("ABC-PERP", ...)` performs no liquidation; once the future
+receives a settlement price and settles, the same call liquidates.
+Falsifier: the account is liquidated while the sibling is pending, or the profile
+error is escalated rather than skipped.
+Mechanism family: cross-book coupling, fail-open on the action.
+
+**E-019 — H-020, a settlement-pending sibling and the whole account.**
+Preregistered above. Artifact:
+`tests/economic_audit_pending_immunity_test.go`.
+Base: `a666d02faede3d40f046b11e60eb672c59386a94`.
+Reproduce: `go test ./tests/ -run 'TestAuditPendingSibling|TestAuditSuspendedLiquidation' -v`.
+
+Fixture: 100 USD of perp cash, long 10 `ABC-PERP` at 100, plus one unit of an
+`ABC-FUT` that reaches expiry with no settlement price and so enters
+settlement-pending. The perp mark halves to 50, which alone is
+`100 + 10*(50-100) = -400 USD` of equity.
+
+Result: **H-020 SUPPORTED, then substantially bounded by the follow-up.**
+
+While the sibling is pending: `liquidations=0`, the perp position stands at its
+full 10 units, and cash is untouched. `buildAccountMarginProfile` fails closed
+because no valid mark exists for the pending contract; `CheckLiquidations`
+treats that error as a diagnostic, calls `reportPriceUnavailable`, and continues
+to the next client. Failing closed on the *measurement* fails open on the
+*action*.
+
+**The bound, and it changes the finding materially.** The account is not
+privileged, it is **frozen**: `order_handling.go:557` refuses every order from a
+client with settlement-pending exposure, and the test confirms the refusal
+carries `ACCOUNT_SETTLEMENT_PENDING`. The actor cannot add risk — and cannot
+shed it either, since a closing order is refused on the same grounds. Once the
+contract settles the account is liquidated normally and the fund absorbs the
+deficit. My preregistration called this "immune to liquidation on every other
+book", which overstates it; the accurate word is suspended.
+
+**What the suspension costs, isolated in a second fixture.** The position rides
+the market while nobody can close it, so the deficit is set by the price
+available when the freeze lifts rather than by the price at the breach:
+
+| position closes at | fund absorbs | hand-derived |
+|---|---:|---|
+| 50, the breach price | -400 USD | `10*(50-100) = -500` against 100 cash |
+| 25, after the market moved | -650 USD | `10*(25-100) = -750` against 100 cash |
+
+The 250 USD difference is what the delay transfers from the defaulter to the
+insurance fund. A liquidation exists precisely to cap that growth.
+
+**Why it is still a fairness question.** The defaulter's downside is capped at
+zero cash by the bankruptcy write-down, so the tail beyond that is the fund's.
+An actor frozen through a falling market therefore holds the recovery and not
+the tail, while an actor without a pending contract is closed out at the breach.
+Two identical losing positions, two different outcomes, and the difference is
+whether one of them happened to hold an expired contract awaiting a price.
+
+**Competing readings, both legitimate.** (a) The caller is wrong: the comment on
+the profile says fail closed, and skipping the client fails open on the action;
+an unmeasurable account should be escalated, not passed over. (b) The caller is
+right: you cannot size a liquidation whose total exposure you cannot value, so
+declining to act and freezing the account is the conservative choice, and the
+freeze is the mitigation. This audit does not decide between them — that is
+scientific economics. Recorded as RT-012 with the measured cost attached so the
+decision can be made on numbers.
+
+**Reachability not established.** The state requires a dated contract reaching
+expiry with no settlement price, and `expiryUnavailableRetryForever` shows the
+condition is anticipated and unbounded in duration. Whether the campaign's own
+configurations ever produce it is *not* tested here and should not be assumed
+from this experiment.
+
 ---
 
 ## F. Findings
@@ -894,6 +992,13 @@ See `research/red-team-findings.md` for the full records.
 - **RT-003** — bounded no-violation results (INV-2, INV-5, INV-6, identity).
 - **RT-006** — latency is delivered as configured across 225 link x channel
   rows; no unearned speed advantage. Transport only.
+- **RT-012** — a position on a settlement-pending contract suspends liquidation
+  of the entire account: the margin profile fails closed and the caller skips
+  the client. The account is frozen, not privileged (new orders are refused),
+  but the position rides the market uncapped and the fund absorbs the delay —
+  measured at 400 USD if closed at the breach price versus 650 USD after the
+  market moved. **Owner decision**; reachability in campaign configs not
+  established.
 - **RT-011** — margin is aggregated across books, liquidation is not, so the
   position an actor loses depends on which book ticked rather than on which
   exposure caused the deficit. CORRECT BUT SURPRISING / specification question,
@@ -990,9 +1095,8 @@ Next, in priority order:
    while trading `ABC/CDF`, where `buildAccountMarginProfile` skips any
    instrument whose quote asset differs (`perp.QuoteAsset() != quote` →
    `continue`), so exposure in a second quote asset is invisible to the first
-   one's risk check; and whether the settlement-pending fail-closed rule can be
-   used to make an account unliquidatable by leaving one sibling contract
-   pending.
+   one's risk check; and an option exercised against a live hedge. The
+   settlement-pending question is closed as RT-012.
 2. **RETIRED — H-013 — decision-record coverage is a property of the run
    configuration, not of the code.** `-record-market-data-receipts` requires an explicit
    `-market-data-receipt-roles` list, so an un-audited participant class emits

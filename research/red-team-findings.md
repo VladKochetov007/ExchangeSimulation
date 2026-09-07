@@ -581,3 +581,64 @@ by the venue rather than by their strategies.
 directions: that the trigger symbol's position is closed and the sibling's is
 not, and that the sibling is reached on its own next tick with the fund
 absorbing exactly the derived deficit. Any change to either becomes visible.
+
+## RT-012 — A settlement-pending sibling suspends liquidation of the whole account
+
+**Classification.** Specification question with a measured cost. **Owner
+decision** — the two readings below are both defensible and choosing between
+them is scientific economics. Severity depends on reachability, which this
+audit does **not** establish.
+
+**Base.** `a666d02faede3d40f046b11e60eb672c59386a94`.
+
+**Mechanism.** `buildAccountMarginProfile` fails the whole profile closed when
+any of the account's positions sits on a settlement-pending contract, for a
+stated and sound reason: "Retained pending exposure is not an economic zero. No
+valid mark exists, so fail the whole account profile closed instead of allowing
+active sibling risk to ignore it." `CheckLiquidations` receives that error,
+reports it through `reportPriceUnavailable`, and `continue`s to the next client.
+**Failing closed on the measurement fails open on the action.**
+
+**Minimal reproduction.** 100 USD of perp cash, long 10 `ABC-PERP` at 100, plus
+one unit of an `ABC-FUT` that expires with no settlement price. The perp mark
+halves to 50, putting equity at `100 + 10*(50-100) = -400 USD`. Result:
+`liquidations=0`, the position stands at its full size, cash untouched. Once the
+future receives a price and settles, the same call liquidates normally.
+
+**The bound, which changes the finding.** The account is **frozen, not
+privileged**. `order_handling.go:557` refuses every order from a client with
+settlement-pending exposure — including one that would *reduce* the position —
+with `ACCOUNT_SETTLEMENT_PENDING`. The preregistration called this "immune to
+liquidation on every other book"; the accurate word is suspended, and the
+correction is recorded rather than quietly dropped.
+
+**What the suspension costs, isolated in a second fixture.** The position rides
+the market while nobody can close it, so the deficit is set by the price
+available when the freeze lifts, not by the price at the breach:
+
+| position closes at | fund absorbs | hand-derived |
+|---|---:|---|
+| 50, the breach price | -400 USD | `10*(50-100) = -500` against 100 cash |
+| 25, after the market moved | -650 USD | `10*(25-100) = -750` against 100 cash |
+
+The 250 USD is what the delay transfers from the defaulter to the insurance
+fund. Capping exactly that growth is what a liquidation is for.
+
+**Why it remains a fairness question.** The defaulter's downside is capped at
+zero cash by the bankruptcy write-down, so everything beyond that is the fund's.
+An actor frozen through a falling market keeps the recovery and not the tail,
+while an actor without a pending contract is closed out at the breach. Two
+identical losing positions, two different outcomes, and the difference is
+whether one of them happened to hold an expired contract awaiting a price.
+
+**Competing readings.** (a) The caller is wrong: the profile's own comment says
+fail closed, and skipping the client fails open on the action; an unmeasurable
+account should be escalated rather than passed over. (b) The caller is right:
+a liquidation whose total exposure cannot be valued cannot be sized, so
+declining to act is conservative and the admission freeze is the mitigation.
+Not decided here.
+
+**Reachability.** Requires a dated contract reaching expiry with no settlement
+price. `expiryUnavailableRetryForever` shows the condition is anticipated and
+unbounded in duration. Whether the campaign's configurations produce it is not
+tested and must not be assumed from this experiment.
