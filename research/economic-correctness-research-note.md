@@ -1918,6 +1918,96 @@ than counted directly.
 
 RT-021 is updated with these numbers rather than left as a structural note.
 
+**H-031 — which venue an actor is placed on changes its outcome.**
+E-031 surfaced this without looking for it: venue silence is not symmetric. On
+`CDF/USD` central's book is one-sided 4.76% of the time against north's 0.64%,
+and on `ABC/CDF` the three venues run 7.35%, 8.36% and 8.67%. The venues are not
+equivalent environments.
+
+Why that is the campaign's problem rather than a curiosity: the configuration
+places the same participant *counts* on all three venues, so every role class
+exists three times over. Any statement of the form "strategy X outperformed
+strategy Y" is therefore an average over three environments — and if those
+environments differ materially, part of the measured difference between two
+classes is the venue they happened to be quoted into, not the strategy.
+
+Representation change: stop comparing *classes* and compare *one class against
+itself* across venues. That holds strategy fixed and varies only the environment,
+which is the clean design the campaign's own layout already provides for free.
+
+The evidence exists: `ParticipantAccountSnapshot` records every participant's
+marked account with its role, its venue and the marks it was valued at, at
+named lifecycle phases, and the run writes `terminal-outcome.json`.
+
+Predicted observable, recorded before measuring: within at least one role class,
+terminal marked equity differs across venues by materially more than it differs
+between participants of the same class on the same venue. The within-venue spread
+is the natural yardstick — if between-venue differences sit inside it, venue
+assignment is not a confounder and H-031 is falsified.
+Falsifier: for every class, the between-venue spread is comparable to or smaller
+than the within-venue spread.
+Mechanism family: environment confound, actor-fairness at the population level.
+
+**E-032 — H-031, does venue placement change an actor's outcome?**
+Preregistered above. Artifact: `research/tools/venueeffect/main.go`.
+Base: `a666d02faede3d40f046b11e60eb672c59386a94`.
+Run: `clock-control-5h-101.json`, seed 607, 5 simulated hours, `-log-mode none`
+(the population artifact is written regardless of log mode).
+Reproduce: `go run research/tools/venueeffect/main.go -file <logdir>/greeks.json -detail`.
+
+Design: the campaign places the same participant counts on all three venues, so
+every role class exists three times over. Hold the strategy fixed, vary only the
+environment, and compare the between-venue spread of class means against the
+within-venue spread of individuals.
+
+**Result: H-031 SUPPORTED, and the metric needed correcting on the way.**
+
+| class | n/venue | between-venue spread | within-venue spread | ratio | **spread as % of result** |
+|---|---:|---:|---:|---:|---:|
+| `triangle_arb` | 2 | 1 119 237 | 3 819 | 293× | **8.23%** |
+| `elastic_supplier` | 8 | 41 586 | 191 | 218× | 0.39% |
+| `dated_carry_arb` | 2 | 10 818 | 90 | 120× | 0.41% |
+| `parity_arb` | 2 | 10 529 | 146 | 72× | — |
+| `option_value_taker` | 4 | 16 033 | 454 | 35× | — |
+| `latent_liquidity` | 6 | 98 086 | 7 407 | 13× | — |
+| `fixed_distance_maker` | 8 | 46 486 | 1 860 149 | **0.02×** | — |
+| `noise_flow` | 6 | 1 221 324 | 32 347 493 | **0.04×** | — |
+
+Per-venue means for the largest effect: `triangle_arb` returns **+14 258 332**
+on north, +13 393 986 on south and +13 139 095 on central.
+
+**The metric correction, which changes how the table should be read.** The ratio
+column is inflated, and not by a small amount. Same-class actors on the same
+venue are near-clones — these are deterministic strategies with near-identical
+parameters — so the within-venue spread is tiny by construction, and dividing by
+it produces large numbers regardless of whether the venue effect is
+economically meaningful. `elastic_supplier`'s 218× is a venue spread of 0.39% of
+its own result. **The load-bearing column is the last one**, and by that measure
+only `triangle_arb`, at 8.23%, shows a venue effect of a size that could change
+a conclusion.
+
+**Competing reading, and it is strong.** A venue effect is *expected* for
+venue-local strategies. A triangular arbitrageur trades three books on its own
+venue; its result should depend on that venue's book quality. This is not
+evidence of a defect in the venue's economics — the venues really are different
+environments, which E-031 already showed from the other direction (`ABC/CDF`
+one-sidedness of 7.35% on north against 8.67% on central).
+
+**What it is evidence of is methodological, and that is the finding.** Any
+comparison of the form "class X outperformed class Y" is an average over three
+environments that are not equivalent. For classes near the bottom of the table
+that does not matter — `fixed_distance_maker`'s venue term is 2% of its
+individual variation. For `triangle_arb` the venue term is 8.23% of the result
+itself, so a comparison involving it that does not control for venue is carrying
+an environment term of that size. Recorded as RT-022.
+
+*Eighth instrument error, caught before reporting.* The first version grouped by
+the numbered role (`elastic_supplier_3`) rather than the role class, so every
+group held exactly one participant per venue, the within-venue spread was zero by
+construction, and every ratio printed as `inf`. The tool now strips the index,
+and classes that genuinely have one participant per venue — `perp_maker` — are
+reported as "no yardstick" instead of being given a ratio against zero.
+
 ---
 
 ## F. Findings
@@ -1934,6 +2024,12 @@ See `research/red-team-findings.md` for the full records.
 - **RT-003** — bounded no-violation results (INV-2, INV-5, INV-6, identity).
 - **RT-006** — latency is delivered as configured across 225 link x channel
   rows; no unearned speed advantage. Transport only.
+- **RT-022** — venue placement carries an environment term in the campaign's own
+  comparisons. `triangle_arb`'s result differs by **8.23%** across the three
+  venues (north +14 258 332 vs central +13 139 095) while same-venue clones
+  differ by 0.03%. Expected physics for venue-local strategies, but it means any
+  cross-class comparison that does not control for venue carries that term.
+  **Methodological, not an economics defect.**
 - **RT-021** — the index that anchors every mark has no staleness bound: a venue
   that goes one-sided stops updating without losing its vote, so two silent
   venues outvote the only live one and the index publishes a price no venue is

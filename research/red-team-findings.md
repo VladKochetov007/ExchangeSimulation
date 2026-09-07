@@ -1247,3 +1247,49 @@ that begins and ends between two snapshots is invisible. Per-venue snapshot
 counts slightly exceed the distinct instant count, so a few instants carry more
 than one snapshot per venue; the "exactly 2 silent" column is derived as `≥2`
 minus `all` rather than counted directly.
+
+## RT-022 — Venue placement carries an environment term in the campaign's comparisons
+
+**Classification.** Methodological, **not an economics defect**. The venues are
+genuinely different environments and a venue-local strategy's result should
+depend on its venue. What follows is how the campaign's numbers must be read.
+
+**Base.** `a666d02faede3d40f046b11e60eb672c59386a94`.
+Run: `clock-control-5h-101.json`, seed 607, 5 simulated hours.
+
+The campaign places the same participant counts on all three venues, so every
+role class exists three times over — a within-class design that holds strategy
+fixed and varies only the environment.
+
+| class | n/venue | between-venue | within-venue | ratio | **% of result** |
+|---|---:|---:|---:|---:|---:|
+| `triangle_arb` | 2 | 1 119 237 | 3 819 | 293× | **8.23%** |
+| `elastic_supplier` | 8 | 41 586 | 191 | 218× | 0.39% |
+| `dated_carry_arb` | 2 | 10 818 | 90 | 120× | 0.41% |
+| `latent_liquidity` | 6 | 98 086 | 7 407 | 13× | — |
+| `fixed_distance_maker` | 8 | 46 486 | 1 860 149 | 0.02× | — |
+| `noise_flow` | 6 | 1 221 324 | 32 347 493 | 0.04× | — |
+
+`triangle_arb` returns **+14 258 332** on north, +13 393 986 on south,
++13 139 095 on central.
+
+**Read the last column, not the ratio.** The ratio is inflated: same-class actors
+on the same venue are near-clones of deterministic strategies, so the
+within-venue spread is tiny by construction and dividing by it produces large
+numbers whether or not the venue effect matters economically.
+`elastic_supplier`'s 218× is a venue spread of 0.39% of its own result. Only
+`triangle_arb`, at 8.23%, is large enough to change a conclusion.
+
+**The finding is methodological.** Any statement of the form "class X
+outperformed class Y" averages over three environments that E-031 already showed
+are not equivalent (`ABC/CDF` one-sidedness: 7.35% north, 8.67% central). For
+classes at the bottom of the table this is irrelevant. For `triangle_arb` a
+comparison that does not control for venue carries an environment term worth
+8.23% of the result.
+
+**Instrument note, the eighth.** The first version grouped by the numbered role
+(`elastic_supplier_3`) rather than the class, so every group held one participant
+per venue, the within-venue spread was zero by construction, and every ratio
+printed `inf`. The tool now strips the index, and a class that genuinely has one
+participant per venue is reported as "no yardstick" rather than given a ratio
+against zero.
