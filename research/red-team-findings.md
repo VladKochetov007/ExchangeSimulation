@@ -816,3 +816,62 @@ record. One look at a raw line settled it. With RT-006's expectation model,
 RT-010's asynchronous outbox and RT-013's price conversion, that is four
 instruments returning confident wrong answers, three of them nulls. **Read one
 raw record before trusting any aggregate computed over it.**
+
+## RT-015 — The borrow gate values cash only
+
+**Classification.** REAL BUG in the sense of an inconsistency between two
+valuations of the same account, with the permissive one gating leverage.
+Severity medium-high: reachable with no special access, exercised in the
+campaign. **Owner decision** — how much leverage an account may take is
+scientific economics.
+
+**Base.** `a666d02faede3d40f046b11e60eb672c59386a94`.
+
+**Mechanism.** `validateCrossMarginCollateral` builds `totalAssetValue` from
+`client.PerpBalances` and `client.Balances` at oracle prices, subtracts
+`client.Borrowed`, and limits the new borrow against that net equity. It never
+looks at positions, and a reservation is an earmark *inside* the balances it
+sums. Meanwhile `buildAccountMarginProfile` — the risk engine — does add every
+position's unrealized PnL to equity. The two disagree, and the borrow gate is
+the more generous.
+
+The gate's own comment shows the author reasoning carefully about the equity
+base: "Limit against NET equity (assets minus debt): borrowed-in cash sits in the
+balances, so limiting against gross assets would let each borrow enlarge the base
+for the next one." The omission of positions and earmarks sits alongside that
+care, which is why it reads as an oversight rather than a decision — but the
+disposition is still the owner's.
+
+**Measured** (`tests/economic_audit_borrow_valuation_test.go`), collateral factor
+0.5, 1000 USD of cash, limit found by bisecting the gate:
+
+| account | economic equity | admitted borrow |
+|---|---:|---:|
+| no position | 1000 USD | 500.00 |
+| long 5 at 100, mark 60 (unrealized −200) | 800 USD | **500.00** |
+
+An engine counting the loss would admit 400. The account borrows 25% more than
+its equity supports, against a loss the risk engine already recognises.
+
+**The second arm is the sharper one** — the same capital counted twice rather
+than a stale valuation:
+
+| account | cash | reserved | available | admitted borrow |
+|---|---:|---:|---:|---:|
+| resting bid, 90 ABC at 100 | 1000 | 900 | **100** | **500.00** |
+
+An account with 100 USD actually available borrows 500. The same capital backs
+the resting order and the loan simultaneously.
+
+**Competing reading, and why it fails.** One could argue positions are margined
+separately, so the cash is genuinely unencumbered. The second arm refutes it:
+`PerpReserved` *is* the order and position margin, it sits inside the balance the
+gate sums, and the gate therefore counts that margin as collateral for a new
+loan.
+
+**Reachability.** Borrowing is enabled in the campaign with auto-borrow on both
+wallets, and the 30-minute run in E-022 produced 76 borrow events.
+
+**The tests pin, they do not prescribe.** They fail if the gate starts counting
+either the unrealized loss or the earmark, so the disagreement between the two
+valuations cannot change silently in either direction.

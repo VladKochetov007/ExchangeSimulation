@@ -1221,6 +1221,84 @@ RT-010's asynchronous outbox, RT-013's price conversion, and now a schema
 mismatch — four instruments that returned a confident wrong answer, three of
 them nulls. **Read one raw record before trusting any aggregate over it.**
 
+**H-023 — the borrow limit is computed on cash the account has already lost or
+already committed.**
+`validateCrossMarginCollateral` builds `totalAssetValue` by summing
+`client.PerpBalances` and `client.Balances` at oracle prices, subtracts
+`client.Borrowed`, and limits the new borrow against that net equity. The
+reasoning it states is careful — negative balances subtract, and the limit is
+against net equity precisely so each borrow cannot enlarge the base for the
+next.
+
+What the sum does not contain is anything about **positions**. An account long a
+perp whose mark has fallen carries an unrealized loss that has not touched its
+cash balance, so the collateral valuation still sees the full pre-loss cash. The
+same is true of `Reserved`: an earmark sits inside `Balances`, so capital already
+committed to resting orders is counted as free collateral.
+
+Why this is an actor-fairness question rather than a modelling choice: the
+liquidation engine *does* value positions — `buildAccountMarginProfile` adds
+every position's unrealized PnL to equity. Two parts of the same system
+therefore disagree about what the account is worth, and the disagreement points
+one way: the borrow gate is the more generous of the two. An actor that is
+already losing can lever up on equity the risk engine knows it no longer has,
+and the counterparties to that new exposure are the ones carrying it.
+
+Predicted observable, recorded before running: an account with cash `C` and an
+unrealized loss `L` (with `L` small enough that it is not yet liquidatable) can
+borrow up to `factor·C` rather than `factor·(C−L)`. A borrow that should be
+refused once the loss is counted will succeed.
+Falsifier: the borrow is refused, or the permitted amount shrinks by the
+unrealized loss.
+Mechanism family: cross-book coupling, valuation disagreement.
+
+**E-023 — H-023, what the borrow gate can see.**
+Preregistered above. Artifact:
+`tests/economic_audit_borrow_valuation_test.go`.
+Base: `a666d02faede3d40f046b11e60eb672c59386a94`.
+Reproduce: `go test ./tests/ -run TestAuditBorrowLimitIgnores -v`.
+
+Result: **H-023 SUPPORTED on both counts.** Collateral factor 0.5, 1000 USD of
+cash, limit found by bisecting the gate itself.
+
+| account | economic equity | admitted borrow |
+|---|---:|---:|
+| no position | 1000 USD | 500.00 USD |
+| long 5 at 100, mark 60 (unrealized -200) | 800 USD | **500.00 USD** |
+
+An engine that counted the loss would admit 400. The account borrows 25% more
+than its equity supports, and the risk engine already knows the equity is gone:
+`buildAccountMarginProfile` adds every position's unrealized PnL. Two parts of
+the same system disagree about what the account is worth, and the borrow gate is
+the more generous of the two.
+
+The second arm is sharper, because it is the same capital counted twice rather
+than a stale valuation. A reservation is an earmark *inside* `PerpBalances`, and
+the gate sums `PerpBalances`:
+
+| account | cash | reserved | available | admitted borrow |
+|---|---:|---:|---:|---:|
+| resting bid for 90 ABC at 100 | 1000 | 900 | **100** | **500.00 USD** |
+
+An account with 100 USD actually available borrows 500. The same capital backs
+the resting order and the loan at once — collateral reuse, and it needs no
+special access.
+
+**Reachability.** Borrowing is enabled in the campaign with auto-borrow on both
+wallets, and the 30-minute run in E-022 produced 76 borrow events, so the gate is
+live and exercised.
+
+**Disposition: owner decision, not fixed.** How much leverage an account may take
+is scientific economics. What the tests do is pin the behaviour in both
+directions — they now fail if the gate starts counting either the loss or the
+earmark — so the disagreement between the two valuations cannot change silently.
+
+**Competing reading, recorded.** Positions are margined separately, so one could
+argue the cash is genuinely unencumbered and the position's own margin is the
+control. That argument does not survive the second arm: `PerpReserved` *is* the
+position and order margin, it sits inside the balance the gate sums, and the gate
+therefore counts the margin as collateral for a new loan.
+
 ---
 
 ## F. Findings
@@ -1237,6 +1315,12 @@ See `research/red-team-findings.md` for the full records.
 - **RT-003** — bounded no-violation results (INV-2, INV-5, INV-6, identity).
 - **RT-006** — latency is delivered as configured across 225 link x channel
   rows; no unearned speed advantage. Transport only.
+- **RT-015** — the borrow gate values cash only. It ignores unrealized losses
+  (an account 200 USD under water still borrows the full 500) and counts
+  reserved margin as free collateral (100 USD available, 500 USD borrowed), so
+  the same capital backs a resting order and a loan at once. The risk engine
+  values positions; the borrow gate does not, and it is the more generous of the
+  two. Reachable and exercised. **Owner decision.**
 - **RT-014** — collateral interest is forgiven entirely below 105.12 USD of
   debt, and the delivered rate rises with principal from 0 bps to the configured
   500. The cost of leverage depends on how much is borrowed. Reachable by every
