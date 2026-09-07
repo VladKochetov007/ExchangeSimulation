@@ -1067,3 +1067,41 @@ directly rather than crossing a book — an unrecorded mutation of the kind that
 invalidated E-007. It cannot affect these assertions, which are the invariance of
 debt, cash and fund across the liquidation calls. It would matter if the claim
 were about conservation; it is not.
+
+## RT-019 — Expiring contracts share one settlement observation
+
+**Classification.** Bounded no-violation result, pinned. Recorded because
+nothing else asserts it and its regression would be visible only to hedgers.
+
+**Base.** `a666d02faede3d40f046b11e60eb672c59386a94`.
+
+`UpdateDerivativeMarks` resolves **one** underlying observation per tick through
+`derivativeUnderlyingPrice` and hands that same number to every expirable via
+`ObserveSettlement`. Measured with an option and a dated future on the same
+underlying expiring together: both settle at 10 000 000, the spot mid, rather
+than at either derivative's own book. A calendar hedge between them therefore
+nets exactly.
+
+**Why pin it.** If the shared observation were ever replaced by per-instrument
+sampling, calendar hedges would quietly stop netting. No directional participant
+would notice and no existing test would fail — only hedgers would pay, which is
+the hardest kind of unfairness to detect from aggregate metrics.
+
+**What this does not cover.** Hedging an expiring option with the **perp** leaves
+genuine basis risk: the option settles to the spot reference while the perp stays
+open at its own mark (`exchange.go:1704`). That is real economics the hedger
+owns, not a venue artefact. The original hypothesis assumed otherwise and was
+wrong about the economics, not about the code.
+
+**Instrument note, the sixth — and a new shape.** The first run reported that the
+future got no settlement observation while the option, from the same call, got
+one. That looked like a genuine asymmetry between expirable types. It was the
+fixture: `NewExpiringFutures` takes no underlying argument, so a bare
+construction leaves `Underlying` empty and the resolution falls through to the
+configured index, which publishes only the four spot symbols. The campaign never
+builds one that way — `instrument/listing.go:97` sets it, and the listing
+scheduler is the only path that lists dated futures.
+
+The five earlier instrument errors were about reading the system wrong. This one
+is about building it wrong. **Prefer the construction path production uses; a
+bare constructor can leave a field the whole lifecycle depends on.**

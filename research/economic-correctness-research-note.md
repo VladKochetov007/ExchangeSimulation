@@ -1607,6 +1607,84 @@ invariance of debt, cash and fund across the liquidation calls, none of which th
 injection can affect. It would matter if the claim were about conservation; it is
 not.
 
+**H-027 — a perfectly hedged option position does not end flat at expiry.**
+The last named surface from the original unaudited list, and the one that tests
+the venue's treatment of *hedgers* specifically rather than of directional
+actors.
+
+Mechanism to test: expiring contracts and perps do not get their price from the
+same place. `refreshDerivativeMarks` resolves **one** underlying observation per
+tick through `derivativeUnderlyingPrice`, which reads
+`bookReferencePrice(underlyingSymbol)` — the spot book — and hands that same
+number to every expirable via `ObserveSettlement`. So an option and a dated
+future on the same underlying settle against an identical price, which is
+correct and deliberate. The perp is marked separately, through
+`UpdateFundingRate(index, mark)` fed by the simulation.
+
+If the perp's mark is anything other than that same spot reference, then an
+actor who is short an option and delta-hedged in the perp has the two legs
+valued against two different prices at the instant of expiry, and books a
+phantom profit or loss equal to the basis — despite having taken no net
+exposure. The venue would then be creating and destroying value specifically for
+participants who hedge, which is the opposite of what a hedge is for.
+
+Predicted observable, recorded before reading where the simulation sources the
+perp mark: an exactly delta-hedged account's total equity changes across the
+expiry boundary by the basis between the spot reference and the perp mark, and
+by zero when the two coincide.
+Falsifier: the hedged account's equity is unchanged across expiry for any basis,
+which would mean both legs are settled against one price.
+Mechanism family: valuation disagreement, applied to a hedge rather than to an
+account.
+
+**E-028 — H-027, hedged option positions at expiry.**
+Preregistered above. Artifact:
+`tests/economic_audit_shared_settlement_test.go`.
+Base: `a666d02faede3d40f046b11e60eb672c59386a94`.
+Reproduce: `go test ./tests/ -run TestAuditExpiringContractsShareOne -v`.
+
+Result: **H-027 FALSIFIED, and the reasoning was corrected twice before any
+number was produced.**
+
+*First correction, from reading rather than running.* The hypothesis assumed that
+an option hedged in the perp books a phantom PnL at expiry because the two legs
+are priced differently. They are — the option settles to the spot reference while
+the perp is marked at its own book (`exchange.go:1704`, mark = the perp's own
+book, index = the configured spot index). But that is **genuine basis risk that
+the hedger holds**, not a venue artefact: the perp position is not settled, it
+stays open at its own mark, and an actor who hedges an option with a perp really
+does own the basis. Not a defect, and the hypothesis as written was wrong about
+the economics rather than about the code.
+
+*What is actually load-bearing.* `UpdateDerivativeMarks` resolves **one**
+underlying observation per tick through `derivativeUnderlyingPrice` and hands
+that same number to every expirable via `ObserveSettlement`. So a calendar hedge
+— an option and a dated future on the same underlying, expiring together —
+settles both legs against an identical price and nets exactly. Measured: one
+observation, future settles at 10 000 000, option at 10 000 000, both equal to
+the spot mid rather than to either derivative's own book.
+
+Nothing else asserts this. If the shared observation were replaced by
+per-instrument sampling, calendar hedges would quietly stop netting and **only
+hedgers would pay for it** — the failure would be invisible to any directional
+participant and to every existing test. Pinned as RT-019.
+
+*Second correction, and a new shape of instrument error.* The first run reported
+that the future got no settlement observation while the option, from the same
+call, got one. That looked like a real asymmetry between the two expirable
+types. It was the fixture: `NewExpiringFutures` takes no underlying argument, so
+a bare construction leaves `Underlying` empty and
+`derivativeUnderlyingPrice` falls through to the configured index, which does not
+publish per-contract symbols. The campaign never constructs one that way — the
+listing scheduler sets it (`instrument/listing.go:97`) and is the only path that
+lists dated futures.
+
+The five earlier instrument errors were all about *reading* the system wrong.
+This one is about *building* it wrong: constructing a domain object directly
+instead of through the factory the system actually uses, and then measuring
+behaviour the system never exhibits. **Prefer the construction path production
+uses; a bare constructor can leave a field the whole lifecycle depends on.**
+
 ---
 
 ## F. Findings
@@ -1623,6 +1701,10 @@ See `research/red-team-findings.md` for the full records.
 - **RT-003** — bounded no-violation results (INV-2, INV-5, INV-6, identity).
 - **RT-006** — latency is delivered as configured across 225 link x channel
   rows; no unearned speed advantage. Transport only.
+- **RT-019** — every expiring contract settles against one shared underlying
+  observation, so a calendar hedge nets exactly. Bounded no-violation result,
+  pinned because nothing else asserts it and its regression would be visible
+  only to hedgers.
 - **RT-018** — borrowed spot exposure is governed by nothing. Both liquidation
   entry points walk positions; spot debt is not a position. An account 50 000 USD
   underwater on a venue-financed short is untouched by either, and no event
