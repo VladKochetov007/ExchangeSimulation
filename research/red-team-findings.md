@@ -1206,3 +1206,44 @@ discipline.**
 **Not established.** Whether any venue's `ABC/USD` book goes one-sided during a
 run, and for how long, was not measured. The mechanism is structural; its
 frequency is an empirical question this experiment did not ask.
+
+## RT-021 (quantified) — the stale-vote configuration is absent where it would matter most
+
+`research/tools/booksidedness/main.go` against `clock-control-5h-101.json`,
+seed 607, full 5 simulated hours. A venue is "silent" for the index when its book
+is one-sided, because `TwoSidedMidPrice` then fails and its entry is not updated.
+18 000 snapshot instants:
+
+| symbol | north | central | south | ≥2 silent | all silent | **exactly 2 silent** |
+|---|---:|---:|---:|---:|---:|---:|
+| `ABC/USD` | 0.40% | 0.40% | 0.40% | 3 (0.02%) | 3 (0.02%) | **0** |
+| `CDF/USD` | 0.64% | 4.76% | 3.83% | 71 (0.39%) | 4 (0.02%) | **67 (0.37%)** |
+| `ABC/CDF` | 7.35% | 8.67% | 8.36% | 456 (2.53%) | 16 (0.09%) | **440 (2.44%)** |
+
+**The distinction that decides severity.** The harm needs *exactly* two silent
+venues and one live one, so two stale observations outvote a live market. When
+**all** venues are silent nobody updates and the median is entirely stale, but no
+live market is contradicted — a weaker condition. The last column separates them.
+
+**On `ABC/USD` the harmful configuration occurred zero times in 18 000
+instants.** That is the book anchoring the perp mark, and therefore margin,
+liquidation and funding. Every multi-venue silence there was total silence.
+RT-021's consequence for the margin system is, in this configuration, absent
+rather than merely rare.
+
+**On `ABC/CDF` it is common** — 2.44%, about 440 instants, roughly one per 41
+seconds of simulated time — and `CDF/USD` sits between at 0.37%. The mechanism is
+live on the books whose index feeds cross-asset pricing, not on the one that
+governs margin.
+
+**A second observation the table forced.** Venue silence is not symmetric: on
+`CDF/USD`, central is one-sided 4.76% of the time against north's 0.64%. The
+venues contribute unequally to the consensus that prices everyone — an
+actor-fairness input in its own right, and not something this experiment set out
+to measure.
+
+**Scope.** Snapshots are periodic, so this is a *sampled* silence rate; silence
+that begins and ends between two snapshots is invisible. Per-venue snapshot
+counts slightly exceed the distinct instant count, so a few instants carry more
+than one snapshot per venue; the "exactly 2 silent" column is derived as `≥2`
+minus `all` rather than counted directly.

@@ -1845,6 +1845,79 @@ goes one-sided during a campaign run, and for how long, is **not measured here**
 The mechanism is structural; its frequency is an empirical question this
 experiment did not ask. Recorded as RT-021.
 
+**H-030 — the index's stale-vote weakness is not merely structural.**
+RT-021 established the mechanism — `venueMids` is overwritten, never aged, and a
+venue that cannot produce a two-sided mid stops updating without losing its vote
+— but explicitly did not measure how often a venue is in that state. Without
+that number the finding cannot be ranked against the others, and the discipline
+this audit has already had to apply twice (E-022's over-stated 30-minute
+extrapolation, RT-016's bounded excursion) says the number comes before the
+severity claim.
+
+The observable: each venue publishes periodic `BookSnapshot` events per symbol
+carrying `bids` and `asks`. A snapshot with either side empty is a moment when
+`TwoSidedMidPrice` would fail and that venue would contribute nothing new to the
+consensus while its previous observation kept voting.
+
+Predicted observable, recorded before measuring: one-sidedness is rare on
+`ABC/USD` at the venue with the maker population and more common on the thinner
+books, and the fraction of *simultaneous* two-venue silence — the case where the
+live market is outvoted — is far smaller than any single venue's silence rate.
+Falsifier: every venue is two-sided in essentially every snapshot, which would
+make RT-021 structural only and reduce its severity to a latent note.
+Scope limit stated in advance: snapshots are periodic, so this measures a
+*sampled* silence rate and not the instantaneous one, and it cannot see silence
+that begins and ends between two snapshots.
+
+**E-031 — H-030, how often the stale-vote configuration actually occurs.**
+Preregistered above. Artifact: `research/tools/booksidedness/main.go`.
+Base: `a666d02faede3d40f046b11e60eb672c59386a94`.
+Run: `clock-control-5h-101.json`, seed 607, full 5 simulated hours, `-log-mode full`.
+Reproduce: `go run research/tools/booksidedness/main.go -dir <logdir> -symbol ABC-USD`.
+
+A venue is "silent" for the index when its book is one-sided, because
+`TwoSidedMidPrice` then fails and the campaign's call site does not update that
+venue's entry. Over 18 000 snapshot instants:
+
+| symbol | north | central | south | ≥2 silent at once | all silent | **exactly 2 silent (the harmful case)** |
+|---|---:|---:|---:|---:|---:|---:|
+| `ABC/USD` | 0.40% | 0.40% | 0.40% | 3 (0.02%) | 3 (0.02%) | **0** |
+| `CDF/USD` | 0.64% | 4.76% | 3.83% | 71 (0.39%) | 4 (0.02%) | **67 (0.37%)** |
+| `ABC/CDF` | 7.35% | 8.67% | 8.36% | 456 (2.53%) | 16 (0.09%) | **440 (2.44%)** |
+
+**The distinction that decides the severity.** RT-021's harm needs *exactly* two
+silent venues and one live one: then two stale observations outvote a live
+market. When **all** venues are silent nobody updates, the median is entirely
+stale, but no live market is being contradicted — that is a different and much
+weaker condition. The last column is the difference between the two.
+
+**Result, and it downgrades RT-021 where it matters most.** On `ABC/USD` — the
+book that anchors the perp mark and therefore margin, liquidation and funding —
+the harmful configuration occurred **zero times in 18 000 instants**. Every
+multi-venue silence there was total silence. RT-021's consequence for the margin
+system is, in this configuration, **not merely rare but absent**.
+
+On the thin cross book `ABC/CDF` it is common: **2.44%, about 440 instants**, or
+roughly one per 41 seconds of simulated time. `CDF/USD` sits between at 0.37%.
+So the mechanism is live, but on the books whose index feeds cross-asset pricing
+rather than on the one that governs margin.
+
+**A second thing the table shows.** Venue silence is not symmetric: on `ABC/CDF`
+central is one-sided 8.67% of the time against north's 7.35%, and on `CDF/USD`
+central is 4.76% against north's 0.64%. The venues contribute unequally to the
+consensus that prices everyone, which is an actor-fairness input in its own right
+and was not something this experiment set out to measure.
+
+**Scope, stated in advance and unchanged.** Snapshots are periodic, so this is a
+*sampled* silence rate; silence beginning and ending between two snapshots is
+invisible. The per-venue snapshot counts (18 018–18 076) slightly exceed the
+18 000 distinct instants, so a few instants carry more than one snapshot per
+venue; the effect on the percentages is below their reported precision, and the
+"exactly 2 silent" column is derived as `≥2 silent` minus `all silent` rather
+than counted directly.
+
+RT-021 is updated with these numbers rather than left as a structural note.
+
 ---
 
 ## F. Findings
@@ -1865,7 +1938,11 @@ See `research/red-team-findings.md` for the full records.
   that goes one-sided stops updating without losing its vote, so two silent
   venues outvote the only live one and the index publishes a price no venue is
   showing. Median-of-three works; permanent membership is the weakness.
-  Frequency in real runs **not measured**. **Owner decision.**
+  **Quantified in E-031**: the harmful configuration — exactly two silent venues
+  outvoting one live one — occurred **zero times in 18 000 instants on
+  `ABC/USD`**, the book that anchors the perp mark, and **2.44% of the time on
+  the thin `ABC/CDF`**. Live on the cross books, absent on the margin-governing
+  one. **Owner decision.**
 - **RT-020** — one minimum-size resting quote that never trades moves the perp
   mark 1.90%, and the clamp permits 3.00%, against a 500 bps maintenance margin
   — 38% and 60% of the buffer respectively. The anchoring defence is complete in
