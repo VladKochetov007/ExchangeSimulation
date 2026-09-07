@@ -1161,3 +1161,48 @@ marketable order, not a resting quote, and it left the book crossed, so
 reported a mark move of exactly 0.0000% — reading as a complete defence. **A
 manipulation fixture must post a quote the venue would actually leave resting; a
 crossed book measures the error path, not the mechanism.**
+
+## RT-021 — The index has no staleness bound
+
+**Classification.** Structural property with a measured mechanism. Frequency in
+real runs **not measured**. **Owner decision.**
+
+**Base.** `a666d02faede3d40f046b11e60eb672c59386a94`.
+
+RT-020 showed the mark is anchored to the index and clamped ±3% around it, which
+makes the index — not the mark — the load-bearing number. This is the index's own
+robustness.
+
+`spotIndexProvider` in consensus mode takes a median over
+`venueMids[symbol][venueID]`. That map is **overwritten, never aged**, and the
+campaign's call site writes only when `TwoSidedMidPrice(symbol)` succeeds. A
+venue that goes one-sided stops updating without losing its vote.
+
+**Measured** (`simulations/multivenue/economic_audit_index_consensus_test.go`):
+
+| observations | index |
+|---|---|
+| one venue at 100 | 100 |
+| two venues at 100 and 200 | **200** — the upper, not the average |
+| three at 100, 101, 100 000 | 101 — one venue cannot carry it |
+| two live at 400, one silent last seen at 100 | 400 |
+| **one live at 400, two silent last seen at 100** | **100** |
+
+The last row is the finding: with the campaign's three venues, two silent ones
+outvote the only live market, and **the index publishes a price no venue is
+currently showing**. "Silent" is a low bar — `TwoSidedMidPrice` needs both sides,
+so an active market quoting only bids already qualifies.
+
+**Median-of-three is a real defence** and the third row shows it working against
+a venue quoting 100 000. The weakness is not the median; it is that membership is
+permanent.
+
+**Where this sits.** The scoring path, which moves no money, takes an explicit
+`maxStaleness` and records whether the mark it used was fresh or `recent_`. The
+index that drives every mark takes none. That is RT-017's inverse ordering again,
+one level deeper: **the anchor with the most authority has the least memory
+discipline.**
+
+**Not established.** Whether any venue's `ABC/USD` book goes one-sided during a
+run, and for how long, was not measured. The mechanism is structural; its
+frequency is an empirical question this experiment did not ask.

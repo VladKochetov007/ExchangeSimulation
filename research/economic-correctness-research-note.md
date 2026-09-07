@@ -1772,6 +1772,79 @@ quotes inside the spread. **A manipulation fixture must post a quote the venue
 would actually leave resting; a crossed book measures the error path, not the
 mechanism.**
 
+**H-029 — the anchor the mark trusts has no staleness bound and degenerates on
+thin participation.**
+RT-020 established that the mark is anchored to the index and clamped around it.
+That makes the index the load-bearing number, so the same lens now points one
+level down: *can a participant move the anchor, and does the anchor forget?*
+
+The campaign's index is `spotIndexProvider` in `consensus` mode: a median over
+`venueMids[symbol][venueID]`, populated from each venue's automation tick with
+`observeVenueMid(symbol, venue.ID, mid)` guarded by
+`if mid, ok := venue.Exchange.TwoSidedMidPrice(symbol); ok`. Two properties
+follow from the data structure rather than from any policy:
+
+1. **The map has no expiry.** A venue that stops producing a two-sided mid stops
+   *updating* its entry; it does not lose its vote. Its last observation keeps
+   voting in the median indefinitely. Contrast the scoring path, which takes an
+   explicit `maxStaleness` and distinguishes `two_sided_..._mid` from
+   `recent_..._mid` in the evidence — the same asymmetry RT-017 recorded, now
+   one level deeper.
+2. **A median is only robust while the sample is odd and plural.** With three
+   venues an attacker must move two. With two, `mids[len/2]` selects the
+   **upper** of the pair, so a single venue quoting up carries the index. With
+   one, the median is that venue.
+
+Predicted observable, recorded before running: with two contributing venues the
+index equals the higher mid, not their average; with three it resists one venue
+entirely; and a venue whose book goes empty keeps its last mid in the consensus
+for as long as the run continues.
+Falsifier: entries expire, or the two-venue case takes a low/average rather than
+the upper observation.
+Mechanism family: manipulable input, one level below the mark.
+
+**E-030 — H-029, the anchor's own robustness.**
+Preregistered above. Artifact:
+`simulations/multivenue/economic_audit_index_consensus_test.go`.
+Base: `a666d02faede3d40f046b11e60eb672c59386a94`.
+Reproduce: `go test ./simulations/multivenue/ -run TestAuditIndexConsensusRobustness -v`.
+
+Result: **H-029 SUPPORTED on both parts.**
+
+| observations | index |
+|---|---|
+| one venue at 100 | 100 |
+| two venues at 100 and 200 | **200** — the upper, not the average |
+| three venues at 100, 101, 100 000 | 101 — one venue cannot carry it |
+| two live at 400, one silent last seen at 100 | 400 |
+| **one live at 400, two silent last seen at 100** | **100** |
+
+The last row is the finding. `venueMids[symbol][venueID]` is overwritten, never
+aged, and the campaign's call site only writes when
+`venue.Exchange.TwoSidedMidPrice(symbol)` succeeds. A venue that goes one-sided
+therefore stops updating without losing its vote, and with three venues two
+silent ones outvote the only live market. **The index can publish a price no
+venue is currently showing.**
+
+`TwoSidedMidPrice` needs both sides, so "silent" here does not mean a dead
+venue — an active market quoting only bids already qualifies.
+
+**Where this sits.** RT-020 showed the mark is anchored to the index and clamped
+±3% around it, which makes the index the load-bearing number rather than the
+mark. One level down, that number has no staleness bound at all. The scoring
+path, which moves no money, takes an explicit `maxStaleness` and records in its
+evidence whether the mark it used was fresh or `recent_`. **This is RT-017's
+inverse ordering again, one level deeper: the anchor with the most authority has
+the least memory discipline.**
+
+Median-of-three is a real defence and the third row shows it working. The
+weakness is not the median, it is that membership is permanent.
+
+**Reachability not established.** Whether any venue's `ABC/USD` book actually
+goes one-sided during a campaign run, and for how long, is **not measured here**.
+The mechanism is structural; its frequency is an empirical question this
+experiment did not ask. Recorded as RT-021.
+
 ---
 
 ## F. Findings
@@ -1788,6 +1861,11 @@ See `research/red-team-findings.md` for the full records.
 - **RT-003** — bounded no-violation results (INV-2, INV-5, INV-6, identity).
 - **RT-006** — latency is delivered as configured across 225 link x channel
   rows; no unearned speed advantage. Transport only.
+- **RT-021** — the index that anchors every mark has no staleness bound: a venue
+  that goes one-sided stops updating without losing its vote, so two silent
+  venues outvote the only live one and the index publishes a price no venue is
+  showing. Median-of-three works; permanent membership is the weakness.
+  Frequency in real runs **not measured**. **Owner decision.**
 - **RT-020** — one minimum-size resting quote that never trades moves the perp
   mark 1.90%, and the clamp permits 3.00%, against a 500 bps maintenance margin
   — 38% and 60% of the buffer respectively. The anchoring defence is complete in
