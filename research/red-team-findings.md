@@ -1105,3 +1105,59 @@ scheduler is the only path that lists dated futures.
 The five earlier instrument errors were about reading the system wrong. This one
 is about building it wrong. **Prefer the construction path production uses; a
 bare constructor can leave a field the whole lifecycle depends on.**
+
+## RT-020 — The mark defence bounds manipulation without pricing it
+
+**Classification.** Property of the rules with a measured bound. **Not an
+observed exploit** — nothing in the campaign's actor population does this, and
+this audit has not searched run evidence for it. **Owner decision.**
+
+**Base.** `a666d02faede3d40f046b11e60eb672c59386a94`.
+
+**The defence is better than the hypothesis assumed, and that half is a negative
+result worth keeping.** `ensureAnchoredMarkCalcs` installs a
+`ClampedEMAMarkPrice` on **every** margined book whose instrument has an
+underlying or for which an index provider exists — with the campaign's provider
+present, that is all of them, dated futures included. The calculator fails
+**closed**: when the index is unavailable it returns an error rather than falling
+back to the manipulable mid. The predicted coverage gap does not exist.
+`NewExchangeWithConfig`'s own comment names the attack it is defending against:
+"a margined book marked at its own mid lets liquidations trade into the very
+price that triggers them (self-feeding cascade)."
+
+**What the measurement found** (`tests/economic_audit_mark_manipulation_test.go`):
+
+| step | value |
+|---|---|
+| index | 50 000 |
+| honest two-sided market | 49 000 / 51 000 |
+| one minimum-size bid inside the spread, never trading | mid → **+1.90%** |
+| mark after 200 passes | **+1.90% of index** |
+| clamp | ±3.00% of index |
+| maintenance margin rate | 500 bps |
+
+One unit of base quantity — `1`, not one lot — resting inside the spread and
+never trading moves the mark 1.90%. The clamp is never reached, so the mid sets
+this number, not the band.
+
+**Why the number matters.** Maintenance margin is 500 bps, so 1.90% is **38% of
+the entire maintenance buffer** and the clamp permits up to 3.00%, or **60%** of
+it. An account near maintenance can be pushed materially toward or away from
+liquidation by a participant risking one unit. Funding is charged on position
+value at the same mark, so the same quote also changes what every other holder
+pays that interval.
+
+**The gap is that the bound is not priced.** The anchored calculator reads
+`book.GetMidPrice()` — an unweighted mid — so the displacement is independent of
+the quoting actor's size. A quantity-weighted calculator exists in the codebase
+(`WeightedMidPriceCalculator`) and is not what the anchor uses. Weighting the
+mid, narrowing the band, or requiring a minimum resting quantity to influence the
+mark are all defensible responses and all change scientific economics.
+
+**Instrument note, the seventh.** The first version posted the manipulating bid
+*through* the ask — index + 20 000 against an ask at index + 10. That is a
+marketable order, not a resting quote, and it left the book crossed, so
+`GetMidPrice` failed, the calculator returned the bare index, and the test
+reported a mark move of exactly 0.0000% — reading as a complete defence. **A
+manipulation fixture must post a quote the venue would actually leave resting; a
+crossed book measures the error path, not the mechanism.**

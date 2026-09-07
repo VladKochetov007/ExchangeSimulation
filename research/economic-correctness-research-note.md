@@ -1685,6 +1685,93 @@ instead of through the factory the system actually uses, and then measuring
 behaviour the system never exhibits. **Prefer the construction path production
 uses; a bare constructor can leave a field the whole lifecycle depends on.**
 
+**H-028 — one actor can move the number that governs every other actor.**
+New lens, and the one the campaign's framing most directly asks for: every
+hypothesis so far has asked whether the venue's *accounting* is fair. This asks
+whether the venue's *inputs* can be moved by a participant. Funding is charged on
+position value at the mark, and liquidation triggers on equity measured at the
+mark. If the mark is computed from a book any actor can post into, then one
+actor's order changes what every other actor pays and when they are closed out.
+
+The venue is not naive about this. `NewExchangeWithConfig` sets
+`autoAnchorMarks` whenever the caller supplies no mark calculator — which the
+campaign does not — and its comment states the exact attack: "a margined book
+marked at its own mid lets liquidations trade into the very price that triggers
+them (self-feeding cascade)." There is also an EMA (`MarkPriceEMAWindow`,
+default 10) and a band (`MarkPriceBandBps`, default 600, so ±6%).
+
+So the question is not whether a defence exists but what it **covers**. The
+comment says books with no resolvable index "keep the mid", and the campaign's
+index provider publishes exactly four symbols — `ABC/USD`, `ABC-PERP`,
+`CDF/USD`, `ABC/CDF` (`sim.go:2439`). Dated futures and options are listed
+dynamically by the listing scheduler and are not among them. Dated futures are
+margined, so their mark drives margin and liquidation for anyone holding them.
+
+Predicted observable, recorded before measuring: `ABC-PERP` is auto-anchored and
+its mark does not follow a lone order posted into its book; a dated future is
+not anchored, and a single minimum-size order at an improved price moves its
+mark, and therefore moves the margin of every account holding that contract.
+Falsifier: dated futures are anchored too, or the EMA and band absorb a
+one-order move entirely.
+Mechanism family: manipulable input, coverage gap in an existing defence.
+
+**E-029 — H-028, how far one actor can walk the mark.**
+Preregistered above. Artifact:
+`tests/economic_audit_mark_manipulation_test.go`.
+Base: `a666d02faede3d40f046b11e60eb672c59386a94`.
+Reproduce: `go test ./tests/ -run TestAuditHowFarOneActorCanWalk -v`.
+
+**The predicted coverage gap was falsified; the defence is better than the
+hypothesis assumed.** `ensureAnchoredMarkCalcs` installs a
+`ClampedEMAMarkPrice` on **every** margined book whose instrument has an
+underlying *or* for which an index provider exists — which, with the campaign's
+provider present, is all of them, dated futures included. And the calculator
+fails **closed**: when the index itself is unavailable it returns an error rather
+than falling back to the manipulable mid. There is no unanchored margined book.
+
+**What the measurement then found is a bound, not an immunity.**
+
+| step | value |
+|---|---|
+| index | 50 000 |
+| honest two-sided market | 49 000 / 51 000 |
+| one minimum-size bid posted inside the spread, never trading | book mid → **+1.90%** |
+| mark after 200 passes | **+1.90% of index** |
+| clamp | ±3.00% of index (600 bps band, halved) |
+| maintenance margin rate | 500 bps |
+
+One unit of base quantity — `1`, not one lot — resting inside the spread and
+never trading moves the mark by 1.90%. The clamp is never reached, so it is the
+mid itself, not the band, that sets this number; the EMA converges to the full
+basis in far fewer than 200 passes.
+
+**Why the number matters.** Maintenance margin is 500 bps. A 1.90% mark move is
+**38% of the entire maintenance buffer**, and the clamp permits up to 3.00%,
+which is **60% of it**. An account sitting near maintenance can therefore be
+pushed materially closer to liquidation — or away from it — by a participant
+risking one unit of size. Funding is charged on position value at the same mark,
+so the same quote also changes what every other holder pays that interval.
+
+**What this is and is not.** It is a property of the rules, not an observed
+exploit: nothing in the campaign's actor population does this, and this audit
+has not looked for it in run evidence. The mid is a plain mid — `GetMidPrice`,
+which the anchored calculator calls directly — so the displacement is
+independent of the quoting actor's size. A quantity-weighted mid exists in the
+codebase (`WeightedMidPriceCalculator`) and is not what the anchor uses.
+
+Recorded as RT-020. Disposition is the owner's: weighting the mid by size,
+narrowing the band, or requiring a minimum resting quantity to influence the mark
+are all defensible and all change scientific economics.
+
+*Seventh instrument error.* The first version posted the manipulating bid
+*through* the ask, at index + 20 000 against an ask at index + 10. That is not a
+resting manipulation, it is a marketable order, and it left the book crossed so
+`GetMidPrice` failed and the calculator returned the bare index — reporting a
+mark move of exactly 0.0000% and reading as a complete defence. The fixture now
+quotes inside the spread. **A manipulation fixture must post a quote the venue
+would actually leave resting; a crossed book measures the error path, not the
+mechanism.**
+
 ---
 
 ## F. Findings
@@ -1701,6 +1788,12 @@ See `research/red-team-findings.md` for the full records.
 - **RT-003** — bounded no-violation results (INV-2, INV-5, INV-6, identity).
 - **RT-006** — latency is delivered as configured across 225 link x channel
   rows; no unearned speed advantage. Transport only.
+- **RT-020** — one minimum-size resting quote that never trades moves the perp
+  mark 1.90%, and the clamp permits 3.00%, against a 500 bps maintenance margin
+  — 38% and 60% of the buffer respectively. The anchoring defence is complete in
+  coverage and fails closed, but bounds manipulation without pricing it: the mid
+  it reads is unweighted, so displacement is independent of the manipulator's
+  size. Property of the rules, **not an observed exploit**. **Owner decision.**
 - **RT-019** — every expiring contract settles against one shared underlying
   observation, so a calendar hedge nets exactly. Bounded no-violation result,
   pinned because nothing else asserts it and its regression would be visible
