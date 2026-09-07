@@ -82,7 +82,8 @@ would have produced a false finding — see G-1.
 | system identity | whole run | §B identity | no violation, residual 19/1.6e16 | E-003 |
 | venue take | fee accrual | INV-5 | no violation | E-003 |
 | borrow / repay | credit → repay | INV-6 | net zero on ABC, CDF | E-003 |
-| liquidation / default | margin call → liquidation → shortfall | INV-7 | **NOT EXERCISED** | — |
+| liquidation / default | margin call → liquidation → shortfall | INV-7 | fixture: no violation. **NOT EXERCISED in integration** | E-008 |
+| detector sensitivity | injected faults | INV-1 | boundary established, 2 gaps | E-009 |
 | collateral release | reserve → release | INV-8 | not tested | — |
 | transfers in flight | debit → transit → credit | — | not tested | — |
 | option exercise vs live hedge | exercise → assignment | — | not tested | — |
@@ -111,7 +112,10 @@ Status: **FALSIFIED WITHIN TESTED SCOPE.** 99 contracts, all net exactly zero.
 Scope: one config, one seed, 7 simulated hours.
 
 **H-004 — debt can disappear at liquidation, or residual value can reach the
-wrong party.** Status: **OPEN — next.**
+wrong party.** Status: **FALSIFIED WITHIN TESTED SCOPE** (E-008, on `a666d02`).
+Scope: one forced-bankruptcy fixture, cross-margin default mode, no clearance
+fee, single instrument. Not a statement about production reachability, nor
+about multi-instrument or cascade cases.
 Origin: RT-003 records liquidation as unexercised; it is the largest unaudited
 surface and the classic location for an extinguished obligation without a payer.
 Claim: there exists a reachable sequence (borrow → short → adverse move →
@@ -138,7 +142,8 @@ weakness: a double release leaves no trace.
 Invariant: INV-8.
 
 **H-006 — the conservation tracker cannot see a mis-directed transfer.**
-Status: **OPEN.** Origin: `VerifyConservation` compares per-asset totals, so a
+Status: **SUPPORTED WITHIN TESTED SCOPE** (E-009). Confirmed by controlled
+mutation, together with a second blind spot found while testing it. Origin: `VerifyConservation` compares per-asset totals, so a
 payment to the wrong participant preserves every total it checks. Demonstrated
 incidentally by E-004: a balanced two-party settlement hid an omitted recording
 entirely. This is an audit-coverage hypothesis about the detector, not the
@@ -195,6 +200,54 @@ Establishes: RT-001 reproduces on the pinned revision and the fix addresses it.
 `general.jsonl` identical once violation lines are removed.
 Establishes: semantic impact none beyond removing the spurious events.
 
+**E-007 — H-004 liquidation fixture, first attempt. INVALID.**
+Command: `go test ./tests/ -run TestAuditLiquidationDeficitHasAPayerAndDebtSurvives`
+on `redteam/economic-audit`. Result: four economic assertions passed; the
+conservation assertion failed with `Gap: 46000000`.
+**The gap was the test's own setup, not the product.** The fixture assigned
+`Balances["USD"] = 500` and `Borrowed["USD"] = 40` by direct field write, which
+are themselves unrecorded mutations: 500 − 40 = 460, and the reported gap is
+exactly 46,000,000 at this precision. An invalid experiment cannot support or
+falsify anything; superseded by E-008.
+
+**E-008 — H-004 liquidation fixture, corrected.**
+Change: assert on the *change* in the conservation gap across the liquidation
+rather than its absolute value, so the setup artifact is held constant and the
+transition is what is measured.
+Run on the pinned scientific revision `a666d02` in a clean worktree (not on the
+audit branch, so the RT-001 patch cannot be credited for the result):
+**PASS**. Independently hand-derived expectations, all met:
+realized on close = 10 × (80 − 100) = −200 USD; perp cash 100 − 200 = −100 →
+deficit 100; insurance fund = −100 exactly; bankrupt perp cash → 0; borrowed
+principal unchanged at 40; spot balance unchanged at 500; the liquidation moves
+the conservation gap by zero.
+Establishes: within this scope the deficit has a named payer, the loan is not
+extinguished, and the write-down records both legs. Does not establish anything
+about cascades, multi-instrument cross-margin, or production reachability —
+liquidation did not occur at all in the 7h integration run (E-002).
+
+**E-009 — detector sensitivity, controlled mutations.**
+Files: `tests/economic_audit_detector_sensitivity_test.go` and
+`exchange/economic_audit_recorded_destruction_test.go`. All results as
+predicted before running:
+
+| injected fault | detected by `VerifyConservation`? |
+| --- | --- |
+| valid control, no fault | no report (correct) |
+| unrecorded credit (+7) | **yes**, gap +7 |
+| unrecorded debit (−3) | **yes**, gap −3 |
+| debt silently cancelled (50) | **yes**, gap +50 |
+| one smallest currency unit | **yes**, gap 1 |
+| value paid to the wrong participant | **no — survives** |
+| value destroyed but faithfully recorded | **no — survives** |
+
+Establishes the detector's boundary empirically: it detects *unrecorded*
+mutations, and only those. Nothing in it requires a debit to have a matching
+credit, and nothing in it identifies a recipient. Both surviving faults are
+audit-coverage gaps for this detector and are covered instead by the identity
+check in `research/accounting-audit.md`. The two checks are complementary;
+neither subsumes the other. Recorded rather than weakened, per the audit rules.
+
 ---
 
 ## F. Findings
@@ -209,6 +262,20 @@ See `research/red-team-findings.md` for the full records.
   not yet established, so "edge case" is a classification, not a safety claim.
   See H-008 below for the work that would close it.
 - **RT-003** — bounded no-violation results (INV-2, INV-5, INV-6, identity).
+
+**H-009 — a bankrupt account's spot wallet is not seized, so the insurance fund
+absorbs a deficit an aggregate-solvent account could have covered.**
+Status: **OPEN — specification question, not a bug to fix here.**
+Origin: reading `liquidate` at `exchange/exchange.go:2242`; confirmed by E-008,
+where the defaulter's 500 USD spot balance is untouched while the fund absorbs
+the whole 100 USD deficit.
+Evidence it is deliberate: `Client.BorrowedSpot` is documented as splitting a
+liability by wallet precisely so that "perp equity, liquidation estimates, and
+snapshots must not charge a spot-credited loan to the perp wallet."
+Competing readings: (a) wallets are deliberately segregated, so this is
+INTENDED MODEL ASSUMPTION; (b) the model claims cross-margin netting across
+wallets, in which case the venue eats a loss a solvent account should bear.
+Owner decision required. The audit does not resolve it and does not change it.
 
 **H-008 — RT-002 residual is directional and extractable.** Status: **OPEN.**
 The instructions correctly reject "small relative to capital" as a disposition.

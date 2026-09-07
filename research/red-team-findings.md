@@ -167,3 +167,80 @@ Named so the freeze knows what this report does not cover.
 - Relisting after settlement under the same symbol.
 - Negative and zero price domains at settlement.
 - The holdout cells, by instruction.
+
+---
+
+## RT-004 — Conservation tracker detects unrecorded mutations only
+
+**Severity:** medium (audit coverage, not an economic defect).
+**Classification:** CORRECT BUT SURPRISING. Layer: evidence / detector.
+**Base revision:** `a666d02`.
+
+**What was tested.** Seven controlled faults injected into a clean fixture, with
+the outcome predicted before running. See E-009 in the research note.
+
+| injected fault | detected |
+| --- | --- |
+| valid control | no report (correct) |
+| unrecorded credit (+7) | yes |
+| unrecorded debit (−3) | yes |
+| debt silently cancelled | yes |
+| one smallest currency unit | yes |
+| value paid to the wrong participant | **no** |
+| value destroyed but faithfully recorded | **no** |
+
+**Interpretation.** `VerifyConservation` compares per-asset totals of recorded
+movements against per-asset totals of holdings. It therefore detects unrecorded
+mutations and only those. Nothing in it requires a debit to have a matching
+credit, and nothing in it identifies a recipient — so a payment to the wrong
+customer preserves every total it checks, and destruction that is faithfully
+logged moves both totals together.
+
+**Why this matters for reading other results.** RT-001 was invisible in a
+balanced two-party fixture for exactly this reason and only surfaced on a run
+where settlement cash did not net to zero. A green tracker is not evidence that
+payments reached the right parties.
+
+**Disposition: no code change.** The two blind spots are covered by the identity
+check in `research/accounting-audit.md`
+(`InternalNet + ExchangeTake + OpenLinearValue = 0`, via
+`mvanalyze -metric conservation`). The checks are complementary and neither
+subsumes the other. The gap is recorded rather than closed, and the surviving
+faults are asserted as surviving in the tests so that a future change to
+sensitivity shows up as a failure.
+
+**Regression tests.** `tests/economic_audit_detector_sensitivity_test.go`,
+`exchange/economic_audit_recorded_destruction_test.go`.
+
+---
+
+## RT-005 — A bankrupt account's spot wallet is not seized
+
+**Severity:** open pending owner decision. **Classification: NOT ENOUGH
+EVIDENCE** to call it either a defect or an intended assumption.
+Layer: specification. **Base revision:** `a666d02`.
+
+**Observation.** `liquidate` (`exchange/exchange.go:2242`) resolves a bankrupt
+account by zeroing negative *perp* cash and debiting `VenueInsuranceFund` the
+same amount. The repay path above it touches only `PerpBalances` and `Borrowed`.
+`client.Balances` — the spot wallet — is never consulted. In E-008 the
+defaulter keeps 500 USD of spot cash while the fund absorbs the full 100 USD
+deficit.
+
+**Economic consequence if unintended.** The insurance fund, and ultimately the
+venue, bears a loss that an aggregate-solvent account could have covered. That
+is a loss forced onto a party that should not bear it.
+
+**Evidence it may be intended.** `Client.BorrowedSpot` is documented as
+splitting a liability by wallet precisely so that "perp equity, liquidation
+estimates, and snapshots must not charge a spot-credited loan to the perp
+wallet." That reads as deliberate wallet segregation.
+
+**Owner decision required.** If wallets are segregated by design this is an
+INTENDED MODEL ASSUMPTION and should be stated as one. If the model claims
+cross-margin netting across wallets, this is a real defect. The audit does not
+resolve it and has not changed it.
+
+**Reachability.** The transition is reachable in a fixture. It was **not**
+exercised in the 7h integration run — no liquidation occurred there at all — so
+production reachability on dev cells is unestablished.
