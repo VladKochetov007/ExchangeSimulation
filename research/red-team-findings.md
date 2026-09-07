@@ -939,16 +939,22 @@ worth.
 **How far the market actually moves** (`research/tools/pricerange`), two reads of
 one 5-hour control run in progress:
 
-| trades scanned | low vs oracle | high vs oracle | widest |
+| ABC-USD, trades scanned | low | high | widest |
 |---:|---:|---:|---:|
-| 144 101 | −0.24% | +0.04% | 0.24% |
-| 257 411 | −0.48% | +0.04% | 0.48% |
+| 144 101 (partial) | −0.24% | +0.04% | 0.24% |
+| 257 411 (partial) | −0.48% | +0.04% | 0.48% |
+| **544 835 (complete 5 h)** | **−1.06%** | **+0.04%** | **1.06%** |
 
-The band is **not stationary** — the low walks down while the high does not move
-— so the excursion grows with run length. At 0.48% against a 25% haircut the
-oracle is still accurate by a factor of fifty, so the mechanism is latent here.
-A claim that it stays latent over a longer run, or in a less anchored
-configuration, is **not** supported by this measurement and is not made.
+The band is **not stationary and not symmetric**: ABC's high never leaves +0.04%
+while its low walks to −1.06%, so the excursion grows in one direction with run
+length, roughly doubling as the sample doubles. CDF-USD against its own 3 000
+bootstrap behaves differently — inside **0.17%** over 431 985 trades and moving
+both ways — so the drift is a property of ABC here, not of the venue.
+
+At 1.06% against a 25% haircut the oracle is accurate by a factor of about
+twenty-four, so the mechanism is latent in this configuration. A claim that it
+stays latent in a less anchored configuration is **not** supported and is not
+made.
 
 **The condition under which it bites**: any configuration where ABC's excursion
 from its bootstrap approaches the haircut. The anchored control does not. A

@@ -1402,18 +1402,26 @@ adverse move and no more.
 partial numbers are reported as partial.** Two reads of the same run in
 progress:
 
-| trades scanned | low vs oracle | high vs oracle | widest |
+| ABC-USD, trades scanned | low vs oracle | high vs oracle | widest |
 |---:|---:|---:|---:|
-| 144 101 | −0.24% | +0.04% | **0.24%** |
-| 257 411 | −0.48% | +0.04% | **0.48%** |
+| 144 101 (partial) | −0.24% | +0.04% | 0.24% |
+| 257 411 (partial) | −0.48% | +0.04% | 0.48% |
+| **544 835 (complete 5 h)** | **−1.06%** | **+0.04%** | **1.06%** |
 
-The band is not stationary: the low moves steadily down while the high does not
-move, so the excursion grows with run length rather than oscillating around the
-reference. At 0.48% against a 25% haircut the static oracle is still accurate by
-a factor of fifty, so **the mechanism is a latent hazard in this configuration,
-not a live mispricing** — but a claim that it stays that way over a longer run,
-or in a less anchored configuration, is not supported by this measurement and is
-not made. The final full-run figure is not yet in.
+The band is not stationary and not symmetric: across the whole run ABC's high
+never leaves +0.04% while its low walks to −1.06%, so the excursion grows with
+run length in one direction rather than oscillating around the reference. It
+roughly doubled with each doubling of the sample.
+
+The second collateral asset behaves differently. CDF-USD, against its own 3 000
+bootstrap, stays inside **0.17%** over 431 985 trades and moves *both* ways
+(−0.10% / +0.17%). So the drift is a property of ABC in this configuration, not
+of the venue.
+
+At 1.06% against a 25% haircut the static oracle is accurate by a factor of
+about twenty-four, so **the mechanism is a latent hazard in this configuration,
+not a live mispricing.** A claim that it stays latent in a less anchored
+configuration is not supported by this measurement and is not made.
 
 **The condition under which it would bite, stated so it can be checked rather
 than assumed:** any configuration in which ABC's excursion from its bootstrap
@@ -1456,9 +1464,9 @@ See `research/red-team-findings.md` for the full records.
 - **RT-016** — the borrow gate prices collateral from a static oracle pinned to
   the bootstrap price, so a 50% fall in ABC leaves borrowing power unchanged at
   twice the collateral's worth. **Latent, not live**: measured excursion in the
-  anchored control config reaches 0.48% against a 25% haircut, and is still
-  drifting rather than oscillating. Re-measure over a full run and before
-  trusting a stress configuration. **Owner decision.**
+  anchored control config is 1.06% over a full 5-hour run against a 25% haircut,
+  one-directional and still growing with run length; CDF stays inside 0.17%.
+  Re-measure before trusting a stress configuration. **Owner decision.**
 - **RT-015** — the borrow gate values cash only. It ignores unrealized losses
   (an account 200 USD under water still borrows the full 500) and counts
   reserved margin as free collateral (100 USD available, 500 USD borrowed), so
