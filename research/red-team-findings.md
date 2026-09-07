@@ -875,3 +875,34 @@ wallets, and the 30-minute run in E-022 produced 76 borrow events.
 **The tests pin, they do not prescribe.** They fail if the gate starts counting
 either the unrealized loss or the earmark, so the disagreement between the two
 valuations cannot change silently in either direction.
+
+## RT-014 (correction) — the 30-minute figure was a warm-up artefact
+
+The same config and seed run for its designed 5 simulated hours instead of 30
+minutes, scanned with the same tool.
+
+| | 30 min | 5 h |
+|---|---:|---:|
+| borrow events | 76 | 978 |
+| interest charges | 110 | 2 455 |
+| collected | 160 | 26 805 |
+| charge buckets observed | 1–3 | 1–51 |
+| aggregate delivered, lower bound | — | **91.6% = 458 bps of 500** |
+
+**The earlier claim was too strong.** "The delivered rate is roughly 250–430 bps
+… at campaign scale this is the operating regime" over-states it: the 30-minute
+window sampled the warm-up, when debts are small and sit in the lowest buckets.
+Over the full run the aggregate under-collection is at most 8.4%.
+
+**What survives is the distributional claim, which was the finding.** 513 of
+2 455 charges — 20.9% — fall in buckets 1–3, where the delivered rate is bounded
+below by 50.0%, 66.7% and 75.0%. The cost of leverage still depends on the size
+of the debt, and no configuration states it. The exact threshold from the unit
+tests is unchanged.
+
+Only three clients borrow in this run (12, 13, 14), so the distortion is
+concentrated rather than population-wide here.
+
+**Method note.** A run length chosen for convenience is not a sample of the
+regime the campaign reports on. The measurement was right; the scope sentence
+attached to it was not.

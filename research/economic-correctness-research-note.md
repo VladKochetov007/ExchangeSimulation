@@ -1299,6 +1299,46 @@ control. That argument does not survive the second arm: `PerpReserved` *is* the
 position and order margin, it sits inside the balance the gate sums, and the gate
 therefore counts the margin as collateral for a new loan.
 
+**E-024 — RT-014 over the full five hours, and a correction to E-022.**
+Same config and seed as E-022 (`clock-control-5h-101.json`, seed 607), run for
+its designed 5 simulated hours instead of 30 minutes. 6.6 GB of logs, scanned
+with the same `research/tools/interestscan`.
+
+| | E-022 (30 min) | E-024 (5 h) |
+|---|---:|---:|
+| borrow events | 76 | 978 |
+| interest charges | 110 | 2 455 |
+| collected | 160 | 26 805 |
+| charge buckets observed | 1–3 | **1–51** |
+| aggregate delivered, lower bound | — | **91.6% (458 bps of 500)** |
+
+**Correction, stated plainly.** E-022 concluded that "the delivered rate is
+roughly 250–430 bps against a configured 500" and that "at campaign scale this
+is the operating regime". That over-states it. The 30-minute window sampled the
+warm-up, when debts are small and therefore sit in the lowest charge buckets.
+Over the full run the aggregate delivered rate is bounded below by
+`collected/(collected + charges) = 26 805/29 260 = 91.6%`, so **≥ 458 bps of the
+configured 500** — an aggregate under-collection of at most 8.4%, not 15–50%.
+
+**What survives, and it is the part that was the finding.** The delivered rate
+still depends on the size of the debt, and the dependence is visible in the
+distribution rather than in the aggregate: **513 of 2 455 charges (20.9%) fall in
+buckets 1–3**, where the delivered rate is bounded below by only 50.0%, 66.7%
+and 75.0%. Small debts pay materially less than large ones for the same nominal
+rate, every minute, and no configuration states this. The threshold result of
+E-021 is unchanged and exact.
+
+**Population note.** Only three clients borrow at all in this run (12, 13 and
+14, taking 10 711, 8 365 and 7 729 quote units of the 26 805). The distortion is
+therefore concentrated rather than population-wide in this configuration, which
+also means a per-actor performance comparison involving those three is where it
+would show up.
+
+**Method note.** The correction is the direct consequence of extrapolating a
+30-minute window to a 5-hour claim. The measurement was right; the scope
+sentence attached to it was not. A run length chosen for convenience is not a
+sample of the regime the campaign actually reports on.
+
 ---
 
 ## F. Findings
@@ -1325,11 +1365,12 @@ See `research/red-team-findings.md` for the full records.
   debt, and the delivered rate rises with principal from 0 bps to the configured
   500. The cost of leverage depends on how much is borrowed. Reachable by every
   actor; borrowing is enabled in the campaign and the charge runs as a phase
-  job. **The strongest economic finding of this audit.** Measured at campaign
-  scale in E-022: in a 30-minute dev run every debt sat in the three lowest
-  charge buckets, so the delivered rate was 250-430 bps against a configured
-  500. The threshold is denominated in raw asset units, so it is worth about
-  5 256 USD on ABC against 105.12 USD on USD.
+  job. Measured over the full 5-hour run in E-024: aggregate delivered rate is
+  **at least 458 bps of the configured 500**, with 20.9% of charges in the three
+  lowest buckets where it is 50-75%. E-022's 30-minute figure of 250-430 bps was
+  a warm-up artefact and is **corrected**. The threshold is denominated in raw
+  asset units, so it is worth about 5 256 USD on ABC against 105.12 USD on
+  USD.
 - **RT-013** — funding is not invariant under account partition: the more
   fragmented side gets the rounding, so splitting helps a payer and hurts a
   receiver, and the exchange residual absorbs the difference. EDGE CASE by
