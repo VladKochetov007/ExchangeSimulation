@@ -2106,6 +2106,94 @@ across seeds is not measured, and with a single run they could as easily be
 sampling noise as structure. That check is the natural next experiment and this
 one does not substitute for it.
 
+**H-033 — the venue effect is structure, not sampling noise.**
+The discriminating test E-033 said it owed. RT-022 reports an 8.23% venue spread
+for `triangle_arb` and RT-023 reports per-class rule- and funding-axis terms,
+both from **one seed**. With a single run those numbers cannot be told apart from
+sampling variation, and this audit has already had to downgrade two findings for
+exactly that kind of over-reach.
+
+Design: rerun the identical configuration at three further seeds and compare the
+per-class axis terms. Seeds 608, 609 and 610 — development seeds; the scientific
+holdouts are not touched.
+
+The discriminating quantity is **sign stability**. A venue term that is real
+structure should keep its sign across seeds for a given class; one that is
+sampling noise should flip. Magnitude agreement is a weaker and less reliable
+signal at n=4, so the sign is the test.
+
+Predicted observable, recorded before running: `triangle_arb`'s rule-axis term
+stays positive in all four seeds, because a 7.29% effect against a 0.03%
+within-venue spread is far outside plausible noise for a deterministic strategy.
+The small-magnitude classes — `option_flow` at −0.00%, `round_trip` at 0.32% —
+flip freely, which would confirm the sign test is measuring something rather than
+returning "stable" for everything.
+Falsifier: `triangle_arb`'s rule axis changes sign across seeds, which would mean
+RT-022's headline number is noise and must be withdrawn rather than merely
+qualified.
+Mechanism family: replication.
+
+**E-034 — H-033, replication across four seeds.**
+Preregistered above. Artifact: `research/tools/venueeffect/main.go`.
+Base: `a666d02faede3d40f046b11e60eb672c59386a94`.
+Runs: `clock-control-5h-101.json`, seeds **607, 608, 609, 610**, 5 simulated
+hours each, `-log-mode none`. Development seeds; no scientific holdout touched.
+
+**Result: H-033 SUPPORTED for the headline class, and the built-in control
+worked.**
+
+`triangle_arb`'s rule-axis term, seed by seed: **+991 791, +800 529, +653 236,
++792 955**. Positive in all four, same order of magnitude, never close to zero.
+RT-022's venue term is **structure, not sampling noise**, and can be stated as a
+replicated result rather than a single observation.
+
+The prediction also said the small-magnitude classes should flip freely,
+otherwise the sign test would be returning "stable" for everything. They do —
+`option_flow` (−++−), `latent_liquidity` (+++−), `dated_carry_arb` (+++−),
+`parity_arb` (+++−), `elastic_supplier` (+++−) all change sign. The test
+discriminates.
+
+Rule-axis sign stable across all four seeds: `triangle_arb` (++++),
+`imbalance_maker` (++++), `spot_maker` (++++), `option_dealer` (++++),
+`metaorder_trader` (++++), `perp_maker` (++++), `fixed_distance_maker` (−−−−),
+`vanna_volga_desk` (−−−−).
+
+**A result that corrects RT-023's evidence.** RT-023 cited
+`abc_cdf_spot_maker` as the clearest case of the funding term swamping the rule
+term. Its *rule* axis turns out to be the least stable quantity in the table —
++415 725, then −1 921 747, −2 172 357, −365 331 — so that class was the wrong
+witness. RT-023's conclusion is unchanged, because the confound is structural
+rather than empirical, but the example is replaced below.
+
+**What replication newly identifies.** `central` versus `south` holds the
+matching rule fixed and varies only the funding interval, so it is the one
+*clean* contrast — and for several classes its sign is stable across all four
+seeds:
+
+| class | 607 | 608 | 609 | 610 | mean |
+|---|---:|---:|---:|---:|---:|
+| `noise_flow` | +1 221 324 | +323 478 | +2 139 099 | +2 816 095 | **+1 624 999** |
+| `abc_cdf_spot_maker` | −3 279 751 | −186 314 | −6 065 150 | −8 189 817 | **−4 430 258** |
+| `imbalance_maker` | −124 211 | −249 168 | −66 494 | −211 055 | −162 732 |
+| `perp_maker` | +11 432 | +74 820 | +157 292 | +39 387 | +70 733 |
+| `round_trip` | −42 | −221 | −107 | −38 | −102 |
+
+So the **funding-interval effect is both identified and replicated**: shortening
+the interval from 2 h to 1 h is worth on average +1.6 M to `noise_flow` and
+−4.4 M to `abc_cdf_spot_maker`. That is the one venue factor this configuration
+can attribute, and it is larger than the unattributable rule term for both
+classes.
+
+**Standing corrections.** RT-022 is upgraded from "single seed, could be noise"
+to replicated across four seeds. RT-023 is unchanged: replication does not break
+a confound, and north remains the only venue that is both price-time and
+long-funding. What is new is that the *other* axis is clean, stable and larger
+than the confounded one for the classes where it matters.
+
+**Scope.** Four seeds, one configuration, 5 simulated hours each. Sign stability
+at n=4 is a weak test individually; it is meaningful here because the
+small-magnitude classes visibly fail it.
+
 ---
 
 ## F. Findings
@@ -2126,11 +2214,16 @@ See `research/red-team-findings.md` for the full records.
   interval**: north is the only price-time venue and also the only 8-hour funding
   venue, so no venue effect can be attributed to either. The one clean contrast
   (central vs south, same rule, 1 h vs 2 h) often shows a larger term than the
-  one being attributed to the rule. Single seed.
+  one being attributed to the rule. **Replicated across seeds 607-610 (E-034)**,
+  which also identifies the funding axis as the one attributable venue factor:
+  shortening 2 h to 1 h is worth +1.6 M to `noise_flow` and -4.4 M to
+  `abc_cdf_spot_maker` on average.
 - **RT-022** (amended by E-033) — venue placement carries an environment term:
   `triangle_arb` differs by **8.23%** across venues against 0.03% between
-  same-venue clones. The term is real and previously unquantified, but it is
-  **unattributable** — the venues differ deliberately in both rule and funding.
+  same-venue clones. **Replicated across four seeds (E-034)**: the term is
+  positive in all of 607-610 at 653 k-992 k, so it is structure rather than
+  sampling noise — but it remains **unattributable**, since the venues differ
+  deliberately in both rule and funding.
   **Methodological, not an economics defect.**
 - **RT-021** — the index that anchors every mark has no staleness bound: a venue
   that goes one-sided stops updating without losing its vote, so two silent

@@ -1341,3 +1341,46 @@ the configuration before characterising what a measurement means.**
 **Scope.** One configuration, one seed. Whether the per-class signs are stable
 across seeds is not measured; with a single run they could as easily be sampling
 noise as structure.
+
+## RT-022 / RT-023 (replicated) — the venue term is structure; the funding axis is the attributable one
+
+Seeds **607, 608, 609, 610**, `clock-control-5h-101.json`, 5 simulated hours
+each. Development seeds; no scientific holdout touched.
+
+**RT-022 upgraded.** `triangle_arb`'s rule-axis term is **+991 791, +800 529,
++653 236, +792 955** — positive in all four seeds, same order of magnitude,
+never near zero. The venue term is structure, not sampling noise.
+
+**The control worked.** The prediction required small-magnitude classes to flip,
+or the sign test would be meaningless. They do: `option_flow` (−++−),
+`latent_liquidity` (+++−), `dated_carry_arb` (+++−), `parity_arb` (+++−),
+`elastic_supplier` (+++−).
+
+Rule-axis sign stable in all four: `triangle_arb`, `imbalance_maker`,
+`spot_maker`, `option_dealer`, `metaorder_trader`, `perp_maker` (all +),
+`fixed_distance_maker`, `vanna_volga_desk` (both −).
+
+**RT-023's example was wrong; its conclusion is not.** RT-023 cited
+`abc_cdf_spot_maker` as the clearest case of funding swamping rule. That class's
+*rule* axis is the least stable quantity in the table — +415 725, −1 921 747,
+−2 172 357, −365 331 — so it was the wrong witness. The confound is structural,
+so the conclusion stands; the example is replaced.
+
+**What replication newly identifies.** `central` versus `south` holds the rule
+fixed and varies only funding (1 h vs 2 h), so it is the one clean contrast, and
+for several classes it is stable across all four seeds:
+
+| class | 607 | 608 | 609 | 610 | mean |
+|---|---:|---:|---:|---:|---:|
+| `noise_flow` | +1 221 324 | +323 478 | +2 139 099 | +2 816 095 | **+1 624 999** |
+| `abc_cdf_spot_maker` | −3 279 751 | −186 314 | −6 065 150 | −8 189 817 | **−4 430 258** |
+| `imbalance_maker` | −124 211 | −249 168 | −66 494 | −211 055 | −162 732 |
+| `perp_maker` | +11 432 | +74 820 | +157 292 | +39 387 | +70 733 |
+
+**Shortening the funding interval from 2 h to 1 h is worth +1.6 M to
+`noise_flow` and −4.4 M to `abc_cdf_spot_maker` on average** — identified,
+replicated, and larger than the unattributable rule term for both.
+
+**Scope.** Four seeds, one configuration, 5 simulated hours each. Sign stability
+at n=4 is weak on its own; it carries here because the small-magnitude classes
+visibly fail it.
