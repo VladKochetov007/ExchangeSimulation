@@ -84,7 +84,7 @@ would have produced a false finding — see G-1.
 | borrow / repay | credit → repay | INV-6 | net zero on ABC, CDF | E-003 |
 | liquidation / default | margin call → liquidation → shortfall | INV-7 | fixture: no violation. **NOT EXERCISED in integration** | E-008 |
 | detector sensitivity | injected faults | INV-1 | boundary established, 2 gaps | E-009 |
-| collateral release | reserve → release | INV-8 | not tested | — |
+| collateral release | reserve → cancel / fill | INV-8 | no violation, 2 races | E-010 |
 | transfers in flight | debit → transit → credit | — | not tested | — |
 | option exercise vs live hedge | exercise → assignment | — | not tested | — |
 | relisting under a reused symbol | settled → listed | — | not tested | — |
@@ -135,7 +135,10 @@ Known limitation: a fixture proves the transition, not its production
 reachability; reachability must be argued separately.
 
 **H-005 — collateral can be released more than once, or released without a
-matching reservation.** Status: **OPEN.**
+matching reservation.** Status: **FALSIFIED WITHIN TESTED SCOPE** (E-010, on
+`a666d02`). Scope: double cancel, and cancel after a full fill, on one perp with
+one account. Not tested: partial fills, amend/replace, cross-margin with several
+instruments sharing the earmark, or a cancel racing a fill under concurrency.
 Origin: `ReleasePerp` clamps at zero (`max(0, PerpReserved-amount)`), which
 silently absorbs an over-release instead of failing. That is a detector-shaped
 weakness: a double release leaves no trace.
@@ -247,6 +250,44 @@ credit, and nothing in it identifies a recipient. Both surviving faults are
 audit-coverage gaps for this detector and are covered instead by the identity
 check in `research/accounting-audit.md`. The two checks are complementary;
 neither subsumes the other. Recorded rather than weakened, per the audit rules.
+
+**E-010 — H-005 collateral release, cancel/fill races.**
+File: `tests/economic_audit_collateral_test.go`. Run on the pinned base
+`a666d02` as well as the audit branch: **PASS** on both.
+Cases: (a) cancelling the same resting order twice frees the earmark once and
+the second cancel moves nothing; the earmark returns exactly to its pre-order
+value. (b) Cancelling an order that has already filled completely does not
+release the position's margin, and `PerpAvailable` never exceeds
+`PerpBalances`.
+Why this framing: `PerpAvailable = PerpBalances - PerpReserved`, so an
+under-counted earmark is buying power the account's capital does not support —
+free leverage relative to other participants, not merely a bookkeeping slip.
+`ReleasePerp` clamps at `max(0, reserved-amount)`, so an over-release would be
+absorbed silently, and RT-004 established the conservation tracker cannot see it
+either, because the earmark lives inside `PerpBalances` and no total moves.
+Establishes: neither of the two obvious double-release paths fires. Does not
+establish: behaviour under partial fills, amend/replace, multi-instrument
+cross-margin, or a genuine concurrent cancel/fill race.
+
+**H-010 — an actor can act on information it should not have (fairness).**
+Status: **OPEN — registered, not yet tested.**
+Origin: the operator's framing that the simulation must be a fair battle of
+actors. Instruction 6 names the specific risk: a participant observing a fill
+before the modelled receipt, reading a future price, or reaching global state
+directly rather than through its gateway.
+Claim: some actor path reads exchange or venue state that its own message flow
+would not have delivered yet, giving it an advantage no other actor could obtain.
+Invariant: information causality — an actor's decision at time t may depend only
+on messages delivered to it by t.
+Candidate paths: actor implementations under `simulations/multivenue/`, any
+direct reference from an actor to `*DefaultExchange`, `MDPublisher`, or a
+position/book structure rather than to its gateway.
+Discriminating test: static — enumerate actor→exchange references that bypass
+the gateway; then dynamic — check that no decision timestamp precedes the
+delivery timestamp of the information it used.
+Why it matters: a latency or information advantage that is not part of the
+modelled economics invalidates every relative-performance conclusion drawn from
+these runs, which is precisely what the campaign measures.
 
 ---
 
