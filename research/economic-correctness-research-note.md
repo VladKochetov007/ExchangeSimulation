@@ -1339,6 +1339,104 @@ would show up.
 sentence attached to it was not. A run length chosen for convenience is not a
 sample of the regime the campaign actually reports on.
 
+**H-024 — the borrow gate prices collateral at a constant, forever.**
+RT-015 established that the borrow gate and the risk engine disagree about
+*what* to value. This asks whether they also disagree about *at what price*.
+
+`buildAccountMarginProfile` and `MarkedAccount` both value derivative exposure
+through `riskMark`, which reads each instrument's stored funding mark and falls
+back to a live book reference only before the first mark update. The borrow gate
+does not use `riskMark` at all: it reads `bm.Config.PriceSource`, and the
+campaign supplies `exchange.NewStaticPriceOracle(collateralPrices)` with
+`"ABC": mvBootstrapPrice` — the 50 000 bootstrap, fixed at construction
+(`simulations/multivenue/sim.go:2862`).
+
+If that oracle never updates, then borrowing power derived from ABC collateral
+is pinned to the price ABC had before the simulation began. In a falling market
+an actor keeps full borrowing power against collateral that has lost value; in a
+rising one it is denied borrowing power it has earned. Either way leverage is
+decoupled from the market the same actor is trading, and the decoupling grows
+with the price excursion.
+
+Note the second-order term: `CollateralFactors` names only `"USD": 1`, so ABC
+falls through to the 0.75 default. A haircut of 25% covers a 25% adverse move
+and no more.
+
+Predicted observable, recorded before running: with an account holding ABC
+collateral, halving the live market price of ABC leaves the admitted borrow
+unchanged. Then, from a real run, the excursion of the live ABC mid away from
+50 000 bounds how large the mispricing actually gets.
+Falsifier: the admitted borrow tracks the live price.
+Competing reading to keep alive: a static collateral oracle deliberately breaks
+the circularity of valuing collateral with the same market the borrower is
+moving, which is a defensible choice for a research venue. If so the finding is
+a documentation gap plus a fairness consequence, not a defect.
+Mechanism family: valuation disagreement, stale reference.
+
+**E-025 — H-024, the collateral oracle against the market.**
+Preregistered above. Artifacts:
+`tests/economic_audit_collateral_oracle_test.go` and
+`research/tools/pricerange/main.go`.
+Base: `a666d02faede3d40f046b11e60eb672c59386a94`.
+Reproduce: `go test ./tests/ -run TestAuditBorrowCollateralIsPriced -v`, and
+`go run research/tools/pricerange/main.go -dir <logdir> -symbol ABC-USD`.
+
+**Mechanism: SUPPORTED, exactly and decisively.** 10 ABC of collateral, USD
+factor 1:
+
+| market price of ABC | oracle price | admitted borrow |
+|---:|---:|---:|
+| 50 000 | 50 000 | 500 000 USD |
+| **25 000** | 50 000 | **500 000 USD** |
+| 25 000 | 25 000 | 250 000 USD |
+
+A 50% fall in ABC leaves borrowing power completely unchanged, at twice what the
+collateral is then worth. The gate never consults `riskMark`; it reads
+`BorrowingConfig.PriceSource`, and the campaign supplies
+`exchange.NewStaticPriceOracle` with ABC pinned to the 50 000 bootstrap
+(`simulations/multivenue/sim.go:2862`). ABC is absent from `CollateralFactors`,
+so it falls through to the 0.75 default — a 25% haircut, which covers a 25%
+adverse move and no more.
+
+**Magnitude: small in this configuration, and drifting — which is why the
+partial numbers are reported as partial.** Two reads of the same run in
+progress:
+
+| trades scanned | low vs oracle | high vs oracle | widest |
+|---:|---:|---:|---:|
+| 144 101 | −0.24% | +0.04% | **0.24%** |
+| 257 411 | −0.48% | +0.04% | **0.48%** |
+
+The band is not stationary: the low moves steadily down while the high does not
+move, so the excursion grows with run length rather than oscillating around the
+reference. At 0.48% against a 25% haircut the static oracle is still accurate by
+a factor of fifty, so **the mechanism is a latent hazard in this configuration,
+not a live mispricing** — but a claim that it stays that way over a longer run,
+or in a less anchored configuration, is not supported by this measurement and is
+not made. The final full-run figure is not yet in.
+
+**The condition under which it would bite, stated so it can be checked rather
+than assumed:** any configuration in which ABC's excursion from its bootstrap
+approaches the 25% haircut. The anchored control config does not; a stress
+configuration (`research/configs/v005-stress-perp.json` and its siblings) is
+where this should be re-measured before any run of that family is treated as
+economically faithful. This audit has not measured those.
+
+**Competing reading, kept alive.** A static collateral oracle deliberately
+breaks the circularity of valuing collateral with the very market the borrower
+is moving, which is defensible for a research venue and avoids a
+liquidation-spiral artefact. Under that reading the finding is a documentation
+gap plus a bounded fairness consequence, not a defect. Nothing in the code
+states the choice, which is why it is recorded.
+
+*Fifth instrument error, caught before it produced a number.* The price tool
+first searched for an event named `"trade"`. The evidence writes `"Trade"`,
+capitalised, and the `Trade` payload carries **no symbol** — the book a trade
+belongs to is the file it is written in. Both mistakes would have yielded a
+confident "no trades found" or a silently empty band. Checking one raw line
+before trusting the aggregate caught it, which is now the standing rule from
+E-022.
+
 ---
 
 ## F. Findings
@@ -1355,6 +1453,12 @@ See `research/red-team-findings.md` for the full records.
 - **RT-003** — bounded no-violation results (INV-2, INV-5, INV-6, identity).
 - **RT-006** — latency is delivered as configured across 225 link x channel
   rows; no unearned speed advantage. Transport only.
+- **RT-016** — the borrow gate prices collateral from a static oracle pinned to
+  the bootstrap price, so a 50% fall in ABC leaves borrowing power unchanged at
+  twice the collateral's worth. **Latent, not live**: measured excursion in the
+  anchored control config reaches 0.48% against a 25% haircut, and is still
+  drifting rather than oscillating. Re-measure over a full run and before
+  trusting a stress configuration. **Owner decision.**
 - **RT-015** — the borrow gate values cash only. It ignores unrealized losses
   (an account 200 USD under water still borrows the full 500) and counts
   reserved margin as free collateral (100 USD available, 500 USD borrowed), so

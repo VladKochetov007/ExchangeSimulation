@@ -906,3 +906,64 @@ concentrated rather than population-wide here.
 **Method note.** A run length chosen for convenience is not a sample of the
 regime the campaign reports on. The measurement was right; the scope sentence
 attached to it was not.
+
+## RT-016 — Borrow collateral is priced by a static oracle
+
+**Classification.** Specification question with a bounded, measured
+consequence. **Owner decision.** Latent in the configuration measured; the
+condition under which it becomes live is stated below so it can be checked
+rather than assumed.
+
+**Base.** `a666d02faede3d40f046b11e60eb672c59386a94`.
+
+**Mechanism.** The risk engine values derivative exposure through `riskMark`,
+which tracks each instrument's stored funding mark. The borrow gate never
+consults `riskMark`: it reads `BorrowingConfig.PriceSource`, and the campaign
+supplies `exchange.NewStaticPriceOracle` with ABC pinned to the 50 000 bootstrap
+(`simulations/multivenue/sim.go:2862`). ABC is absent from `CollateralFactors`
+so it takes the 0.75 default — a 25% haircut, covering a 25% adverse move and no
+more.
+
+**Measured** (`tests/economic_audit_collateral_oracle_test.go`), 10 ABC of
+collateral:
+
+| market price of ABC | oracle price | admitted borrow |
+|---:|---:|---:|
+| 50 000 | 50 000 | 500 000 USD |
+| **25 000** | 50 000 | **500 000 USD** |
+| 25 000 | 25 000 | 250 000 USD |
+
+A 50% fall leaves borrowing power unchanged at twice what the collateral is then
+worth.
+
+**How far the market actually moves** (`research/tools/pricerange`), two reads of
+one 5-hour control run in progress:
+
+| trades scanned | low vs oracle | high vs oracle | widest |
+|---:|---:|---:|---:|
+| 144 101 | −0.24% | +0.04% | 0.24% |
+| 257 411 | −0.48% | +0.04% | 0.48% |
+
+The band is **not stationary** — the low walks down while the high does not move
+— so the excursion grows with run length. At 0.48% against a 25% haircut the
+oracle is still accurate by a factor of fifty, so the mechanism is latent here.
+A claim that it stays latent over a longer run, or in a less anchored
+configuration, is **not** supported by this measurement and is not made.
+
+**The condition under which it bites**: any configuration where ABC's excursion
+from its bootstrap approaches the haircut. The anchored control does not. A
+stress configuration (`research/configs/v005-stress-perp.json` and siblings) is
+where this should be re-measured before such a run is treated as economically
+faithful. Not measured here.
+
+**Competing reading, kept alive.** A static collateral oracle deliberately
+breaks the circularity of valuing collateral with the very market the borrower is
+moving, and avoids a liquidation-spiral artefact. Under that reading this is a
+documentation gap plus a bounded fairness consequence rather than a defect.
+Nothing in the code states the choice.
+
+**Instrument note, the fifth.** The price tool first searched for an event named
+`"trade"`. The evidence writes `"Trade"`, and the payload carries **no symbol** —
+the book a trade belongs to is the file it is written in. Either mistake yields a
+confident empty result. Caught by reading one raw line, which is the standing
+rule from RT-014.
