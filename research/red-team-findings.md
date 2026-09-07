@@ -524,3 +524,60 @@ invariant tested to date has been single-account, single-instrument,
 single-book, and that frame is now exhausted. The next work is cross-book value
 flow through a shared account (H-019), where a per-book invariant can hold
 everywhere and the system still leak.
+
+## RT-011 — Margin is aggregated across books; liquidation is not
+
+**Classification.** CORRECT BUT SURPRISING / specification question. Severity
+medium. Reachable by any account holding positions in two books. **Owner
+decision** — partial-close ordering and cross-book seizure rules are scientific
+economics. No value is created and conservation is intact.
+
+**Base.** `a666d02faede3d40f046b11e60eb672c59386a94`.
+
+**The asymmetry.** `buildAccountMarginProfile` (`exchange/exchange.go:1848`)
+walks every book in sorted symbol order, adds each position's unrealized PnL to
+equity, and fails the whole profile closed if any sibling exposure is
+settlement-pending. Margin is genuinely cross-book. `CheckLiquidations`
+(`exchange/exchange.go:2060`) is entered per symbol from that symbol's mark
+update and, when the account breaches, closes only the positions **in that
+symbol**.
+
+**Minimal reproduction.** 900 USD of perp cash, long 1 `ABC-PERP` at 100, long
+10 `ABC-FUT` at 100. The sibling's mark collapses to 5; the perp does not move.
+
+    sibling uPnL = 10 * (5 - 100)   = -950 USD
+    perp    uPnL =  1 * (100 - 100) =    0 USD
+    equity       = 900 - 950 + 0    =  -50 USD
+
+| step | liquidations | `ABC-PERP` | `ABC-FUT` | perp cash | insurance fund |
+|---|---:|---:|---:|---:|---:|
+| mark update on the healthy book | 1 | **0** | 10 | 900 | 0 |
+| second check on the same book | 1 | 0 | 10 | 900 | 0 |
+| mark update on the losing book | 2 | 0 | **0** | 0 | **-50** |
+
+The perp position, sitting exactly at its entry price with no loss at all, is
+the one confiscated — to answer a deficit caused entirely by the future. The
+future is untouched. A second check on the perp finds nothing, because
+`CheckLiquidations` returns early at `len(positions) == 0`; between the two
+ticks the account carries 10 units of unmargined exposure and is invisible
+through the door it was found by.
+
+**Severity bound, established by attacking the result rather than reporting it.**
+The hypothesis stopped at "the account remains below maintenance", which would
+have implied a permanent hole. It is not permanent: a mark update on the losing
+book reaches the exposure, closes it, and the fund absorbs exactly the
+hand-derived 50 USD. Reporting the first half alone would have overstated the
+finding.
+
+**What remains.** Which of an actor's positions is confiscated depends on which
+book happened to tick first, not on which exposure caused the loss. Two actors
+with identical portfolios and identical losses can lose different positions
+depending on the arrival order of marks on instruments neither controls, and an
+actor hedging across two books risks having the hedge taken while the loss stays
+open. That is an unearned difference in outcome between participants, produced
+by the venue rather than by their strategies.
+
+**The test does not prescribe a policy.** It pins the measured behaviour in both
+directions: that the trigger symbol's position is closed and the sibling's is
+not, and that the sibling is reached on its own next tick with the fund
+absorbing exactly the derived deficit. Any change to either becomes visible.

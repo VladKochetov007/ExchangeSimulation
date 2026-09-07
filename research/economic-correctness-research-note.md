@@ -791,6 +791,93 @@ places where every per-book invariant can hold and the system still leaks,
 because no single book owns the identity that would catch it. Registered as
 H-019 and taken next.
 
+**H-019 — the exposure that causes a deficit is not the exposure that gets
+closed.**
+Representation change: stop asking "is this position correctly margined" and ask
+"when an account fails, which book pays?" Margin is aggregated across every book
+the account touches — `buildAccountMarginProfile` walks all books in sorted
+symbol order, adds each position's unrealized PnL to equity, and fails the whole
+profile closed if any sibling exposure is settlement-pending. Liquidation is not
+aggregated the same way: `CheckLiquidations(symbol, ...)` is entered per symbol
+from that symbol's mark update, and when the account breaches, it liquidates only
+the positions **in that symbol**.
+
+Mechanism: an account long a small `ABC-PERP` and long a large `ABC-FUT` whose
+mark collapses is under maintenance because of the future. If a mark update
+arrives on the perp, the perp position — the healthy one — is closed, and the
+future, which caused the deficit, is untouched. Worse, the account is now
+invisible through that door: the next `CheckLiquidations("ABC-PERP", ...)`
+returns early at `len(positions) == 0`, so the breach can only be found again
+through a mark update on the future itself.
+
+Why this is an actor-fairness question: which of an actor's positions is
+confiscated depends on which book happened to receive a mark update, not on
+which exposure caused the loss. Two actors with identical portfolios and
+identical losses lose different positions depending on the tick order of
+instruments they do not control. And an account left holding the loss-maker with
+no margin is a deficit the insurance fund has not absorbed, because bankruptcy is
+only detected inside `liquidate`.
+
+Predicted observable, recorded before running: the perp position is closed, the
+future position survives at full size, and the account remains below maintenance
+afterwards.
+Falsifier: liquidation reaches the sibling exposure, or the account is above
+maintenance once the trigger symbol's positions are closed.
+Mechanism family: cross-book coupling, aggregation asymmetry.
+
+**E-018 — H-019, which book pays when an account fails.**
+Preregistered above. Artifact:
+`tests/economic_audit_cross_book_liquidation_test.go`.
+Base: `a666d02faede3d40f046b11e60eb672c59386a94`.
+Reproduce: `go test ./tests/ -run TestAuditCrossBookLiquidation -v`.
+
+Fixture, hand-derived rather than read back from the margin engine: client 1
+holds 900 USD of perp cash, is long 1 `ABC-PERP` at 100 and long 10 `ABC-FUT` at
+100. The sibling's mark collapses to 5; the perp does not move.
+
+    sibling uPnL = 10 * (5 - 100)   = -950 USD
+    perp    uPnL =  1 * (100 - 100) =    0 USD
+    equity       = 900 - 950 + 0    =  -50 USD
+
+Result: **H-019 SUPPORTED as predicted, and then bounded by its own follow-up.**
+
+| step | liquidations | `ABC-PERP` | `ABC-FUT` | perp cash | fund |
+|---|---:|---:|---:|---:|---:|
+| mark update on the healthy book | 1 | **0** | 10 | 900 | 0 |
+| second check on the same book | 1 | 0 | 10 | 900 | 0 |
+| mark update on the losing book | 2 | 0 | **0** | 0 | **-50** |
+
+The perp position — sitting exactly at its entry price, carrying no loss at all —
+is the one confiscated, to answer a deficit caused entirely by the future. The
+future is untouched. A second check on the perp then finds nothing, because
+`CheckLiquidations` returns early at `len(positions) == 0`, so between the two
+ticks the account carries 10 units of unmargined exposure and is invisible
+through the door it was found by.
+
+**The severity bound, established by attacking my own result.** The
+preregistration stopped at "the account remains below maintenance afterwards",
+which would have implied a permanent hole. It is not permanent: a mark update on
+the losing book does reach the exposure, closes it, and the insurance fund
+absorbs exactly the hand-derived 50 USD. So the defect is not lost solvency —
+it is *which* position is taken, and a window of unmargined exposure between
+ticks. Reporting the first half alone would have overstated it.
+
+**What remains, and why it is a fairness question.** Margin is aggregated across
+every book (`buildAccountMarginProfile` walks all books in sorted symbol order
+and sums each position's unrealized PnL into equity); liquidation is not
+(`CheckLiquidations` closes only the trigger symbol's positions). Because of
+that asymmetry, which of an actor's positions is confiscated depends on which
+book happened to tick first, not on which exposure caused the loss. Two actors
+with identical portfolios and identical losses can lose different positions
+depending on the arrival order of marks on instruments neither controls. An
+actor that hedges across two books is exposed to having the hedge taken and the
+loss left open.
+
+Recorded as RT-011. Classification **CORRECT BUT SURPRISING / specification
+question**, not a bug to fix here: partial-close ordering and cross-book seizure
+are scientific economics and the owner's to decide. Conservation is intact and
+no value is created — the fund absorbed the shortfall exactly.
+
 ---
 
 ## F. Findings
@@ -807,6 +894,12 @@ See `research/red-team-findings.md` for the full records.
 - **RT-003** — bounded no-violation results (INV-2, INV-5, INV-6, identity).
 - **RT-006** — latency is delivered as configured across 225 link x channel
   rows; no unearned speed advantage. Transport only.
+- **RT-011** — margin is aggregated across books, liquidation is not, so the
+  position an actor loses depends on which book ticked rather than on which
+  exposure caused the deficit. CORRECT BUT SURPRISING / specification question,
+  severity medium, reachable by any account with positions in two books.
+  Conservation intact; the deficit is transient, closed on the losing book's
+  own next tick. **Owner decision.**
 - **RT-010** — bounded no-violation results: every exit from the reservation
   lifecycle (FOK kill, post-only refusal, insufficient balance, partial fill,
   cancel of a partially filled remainder) restores the earmark exactly; and
@@ -891,15 +984,15 @@ foreclosed — and those are recorded in as much detail as the confirmed ones.
 
 Next, in priority order:
 
-1. **H-019 — cross-book value flow through a shared account.** The execution
-   path has plateaued: E-015, E-016 and E-017 are three consecutive
-   falsifications, and every invariant tested so far has been single-account,
-   single-instrument, single-book. The untested surface is the coupling between
-   books through one account — cross-margin between `ABC-PERP` and a dated
-   `ABC-FUT`, an option exercised against a live hedge, collateral held in CDF
-   while trading `ABC/CDF`, a mark on one instrument driving a liquidation on
-   another. A per-book invariant can hold everywhere and the system still leak,
-   because no single book owns the identity that would catch it.
+1. **H-020 — the rest of the cross-book surface.** E-018 opened it and found
+   RT-011 on the first probe, which argues for staying in this frame. Still
+   untested: an option exercised against a live hedge; collateral held in CDF
+   while trading `ABC/CDF`, where `buildAccountMarginProfile` skips any
+   instrument whose quote asset differs (`perp.QuoteAsset() != quote` →
+   `continue`), so exposure in a second quote asset is invisible to the first
+   one's risk check; and whether the settlement-pending fail-closed rule can be
+   used to make an account unliquidatable by leaving one sibling contract
+   pending.
 2. **RETIRED — H-013 — decision-record coverage is a property of the run
    configuration, not of the code.** `-record-market-data-receipts` requires an explicit
    `-market-data-receipt-roles` list, so an un-audited participant class emits
