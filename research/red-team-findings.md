@@ -1010,3 +1010,60 @@ The test labels the extreme as such.
 discipline is weakest should look where the consequences are largest. In this
 system that is exactly where it is absent, and neither RT-015 nor RT-016 says so
 on its own.
+
+## RT-018 — Borrowed spot exposure is governed by nothing
+
+**Classification.** REAL BUG in the sense of an exposure class with no
+enforcement path at all. Severity depends on whether real runs reach negative
+equity this way, which is **not measured**. **Owner decision** — whether spot
+debt should be liquidatable is scientific economics.
+
+**Base.** `a666d02faede3d40f046b11e60eb672c59386a94`.
+
+**Mechanism, and it is structural rather than a missing check.** The exchange has
+exactly two liquidation entry points — `CheckLiquidations` for perps and dated
+futures, `CheckPositionMarginerLiquidations` for options. Both walk **positions**.
+Spot debt is not a position: it lives in `Client.Borrowed` and
+`Client.BorrowedSpot`. Neither entry point can see it. The borrow gate refuses
+*new* credit once equity is gone, but refusing new credit is not unwinding old
+exposure.
+
+`AutoBorrowSpot: true` — which the campaign sets — borrows an asset for a
+participant short of it at settlement. That is a venue-financed short spot
+position.
+
+**Measured** (`tests/economic_audit_spot_debt_test.go`). 100 000 USD account
+borrows 1 ABC at 50 000 and sells it; ABC quadruples to 200 000:
+
+| | equity |
+|---|---:|
+| at entry | +100 000 USD |
+| after the move | **−50 000 USD** |
+
+Both liquidation entry points invoked:
+
+| | before | after |
+|---|---:|---:|
+| ABC debt | 100 000 000 | 100 000 000 |
+| USD cash | 15 000 000 000 | 15 000 000 000 |
+| insurance fund | 0 | 0 |
+
+Nothing moves, and no event records that the venue is carrying 50 000 USD.
+
+**The asymmetry is the finding.** An actor whose derivative goes bad is closed
+out and its deficit charged to the insurance fund — bounded, logged,
+attributable (E-018, E-019). An actor whose borrowed spot goes bad is closed out
+by nothing and the shortfall is recorded nowhere. Same economic short, different
+rules, decided by which instrument expressed it.
+
+**What is not established.** The mechanism is live — E-022 observed real
+`auto_spot` ABC borrows — but whether any account in a real run reaches negative
+equity this way is not measured, and this finding must not be read as saying it
+does. `RepayMargin` exists and ordinary trading retires these debts; what is
+absent is the forced unwind.
+
+**Fixture note.** The sale of the borrowed ABC is injected by writing balances
+directly rather than crossing a book — an unrecorded mutation of the kind that
+invalidated E-007. It cannot affect these assertions, which are the invariance of
+debt, cash and fund across the liquidation calls. It would matter if the claim
+were about conservation; it is not.

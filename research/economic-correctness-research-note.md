@@ -1521,6 +1521,92 @@ round. A reviewer looking for where valuation discipline is weakest should look
 where the consequences are largest, and in this system that is exactly where the
 discipline is absent. Recorded as RT-017.
 
+**H-026 — borrowed spot exposure is never forcibly unwound.**
+The frame that produced RT-015 to RT-017 asked which valuation governs. This
+asks the prior question: *which exposures are governed at all?*
+
+The exchange has exactly two liquidation entry points:
+`CheckLiquidations` (perp and dated futures) and
+`CheckPositionMarginerLiquidations` (options). Both walk *positions*. Spot debt
+lives in `Client.Borrowed` / `Client.BorrowedSpot` and is not a position, so
+neither entry point can see it. The borrow gate refuses to extend *new* credit
+once equity is gone, but refusing new credit is not unwinding old exposure.
+
+Mechanism: with `AutoBorrowSpot: true` — which the campaign sets — a participant
+short of an asset at settlement has it borrowed for them. That is a short spot
+position financed by the venue. If the borrowed asset then appreciates, the debt
+grows against a fixed pile of sale proceeds, and there is no code path that
+closes it.
+
+Why it is an actor-fairness question: an actor holding a losing *derivative* is
+closed out and its deficit is charged to the insurance fund, a visible and
+bounded event. An actor holding a losing *borrowed-spot* position is closed out
+by nothing. Two actors with the same economic short therefore face different
+rules depending on which instrument expressed it, and the second one's downside
+is carried by the venue with no event marking it.
+
+Predicted observable, recorded before running: after a large adverse move, the
+account's marked equity is negative, and invoking both liquidation entry points
+leaves the debt, the balances and the insurance fund unchanged.
+Falsifier: some path closes the position, charges the fund, or margin-calls the
+account.
+Mechanism family: ungoverned exposure.
+
+**E-027 — H-026, what governs borrowed spot exposure.**
+Preregistered above. Artifact: `tests/economic_audit_spot_debt_test.go`.
+Base: `a666d02faede3d40f046b11e60eb672c59386a94`.
+Reproduce: `go test ./tests/ -run TestAuditBorrowedSpotExposure -v`.
+
+Result: **H-026 SUPPORTED. Nothing governs it.**
+
+An account with 100 000 USD borrows 1 ABC at 50 000 and sells it — a
+venue-financed short, which is what `AutoBorrowSpot` produces when a participant
+is short of an asset at settlement. ABC then quadruples to 200 000.
+
+| | equity |
+|---|---:|
+| at entry, ABC at 50 000 | +100 000 USD |
+| after ABC reaches 200 000 | **−50 000 USD** |
+
+Both liquidation entry points are then invoked — `CheckLiquidations` for perps
+and dated futures, `CheckPositionMarginerLiquidations` for options:
+
+| | before | after |
+|---|---:|---:|
+| ABC debt | 100 000 000 | 100 000 000 |
+| USD cash | 15 000 000 000 | 15 000 000 000 |
+| insurance fund | 0 | 0 |
+
+Nothing moves. The account is 50 000 USD underwater, no path closes it, and no
+event records that the venue is carrying the loss.
+
+**The asymmetry, which is the finding.** An actor whose *derivative* goes bad is
+closed out and its deficit is charged to the insurance fund — a bounded, logged,
+attributable event, as E-018 and E-019 measured. An actor whose *borrowed spot*
+goes bad is closed out by nothing and the shortfall is recorded nowhere. Two
+actors holding the same economic short face different rules according to which
+instrument expressed it, and the venue silently carries the second.
+
+The reason is structural rather than a missing check: both liquidation entry
+points walk **positions**, and spot debt is not a position — it lives in
+`Client.Borrowed` and `Client.BorrowedSpot`. The borrow gate does refuse *new*
+credit once equity is gone, but refusing new credit is not unwinding old
+exposure.
+
+**Scope and what is not established.** `AutoBorrowSpot: true` is set by the
+campaign and E-022 observed real `auto_spot` ABC borrows, so the mechanism is
+live. Whether any account in a real run actually reaches negative equity this
+way is **not measured here**, and the finding must not be read as saying it does.
+Voluntary `RepayMargin` exists and ordinary trading retires these debts; what is
+absent is the forced unwind when equity goes negative.
+
+*Fixture note.* The sale of the borrowed ABC is injected by writing the balances
+directly rather than crossing a book. That is an unrecorded mutation of the kind
+E-007 invalidated an earlier experiment for — but the assertions here are the
+invariance of debt, cash and fund across the liquidation calls, none of which the
+injection can affect. It would matter if the claim were about conservation; it is
+not.
+
 ---
 
 ## F. Findings
@@ -1537,6 +1623,13 @@ See `research/red-team-findings.md` for the full records.
 - **RT-003** — bounded no-violation results (INV-2, INV-5, INV-6, identity).
 - **RT-006** — latency is delivered as configured across 225 link x channel
   rows; no unearned speed advantage. Transport only.
+- **RT-018** — borrowed spot exposure is governed by nothing. Both liquidation
+  entry points walk positions; spot debt is not a position. An account 50 000 USD
+  underwater on a venue-financed short is untouched by either, and no event
+  records that the venue carries the loss — while the same economic short
+  expressed as a derivative is closed out and charged to the insurance fund.
+  Mechanism live (`AutoBorrowSpot: true`); whether a real run reaches negative
+  equity this way is **not measured**. **Owner decision.**
 - **RT-017** — the system holds three valuations of an account, and their
   pricing discipline is **inversely ordered to their authority**: the scoring
   path records provenance and bounds staleness, the risk engine uses a live mark
