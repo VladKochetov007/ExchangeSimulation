@@ -2352,6 +2352,97 @@ with its stated limit: it separates revaluation from an accounting gap by
 magnitude and consistency, not exactly. H-035 does not close that gap and the
 note does not claim it does.
 
+**H-036 — the population's accounting gap is zero, identified by regression
+rather than by valuation surgery.**
+E-036 failed because it tried to remove revaluation by changing how accounts are
+*valued*, and `AccountValuationSpec` cannot reach the derivative term. The
+simpler route does not touch valuation at all.
+
+Representation change: treat the residual as a **linear function of the mark
+drift** across seeds, and identify the two terms by their different behaviour
+rather than by isolating one of them.
+
+    residual(seed) = inventory × drift(seed) + gap
+
+Each seed produces its own ABC drift and its own residual, so a fit over several
+seeds separates them: the **slope** is the population's net long inventory and
+the **intercept is the accounting gap** — the quantity RT-024 could only bound by
+magnitude and E-036 could not reach at all. This needs no new API and no change
+to any scientific surface; it needs only runs at different seeds, which cost
+minutes each.
+
+Predicted observable, recorded before running: the fit is close to linear
+because the population's inventory barely changes across seeds — the endowments
+are identical and only trading moves them — and the intercept is small relative
+to the residuals it is extracted from. "Small" is defined in advance as **under
+one percent of the mean absolute residual**; anything larger is an accounting gap
+worth naming.
+Falsifier: a large intercept, or a fit poor enough that the intercept is not
+identified — if the drifts across seeds cluster too tightly, the regression has
+no leverage and the experiment answers nothing. That second outcome is a real
+possibility and will be reported as such rather than dressed up.
+Mechanism family: population-level closure, identified by variation.
+
+**E-037 — H-036, identifying the accounting gap by regression. NOT IDENTIFIED.**
+Preregistered above. Artifact: `research/tools/closureregression/main.go`.
+Base: `a666d02faede3d40f046b11e60eb672c59386a94`.
+Runs: `clock-control-5h-101.json`, seeds **607–614**, 5 simulated hours each.
+
+The model was `residual = inventory × drift + gap`, fitted across seeds so the
+intercept would be the accounting gap RT-024 could only bound and E-036 could not
+reach.
+
+| seed | ABC drift | residual (quote units) |
+|---|---:|---:|
+| 611 | −1.1102% | −1 127 510 973 |
+| 609 | −1.0912% | −1 211 711 695 |
+| 607 | −1.0511% | −1 112 935 935 |
+| 610 | −1.0419% | −1 103 291 125 |
+| 612 | −1.0324% | −842 954 514 |
+| 614 | −1.0200% | −591 526 032 |
+| 608 | −0.9591% | −1 013 042 345 |
+| 613 | −0.9575% | −1 180 091 996 |
+
+Fit: slope 75 819 252 488, **intercept −239 727 063 ± 1 572 059 399**,
+**R² = 0.0398**.
+
+**The intercept is not identified, and the preregistration named this outcome in
+advance** — "if the drifts across seeds cluster too tightly, the regression has
+no leverage and the experiment answers nothing. That second outcome is a real
+possibility and will be reported as such rather than dressed up." The standard
+error is **6.5× the estimate**. The intercept is −23% of the mean absolute
+residual, and that number means nothing.
+
+**Two independent reasons it failed, and the second is the more interesting.**
+
+1. *No leverage.* Eight seeds produced drifts spanning only **0.1527%**, from
+   −1.1102% to −0.9575%. A regressor that barely varies cannot identify an
+   intercept.
+2. *Misspecification.* R² of 0.04 says the residual is not tracking drift at all.
+   The model treated inventory as a constant nuisance across seeds; it is not.
+   Participants trade, so the population's net long position at the terminal
+   instant is a **per-seed variable**, and `inventory × drift` is not a
+   fixed-slope relation. More seeds would not fix this — the model is wrong, not
+   merely underpowered.
+
+**Consolidated position on RT-024's hole.** Three routes have now been tried and
+all three fail for distinct, documented reasons:
+
+| route | why it fails |
+|---|---|
+| magnitude screen (RT-024) | cannot separate revaluation from a gap below ~2% of the endowment |
+| fixed-mark revaluation (E-036) | `AccountValuationSpec` reaches wallet balances only; derivative exposure is valued from the instruments' own marks |
+| regression on drift (E-037) | no drift leverage across seeds, and inventory is a per-seed variable so the model is misspecified |
+
+**The gap is not closable from the current artifact surface**, and the missing
+piece is the same one E-036 identified: the artifacts record equity but not the
+**inventory** behind it. `MarkedAccountSnapshot` reports `SpotEquity`,
+`PerpCashEquity`, `DerivativeUnrealized` and `OptionMarketValue`, all already
+valued at marks. One additional field — the population's net base-asset position
+at each capture — would make the gap computable directly, with no regression and
+no valuation surgery. That is a concrete, small instrumentation request and it is
+the useful output of these three experiments.
+
 ---
 
 ## F. Findings
@@ -2374,7 +2465,11 @@ See `research/red-team-findings.md` for the full records.
   Bounded no-violation result; the screen is reusable. **E-036 attempted an
   exact version and the method was invalid**: `AccountValuationSpec` reaches only
   wallet balances, while derivative exposure is valued from the instruments'
-  own marks, so fixing the spec cannot remove derivative revaluation.
+  own marks, so fixing the spec cannot remove derivative revaluation. **E-037
+  tried a third route, regression across eight seeds, and the intercept was not
+  identified** — 0.15% drift spread and R²=0.04. The gap is **not closable from
+  the current artifact surface**; one extra field (net base-asset position at
+  each capture) would make it computable directly.
 - **RT-023** — the venue design **confounds matching rule with funding
   interval**: north is the only price-time venue and also the only 8-hour funding
   venue, so no venue effect can be attributed to either. The one clean contrast

@@ -1455,3 +1455,31 @@ value by client ID alone collides across venues. Measured: all 86 shared IDs
 carry the same role and the same initial equity on all three venues, so the
 lookup returns the correct value and RT-022, RT-023, RT-024 and E-034 are
 unaffected. Recorded because the next tool to key by client ID needs to know.
+
+## RT-024 (consolidated) — the population gap is not closable from the current artifacts
+
+Three routes tried, three distinct documented failures:
+
+| route | why it fails |
+|---|---|
+| magnitude screen (RT-024) | cannot separate revaluation from a gap below ~2% of the endowment |
+| fixed-mark revaluation (E-036) | `AccountValuationSpec` reaches wallet balances only; derivative exposure is valued from the instruments' own marks and ignores the spec |
+| regression on drift (E-037) | no drift leverage across seeds, and inventory is a per-seed variable so the model is misspecified |
+
+**E-037 in detail.** Fitting `residual = inventory × drift + gap` across seeds
+607–614 gives intercept **−239 727 063 ± 1 572 059 399** with **R² = 0.0398** —
+a standard error 6.5× the estimate. The preregistration named this outcome in
+advance and it is reported rather than dressed up.
+
+Two independent causes. The drifts span only **0.1527%** (−1.1102% to −0.9575%),
+so the regressor barely varies. And R² of 0.04 says the residual is not tracking
+drift at all: the model treats inventory as a constant across seeds, but
+participants trade, so the terminal net long position is a **per-seed variable**.
+More seeds would not help — the model is wrong, not underpowered.
+
+**The concrete request this produces.** The artifacts record equity but not the
+inventory behind it; every field of `MarkedAccountSnapshot` is already valued at
+marks. **One additional field — the population's net base-asset position at each
+capture — makes the gap computable directly**, with no regression and no
+valuation surgery. That is the useful output of these three experiments, and it
+is small enough to be worth doing.
