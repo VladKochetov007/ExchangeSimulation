@@ -601,6 +601,115 @@ asymmetry is latent, so no campaign result depends on it. Recorded as RT-009 so
 that enabling hidden orders is a deliberate act with a known consequence rather
 than a silent one.
 
+**H-016 — an order that is refused, or filled in part, leaves collateral
+stranded or frees too much.**
+Representation change: stop treating an order as an event and treat it as a
+*reservation lifecycle* — reserve on admission, convert on fill, release on
+termination — and ask whether every path through that lifecycle returns the
+earmark to exactly what the surviving exposure requires. H-005 audited the
+cancel paths. The admission-refusal and partial-fill paths are untested.
+
+Why it is an actor-fairness question: `Available = Balances - Reserved`. An
+earmark that outlives its order removes buying power an actor is entitled to;
+one that is released too eagerly grants buying power its capital does not
+support. Both are silent — `ReleasePerp` clamps at zero, so an over-release
+leaves no trace, and RT-004 established that the conservation tracker cannot see
+either, because a reservation is an earmark inside the balance and no total
+moves.
+
+Sub-cases, each a distinct exit from the lifecycle:
+- (a) a fill-or-kill order that cannot be filled completely;
+- (b) a post-only order that would cross;
+- (c) an order refused for self-trade;
+- (d) a resting order filled in part, then cancelled;
+- (e) an immediate-or-cancel order filled in part, remainder killed;
+- (f) an order refused for insufficient balance, which must not have consumed
+  anything on its way to the refusal.
+
+Predicted observable, recorded before running: the refusal paths (a, b, c, f)
+return the earmark to its pre-order value exactly, because a refusal is the
+easiest case to get right and the code rejects before or immediately after
+reserving. The partial paths (d, e) are where a discrepancy is most likely,
+because the release has to be computed from a remainder rather than from the
+original order.
+Falsifier for the hypothesis as a whole: every path restores the earmark to
+exactly what the surviving exposure requires.
+Mechanism family: state-machine leak.
+
+**E-015 — H-016, reservation lifecycle on refusal and partial fill.**
+Preregistered above. Artifact:
+`tests/economic_audit_reservation_lifecycle_test.go`.
+Base: `a666d02faede3d40f046b11e60eb672c59386a94`.
+Reproduce: `go test ./tests/ -run 'TestAuditRefusedOrder|TestAuditPartiallyFilled' -v`.
+
+Result: **H-016 FALSIFIED WITHIN TESTED SCOPE.** Every exit returns the earmark
+to exactly what the surviving exposure requires.
+
+- fill-or-kill that cannot be filled completely (`FOK_NOT_FILLED`): earmark
+  restored exactly.
+- post-only that would cross (`POST_ONLY_WOULD_TAKE`): restored exactly.
+- order larger than the balance behind it (`INSUFFICIENT_BALANCE`): restored
+  exactly.
+- resting order half filled: the earmark is exactly half of what the whole
+  order held, measured against the idle baseline rather than assumed to be
+  zero.
+- cancelling that half-filled remainder: returns to the idle baseline exactly —
+  not less, which would strand collateral, and not more, which would free
+  collateral the fill had already converted into an asset.
+- `GetAvailable` never exceeds the balance at any point.
+
+*A prediction that was wrong, recorded as such.* The preregistration expected
+the partial-fill paths to be the likely failure sites, "because the release has
+to be computed from a remainder rather than from the original order". They are
+in fact exact by construction: `releaseReserved` releases what was locked rather
+than recomputing an approximation, and says so.
+
+*A case that could not be run as written.* The self-trade arm was removed from
+the table: `RejectSelfTrade` is declared in the reject vocabulary but **no code
+path produces it**, so the order is accepted rather than refused. That is not a
+defect — it is a different self-trade-prevention policy — and it became H-017.
+
+**E-016 — H-017, self-trade prevention and the crossed book.**
+Artifact: `tests/economic_audit_self_cross_test.go`.
+Reproduce: `go test ./tests/ -run TestAuditSelfTradePrevention -v`.
+
+Result: **H-017 FALSIFIED.** The exchange does not skip and rest. After the
+matcher has consumed every crossable order belonging to other clients, any price
+still crossing the remainder must belong to the incoming client, and
+`cancelOwnCrossingQuotes` (`exchange/order_handling.go:1718`) withdraws those
+resting quotes — the "cancel maker" self-trade-prevention mode. Its comment
+states the reason this audit had hypothesised as a risk: "Resting it as-is would
+display a crossed/locked book."
+
+Four properties measured, each now pinned:
+
+1. **The book is never left crossed and no wash trade prints.** A participant
+   resting a sell at 90 and then buying at 110 ends with a bid at 110 and no
+   ask; no trade prints and no balance moves.
+2. **The cancelled quote's collateral is released, not stranded.** The base
+   earmark returns to zero, available never exceeds balance, and the client
+   stops tracking the withdrawn order.
+3. **The owner is told.** A `ForcedCancelNotification` is delivered for each
+   withdrawn quote. This is the failure mode this project has already been
+   bitten by — an order removed without telling its owner leaves the actor
+   believing it still rests, and its bookkeeping blocked indefinitely.
+4. **In a deterministic order.** Three own asks placed from the highest price
+   down, so price order and placement order disagree, are cancelled in
+   *placement* order. The implementation collects targets by iterating a map and
+   then sorts by order ID precisely for this reason; without the sort, map
+   iteration would reach the evidence stream and the execution hash would stop
+   being reproducible.
+
+*Method note, recorded because it nearly became a false finding of exactly the
+bug class above.* The first run of property 3 reported "3 quotes were withdrawn
+but 0 cancellations were delivered". That was my harness: `enqueueResponse`
+appends to an outbox that a separate goroutine drains, so a non-blocking read
+races the delivery rather than observing it. Reporting it would have claimed a
+silent-forced-cancel bug in code that delivers correctly. The test now collects
+until the expected count arrives or a deadline passes, so a shortfall is a real
+shortfall. The general lesson matches RT-006's: when the observable is produced
+asynchronously, an instrument that samples once measures the scheduler.
+
 ---
 
 ## F. Findings
@@ -617,6 +726,12 @@ See `research/red-team-findings.md` for the full records.
 - **RT-003** — bounded no-violation results (INV-2, INV-5, INV-6, identity).
 - **RT-006** — latency is delivered as configured across 225 link x channel
   rows; no unearned speed advantage. Transport only.
+- **RT-010** — bounded no-violation results: every exit from the reservation
+  lifecycle (FOK kill, post-only refusal, insufficient balance, partial fill,
+  cancel of a partially filled remainder) restores the earmark exactly; and
+  self-trade prevention is cancel-maker, leaving the book uncrossed, the
+  collateral released, the owner notified, and the notifications ordered by
+  placement rather than by map iteration.
 - **RT-008** — the taker fee depends on how the counterparty's liquidity was
   sliced, always in the taker's favour, and no conservation check can see the
   shortfall. EDGE CASE by magnitude at campaign prices (<=9 quote units in
@@ -688,16 +803,20 @@ Owner decisions outstanding: RT-002 disposition (per-position truncation vs a
 book-level carry, as futures already do); H-009 (whether a bankrupt account's
 spot wallet should be seized before the insurance fund absorbs the deficit).
 
-H-004, H-005, H-006, H-010, H-011, H-012, H-013, H-014 and H-015 are now closed
-within their tested scope; E-008 through E-014 hold the evidence.
+H-004, H-005, H-006, H-010 through H-017 are now closed within their tested
+scope; E-008 through E-016 hold the evidence. Three of them (H-013, H-016,
+H-017) were closed by falsification — the risk they named was already
+foreclosed — and those are recorded in as much detail as the confirmed ones.
 
 Next, in priority order:
 
-1. **H-016 — the execution path from admission to clearing.** Still untouched:
-   partial-fill collateral release, post-only and FOK admission under a racing
-   book, and amend semantics (there is no amend path, which is itself worth
-   stating: priority cannot be bought by modification because modification does
-   not exist).
+1. **H-018 — the remaining execution-path surfaces.** E-015 and E-016 closed
+   admission refusal, partial fill and self-trade prevention. Untouched:
+   immediate-or-cancel with a partially filled remainder, market orders that
+   exhaust the book, and an order whose instrument expires or is delisted while
+   it rests. There is no amend path at all, which is worth stating positively:
+   queue position cannot be bought by modification because modification does not
+   exist.
 2. **RETIRED — H-013 — decision-record coverage is a property of the run
    configuration, not of the code.** `-record-market-data-receipts` requires an explicit
    `-market-data-receipt-roles` list, so an un-audited participant class emits

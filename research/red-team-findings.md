@@ -446,3 +446,53 @@ a refreshed tranche goes to the back of its price level and loses time priority.
 **What this finding is for.** Not a request to change the matcher. It makes
 enabling hidden orders a deliberate act with a known consequence instead of a
 silent one, and the test fails loudly if the rule changes in either direction.
+
+## RT-010 — Bounded no-violation results on the execution path
+
+Recorded so the negative results are preserved and are not re-derived under
+different wording. Base `a666d02faede3d40f046b11e60eb672c59386a94`.
+
+**Reservation lifecycle** (`tests/economic_audit_reservation_lifecycle_test.go`).
+`Available = Balances - Reserved`, so an earmark that outlives its order removes
+buying power an actor is entitled to, and one released too eagerly grants buying
+power its capital does not support. Both are silent: `ReleasePerp` clamps at
+zero, and RT-004 established the conservation tracker cannot see either.
+
+Every exit tested restores the earmark exactly: fill-or-kill that cannot fill
+completely, post-only that would cross, an order larger than its balance, a
+resting order half filled (the earmark is exactly half of what the whole order
+held), and cancelling that half-filled remainder (back to the idle baseline —
+not less, which would strand, and not more, which would free collateral the fill
+had already converted into an asset). `GetAvailable` never exceeds the balance.
+
+The reason is visible in the code: `releaseReserved` "releases what was locked,
+not a recomputed approximation." The audit's prediction that the partial paths
+would be the weak ones was wrong, and is recorded as wrong.
+
+**Self-trade prevention** (`tests/economic_audit_self_cross_test.go`).
+`RejectSelfTrade` is declared in the reject vocabulary but no code path produces
+it, which raised the question of whether one participant could leave the public
+book crossed against itself — best bid, best ask, mid and spread being the
+inputs every other participant quotes against.
+
+It cannot. `cancelOwnCrossingQuotes` (`exchange/order_handling.go:1718`)
+implements cancel-maker: once the matcher has consumed every crossable order
+from other clients, anything still crossing belongs to the incoming client and
+is withdrawn. Four properties are now pinned —
+
+1. the book is never left crossed and no wash trade prints;
+2. the withdrawn quote's collateral is released, not stranded;
+3. the owner receives a `ForcedCancelNotification` for each withdrawal — this is
+   the failure mode the project has already been bitten by, where an order
+   removed without telling its owner leaves the actor believing it still rests;
+4. the notifications arrive in **placement** order, not price order and not map
+   order. The implementation collects targets from a map and sorts by order ID
+   for exactly this reason; without the sort, map iteration would reach the
+   evidence stream and the execution hash would stop being reproducible.
+
+**Method note.** The first run of property 3 reported zero cancellations
+delivered, which would have been a false finding of the silent-forced-cancel bug
+class in code that delivers correctly. `enqueueResponse` appends to an outbox
+drained by a separate goroutine, so a non-blocking read races delivery instead of
+observing it. When the observable is produced asynchronously, an instrument that
+samples once measures the scheduler.
