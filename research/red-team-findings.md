@@ -244,3 +244,43 @@ resolve it and has not changed it.
 **Reachability.** The transition is reachable in a fixture. It was **not**
 exercised in the 7h integration run — no liquidation occurred there at all — so
 production reachability on dev cells is unestablished.
+
+---
+
+## RT-006 — Latency is delivered as configured; no unearned speed advantage
+
+**Severity:** none — bounded no-violation result, recorded because actor
+fairness is a load-bearing assumption of every relative-performance conclusion
+the campaign draws. **Base revision:** `a666d02`. Evidence: E-011.
+
+**Invariant.** A participant class may only receive the information and
+execution speed its configuration grants it. If a class were faster than
+configured, its measured performance would reflect the harness rather than its
+strategy.
+
+**Result.** dev-607 / seed 607 / 20m, 225 link x channel rows across 27
+participant classes and 3 remote maker feeds: every row's delivered latency
+matches the model its config declares, including the spiky mixture
+(0.99·1ms + 0.01·50ms = 1.49ms), two lognormal means, a normal, an explicit
+`market_data_scale: 2` on two classes, the 1s `cross_venue_base_latency`, and
+three remote feeds at exactly 10/20/30 ms. No link has a zero-latency channel.
+Undelivered at shutdown is 0.056% of scheduled messages, spread across 140 of
+225 rows — a drain boundary, not one actor being starved.
+
+Statically, no actor holds an exchange, book or position reference; the only
+direct handle is `Venue.Exchange`, which is the venue. The courier boundary
+itself was already covered by
+`simulation/information_boundary_test.go` and `simulation/delayed_gateway_test.go`,
+which this audit did not duplicate.
+
+**Scope.** One config, one seed, 20 simulated minutes, transport only. It does
+**not** establish that an actor's decision logic consults only what its inbox
+already held — see H-011, which is open and testable from evidence the runs
+already emit.
+
+**Method note.** Two earlier passes of this reconciliation reported 15 and then
+9 mismatches; all were errors in the expectation model, not the system. For a
+stochastic latency profile the configured `delay` is not the expected delivered
+mean, and `market_data_scale`, `cross_venue_base_latency` and the remote-feed
+table each have their own rule. Reporting either pass would have produced a
+false fairness finding.

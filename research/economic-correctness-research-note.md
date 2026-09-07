@@ -88,6 +88,7 @@ would have produced a false finding — see G-1.
 | transfers in flight | debit → transit → credit | — | not tested | — |
 | option exercise vs live hedge | exercise → assignment | — | not tested | — |
 | relisting under a reused symbol | settled → listed | — | not tested | — |
+| information causality (transport) | publish → deliver → decide | causality | no violation, 225 rows | E-011 |
 | execution path (admission → fill → clearing) | — | — | not tested | — |
 
 Coverage classes: E-002/E-003 are *reachable integration* evidence from one
@@ -270,7 +271,11 @@ establish: behaviour under partial fills, amend/replace, multi-instrument
 cross-margin, or a genuine concurrent cancel/fill race.
 
 **H-010 — an actor can act on information it should not have (fairness).**
-Status: **OPEN — registered, not yet tested.**
+Status: **FALSIFIED WITHIN TESTED SCOPE** for the two forms tested (E-011).
+Static: no actor holds an exchange reference. Configured-vs-delivered: all 225
+link x channel rows reconcile. Not tested: whether an actor's *decision*
+timestamp ever precedes the delivery timestamp of the data it used — the
+per-decision causality check is still open, and is now H-011.
 Origin: the operator's framing that the simulation must be a fair battle of
 actors. Instruction 6 names the specific risk: a participant observing a fill
 before the modelled receipt, reading a future price, or reaching global state
@@ -288,6 +293,65 @@ delivery timestamp of the information it used.
 Why it matters: a latency or information advantage that is not part of the
 modelled economics invalidates every relative-performance conclusion drawn from
 these runs, which is precisely what the campaign measures.
+
+**E-011 — H-010, information causality and latency fairness.**
+
+*Stage 1, static.* No file under `simulations/multivenue/` holds a
+`*DefaultExchange`, an `OrderBook` or a `PositionManager`. Actors reach the
+venue only through `actor.Gateway` behind a `simulation.Mount`; the only direct
+exchange handle is `Venue.Exchange`, which is the venue itself. So an actor
+cannot read venue state directly, and the courier boundary is the only path.
+
+*Prior art, not duplicated.* `simulation/information_boundary_test.go` already
+asserts that market data cannot arrive before publication plus latency and that
+receipts attest inbox arrival, and `simulation/delayed_gateway_test.go` covers
+request, response and market-data latency separately. The audit did not rewrite
+these.
+
+*Stage 2, configured versus delivered.* dev-607 / seed 607 / 20m, `latency.json`
+(`domain: courier_delivery`), 225 link x channel rows over 27 participant
+classes and 3 remote maker feeds. Every row's drawn latency matches the model
+its config declares:
+
+| class | model | expected mean | delivered |
+| --- | --- | ---: | ---: |
+| `fixed_distance_maker` | spiky, p=0.01, spike 50 ms | 0.99·1e6 + 0.01·50e6 = 1,490,000 | 1,387k–1,530k across venues/channels |
+| `future_flow` | lognormal σ=0.8 | 15e6·e^0.32 = 20,656,500 | 19.6e6–20.9e6 |
+| `noise_flow` | lognormal σ=1.0, cap 500 ms | 20e6·e^0.5 = 32,974,000 | 32.8e6–33.4e6 |
+| `imbalance_maker` | normal, sd 0.5 ms | 2,000,000 | 1,996,842–2,004,565 |
+| `liability_hedger`, `option_liability_user` | constant + `market_data_scale: 2` | md 40e6, req/resp 20e6 | exactly 40e6 / 20e6 |
+| `cross_venue_arb` | `cross_venue_base_latency` | 1,000,000,000 | exactly 1e9 |
+| remote maker feeds ×3 | constant | 10e6, 20e6, 30e6 | exactly 10e6, 20e6, 30e6 |
+
+No link has a zero-latency channel. Undelivered at shutdown is 1,486 of
+2,637,617 scheduled messages (0.056%), spread over 140 rows, worst single row
+132 of 232,074 — a shutdown-boundary drain, not a systematic starvation of one
+actor.
+
+Establishes: within this config and seed, no participant class receives a speed
+advantage the configuration did not grant it, and the two direction-asymmetric
+classes are asymmetric *by explicit configuration*.
+
+*Correction, recorded because it nearly became a finding.* The first two passes
+of this reconciliation reported 15 and then 9 "mismatches". Every one was my own
+expectation model, not the system: pass 1 compared the configured `delay`
+parameter against a delivered *mean* for stochastic models and did not know
+about `market_data_scale` or `cross_venue_base_latency`; pass 2 still gave the
+spiky mixture zero tolerance and mapped the remote-feed link names in the wrong
+direction. Reporting either pass would have produced a false finding about the
+fairness of the actor population. The lesson generalises: for a stochastic
+latency model the configured parameter is not the expected delivered mean.
+
+**H-011 — an actor's decision uses data it had not yet received.**
+Status: **OPEN.** E-011 establishes that the *transport* honours its
+configuration; it does not establish that an actor's decision logic consults
+only what its inbox already held. A decision that read a shared structure
+directly, or that ran before draining its inbox, would satisfy every check in
+E-011 and still be unfair.
+Discriminating test: the runs already emit market-data receipts
+(`market-data-receipts-v2.bin`) and maker decision records with timestamps; join
+decision events to the receipt of the observation they cite and assert the
+receipt precedes the decision. Cheap, and uses evidence that already exists.
 
 ---
 
