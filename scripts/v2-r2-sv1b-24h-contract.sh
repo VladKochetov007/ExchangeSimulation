@@ -139,7 +139,7 @@ v2_r2_sv1b_require_pinned_binary() {
 	[[ "$expected_revision" =~ ^[0-9a-f]{40}$ && "$expected_sha256" =~ ^[0-9a-f]{64}$ ]] || return 1
 	[[ -x "$binary" && ! -L "$binary" && "$(realpath -e -- "$binary")" == "$binary" ]] || return 1
 	metadata=$(go version -m -- "$binary") || return 1
-	go_version=$(awk 'NR == 1 {print $1; exit}' <<<"$metadata") || return 1
+	go_version=$(sed -n '1s/.*: //p' <<<"$metadata") || return 1
 	package_path=$(awk '$1 == "path" {count++; value=$2} END {if (count != 1 || value == "") exit 1; print value}' <<<"$metadata") || return 1
 	module_path=$(awk '$1 == "mod" {count++; value=$2} END {if (count != 1 || value == "") exit 1; print value}' <<<"$metadata") || return 1
 	buildmode=$(v2_r2_sv1b_binary_metadata_value "$metadata" "-buildmode") || return 1
