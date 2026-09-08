@@ -40,6 +40,10 @@ rg -F 'GOMAXPROCS="$activation_gomaxprocs" "$audit_binary"' "$runner" >/dev/null
 	echo "activation audit does not bind its GOMAXPROCS to the registered resource policy" >&2
 	exit 1
 }
+rg -F 'v2_r2_require_sv1b_activation_nonactivation_provenance "$activation_provenance_pending"' "$runner" >/dev/null || {
+	echo "nonactivation provenance is not staged and self-validated" >&2
+	exit 1
+}
 for required_binding in \
 	'--argjson activation_gomaxprocs "$activation_gomaxprocs"' \
 	'--argjson activation_memory_limit_bytes "$activation_memory_limit_bytes"' \
@@ -225,6 +229,14 @@ v2_r2_sv1b_require_invalid_audit_diagnostic "$temp_root/invalid-audit-provenance
 	echo "bound invalid-audit diagnostic fixture was rejected" >&2
 	exit 1
 }
+{
+	printf '%s\n' '{"ignored":true}'
+	sed -n '1,$p' "$temp_root/invalid-audit-provenance.json"
+} >"$temp_root/invalid-audit-leading-document.json"
+if v2_r2_sv1b_require_invalid_audit_diagnostic "$temp_root/invalid-audit-leading-document.json" "$invalid_diagnostic_root" 1 true; then
+	echo "invalid-audit diagnostic accepted a concatenated provenance stream" >&2
+	exit 1
+fi
 if jq '.comparison_path = (.output_root + "/cdf-liquidity-comparison.json")' "$temp_root/invalid-audit-provenance.json" >"$temp_root/invalid-audit-canonical-path.json" &&
 	v2_r2_sv1b_require_invalid_audit_diagnostic "$temp_root/invalid-audit-canonical-path.json" "$invalid_diagnostic_root" 1 true; then
 	echo "invalid-audit diagnostic accepted a canonical comparison path" >&2
@@ -674,6 +686,18 @@ v2_r2_sv1b_require_activation_comparison_identity "$full_output_root/cdf-liquidi
 	echo "exact registered supplier role and venue population was rejected" >&2
 	exit 1
 }
+jq '.activation_satisfied = false | .treatment.activation_satisfied = false' \
+	"$full_output_root/cdf-liquidity-comparison.json" >"$temp_root/comparison-nonactivation.json"
+v2_r2_sv1b_require_activation_comparison_identity "$temp_root/comparison-nonactivation.json" "$fixture_activation_provenance" \
+	"$review_revision" "$fixture_simulator_sha256" "$fixture_analyzer_sha256" "$activation_supplier_count" false || {
+	echo "valid nonactivation comparison was rejected by the measurement mode" >&2
+	exit 1
+}
+if v2_r2_sv1b_require_activation_comparison_identity "$temp_root/comparison-nonactivation.json" "$fixture_activation_provenance" \
+	"$review_revision" "$fixture_simulator_sha256" "$fixture_analyzer_sha256" "$activation_supplier_count"; then
+	echo "nonactivation comparison was accepted by the activation mode" >&2
+	exit 1
+fi
 if jq '.treatment.suppliers[0].role = "unregistered_role"' "$full_output_root/cdf-liquidity-comparison.json" >"$temp_root/comparison-wrong-role.json" &&
 	v2_r2_sv1b_require_activation_comparison_identity "$temp_root/comparison-wrong-role.json" "$fixture_activation_provenance" \
 		"$review_revision" "$fixture_simulator_sha256" "$fixture_analyzer_sha256" "$activation_supplier_count"; then

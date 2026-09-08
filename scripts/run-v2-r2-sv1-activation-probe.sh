@@ -718,6 +718,16 @@ if [[ "$activation_satisfied" == true ]]; then
 	echo "completed V2-R2-SV1 activation probe: $output_root"
 	exit 0
 fi
-write_pair_provenance "ACTIVATION_CONTRACT_NOT_SATISFIED" false "$comparison_sha"
-echo "activation contract not satisfied: suppliers did not demonstrate finite bounded activity" >&2
+activation_provenance_pending="$output_root/activation-provenance.pending.json"
+write_pair_provenance "ACTIVATION_CONTRACT_NOT_SATISFIED" false "$comparison_sha" "$activation_provenance_pending"
+if ! v2_r2_require_sv1b_activation_nonactivation_provenance "$activation_provenance_pending" "$head_revision" "$binary_sha256"; then
+	mv -- "$activation_provenance_pending" "$output_root/activation-provenance.invalid.json" || true
+	echo "activation probe produced a nonactivation comparison that failed its producer/provenance self-validation" >&2
+	exit 1
+fi
+mv -- "$activation_provenance_pending" "$output_root/activation-provenance.json" || {
+	echo "activation probe could not publish its self-validated nonactivation provenance" >&2
+	exit 1
+}
+echo "activation contract not satisfied: suppliers did not demonstrate finite bounded activity; see $output_root" >&2
 exit 1

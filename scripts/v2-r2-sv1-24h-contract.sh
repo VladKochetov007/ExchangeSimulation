@@ -340,6 +340,76 @@ v2_r2_require_cdf_supplier_comparison() {
 	fi
 }
 
+v2_r2_require_cdf_supplier_comparison_measurement() {
+	local comparison_path=$1 expected_supplier_count=$2
+	v2_r2_require_single_json_object "$comparison_path" || return 1
+	[[ "$expected_supplier_count" =~ ^[1-9][0-9]*$ ]] || return 1
+	if ! jq -e --argjson expected_supplier_count "$expected_supplier_count" '
+		type == "object" and .valid == true and .evidence_valid == true and
+		.activation_satisfied == false and .anti_cheating_satisfied == true and
+		(.provenance | type) == "object" and (.provenance.valid // false) == true and
+		(.treatment | type) == "object" and (.control | type) == "object" and
+		.treatment.valid == true and .treatment.evidence_valid == true and
+		.treatment.activation_satisfied == false and .treatment.anti_cheating_satisfied == true and
+		.control.valid == true and .control.evidence_valid == true and
+		.control.anti_cheating_satisfied == true and
+		(.treatment.supplier_count | type) == "number" and .treatment.supplier_count == $expected_supplier_count and
+		(.control.supplier_count | type) == "number" and .control.supplier_count == 0 and
+		(.control.decision_count | type) == "number" and .control.decision_count == 0 and
+		(.control.fill_count | type) == "number" and .control.fill_count == 0 and
+		(.control.trading_supplier_count | type) == "number" and .control.trading_supplier_count == 0 and
+		(.control.pnl_changing_supplier_count | type) == "number" and .control.pnl_changing_supplier_count == 0 and
+		(.control.inventory_responsive_decision_count | type) == "number" and .control.inventory_responsive_decision_count == 0 and
+		(.control.cancel_count | type) == "number" and .control.cancel_count == 0 and
+		(.control.withdraw_count | type) == "number" and .control.withdraw_count == 0 and
+		(.control.max_borrowed | type) == "number" and .control.max_borrowed == 0 and
+		(.treatment.venues | type) == "array" and (.treatment.venues | length) == 3 and
+		(.control.venues | type) == "array" and (.control.venues | length) == 3 and
+		(.treatment.suppliers | type) == "array" and (.treatment.suppliers | length) == $expected_supplier_count and
+		all(.treatment.suppliers[];
+			.valid == true and .evidence_valid == true and .anti_cheating_satisfied == true and
+			(.client_id | type) == "number" and .client_id == (.client_id | floor) and .client_id > 0 and
+			(.configured_max_position | type) == "number" and .configured_max_position > 0 and
+			(.configured_max_inventory | type) == "number" and .configured_max_inventory > 0 and
+			(.configured_max_quote_qty | type) == "number" and .configured_max_quote_qty > 0 and
+			(.max_position | type) == "number" and .max_position <= .configured_max_position and
+			(.min_position | type) == "number" and .min_position >= (-.configured_max_position) and
+			(.max_gross_base_balance | type) == "number" and .max_gross_base_balance <= .configured_max_inventory and
+			(.max_quote_qty | type) == "number" and .max_quote_qty <= .configured_max_quote_qty and
+			(.max_borrowed | type) == "number" and .max_borrowed == 0)
+	' "$comparison_path" >/dev/null; then
+		return 1
+	fi
+	if [[ "${v2_r2_sv1_candidate_id:-}" == V2-R2-SV1B-* ]] &&
+		! jq -e '
+			.treatment.supplier_removal_counterfactual_valid == true and
+			.treatment.supplier_removal_time_weighted_counterfactual_valid == true and
+			(.treatment.supplier_removal_snapshot_count | type) == "number" and
+			.treatment.supplier_removal_snapshot_count == .treatment.snapshot_count and
+			(.treatment.supplier_removal_observed_duration_ns | type) == "number" and
+			.treatment.supplier_removal_observed_duration_ns > 0 and
+			(.treatment.supplier_removal_bid_absence_active_time_fraction | type) == "number" and
+			.treatment.supplier_removal_bid_absence_active_time_fraction >= 0 and .treatment.supplier_removal_bid_absence_active_time_fraction <= 1 and
+			(.treatment.supplier_removal_ask_absence_active_time_fraction | type) == "number" and
+			.treatment.supplier_removal_ask_absence_active_time_fraction >= 0 and .treatment.supplier_removal_ask_absence_active_time_fraction <= 1 and
+			(.treatment.supplier_removal_qualified_bid_absence_active_time_fraction | type) == "number" and
+			.treatment.supplier_removal_qualified_bid_absence_active_time_fraction >= 0 and .treatment.supplier_removal_qualified_bid_absence_active_time_fraction <= 1 and
+			(.treatment.supplier_removal_qualified_ask_absence_active_time_fraction | type) == "number" and
+			.treatment.supplier_removal_qualified_ask_absence_active_time_fraction >= 0 and .treatment.supplier_removal_qualified_ask_absence_active_time_fraction <= 1 and
+			all(.treatment.venues[];
+				.supplier_removal_counterfactual_valid == true and
+				.supplier_removal_time_weighted_counterfactual_valid == true and
+				(.supplier_removal_snapshot_count | type) == "number" and .supplier_removal_snapshot_count == .snapshot_count and
+				(.supplier_removal_observed_duration_ns | type) == "number" and .supplier_removal_observed_duration_ns > 0 and
+				(.supplier_removal_bid_absence_active_time_fraction | type) == "number" and .supplier_removal_bid_absence_active_time_fraction >= 0 and .supplier_removal_bid_absence_active_time_fraction <= 1 and
+				(.supplier_removal_ask_absence_active_time_fraction | type) == "number" and .supplier_removal_ask_absence_active_time_fraction >= 0 and .supplier_removal_ask_absence_active_time_fraction <= 1 and
+				(.supplier_removal_qualified_bid_absence_active_time_fraction | type) == "number" and .supplier_removal_qualified_bid_absence_active_time_fraction >= 0 and .supplier_removal_qualified_bid_absence_active_time_fraction <= 1 and
+				(.supplier_removal_qualified_ask_absence_active_time_fraction | type) == "number" and .supplier_removal_qualified_ask_absence_active_time_fraction >= 0 and .supplier_removal_qualified_ask_absence_active_time_fraction <= 1)
+		' "$comparison_path" >/dev/null; then
+		return 1
+	fi
+}
+
 # A scored campaign is one provenance unit even though each cell has its own
 # seed and economic configuration. Compare the identities that must not vary
 # across cells; config hashes and cell/seed labels remain deliberately outside
