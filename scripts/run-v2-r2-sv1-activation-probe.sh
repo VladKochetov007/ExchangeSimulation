@@ -668,15 +668,15 @@ if [[ "$treatment_terminal_status" != completed || "$control_terminal_status" !=
 fi
 
 comparison_tmp="$output_root/cdf-liquidity-comparison.json.tmp-$$"
-if "$audit_binary" -treatment "$treatment_dir" -control "$control_dir" >"$comparison_tmp"; then
+if GOMAXPROCS="$activation_gomaxprocs" "$audit_binary" -treatment "$treatment_dir" -control "$control_dir" >"$comparison_tmp"; then
 	audit_status=0
 else
 	audit_status=$?
 fi
-if [[ "$audit_status" -ne 0 ]] || ! jq -e 'type == "object"' "$comparison_tmp" >/dev/null; then
+if [[ "$audit_status" -ne 0 ]] || ! v2_r2_require_single_json_object "$comparison_tmp"; then
 	invalid_comparison_path="$output_root/cdf-liquidity-comparison.json.invalid"
 	comparison_object_valid=false
-	if jq -e 'type == "object"' "$comparison_tmp" >/dev/null; then
+	if v2_r2_require_single_json_object "$comparison_tmp"; then
 		comparison_object_valid=true
 	fi
 	mv -- "$comparison_tmp" "$invalid_comparison_path"

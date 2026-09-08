@@ -601,7 +601,7 @@ v2_r2_sv1b_require_terminal_failure_pair_provenance() {
 
 v2_r2_sv1b_require_invalid_audit_diagnostic() {
 	[[ $# -eq 4 ]] || return 1
-	local provenance_path=$1 expected_output_root=$2 expected_audit_status=$3 expected_object_valid=$4 comparison_path actual_sha256 expected_sha256
+	local provenance_path=$1 expected_output_root=$2 expected_audit_status=$3 expected_object_valid=$4 comparison_path actual_object_valid=false actual_sha256 expected_sha256
 	[[ "$provenance_path" == /* && "$provenance_path" != */ && "$provenance_path" != *$'\n'* && "$provenance_path" != *$'\t'* ]] || return 1
 	[[ "$expected_output_root" == /* && "$expected_output_root" != */ && "$expected_output_root" != *$'\n'* && "$expected_output_root" != *$'\t'* ]] || return 1
 	[[ ("$expected_object_valid" == true && "$expected_audit_status" =~ ^[1-9][0-9]*$) ||
@@ -610,6 +610,10 @@ v2_r2_sv1b_require_invalid_audit_diagnostic() {
 	comparison_path=$(jq -er '.comparison_path | select(type == "string")' "$provenance_path") || return 1
 	[[ "$comparison_path" == "$expected_output_root/cdf-liquidity-comparison.json.invalid" &&
 		-f "$comparison_path" && ! -L "$comparison_path" && "$(realpath -e -- "$comparison_path")" == "$comparison_path" ]] || return 1
+	if v2_r2_require_single_json_object "$comparison_path"; then
+		actual_object_valid=true
+	fi
+	[[ "$actual_object_valid" == "$expected_object_valid" ]] || return 1
 	jq -e --arg expected_status "INVALID_AUDIT_EVIDENCE" --argjson expected_audit_status "$expected_audit_status" --argjson expected_object_valid "$expected_object_valid" '
 		type == "object" and .status == $expected_status and .activation_satisfied == false and
 		.holdouts_consumed == false and .analyzer_exit_status == $expected_audit_status and .comparison_object_valid == $expected_object_valid and
@@ -753,7 +757,7 @@ v2_r2_sv1b_require_invalid_audit_pair_provenance() {
 	# provenance evidence rather than an activation verdict.
 	replay_dir=$(mktemp -d) || return 1
 	replay_path="$replay_dir/cdf-liquidity-comparison.json"
-	if GOMAXPROCS="${v2_r2_sv1_activation_gomaxprocs:-2}" "$analyzer_path" -treatment "$treatment_dir" -control "$control_dir" >"$replay_path"; then
+	if GOMAXPROCS="$v2_r2_sv1_activation_gomaxprocs" "$analyzer_path" -treatment "$treatment_dir" -control "$control_dir" >"$replay_path"; then
 		replay_status=0
 	else
 		replay_status=$?

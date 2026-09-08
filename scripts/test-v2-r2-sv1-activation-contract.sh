@@ -36,6 +36,10 @@ rg -F 'comparison_object_valid: $comparison_object_valid' "$runner" >/dev/null |
 	echo "activation provenance does not serialize malformed-audit output state" >&2
 	exit 1
 }
+rg -F 'GOMAXPROCS="$activation_gomaxprocs" "$audit_binary"' "$runner" >/dev/null || {
+	echo "activation audit does not bind its GOMAXPROCS to the registered resource policy" >&2
+	exit 1
+}
 for required_binding in \
 	'--argjson activation_gomaxprocs "$activation_gomaxprocs"' \
 	'--argjson activation_memory_limit_bytes "$activation_memory_limit_bytes"' \
@@ -213,7 +217,7 @@ printf '%s\n' '{"valid":false,"evidence_valid":false}' >"$invalid_diagnostic_pat
 invalid_diagnostic_sha256=$(sha256sum -- "$invalid_diagnostic_path" | awk '{print $1}')
 jq -n --arg output_root "$invalid_diagnostic_root" --arg comparison_path "$invalid_diagnostic_path" \
 	--arg comparison_sha256 "$invalid_diagnostic_sha256" --argjson analyzer_exit_status 1 --argjson comparison_object_valid true \
-	'{status:"INVALID_AUDIT_EVIDENCE",activation_satisfied:false,holdouts_consumed:false,
+	'{output_root:$output_root,status:"INVALID_AUDIT_EVIDENCE",activation_satisfied:false,holdouts_consumed:false,
 	 analyzer_exit_status:$analyzer_exit_status,comparison_object_valid:$comparison_object_valid,
 	 comparison_path:$comparison_path,comparison_sha256:$comparison_sha256}' \
 	>"$temp_root/invalid-audit-provenance.json"
@@ -234,6 +238,33 @@ fi
 if jq '.comparison_sha256 = ("0" * 64)' "$temp_root/invalid-audit-provenance.json" >"$temp_root/invalid-audit-wrong-hash.json" &&
 	v2_r2_sv1b_require_invalid_audit_diagnostic "$temp_root/invalid-audit-wrong-hash.json" "$invalid_diagnostic_root" 1 true; then
 	echo "invalid-audit diagnostic accepted a mismatched comparison hash" >&2
+	exit 1
+fi
+if jq '.comparison_object_valid = false' "$temp_root/invalid-audit-provenance.json" >"$temp_root/invalid-audit-contradictory-object-flag.json" &&
+	v2_r2_sv1b_require_invalid_audit_diagnostic "$temp_root/invalid-audit-contradictory-object-flag.json" "$invalid_diagnostic_root" 1 false; then
+	echo "invalid-audit diagnostic accepted an object-validity flag contradicted by retained bytes" >&2
+	exit 1
+fi
+printf '%s\n' '{}' '[]' '{}' >"$invalid_diagnostic_path"
+multiple_document_sha256=$(sha256sum -- "$invalid_diagnostic_path" | awk '{print $1}')
+if v2_r2_require_single_json_object "$invalid_diagnostic_path"; then
+	echo "multiple top-level comparison documents were accepted as one object" >&2
+	exit 1
+fi
+jq --arg multiple_document_sha256 "$multiple_document_sha256" \
+	'.analyzer_exit_status = 0 | .comparison_object_valid = false | .comparison_sha256 = $multiple_document_sha256' \
+	"$temp_root/invalid-audit-provenance.json" >"$temp_root/multiple-document-provenance.json"
+v2_r2_sv1b_require_invalid_audit_diagnostic "$temp_root/multiple-document-provenance.json" "$invalid_diagnostic_root" 0 false || {
+	echo "multiple-document invalid-audit diagnostic was not retained as invalid evidence" >&2
+	exit 1
+}
+printf '%s\n' 'not-json' >"$invalid_diagnostic_path"
+malformed_true_sha256=$(sha256sum -- "$invalid_diagnostic_path" | awk '{print $1}')
+if jq --arg malformed_true_sha256 "$malformed_true_sha256" \
+	'.analyzer_exit_status = 1 | .comparison_object_valid = true | .comparison_sha256 = $malformed_true_sha256' \
+	"$temp_root/invalid-audit-provenance.json" >"$temp_root/malformed-object-flag-provenance.json" &&
+	v2_r2_sv1b_require_invalid_audit_diagnostic "$temp_root/malformed-object-flag-provenance.json" "$invalid_diagnostic_root" 1 true; then
+	echo "malformed invalid-audit bytes were accepted with object-validity=true" >&2
 	exit 1
 fi
 printf '%s\n' 'not-json' >"$invalid_diagnostic_path"

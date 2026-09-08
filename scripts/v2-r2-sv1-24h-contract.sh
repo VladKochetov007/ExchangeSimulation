@@ -6,6 +6,14 @@ set -euo pipefail
 
 source "$root_dir/scripts/v2-integrated-longrun-r2-contract.sh"
 
+# jq normally emits one result per top-level JSON document. Contract consumers
+# must reject concatenated documents, because a predicate can otherwise appear
+# to validate only the last value in a malformed stream.
+v2_r2_require_single_json_object() {
+	[[ $# -eq 1 && -s "$1" && ! -L "$1" ]] || return 1
+	jq -s -e 'length == 1 and (.[0] | type == "object")' "$1" >/dev/null
+}
+
 v2_r2_output_root="/home/vlad/v2-r2-sv1-24h-development-20260901-v1"
 v2_r2_attestation_root="/home/vlad/v2-r2-sv1-24h-development-20260901-v1-attestations"
 v2_r2_namespace_lock_path="/home/vlad/v2-r2-sv1-24h-development.lock"
@@ -92,7 +100,7 @@ v2_r2_require_attestation_path() {
 # a raw-event grep so activation and accounting use the same evidence path.
 v2_r2_require_cdf_supplier_activation() {
 	local audit_path=$1 expected_supplier_count=$2
-	[[ -s "$audit_path" ]] || return 1
+	v2_r2_require_single_json_object "$audit_path" || return 1
 	[[ "$expected_supplier_count" =~ ^[1-9][0-9]*$ ]] || return 1
 	if ! jq -e --argjson expected_supplier_count "$expected_supplier_count" --argjson require_no_replacement "$v2_r2_sv1_require_no_replacement_withdrawal" --argjson require_positive_loss_budget "$v2_r2_sv1_require_positive_loss_budget" '
 		type == "object" and (.result | type) == "object" and
@@ -200,7 +208,7 @@ v2_r2_require_cdf_supplier_activation() {
 # cdf_liquidity_activation_observed=false in activation.json.
 v2_r2_require_cdf_supplier_control() {
 	local audit_path=$1
-	[[ -s "$audit_path" ]] || return 1
+	v2_r2_require_single_json_object "$audit_path" || return 1
 	jq -e '
 		type == "object" and (.result | type) == "object" and
 		.result.valid == true and .result.evidence_valid == true and
@@ -219,7 +227,7 @@ v2_r2_require_cdf_supplier_control() {
 
 v2_r2_require_cdf_supplier_comparison() {
 	local comparison_path=$1 expected_supplier_count=$2
-	[[ -s "$comparison_path" ]] || return 1
+	v2_r2_require_single_json_object "$comparison_path" || return 1
 	[[ "$expected_supplier_count" =~ ^[1-9][0-9]*$ ]] || return 1
 	if ! jq -e --argjson expected_supplier_count "$expected_supplier_count" --argjson require_no_replacement "$v2_r2_sv1_require_no_replacement_withdrawal" --argjson require_positive_loss_budget "$v2_r2_sv1_require_positive_loss_budget" '
 		type == "object" and .valid == true and
