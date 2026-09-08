@@ -363,3 +363,28 @@ and updated the registered hashes; the final config checker and clean
 mechanical gates pass at `b11f21a`. This is a scientific protocol/provenance
 repair only. The prior review/build artifacts are not reused; fresh exact-tree
 review and pinned rebuild remain required.
+
+## Append-only feed checkpoint: no new performance commits; invalid-audit boundary repaired — 2026-09-08
+
+The performance branch was fetched with `b1847ac40e8b7483e6e8a3f94b3705b4058884b`
+as the last-reviewed marker. `git log b1847ac..origin/autoresearch/v2-performance-research`
+was empty, so there was no new report or diff to inspect and no performance
+implementation was imported.
+
+The retained seed-643 SV1B activation attempt from `8b3d6c7` produced complete
+raw treatment/control arms but an invalid CDF comparison with 2326 failed
+checks; its initial pair-provenance assembly also failed. The attempt is
+retained as invalid audit evidence only and did not consume capacity,
+development, freeze, or holdout state. The deferred binary-evidence prototype
+and analyzer work on the performance branch remain outside the current
+scientific contract.
+
+Fresh Sol-xhigh review of `24c515f` by Pascal rejected promotion for four
+protocol issues: concatenated JSON acceptance, unbound retained-byte object
+validity, mismatched analyzer GOMAXPROCS during replay, and a vacuous
+canonical-path fixture. Scientific commit `b79c4a3` closes these issues with
+single-object parsing, byte-derived validity, registered analyzer
+GOMAXPROCS, and effective mutations. Clean full tests, vet, and bounded
+targeted race/evidence tests pass at that exact tree. The broad race timeout is
+retained as a harness limitation. One fresh exact-tree review is now required;
+no activation or holdout may proceed until it accepts `b79c4a3`.

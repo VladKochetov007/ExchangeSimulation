@@ -1570,3 +1570,48 @@ and targeted race/evidence gates pass at `b11f21a`. The earlier `07b394b`
 review/build artifacts are not reused; a fresh exact-tree review is required.
 The performance feed remains unchanged after `b1847ac`; no performance code
 was imported and holdouts remain untouched.
+
+## Append-only operational update: invalid-audit provenance repair and review rejection — 2026-09-08
+
+The asynchronous performance feed was fetched through unchanged commit
+`b1847ac40e8b7483e6e8a3f94b3705b4058884b`; no newer commit was present and no
+performance implementation was imported. The VNext binary-evidence work
+remains deferred outside this scientific candidate.
+
+The narrow resource-policy provenance repair at `b7545d4` was independently
+checked by the red-team reviewers, but their review exposed a residual
+activation-boundary defect: the invalid CDF-audit branch moved the analyzer
+output to `cdf-liquidity-comparison.json.invalid` without binding that path,
+hash, status, and validity state into a self-validated pair record. Commit
+`24c515f` added that typed invalid-audit provenance path and replay check.
+
+The retained seed-643 attempt made from exact tree `8b3d6c7` is preserved at
+`/home/vlad/external-scratch/v2-r2-sv1b-activation-643-8b3d6c7eb76225f6f7895dba71edc4f1c20c5e06`.
+Both treatment and control arms completed with producer artifacts and binary
+attestations, but the CDF analyzer emitted invalid evidence (2326 failed
+checks, including observation-frontier/order and ledger-reconciliation
+diagnostics), and the old runner failed to assemble pair provenance because of
+its jq binding error. This is `INVALID_AUDIT_EVIDENCE`, not a valid negative or
+activation result. The raw arms and invalid comparison file remain retained;
+no capacity probe, registered development cell, freeze authorization, or
+holdout was run, and no historical rerun is indicated.
+
+Fresh Sol-xhigh reviewer `Pascal` rejected exact tree `24c515f`. The review
+identified four fail-closed issues: jq accepted multiple top-level documents
+when the final value was an object; `comparison_object_valid` was caller-
+supplied rather than recomputed from retained bytes; replay forced a different
+GOMAXPROCS from the original analyzer invocation; and the canonical-path test
+was vacuous because its fixture did not serialize `output_root`.
+
+Commit `b79c4a3` repairs those issues. Contract consumers now require exactly
+one top-level JSON object, the invalid-audit diagnostic recomputes and binds
+object validity from the retained bytes, the runner and replay use the
+registered analyzer GOMAXPROCS, and the regressions cover multi-document,
+contradictory-flag, malformed-flag, hash, status, and canonical-path cases.
+On clean exact tree `b79c4a3`, the focused activation contract, clean
+`GOMAXPROCS=2 make test`, `go vet ./...`, and the bounded targeted race matrix
+passed. The broader two-core race run reached its 30-minute timeout in the
+pre-existing process-helper determinism test without a race report; this is a
+test-duration limitation, not a broad race pass. A fresh exact-tree independent
+Sol-xhigh review is required before rebuilding binaries or retrying seed 643.
+Holdouts `619`, `631`, and `641` remain untouched.

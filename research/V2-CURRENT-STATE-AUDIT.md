@@ -1415,3 +1415,50 @@ provenance-pinned Go 1.27 build. The activation boundary remains explicit:
 run only the paired seed-643 activation probe after the clean build, then
 review its evidence before any capacity or registered development cell.
 Holdouts `619`, `631`, and `641` remain untouched.
+
+## Append-only operational update: SV1B invalid-audit provenance boundary repaired — 2026-09-08
+
+At the current scientific branch, the performance red-team feed was fetched
+through `b1847ac40e8b7483e6e8a3f94b3705b4058884b`; it has no newer commit. No
+performance code or unrelated optimization was merged. The historical R2
+calendar, CDF economics, correctness hardening, and binary evidence contract
+remain unchanged.
+
+The earlier SV1B seed-643 world attempt rooted at
+`/home/vlad/external-scratch/v2-r2-sv1b-activation-643-8b3d6c7eb76225f6f7895dba71edc4f1c20c5e06`
+is retained in full. Its two producer arms completed, but the CDF analyzer
+comparison was invalid with 2326 checks and the pre-existing runner could not
+publish a valid pair provenance record. It therefore cannot support a
+negative-control, activation, capacity, or development claim. No historical
+experiment was activated by this attempt, so no simulator trajectory rerun is
+required; the raw evidence is not deleted or rewritten.
+
+Reviewers Sagan and Locke accepted the narrow `b7545d4` resource-policy
+binding repair but found that the invalid-audit provenance branch still lacked
+self-validation. Commit `24c515f` added the retained invalid path/hash/status
+fields and exact analyzer replay. Fresh Sol-xhigh reviewer Pascal then rejected
+that exact tree because jq could accept a concatenated JSON stream ending in an
+object, the object-validity flag was not derived from retained bytes, replay
+used a different GOMAXPROCS from the original analyzer call, and the
+canonical-path regression omitted its `output_root` field.
+
+Scientific commit `b79c4a3` is the minimal protocol repair: a shared contract
+helper rejects anything other than one complete top-level JSON object; all CDF
+audit/comparison predicates use it; invalid-audit provenance recomputes
+`comparison_object_valid` from the exact retained file before accepting the
+flag; the analyzer call is explicitly bound to the registered GOMAXPROCS; and
+the activation contract adds effective regressions for multi-document,
+contradictory-validity, malformed-validity, status, hash, and canonical-path
+mutations. This changes no economic mechanism or evidence from the retained
+attempt.
+
+Verification at `b79c4a3`: clean `GOMAXPROCS=2 make test`, `go vet ./...`, the
+focused activation/syntax/diff checks, and targeted `-race` coverage for
+`analysis`, `cmd/mvanalyze`, `cmd/prunegate`, `tests`, and the multivenue
+evidence subset all pass. The broader two-core multivenue race invocation was
+allowed 30 minutes and timed out in an existing process-helper determinism
+test with no race report; it remains an explicit bounded limitation. The next
+promotion gate is one fresh exact-tree independent Sol-xhigh review of
+`b79c4a3`, followed only if accepted by a clean pinned rebuild and a fresh
+paired seed-643 activation probe. No capacity, dev-607, freeze, or holdout
+world has run; holdouts `619`, `631`, and `641` remain untouched.
