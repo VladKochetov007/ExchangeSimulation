@@ -3350,3 +3350,70 @@ ratio of values, not headcounts, and is unaffected.
 **Scope.** Three seeds, one configuration, terminal snapshots. A transient mid-run
 approach would not appear, though a 335x terminal margin makes one implausible; a
 time-resolved check is the obvious extension.
+
+## RT-058 — The dated futures never converge, and that is the design's own test
+
+**Classification.** REAL. A deliberately-built experiment with a decisive negative
+result. The exposure it creates is latent rather than realized.
+
+**Base.** `a666d02faede3d40f046b11e60eb672c59386a94`, seed 607, 8 h, full logs.
+
+**Measured** (`research/tools/futbasis`), basis against the median-of-venues
+`ABC/USD` by hours to expiry:
+
+| band | samples | median (signed) | mean \|basis\| | max \|basis\| |
+|---|---:|---:|---:|---:|
+| **<0.5 h to expiry** | 21 597 | **+27.380%** | **43.079%** | **99.506%** |
+| 0.5–1 h | 21 600 | +19.919% | 35.145% | 89.365% |
+| 1–2 h | 43 025 | +9.827% | 22.579% | 79.281% |
+| 2–4 h | 21 600 | +43.834% | 43.457% | 59.071% |
+| ≥4 h | 43 028 | +13.698% | 13.399% | 30.998% |
+
+The registered falsifier required a median under 2% in the final half hour; the
+measurement is **27.4% signed, 43.1% mean absolute**. The basis never approaches
+zero in any band, and across the three bands nearest expiry it **rises** — 9.8%,
+19.9%, 27.4%.
+
+**Verified on raw prices.** At the expiry instant of `ABC-FUT-1735711201`: futures
+bid **9 814 120 000** / ask **9 820 060 000** against a spot mid of
+**4 929 505 000** — **1.99x its underlying** as it settles. Same base and quote
+precisions as spot with no multiplier (`instrument/listing.go:95`), so this is a
+price level, not a unit artifact.
+
+**It is deliberate, and it is the design's own question that fails.**
+`futmm.go:21`, with `futures_maker_self_anchored: true` in the config:
+
+```go
+// SelfAnchored quotes each future around its own last trade (bootstrapped
+// at spot on listing) instead of pegging to the spot mid. This lets the
+// futures price wander on its own flow, so any basis convergence must
+// come from arbitrage rather than from the quoting rule.
+```
+
+The quoting tether was removed on purpose, to test whether arbitrage enforces
+convergence. **The answer is no**: the basis grows to twice the underlying. Not an
+undocumented defect — a designed experiment with a clear negative result.
+
+**Settlement reads the underlying, so the exposure is real.**
+`exchange/expiry.go:326` feeds the settlement observer `underlyingPrice`, and the
+observer's contract states the price arrives "by the contract's declared
+underlying-reference path; it is never a trade, book-mid, or numeric-zero
+fallback". A position carried into expiry settles roughly **50% away from where
+the book last traded it**.
+
+**But it is latent, and that was measured rather than assumed.** Realized PnL at
+the expiry instants totals **51 USD across 6 events over all five contracts**.
+Almost nobody carries a futures position into settlement, so the mispricing
+transfers nothing today. It is an exposure the population happens not to take.
+
+**Third instrument, third failed tether.** RT-031: the cross book self-references
+by accident. RT-043/RT-044: the perpetual's tether saturates. RT-058: the future
+is self-anchored on purpose and arbitrage fails to converge it. Only `ABC/USD`
+holds, and RT-032 showed that is a configured peg. **Every instrument in this
+campaign is either pinned by configuration or has no working anchor at all.**
+
+**Scope.** One seed, one configuration. Basis uses top-of-book mids against a
+consensus spot at or before each snapshot. At-expiry realized PnL counts events
+within 2 s of the expiry timestamp; a settlement booked outside that window would
+be missed, though the near-zero total across five contracts makes a large missed
+transfer unlikely.

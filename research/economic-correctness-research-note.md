@@ -6207,6 +6207,132 @@ obvious extension if anyone doubts it.
 Recorded as RT-057.
 
 
+**H-069 (PREREGISTERED) — the dated futures converge to spot at expiry, or they
+do not, and unlike a perpetual there is no soft-tether excuse.**
+
+**New family.** The `ABC-FUT-*` books have never been examined. [[RT-045]] showed
+`futures_maker` earning **+7.06 M entirely outside any spot order book**, and
+`bookspread` measured these books at a healthy 0.0–0.1% half-spread — so unlike
+the options they are liquid and two-sided. What has never been checked is the one
+property a dated contract must have.
+
+**Why this is a harder requirement than the perpetual's.** [[RT-043]] and
+[[RT-044]] found the perp's tether — funding and the mark clamp — saturating, and
+a perpetual has no terminal date to force the issue. **A dated future does.** At
+expiry it settles against the underlying, so its price *must* converge or the
+settlement transfers value that the market never priced. Convergence is not a
+modelling preference; it is arithmetic on the settlement.
+
+**Metric.** Basis = `(futures mid − consensus spot) / consensus spot`, with spot
+rebuilt as the median `ABC/USD` mid across venues, evaluated at each snapshot and
+bucketed by **hours remaining to expiry** — the same tenor axis that worked for
+the option dealer in [[RT-054]].
+
+**Claims.**
+1. **Convergence**: median |basis| in the final **0.5 h** before expiry is
+   **< 0.5%**.
+2. **Monotonicity**: median |basis| decreases as expiry approaches, across at
+   least three tenor bands.
+3. The basis at long tenor is materially larger than at short tenor — i.e. there
+   is a real basis to converge *from*, so the test is not vacuous.
+
+**Falsifiers.**
+(a) median |basis| in the final 0.5 h is **≥2%** → the futures do **not**
+converge, and settlement transfers value the book never priced. Given
+[[RT-031]]'s cross book at −69% and [[RT-044]]'s perp at −29%, this is a live
+possibility, not a formality;
+(b) |basis| is **flat** across tenor → the contract is priced without reference to
+time at all;
+(c) |basis| is **near zero everywhere** → claim 3 fails, the futures track spot
+exactly, and there is nothing to converge from — a clean negative result, and the
+one outcome that would say this instrument is well behaved.
+
+**Cheap and decisive.** Five expiries at +2, +4, +6, +8 and +12 h means three
+contracts actually expire inside an 8 h run, giving three independent convergence
+events in one run.
+
+**Instrument.** New Go tool `research/tools/futbasis`: per futures book, basis
+against contemporaneous consensus spot, bucketed by hours to expiry, with counts.
+
+**Discriminating experiment E-074**, preregistered before the run: seed 607, 8 h,
+`-log-mode full`.
+Status: **FALSIFIED WITHIN TESTED SCOPE** — no convergence; falsifier (a) fires
+at 27.4% against a 2% threshold.
+
+
+**E-074 — H-069's convergence claim FALSIFIED. The dated futures never converge:
+median basis is **+27.4%** in the final half hour and **+99.15%** at the expiry
+instant. The design intends arbitrage to close it; arbitrage does not.**
+Base: `a666d02faede3d40f046b11e60eb672c59386a94`, seed 607, 8 h, `-log-mode full`.
+Reproduce: `go run research/tools/futbasis/main.go -dir <logdir>`.
+
+Basis against the median-of-venues `ABC/USD`, by hours to expiry:
+
+| band | samples | median (signed) | mean \|basis\| | p90 \|basis\| | max \|basis\| |
+|---|---:|---:|---:|---:|---:|
+| **<0.5 h to expiry** | 21 597 | **+27.380%** | **43.079%** | 95.019% | **99.506%** |
+| 0.5–1 h | 21 600 | +19.919% | 35.145% | 85.223% | 89.365% |
+| 1–2 h | 43 025 | +9.827% | 22.579% | 70.044% | 79.281% |
+| 2–4 h | 21 600 | +43.834% | 43.457% | 54.900% | 59.071% |
+| ≥4 h | 43 028 | +13.698% | 13.399% | 24.615% | 30.998% |
+
+**Falsifier (a) fires by more than an order of magnitude.** It required a median
+|basis| under 2% in the final half hour to pass; the measurement is **27.4%
+signed, 43.1% mean absolute**. Claim 1 is dead. Claim 2 — monotone convergence —
+is dead too: the profile never approaches zero in any band, and across the three
+bands nearest expiry it **rises**, 9.8% → 19.9% → 27.4%.
+
+**Verified on raw prices, not just the tool.** At the expiry instant of
+`ABC-FUT-1735711201`: futures bid **9 814 120 000** / ask **9 820 060 000**
+against a spot mid of **4 929 505 000** — the contract trades at **1.99× its
+underlying** as it settles. Same precisions, no multiplier
+(`instrument/listing.go:95` takes the spec's own base and quote precision), so
+this is a level, not a unit artifact.
+
+**This is a deliberate design, and it is the design's own question that fails.**
+`futmm.go:21` documents the flag the config enables
+(`futures_maker_self_anchored: true`):
+
+    // SelfAnchored quotes each future around its own last trade (bootstrapped
+    // at spot on listing) instead of pegging to the spot mid. This lets the
+    // futures price wander on its own flow, so any basis convergence must
+    // come from arbitrage rather than from the quoting rule.
+
+So the campaign deliberately removed the quoting tether **to test whether
+arbitrage enforces convergence**. **The measured answer is no** — the basis does
+not converge, it grows to 2×. That is not an undocumented defect; it is a
+designed experiment with a decisive negative result, which is more useful.
+
+**Settlement reads the underlying, so the exposure is real — but it is latent.**
+`exchange/expiry.go:326` feeds the settlement observer `underlyingPrice`, and the
+observer's contract says the price comes "by the contract's declared
+underlying-reference path; it is never a trade, book-mid, or numeric-zero
+fallback". A position carried into expiry would therefore settle roughly **50%
+away from where the book last traded it**.
+
+**Measured, rather than asserted:** realized PnL at the expiry instants totals
+**51 USD across 6 events over all five contracts**. **Almost nobody carries a
+futures position into settlement**, so the mispricing does not currently transfer
+value. The defect is an exposure the population happens not to take, not a loss it
+suffers.
+
+**Third instrument, third failed tether, and the pattern is now complete.**
+[[RT-031]] — the cross book self-references by accident (`ReferenceSymbol` equals
+its own symbol). [[RT-043]]/[[RT-044]] — the perp's tether saturates, mark pinned
+on its clamp while the book runs to −29%. **RT-058 — the future is self-anchored
+on purpose and arbitrage fails to converge it.** Only `ABC/USD` holds, and
+[[RT-032]] showed that is a configured peg. **Every instrument in this campaign
+either is pinned by configuration or has no working anchor at all.**
+
+**Scope.** One seed, one configuration. Basis uses top-of-book mids against a
+consensus spot at or before each snapshot. The at-expiry realized figure counts
+events within 2 s of the expiry timestamp; a settlement booked outside that window
+would be missed, though the near-zero total across five contracts makes a large
+missed transfer unlikely.
+
+Recorded as RT-058.
+
+
 ---
 
 ## F. Findings
@@ -6223,6 +6349,17 @@ See `research/red-team-findings.md` for the full records.
 - **RT-003** — bounded no-violation results (INV-2, INV-5, INV-6, identity).
 - **RT-006** — latency is delivered as configured across 225 link x channel
   rows; no unearned speed advantage. Transport only.
+- **RT-058** — **the dated futures never converge.** Median basis is **+27.4%** in
+  the final half hour to expiry and **+99.15%** at the expiry instant (futures mid
+  9 814 120 000 against a spot of 4 929 505 000 — **1.99x its underlying**), with
+  no band approaching zero. This is **deliberate**: `futures_maker_self_anchored`
+  removes the quoting tether so that "any basis convergence must come from
+  arbitrage" — and the measured answer is that **arbitrage does not converge it**.
+  Settlement reads the underlying (`expiry.go:326`), so a carried position would
+  settle ~50% from the book, but realized PnL at the expiry instants is **51 USD
+  over 6 events**: the exposure is **latent, not realized**. Third instrument with
+  no working tether after [[RT-031]] and [[RT-044]] — **every instrument here is
+  either pinned by configuration or unanchored**.
 - **RT-057** — **the liquidation subsystem is NOT EXERCISED.** Across three seeds
   the closest any of 258 accounts comes to liquidation is **335x the threshold**
   (median 16 000x+), **54% carry zero maintenance margin at all**, and the
