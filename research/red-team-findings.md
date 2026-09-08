@@ -2612,3 +2612,67 @@ the payload and name the book **by file path**, while the shared
 
 **Scope.** One seed, one configuration, 8 h. The three venues share an index and a
 population, so they are not independent replicates.
+
+## RT-045 — Retracts RT-044's liquidation claim; the clamp redistributes instead
+
+**Classification.** RETRACTION plus a larger replacement finding. The measured
+facts of RT-044 stand; the consequence I inferred from them does not.
+
+**Base.** `a666d02faede3d40f046b11e60eb672c59386a94`, seed 607, 8 h, full logs.
+
+**The retraction.** RT-044 asserted that "a liquidation engine reading this mark
+does not fire when it should" and that "every margin figure is optimistic". Tested
+directly by revaluing every terminal perp position at the book midpoint:
+
+    solvent at mark, insolvent at book: 0 accounts
+
+and the run logs **0 liquidation events** in total, against 51 accounts holding
+`ABC-PERP` and 4 363.03 contracts long versus 4 363.03 short. **No account is
+hidden-insolvent.** The perp participants are heavily over-collateralised —
+`carry_arb` holds 100 M USD of perp collateral against 3 000 contracts whose book
+loss is about 38 M. The engine is not failing to fire; there is nothing to fire
+on. RT-044's measurements (mark pinned exactly on the clamp, book 17–29% away)
+are unaffected.
+
+**What the test found instead.** Revaluing perp positions at the book midpoint
+moves reported value between classes:
+
+| class | net contracts | reported above book |
+|---|---:|---:|
+| carry_arb | +3 000.00 | **+38 206 022** |
+| fixed_distance_maker | +591.47 | +7 532 466 |
+| imbalance_maker | +208.62 | +2 657 346 |
+| perp_maker | +124.67 | +1 602 173 |
+| noise_flow | −249.12 | −3 179 918 |
+| spot_maker | −3 675.64 | **−46 818 089** |
+
+The column sums to zero to the unit — a pure transfer, which is the internal
+check that the arithmetic is sound.
+
+**This inverts two of RT-033's published rankings**, which were computed at marks:
+
+| class | at mark | at book | rank change |
+|---|---:|---:|---|
+| spot_maker | −6 817 441 | **+40 000 648** | 2nd-largest donor → 2nd-largest winner |
+| carry_arb | −2 423 266 | **−40 629 288** | 4th donor → 2nd-largest donor |
+
+A sign flip and a 16x change. The concentration result is untouched:
+`triangle_arb` holds no perp position, so its +174 M stands either way.
+
+**Owner decision, not mine.** The mark is the exchange's official valuation and
+the one margin consumes; the book midpoint is closer to realisable value, though
+closing 3 675 contracts would move a book that thin. Neither is unambiguously
+correct. What is not ambiguous is that they diverge by ~50 M **because the clamp
+is binding**, and that a performance ranking which does not state its valuation
+basis is under-specified.
+
+**Scope.** One seed, terminal snapshot only. The revaluation uses one midpoint per
+venue and ignores the depth that closing these positions would consume, so it is
+an upper bound on realisable value rather than an estimate of it.
+
+**Process note.** This is the fourth asserted consequence in this campaign to fail
+its own test, after the latency-ordering pattern (RT-038), the funding count
+prediction (RT-042) and the level-uncertainty falsifier (RT-036). The pattern is
+consistent: measurements survive, and the sentences I write *around* them are
+where the errors are. Consequences now get tested before they are published, not
+after.

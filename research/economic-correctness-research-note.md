@@ -4647,6 +4647,125 @@ the same index and the same population, so they are not independent replicates.
 Recorded as RT-044.
 
 
+**H-056 (PREREGISTERED) — [[RT-044]]'s asserted consequence, tested rather than
+asserted: accounts are solvent at the clamped mark and insolvent at the book.**
+
+RT-044 measured the perp mark pinned at −3% while the book sits 17–29% lower, and
+**asserted** that "a liquidation engine reading this mark does not fire when it
+should". That is an inference, not a measurement, and it is the kind of claim
+this campaign has repeatedly caught itself publishing unverified. This tests it.
+
+**Method.** For every terminal account, recompute the perp position's unrealised
+PnL at the **terminal book midpoint** instead of the mark:
+
+    equity_at_book = equity − unrealized_at_mark + (book_mid − entry) × size / precision
+
+then compare the sign of `equity` against `equity_at_book`. An account that is
+non-negative at the mark and negative at the book is **hidden insolvency**: the
+risk engine believes it is solvent, and the order book says it cannot be closed
+out at that value.
+
+**Claims.**
+1. At least one account is non-negative at the mark and **negative** at the book.
+2. Liquidations attributable to `ABC-PERP` are few relative to a 29% adverse
+   move — the engine does not react to a dislocation of that size.
+
+**Falsifiers, and claim 1 is genuinely at risk.**
+(a) **zero accounts flip sign** → no hidden insolvency, H-056 falsified, and
+RT-044's consequence must be **retracted as overstated**. This is a live
+possibility: perp makers are endowed with 100 M USD of perp collateral, so
+positions may be small enough relative to margin that a 29% gap threatens no
+one. If so the finding is that the mark gap is real but economically inert here,
+which is worth publishing as a limit on RT-044.
+(b) many `ABC-PERP` liquidations already fired → some path uses the book price
+rather than the mark, contradicting RT-044's mechanism.
+(c) accounts hold no material perp position at all → the test is **NOT
+EXERCISED** and neither claim is scored.
+
+**Instrument.** New Go tool `research/tools/marksolvency` (the repo's rule is that
+data processing lives in Go). Inputs: `greeks.json` and a book midpoint per
+venue; output: per-account equity at mark vs at book, the count that flip sign,
+and the aggregate shortfall.
+
+**Discriminating experiment E-061**, preregistered before the run: seed 607, 8 h,
+`-log-mode full`; take the terminal `ABC-PERP` midpoint per venue from
+`BookSnapshot` evidence, recompute, and report.
+Status: **FALSIFIED WITHIN TESTED SCOPE** — zero accounts flip sign; RT-044's
+liquidation consequence is retracted.
+
+
+**E-061 — H-056 FALSIFIED. No account is hidden-insolvent, so [[RT-044]]'s
+liquidation claim is RETRACTED. What replaces it is larger: the clamp moves
+±50 M of reported value between classes and inverts two of [[RT-033]]'s
+rankings.**
+Base: `a666d02faede3d40f046b11e60eb672c59386a94`, seed 607, 8 h, `-log-mode full`.
+Reproduce: `go run research/tools/marksolvency/main.go -file <logdir>/greeks.json -book-mids central=3507230000,north=3511885000,south=3504895000`.
+
+**Falsifier (a) fires. Claim 1 is false.**
+
+    solvent at mark, insolvent at book: 0 accounts
+
+and the run logs **0 liquidation events** in total. `ABC-PERP` terminal exposure
+is 51 accounts, 4 363.03 long against 4 363.03 short.
+
+**RT-044's asserted consequence is retracted.** I wrote that "a liquidation engine
+reading this mark does not fire when it should" and that "every margin figure is
+optimistic". The first half is **not supported**: nobody is close enough to
+insolvency for the mark gap to matter, because the perp participants are heavily
+over-collateralised — `carry_arb` carries 100 M USD of perp collateral against
+3 000 contracts whose book loss is ~38 M. The engine is not failing to fire; **there
+is nothing to fire on.** The measured facts of RT-044 (mark pinned exactly on the
+clamp, book 17–29% away) are unaffected; the inference I hung on them was wrong,
+and this is the fourth time in this campaign that an asserted consequence has
+failed its own test.
+
+**What the test found instead — the mark clamp redistributes reported value.**
+Revaluing every perp position at the book midpoint:
+
+| class | net contracts | reported above book |
+|---|---:|---:|
+| carry_arb | +3 000.00 | **+38 206 022** |
+| fixed_distance_maker | +591.47 | +7 532 466 |
+| imbalance_maker | +208.62 | +2 657 346 |
+| perp_maker | +124.67 | +1 602 173 |
+| noise_flow | −249.12 | −3 179 918 |
+| spot_maker | −3 675.64 | **−46 818 089** |
+
+The column sums to zero to the unit — it is a pure transfer, which is the
+internal check that the revaluation is arithmetically sound.
+
+**This inverts two of RT-033's published rankings.** Those figures were computed
+at marks. At book midpoints:
+
+| class | RT-033 (at mark) | at book | rank change |
+|---|---:|---:|---|
+| spot_maker | −6 817 441 | **+40 000 648** | 2nd-largest donor → **2nd-largest winner** |
+| carry_arb | −2 423 266 | **−40 629 288** | 4th donor → **2nd-largest donor** |
+
+A 16× change for `carry_arb` and a sign flip for `spot_maker`. The concentration
+result is untouched — `triangle_arb` holds no perp position and its +174 M is
+unchanged — but **any statement about the relative performance of
+perp-holding classes depends on which valuation is used**, and the two answers
+disagree by tens of millions.
+
+**This is an owner decision and I am not making it.** The mark is the exchange's
+official valuation and the one margin actually consumes; the book midpoint is
+closer to what could be realised, though liquidating 3 675 contracts would itself
+move a book that thin. Neither is unambiguously correct. What is not ambiguous:
+the two diverge by ~50 M **because the clamp is binding**, and a ranking that
+does not say which basis it used is under-specified.
+
+**Falsifier (c) does not apply** — 51 accounts hold material positions, so the
+test was genuinely exercised rather than vacuous.
+
+**Scope.** One seed, one configuration, terminal snapshot only. The revaluation
+uses a single terminal midpoint per venue and takes no account of the depth that
+would be consumed closing these positions, so it is an upper bound on realisable
+value, not an estimate of it.
+
+Recorded as RT-045.
+
+
 ---
 
 ## F. Findings
@@ -4663,6 +4782,15 @@ See `research/red-team-findings.md` for the full records.
 - **RT-003** — bounded no-violation results (INV-2, INV-5, INV-6, identity).
 - **RT-006** — latency is delivered as configured across 225 link x channel
   rows; no unearned speed advantage. Transport only.
+- **RT-045** — **retracts [[RT-044]]'s liquidation claim**: zero accounts are
+  solvent at the mark and insolvent at the book, and the run logs **0
+  liquidations**, because perp participants are heavily over-collateralised. The
+  measured mark gap stands; the inference did not. What replaces it is larger:
+  revaluing perp positions at the book moves **±50 M of reported value between
+  classes** (`carry_arb` +38.2 M above book, `spot_maker` −46.8 M below), which
+  **inverts two of [[RT-033]]'s rankings** — `spot_maker` −6.8 M → **+40.0 M**,
+  `carry_arb` −2.4 M → **−40.6 M**. Mark-versus-book valuation is an owner
+  decision; a ranking that does not state its basis is under-specified.
 - **RT-044** — the perp **mark is pinned exactly on its ±3% clamp while the book
   is 17-29% away**. At h=8 the mark is 4 781 619 850 and the spot mid
   4 929 505 000, whose 97% is 4 781 619 850 to the unit; **32.5% of samples lie
