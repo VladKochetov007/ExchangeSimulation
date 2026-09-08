@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "contract": "v2-r2-sv1c-24h-config-provenance-v2",
+  "contract": "v2-r2-sv1c-24h-config-provenance-v3",
   "candidate": "V2-R2-SV1C-24H-CDF-LIQUIDITY-STRICT-RISK",
   "predecessor": "V2-R2-SV1B-24H-CDF-LIQUIDITY",
   "source_configs": {
@@ -44,11 +44,11 @@
   },
   "generator": {
     "path": "scripts/render-v2-r2-sv1c-24h-configs.sh",
-    "sha256": "a041af18085f09d387ce69399ad56262641d3d80506223295a0b62b66b294898"
+    "sha256": "af6b546d4490a85ed60a099e4169c517b9a25ca0d2d0dfd3304ba337d5d4b72d"
   },
   "contract_definition": {
     "path": "scripts/v2-r2-sv1c-24h-contract.sh",
-    "sha256": "a9cc5aa6a9b6b68b19e4315ea362d3ef6a4f6119ff97169da18c895cc4933179"
+    "sha256": "24f720dfcd38db8d562bc216a206582b1e4d494caa3b9860dbed0b4e73b4e316"
   },
   "contract_loader": {
     "path": "scripts/v2-r2-sv1-contract-loader.sh",

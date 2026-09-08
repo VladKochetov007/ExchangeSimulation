@@ -246,7 +246,7 @@ jq -n \
 	--argjson capacity_cases "$capacity_cases" \
 	--argjson authorized_launch_config_hashes "$authorized_launch_config_hashes" \
 	'{schema_version: 1,
-		 contract: "v2-r2-sv1c-24h-config-provenance-v2",
+		 contract: "v2-r2-sv1c-24h-config-provenance-v3",
 	 candidate: $candidate,
 	 predecessor: "V2-R2-SV1B-24H-CDF-LIQUIDITY",
 	 source_configs: {"dev-607.json": $source_hash, "dev-607-none.json": $no_log_source_hash},
