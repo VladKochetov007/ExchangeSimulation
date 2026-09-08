@@ -134,3 +134,22 @@ roster or reopening the R2 predecessor.
 
 No step in this document authorizes a holdout run, a predecessor rerun, an
 offline trajectory repair, or deletion of retained evidence.
+
+## Superseding execution-order amendment — 2026-09-08
+
+The earlier list above is retained as the original preregistration record, but
+its execution order is superseded for SV1C by
+`v2-r2-sv1c-activation-capacity-order-amendment-v2-2026-09-08.md`. The
+executable and registered order is:
+
+1. exact-tree validation and independent review;
+2. pinned Go 1.27 builds;
+3. short seed-643 activation probe;
+4. independent activation-evidence review;
+5. seed-659 capacity calibration;
+6. development cells and parity controls.
+
+This activation-first order is chosen because activation is the cheaper
+semantic/liveness gate and capacity is calibration evidence, not authorization
+of an unactivated mechanism. The old capacity-first amendment remains an
+immutable historical rejected protocol and is not used by the SV1C contract.

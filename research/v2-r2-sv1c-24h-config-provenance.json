@@ -48,7 +48,7 @@
   },
   "contract_definition": {
     "path": "scripts/v2-r2-sv1c-24h-contract.sh",
-    "sha256": "220ed0545fb6015e3ecd0a1c6c70a6016f2f4dc0264c216709f53d1d1271754f"
+    "sha256": "31f2851a9f7cfcc6d4615ee6f517d36157ea18877bf1b5bced850bfb740b6d6a"
   },
   "contract_loader": {
     "path": "scripts/v2-r2-sv1-contract-loader.sh",
@@ -89,11 +89,11 @@
   },
   "preregistration": {
     "path": "research/v2-r2-sv1c-strict-risk-amendment-2026-09-08.md",
-    "sha256": "988e224aa1e2d0ae8459b81eff47b0635350fc511ed4088a130bd70e1d715869"
+    "sha256": "1d6fac0a453f41992e7e44b7335c4c2c0811887949b9667d8acb76d3468b3379"
   },
   "capacity_ordering": {
-    "path": "research/v2-r2-sv1c-activation-capacity-order-amendment-2026-09-08.md",
-    "sha256": "244faa31239440b9f3baf0ae87a298acc9e2ba63e69a3d072c6be1317bccc1ee"
+    "path": "research/v2-r2-sv1c-activation-capacity-order-amendment-v2-2026-09-08.md",
+    "sha256": "0f243310c811880a4478bee1323282033f69e5ca5ff165017af5294562f63c50"
   },
   "capacity_calibration": {
     "contract": "v2-r2-sv1c-24h-binary-capacity-v1",
