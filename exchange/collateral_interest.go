@@ -241,7 +241,7 @@ func (e *DefaultExchange) collateralInterestLastTimestamp(clientID uint64, asset
 // for a debt whose sub-unit interest cannot be posted. The fraction is written
 // off rather than attached to an unrelated future loan, and the event makes
 // that loss visible to a replay auditor.
-func (e *DefaultExchange) closeCollateralInterestRemainderLocked(clientID uint64, asset string, timestamp int64, reason string) {
+func (e *DefaultExchange) closeCollateralInterestRemainderLocked(clientID uint64, asset string, timestamp int64, reason string, debtBefore, debtAfter int64) {
 	clientRemainders := e.collateralInterestRemainders[clientID]
 	if clientRemainders == nil {
 		return
@@ -258,7 +258,8 @@ func (e *DefaultExchange) closeCollateralInterestRemainderLocked(clientID uint64
 		log.LogEvent(timestamp, clientID, "margin_interest_remainder_closed", MarginInterestRemainderClosedEvent{
 			Timestamp: timestamp, ClientID: clientID, Asset: asset,
 			RemainderBefore: remainder, RemainderAfter: 0,
-			Denominator: collateralInterestDenominator, Reason: reason,
+			Denominator: collateralInterestDenominator, DebtBefore: debtBefore, DebtAfter: debtAfter,
+			Reason: reason,
 		})
 	}
 }

@@ -626,12 +626,29 @@ func (e *DefaultExchange) EnableBorrowing(config BorrowingConfig) error {
 	if config.Enabled && config.PriceSource == nil {
 		return errors.New("price source required")
 	}
+	if err := validateBorrowingConfig(config); err != nil {
+		return err
+	}
 
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	if e.BorrowingMgr != nil && hasOutstandingBorrowingDebtLocked(e.Clients) {
+		return errors.New("cannot replace borrowing configuration while debt is outstanding")
+	}
 
 	e.BorrowingMgr = NewBorrowingManager(config)
 	return nil
+}
+
+func hasOutstandingBorrowingDebtLocked(clients map[uint64]*Client) bool {
+	for _, client := range clients {
+		for _, debt := range client.Borrowed {
+			if debt > 0 {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (e *DefaultExchange) AddInstrument(instrument Instrument) {
@@ -2220,6 +2237,7 @@ func (e *DefaultExchange) liquidate(clientID uint64, client *Client, symbol stri
 		if borrowed > 0 {
 			availableForRepay := client.PerpAvailable(inst.QuoteAsset())
 			if availableForRepay > 0 {
+				debtBefore := borrowed
 				repayAmount := min(borrowed, availableForRepay)
 
 				oldBorrowed := client.Borrowed[inst.QuoteAsset()]
@@ -2229,8 +2247,9 @@ func (e *DefaultExchange) liquidate(clientID uint64, client *Client, symbol stri
 					client.BorrowedSpot[inst.QuoteAsset()],
 					client.Borrowed[inst.QuoteAsset()],
 				)
-				if client.Borrowed[inst.QuoteAsset()] <= 0 {
-					e.closeCollateralInterestRemainderLocked(clientID, inst.QuoteAsset(), timestamp, "liquidation")
+				debtAfter := client.Borrowed[inst.QuoteAsset()]
+				if debtAfter <= 0 {
+					e.closeCollateralInterestRemainderLocked(clientID, inst.QuoteAsset(), timestamp, "liquidation", debtBefore, debtAfter)
 				}
 				client.PerpBalances[inst.QuoteAsset()] -= repayAmount
 
@@ -2246,7 +2265,8 @@ func (e *DefaultExchange) liquidate(clientID uint64, client *Client, symbol stri
 						Asset:         inst.QuoteAsset(),
 						Principal:     repayAmount,
 						Interest:      0,
-						RemainingDebt: client.Borrowed[inst.QuoteAsset()],
+						RemainingDebt: debtAfter,
+						Reason:        "liquidation",
 					})
 				}
 			}
@@ -2480,10 +2500,14 @@ func (e *DefaultExchange) RepayMargin(clientID uint64, asset string, amount int6
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	client := e.Clients[clientID]
+	debtBefore := int64(0)
+	if client != nil {
+		debtBefore = client.Borrowed[asset]
+	}
 	ctx := buildBorrowContext(e, client, clientID)
 	err := e.BorrowingMgr.RepayMargin(ctx, asset, amount)
 	if err == nil && client != nil && client.Borrowed[asset] <= 0 {
-		e.closeCollateralInterestRemainderLocked(clientID, asset, ctx.Timestamp, "debt_repaid")
+		e.closeCollateralInterestRemainderLocked(clientID, asset, ctx.Timestamp, "debt_repaid", debtBefore, client.Borrowed[asset])
 	}
 	return err
 }

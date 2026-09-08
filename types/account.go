@@ -81,7 +81,10 @@ type MarkedAccountSnapshot struct {
 	AccountSnapshot
 	// MarginInterestRemainders exposes sub-unit financing state at the same
 	// strict valuation boundary as the account. A missing entry means zero.
-	MarginInterestRemainders map[string]int64 `json:"margin_interest_remainders,omitempty"`
+	// The field is always serialized, including an empty map. A strict
+	// terminal audit must distinguish a measured zero remainder from an omitted
+	// financing state.
+	MarginInterestRemainders map[string]int64 `json:"margin_interest_remainders"`
 	ReportAsset              string           `json:"report_asset"`
 	ReportPrecision          int64            `json:"report_precision"`
 	SpotEquity               int64            `json:"spot_equity"`

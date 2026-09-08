@@ -67,6 +67,8 @@ type MarginInterestRemainderClosedEvent struct {
 	RemainderBefore int64  `json:"remainder_before"`
 	RemainderAfter  int64  `json:"remainder_after"`
 	Denominator     int64  `json:"denominator"`
+	DebtBefore      int64  `json:"debt_before"`
+	DebtAfter       int64  `json:"debt_after"`
 	Reason          string `json:"reason"`
 }
 

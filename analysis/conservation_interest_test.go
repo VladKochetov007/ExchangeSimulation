@@ -13,6 +13,100 @@ func marginInterestAccrualLine(timestamp, clientID, principal, rate, interest, s
 	})
 }
 
+func marginInterestBorrowLine(timestamp, clientID, amount, rate, collateral int64) string {
+	return logLine(timestamp, uint64(clientID), "borrow", map[string]any{
+		"timestamp": timestamp, "client_id": clientID, "asset": "USD", "amount": amount,
+		"reason": "test", "margin_mode": "cross", "interest_rate_bps": rate, "collateral_used": collateral,
+	})
+}
+
+func marginInterestRepayLine(timestamp, clientID, principal, remaining int64) string {
+	return logLine(timestamp, uint64(clientID), "repay", map[string]any{
+		"timestamp": timestamp, "client_id": clientID, "asset": "USD", "principal": principal,
+		"interest": int64(0), "remaining_debt": remaining,
+	})
+}
+
+func marginInterestCloseLine(timestamp, clientID, remainder, debtBefore int64) string {
+	return logLine(timestamp, uint64(clientID), "margin_interest_remainder_closed", map[string]any{
+		"timestamp": timestamp, "client_id": clientID, "asset": "USD",
+		"remainder_before": remainder, "remainder_after": int64(0),
+		"denominator": testCollateralInterestDenominator, "debt_before": debtBefore, "debt_after": int64(0),
+		"reason": "debt_repaid",
+	})
+}
+
+func measureDebtTimeline(t *testing.T, terminalRemainders map[string]int64, lines ...string) InterestRemainderAudit {
+	t.Helper()
+	run, err := Open(writeRun(t, Report{
+		TerminalAccounts: []AccountRow{{
+			VenueID: "north", ClientID: 1,
+			Account: Account{MarginInterestRemainders: terminalRemainders},
+		}},
+	}, map[string][]string{"north/derivatives.jsonl": lines}))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	conservation, err := run.MeasureConservation(ConservationOptions{})
+	if err != nil {
+		t.Fatalf("measure: %v", err)
+	}
+	return conservation.InterestRemainder
+}
+
+func TestConservationAuditsDebtStateBehindCollateralInterest(t *testing.T) {
+	lines := []string{
+		marginInterestBorrowLine(1, 1, 100, 7, 50),
+		marginInterestAccrualLine(2, 1, 100, 7, 0, 0, 0, 0, 700, testCollateralInterestDenominator),
+		marginInterestRepayLine(3, 1, 100, 0),
+		marginInterestCloseLine(3, 1, 700, 100),
+	}
+	audit := measureDebtTimeline(t, map[string]int64{}, lines...)
+	if !audit.Applicable || !audit.Valid || audit.BorrowEvents != 1 || audit.RepayEvents != 1 || audit.DebtStateFailures != 0 || audit.DebtRateFailures != 0 || audit.UnlinkedClosures != 0 || audit.MissingTerminalMaps != 0 {
+		t.Fatalf("valid debt-linked interest audit = %+v", audit)
+	}
+}
+
+func TestConservationRejectsDebtTimelineMismatches(t *testing.T) {
+	base := []string{
+		marginInterestBorrowLine(1, 1, 100, 7, 50),
+		marginInterestAccrualLine(2, 1, 99, 7, 0, 0, 0, 0, 693, testCollateralInterestDenominator),
+		marginInterestRepayLine(3, 1, 100, 0),
+		marginInterestCloseLine(3, 1, 700, 100),
+	}
+	forgedDebt := measureDebtTimeline(t, map[string]int64{}, base...)
+	if forgedDebt.Valid || forgedDebt.DebtStateFailures == 0 {
+		t.Fatalf("forged principal was accepted: %+v", forgedDebt)
+	}
+
+	noRepay := measureDebtTimeline(t, map[string]int64{},
+		marginInterestBorrowLine(1, 1, 100, 7, 50),
+		marginInterestAccrualLine(2, 1, 100, 7, 0, 0, 0, 0, 700, testCollateralInterestDenominator),
+		marginInterestCloseLine(3, 1, 700, 100),
+	)
+	if noRepay.Valid || noRepay.UnlinkedClosures == 0 {
+		t.Fatalf("unlinked closure was accepted: %+v", noRepay)
+	}
+
+	missingTerminalMap := measureDebtTimeline(t, nil,
+		marginInterestBorrowLine(1, 1, 100, 7, 50),
+		marginInterestAccrualLine(2, 1, 100, 7, 0, 0, 0, 0, 700, testCollateralInterestDenominator),
+	)
+	if missingTerminalMap.Valid || missingTerminalMap.MissingTerminalMaps == 0 {
+		t.Fatalf("missing terminal remainder map was accepted: %+v", missingTerminalMap)
+	}
+}
+
+func TestConservationRejectsDebtRateChangeWhileOutstanding(t *testing.T) {
+	audit := measureDebtTimeline(t, map[string]int64{},
+		marginInterestBorrowLine(1, 1, 100, 7, 50),
+		marginInterestBorrowLine(2, 1, 20, 8, 10),
+	)
+	if audit.Valid || audit.DebtRateFailures == 0 {
+		t.Fatalf("outstanding-debt rate change was accepted: %+v", audit)
+	}
+}
+
 func TestConservationAuditsCollateralInterestRemainderTransition(t *testing.T) {
 	finalSequence := uint64(1)
 	report := Report{

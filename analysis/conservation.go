@@ -291,6 +291,11 @@ type marginInterestAccrualIdentity struct {
 	asset    string
 }
 
+type marginInterestAccountKey struct {
+	venue    string
+	clientID uint64
+}
+
 type marginInterestAccrualRecord struct {
 	Timestamp       int64
 	IntervalSeconds int64
@@ -306,16 +311,38 @@ type marginInterestAccrualRecord struct {
 }
 
 type marginInterestRemainderClosedRecord struct {
-	Timestamp       int64
-	RemainderBefore int64
-	RemainderAfter  int64
-	Denominator     int64
-	Reason          string
-	Order           evidenceOrder
+	Timestamp        int64
+	RemainderBefore  int64
+	RemainderAfter   int64
+	Denominator      int64
+	Reason           string
+	DebtBefore       int64
+	DebtAfter        int64
+	DebtStatePresent bool
+	Order            evidenceOrder
 }
 
 type marginInterestTransition struct {
 	order   evidenceOrder
+	accrual *marginInterestAccrualRecord
+	closure *marginInterestRemainderClosedRecord
+}
+
+type collateralDebtEvent struct {
+	order         evidenceOrder
+	venue         string
+	clientID      uint64
+	asset         string
+	kind          string
+	amount        int64
+	remainingDebt int64
+	interestRate  int64
+	reason        string
+}
+
+type collateralDebtTimelineEvent struct {
+	order   evidenceOrder
+	debt    *collateralDebtEvent
 	accrual *marginInterestAccrualRecord
 	closure *marginInterestRemainderClosedRecord
 }
@@ -337,6 +364,13 @@ type InterestRemainderAudit struct {
 	InvalidClosures        int  `json:"invalid_closures"`
 	ClosureStateFailures   int  `json:"closure_state_failures"`
 	TerminalMismatches     int  `json:"terminal_mismatches"`
+	BorrowEvents           int  `json:"borrow_events"`
+	RepayEvents            int  `json:"repay_events"`
+	DebtStateFailures      int  `json:"debt_state_failures"`
+	DebtRateFailures       int  `json:"debt_rate_failures"`
+	DebtOrderAmbiguities   int  `json:"debt_order_ambiguities"`
+	UnlinkedClosures       int  `json:"unlinked_closures"`
+	MissingTerminalMaps    int  `json:"missing_terminal_maps"`
 	Applicable             bool `json:"applicable"`
 	Valid                  bool `json:"valid"`
 }
@@ -581,6 +615,8 @@ func (r *Run) MeasureConservation(opts ConservationOptions) (*Conservation, erro
 	marginInterestParticipantByAccrual := make(map[marginInterestAccrualKey]int64)
 	marginInterestRemainderClosures := make(map[marginInterestAccrualIdentity][]marginInterestRemainderClosedRecord)
 	marginInterestRemainderClosureKeys := make(map[marginInterestAccrualKey]struct{})
+	marginInterestDebtEvents := make(map[marginInterestAccrualIdentity][]collateralDebtEvent)
+	terminalRemainderPresence := make(map[marginInterestAccountKey]bool)
 	fundingRemainderVenueFlows := make(map[fundingInstantKey]int64)
 	feeRevenueRecorded := make(map[string]int64)
 	venueRecordedByVenue := make(map[venueAssetKey]int64)
@@ -602,7 +638,7 @@ func (r *Run) MeasureConservation(opts ConservationOptions) (*Conservation, erro
 	optionExpiryAccountingRecords := make(map[optionExpiryAccountingKey]optionExpiryAccountingRecord)
 	var optionExpiryAccounting OptionExpiryAccountingAudit
 	var interestRemainder InterestRemainderAudit
-	scan := ScanOptions{Events: []string{"balance_change", "expiry_settlement", "fee_revenue", "margin_interest", "margin_interest_accrual", "margin_interest_remainder_closed", "margin_interest_failed", "option_expiry_accounting", "venue_balance_change", "position_rounding"}, Files: opts.Files, FilesSelected: opts.FilesSelected}
+	scan := ScanOptions{Events: []string{"balance_change", "borrow", "expiry_settlement", "fee_revenue", "margin_interest", "margin_interest_accrual", "margin_interest_remainder_closed", "margin_interest_failed", "option_expiry_accounting", "repay", "venue_balance_change", "position_rounding"}, Files: opts.Files, FilesSelected: opts.FilesSelected}
 	type feePayload struct {
 		Timestamp int64  `json:"timestamp"`
 		Symbol    string `json:"symbol"`
@@ -639,11 +675,31 @@ func (r *Run) MeasureConservation(opts ConservationOptions) (*Conservation, erro
 		RemainderBefore int64  `json:"remainder_before"`
 		RemainderAfter  int64  `json:"remainder_after"`
 		Denominator     int64  `json:"denominator"`
+		DebtBefore      int64  `json:"debt_before"`
+		DebtAfter       int64  `json:"debt_after"`
 		Reason          string `json:"reason"`
 	}
 	type marginInterestFailurePayload struct {
 		Timestamp int64  `json:"timestamp"`
 		Reason    string `json:"reason"`
+	}
+	type borrowPayload struct {
+		Timestamp      int64  `json:"timestamp"`
+		ClientID       uint64 `json:"client_id"`
+		Asset          string `json:"asset"`
+		Amount         int64  `json:"amount"`
+		Reason         string `json:"reason"`
+		InterestRate   int64  `json:"interest_rate_bps"`
+		CollateralUsed int64  `json:"collateral_used"`
+	}
+	type repayPayload struct {
+		Timestamp     int64  `json:"timestamp"`
+		ClientID      uint64 `json:"client_id"`
+		Asset         string `json:"asset"`
+		Principal     int64  `json:"principal"`
+		Interest      int64  `json:"interest"`
+		RemainingDebt int64  `json:"remaining_debt"`
+		Reason        string `json:"reason"`
 	}
 	type expirySettlementPayload struct {
 		Timestamp   int64  `json:"timestamp"`
@@ -724,6 +780,63 @@ func (r *Run) MeasureConservation(opts ConservationOptions) (*Conservation, erro
 			}
 			return
 		}
+		if event.Name == "borrow" {
+			var payload borrowPayload
+			var fields map[string]json.RawMessage
+			_ = json.Unmarshal(event.Raw(), &fields)
+			if _, hasRate := fields["interest_rate_bps"]; !hasRate {
+				// Borrow receipts before the successor financing contract did not
+				// carry an origination rate. They remain readable as historical
+				// ledger movements but cannot activate this debt-state audit.
+				return
+			}
+			decodeErr := decodeRequiredJSON(event.Raw(), &payload, "timestamp", "client_id", "asset", "amount", "reason", "interest_rate_bps", "collateral_used")
+			valid := decodeErr == nil && payload.Timestamp > 0 && payload.Timestamp == event.SimTS && payload.ClientID == event.ClientID && payload.Asset != "" && payload.Amount > 0 && payload.InterestRate >= 0 && payload.CollateralUsed >= 0
+			mu.Lock()
+			interestRemainder.Applicable = true
+			if !valid {
+				interestRemainder.DebtStateFailures++
+				mu.Unlock()
+				return
+			}
+			identity := marginInterestAccrualIdentity{venue: event.VenueID, clientID: payload.ClientID, asset: payload.Asset}
+			interestRemainder.BorrowEvents++
+			marginInterestDebtEvents[identity] = append(marginInterestDebtEvents[identity], collateralDebtEvent{
+				order: evidenceOrder{timestamp: event.SimTS, file: event.File, ordinal: event.Ordinal},
+				venue: event.VenueID, clientID: payload.ClientID, asset: payload.Asset,
+				kind: "borrow", amount: payload.Amount, interestRate: payload.InterestRate,
+				reason: payload.Reason,
+			})
+			mu.Unlock()
+			return
+		}
+		if event.Name == "repay" {
+			var payload repayPayload
+			var fields map[string]json.RawMessage
+			_ = json.Unmarshal(event.Raw(), &fields)
+			if _, hasRemainingDebt := fields["remaining_debt"]; !hasRemainingDebt {
+				return
+			}
+			decodeErr := decodeRequiredJSON(event.Raw(), &payload, "timestamp", "client_id", "asset", "principal", "interest", "remaining_debt")
+			valid := decodeErr == nil && payload.Timestamp > 0 && payload.Timestamp == event.SimTS && payload.ClientID == event.ClientID && payload.Asset != "" && payload.Principal > 0 && payload.Interest >= 0 && payload.RemainingDebt >= 0
+			mu.Lock()
+			interestRemainder.Applicable = true
+			if !valid {
+				interestRemainder.DebtStateFailures++
+				mu.Unlock()
+				return
+			}
+			identity := marginInterestAccrualIdentity{venue: event.VenueID, clientID: payload.ClientID, asset: payload.Asset}
+			interestRemainder.RepayEvents++
+			marginInterestDebtEvents[identity] = append(marginInterestDebtEvents[identity], collateralDebtEvent{
+				order: evidenceOrder{timestamp: event.SimTS, file: event.File, ordinal: event.Ordinal},
+				venue: event.VenueID, clientID: payload.ClientID, asset: payload.Asset,
+				kind: "repay", amount: payload.Principal, remainingDebt: payload.RemainingDebt,
+				reason: payload.Reason,
+			})
+			mu.Unlock()
+			return
+		}
 		if event.Name == "expiry_settlement" {
 			var payload expirySettlementPayload
 			decodeErr := decodeRequiredJSON(event.Raw(), &payload, "timestamp", "client_id", "symbol", "quote_asset", "size", "cash_flow", "delivery_fee")
@@ -732,7 +845,7 @@ func (r *Run) MeasureConservation(opts ConservationOptions) (*Conservation, erro
 				// Historical expiry records predate quote_asset and remain outside
 				// this successor-only aggregate contract. Once the field is
 				// present, malformed option evidence is an applicable failure.
-				if payload.QuoteAsset != "" || isOptionSymbol(payload.Symbol) {
+				if payload.QuoteAsset != "" {
 					mu.Lock()
 					optionExpiryAccounting.Applicable = true
 					optionExpiryAccounting.Invalid++
@@ -834,10 +947,16 @@ func (r *Run) MeasureConservation(opts ConservationOptions) (*Conservation, erro
 			interestRemainder.Applicable = true
 			mu.Unlock()
 			var payload marginInterestRemainderClosedPayload
+			var fields map[string]json.RawMessage
+			_ = json.Unmarshal(event.Raw(), &fields)
+			_, debtBeforePresent := fields["debt_before"]
+			_, debtAfterPresent := fields["debt_after"]
+			debtStatePresent := debtBeforePresent && debtAfterPresent
 			decodeErr := decodeRequiredJSON(event.Raw(), &payload, "timestamp", "client_id", "asset", "remainder_before", "remainder_after", "denominator", "reason")
 			validReason := payload.Reason == "debt_repaid" || payload.Reason == "liquidation"
 			remainderOutOfRange := payload.Denominator > 0 && (payload.RemainderBefore < 0 || payload.RemainderBefore >= payload.Denominator)
-			if decodeErr != nil || payload.Timestamp <= 0 || payload.Timestamp != event.SimTS || payload.ClientID != event.ClientID || payload.Asset == "" || payload.RemainderBefore <= 0 || payload.RemainderAfter != 0 || payload.Denominator != auditedCollateralInterestDenominator || !validReason || remainderOutOfRange {
+			debtStateInvalid := (debtBeforePresent || debtAfterPresent) && (!debtStatePresent || payload.DebtBefore <= 0 || payload.DebtAfter != 0)
+			if decodeErr != nil || payload.Timestamp <= 0 || payload.Timestamp != event.SimTS || payload.ClientID != event.ClientID || payload.Asset == "" || payload.RemainderBefore <= 0 || payload.RemainderAfter != 0 || payload.Denominator != auditedCollateralInterestDenominator || !validReason || remainderOutOfRange || debtStateInvalid {
 				mu.Lock()
 				interestRemainder.InvalidClosures++
 				if remainderOutOfRange {
@@ -859,6 +978,7 @@ func (r *Run) MeasureConservation(opts ConservationOptions) (*Conservation, erro
 				marginInterestRemainderClosures[identity] = append(marginInterestRemainderClosures[identity], marginInterestRemainderClosedRecord{
 					Timestamp: payload.Timestamp, RemainderBefore: payload.RemainderBefore,
 					RemainderAfter: payload.RemainderAfter, Denominator: payload.Denominator, Reason: payload.Reason,
+					DebtBefore: payload.DebtBefore, DebtAfter: payload.DebtAfter, DebtStatePresent: debtStatePresent,
 					Order: evidenceOrder{timestamp: event.SimTS, file: event.File, ordinal: event.Ordinal},
 				})
 			}
@@ -1333,6 +1453,9 @@ func (r *Run) MeasureConservation(opts ConservationOptions) (*Conservation, erro
 		terminalRemainderKeys := make(map[marginInterestAccrualIdentity]struct{})
 		for _, row := range r.Report.TerminalAccounts {
 			identityVenue := row.VenueID
+			if row.Account.MarginInterestRemainders != nil {
+				terminalRemainderPresence[marginInterestAccountKey{venue: identityVenue, clientID: row.ClientID}] = true
+			}
 			for asset, remainder := range row.Account.MarginInterestRemainders {
 				identity := marginInterestAccrualIdentity{venue: identityVenue, clientID: row.ClientID, asset: asset}
 				if _, duplicate := terminalRemainderKeys[identity]; duplicate {
@@ -1409,6 +1532,110 @@ func (r *Run) MeasureConservation(opts ConservationOptions) (*Conservation, erro
 			}
 		}
 	}
+	for identity, debtEvents := range marginInterestDebtEvents {
+		timeline := make([]collateralDebtTimelineEvent, 0, len(debtEvents)+len(marginInterestAccrualSeries[identity])+len(marginInterestRemainderClosures[identity]))
+		for index := range debtEvents {
+			timeline = append(timeline, collateralDebtTimelineEvent{order: debtEvents[index].order, debt: &debtEvents[index]})
+		}
+		for index := range marginInterestAccrualSeries[identity] {
+			accrual := &marginInterestAccrualSeries[identity][index]
+			timeline = append(timeline, collateralDebtTimelineEvent{order: accrual.Order, accrual: accrual})
+		}
+		for index := range marginInterestRemainderClosures[identity] {
+			closure := &marginInterestRemainderClosures[identity][index]
+			timeline = append(timeline, collateralDebtTimelineEvent{order: closure.Order, closure: closure})
+		}
+		sort.Slice(timeline, func(i, j int) bool {
+			return evidenceBefore(timeline[i].order, timeline[j].order)
+		})
+		currentDebt := int64(0)
+		currentRate := int64(0)
+		hasRate := false
+		var previousOrder evidenceOrder
+		hasPreviousOrder := false
+		for _, transition := range timeline {
+			if hasPreviousOrder && transition.order.timestamp == previousOrder.timestamp && transition.order.file != previousOrder.file {
+				interestRemainder.DebtOrderAmbiguities++
+			}
+			if transition.debt != nil {
+				debtEvent := transition.debt
+				switch debtEvent.kind {
+				case "borrow":
+					if hasRate && currentDebt > 0 && currentRate != debtEvent.interestRate {
+						interestRemainder.DebtRateFailures++
+					}
+					if !hasRate || currentDebt == 0 {
+						currentRate = debtEvent.interestRate
+						hasRate = true
+					}
+					var ok bool
+					if currentDebt, ok = addAuditInt64(currentDebt, debtEvent.amount); !ok {
+						interestRemainder.DebtStateFailures++
+					}
+				case "repay":
+					if debtEvent.amount > currentDebt {
+						interestRemainder.DebtStateFailures++
+					} else {
+						currentDebt -= debtEvent.amount
+						if currentDebt != debtEvent.remainingDebt {
+							interestRemainder.DebtStateFailures++
+						}
+					}
+					if currentDebt == 0 {
+						hasRate = false
+					}
+				}
+			} else if transition.accrual != nil {
+				accrual := transition.accrual
+				if currentDebt <= 0 || accrual.Principal != currentDebt {
+					interestRemainder.DebtStateFailures++
+				}
+				if hasRate && accrual.RateBps != currentRate {
+					interestRemainder.DebtRateFailures++
+				}
+			} else if transition.closure != nil {
+				closure := transition.closure
+				if !closure.DebtStatePresent {
+					interestRemainder.DebtStateFailures++
+					interestRemainder.UnlinkedClosures++
+					continue
+				}
+				linked := false
+				for index := range debtEvents {
+					debtEvent := &debtEvents[index]
+					if debtEvent.kind != "repay" || debtEvent.remainingDebt != 0 || debtEvent.order.timestamp != closure.Timestamp {
+						continue
+					}
+					repaidBefore, ok := addAuditInt64(debtEvent.remainingDebt, debtEvent.amount)
+					if !ok || repaidBefore != closure.DebtBefore {
+						continue
+					}
+					if closure.Reason == "debt_repaid" && debtEvent.reason != "" && debtEvent.reason != "debt_repaid" {
+						continue
+					}
+					if closure.Reason == "liquidation" && debtEvent.reason != "liquidation" {
+						continue
+					}
+					if closure.Reason == "debt_repaid" && !evidenceBefore(debtEvent.order, closure.Order) {
+						continue
+					}
+					if closure.Reason == "liquidation" && !evidenceBefore(closure.Order, debtEvent.order) {
+						continue
+					}
+					linked = true
+					break
+				}
+				if !linked {
+					interestRemainder.UnlinkedClosures++
+				}
+			}
+			previousOrder = transition.order
+			hasPreviousOrder = true
+		}
+		if !terminalRemainderPresence[marginInterestAccountKey{venue: identity.venue, clientID: identity.clientID}] {
+			interestRemainder.MissingTerminalMaps++
+		}
+	}
 	if optionExpiryAccounting.Applicable {
 		for key, record := range optionExpiryAccountingRecords {
 			settlement, hasSettlement := optionExpirySettlements[key]
@@ -1450,7 +1677,7 @@ func (r *Run) MeasureConservation(opts ConservationOptions) (*Conservation, erro
 		}
 	}
 	optionExpiryAccounting.Valid = !optionExpiryAccounting.Applicable || (optionExpiryAccounting.Invalid == 0 && optionExpiryAccounting.DuplicateKeys == 0 && optionExpiryAccounting.MissingAccountingEvents == 0 && optionExpiryAccounting.MissingParticipantEvents == 0 && optionExpiryAccounting.ParticipantMismatches == 0 && optionExpiryAccounting.BalanceMismatches == 0 && optionExpiryAccounting.VenueMismatches == 0 && optionExpiryAccounting.DeliveryFeeMismatches == 0)
-	interestRemainder.Valid = interestRemainder.Invalid == 0 && interestRemainder.DuplicateKeys == 0 && interestRemainder.RemainderOutOfRange == 0 && interestRemainder.TransitionFailures == 0 && interestRemainder.PeriodOrderFailures == 0 && interestRemainder.PostedMismatches == 0 && interestRemainder.WalletPostedMismatches == 0 && interestRemainder.BalanceMismatches == 0 && interestRemainder.InvalidClosures == 0 && interestRemainder.ClosureStateFailures == 0 && interestRemainder.TerminalMismatches == 0
+	interestRemainder.Valid = interestRemainder.Invalid == 0 && interestRemainder.DuplicateKeys == 0 && interestRemainder.RemainderOutOfRange == 0 && interestRemainder.TransitionFailures == 0 && interestRemainder.PeriodOrderFailures == 0 && interestRemainder.PostedMismatches == 0 && interestRemainder.WalletPostedMismatches == 0 && interestRemainder.BalanceMismatches == 0 && interestRemainder.InvalidClosures == 0 && interestRemainder.ClosureStateFailures == 0 && interestRemainder.TerminalMismatches == 0 && interestRemainder.DebtStateFailures == 0 && interestRemainder.DebtRateFailures == 0 && interestRemainder.DebtOrderAmbiguities == 0 && interestRemainder.UnlinkedClosures == 0 && interestRemainder.MissingTerminalMaps == 0
 	expectedFundingRemainders := make(map[fundingInstantKey]int64)
 	for key, residual := range funding {
 		negated, ok := negateAuditInt64(residual.Net)

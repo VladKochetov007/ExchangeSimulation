@@ -3,6 +3,8 @@ package exchange
 import (
 	"errors"
 	"fmt"
+	"maps"
+	"math"
 
 	etypes "exchange_sim/types"
 )
@@ -23,10 +25,42 @@ type BorrowContext struct {
 
 type BorrowingManager struct {
 	Config BorrowingConfig
+	// interestRates is the immutable authority for outstanding-debt accrual.
+	// Config remains public for compatibility with existing adapters, but its
+	// rate map is not consulted after construction.
+	interestRates map[string]int64
+}
+
+func validateBorrowingConfig(config BorrowingConfig) error {
+	for asset, rate := range config.BorrowRates {
+		if rate < 0 {
+			return fmt.Errorf("negative borrowing rate for %s", asset)
+		}
+	}
+	for asset, factor := range config.CollateralFactors {
+		if math.IsNaN(factor) || math.IsInf(factor, 0) || factor < 0 || factor > 1 {
+			return fmt.Errorf("invalid collateral factor for %s", asset)
+		}
+	}
+	for asset, limit := range config.MaxBorrowPerAsset {
+		if limit < 0 {
+			return fmt.Errorf("negative max borrow limit for %s", asset)
+		}
+	}
+	for asset, precision := range config.AssetPrecisions {
+		if precision <= 0 {
+			return fmt.Errorf("invalid asset precision for %s", asset)
+		}
+	}
+	return nil
 }
 
 func NewBorrowingManager(config BorrowingConfig) *BorrowingManager {
-	return &BorrowingManager{Config: config}
+	config.BorrowRates = maps.Clone(config.BorrowRates)
+	config.CollateralFactors = maps.Clone(config.CollateralFactors)
+	config.MaxBorrowPerAsset = maps.Clone(config.MaxBorrowPerAsset)
+	config.AssetPrecisions = maps.Clone(config.AssetPrecisions)
+	return &BorrowingManager{Config: config, interestRates: maps.Clone(config.BorrowRates)}
 }
 
 func (bm *BorrowingManager) BorrowMargin(ctx BorrowContext, asset string, amount int64, reason string) error {
@@ -41,6 +75,9 @@ func (bm *BorrowingManager) BorrowMargin(ctx BorrowContext, asset string, amount
 	// silently drains the wallet, slipping past every downstream limit check.
 	if amount <= 0 {
 		return errors.New("borrow amount must be positive")
+	}
+	if bm.getRate(asset) < 0 {
+		return errors.New("borrowing rate must be non-negative")
 	}
 
 	if ctx.Client.MarginMode == CrossMargin {
@@ -248,10 +285,10 @@ func (bm *BorrowingManager) validateCrossMarginCollateral(client *Client, borrow
 }
 
 func (bm *BorrowingManager) getRate(asset string) int64 {
-	if rate, ok := bm.Config.BorrowRates[asset]; ok {
+	if rate, ok := bm.interestRates[asset]; ok {
 		return rate
 	}
-	if rate, ok := bm.Config.BorrowRates["default"]; ok {
+	if rate, ok := bm.interestRates["default"]; ok {
 		return rate
 	}
 	// Keep the historical borrowing default explicit. Collateral accrual calls

@@ -134,7 +134,7 @@ func TestCollateralInterestRemainderCloseIsExplicit(t *testing.T) {
 		if !ok {
 			t.Fatalf("close event type = %T", record.data)
 		}
-		if event.RemainderBefore != principal || event.RemainderAfter != 0 || event.Reason != "debt_repaid" {
+		if event.RemainderBefore != principal || event.RemainderAfter != 0 || event.DebtBefore != principal || event.DebtAfter != 0 || event.Reason != "debt_repaid" {
 			t.Fatalf("close event = %+v", event)
 		}
 		closed = true
