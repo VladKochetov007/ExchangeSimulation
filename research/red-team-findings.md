@@ -1721,3 +1721,44 @@ constraint a class operated under. RT-022 found an environment term arriving
 through the venue; this is the same shape arriving through the actor
 configuration — except that unlike the venue term it is a **known constant** at
 construction time and could simply be emitted beside the score.
+
+## RT-029 — Normalising by capital reorders the middle of the table
+
+**Classification.** Not a defect — classes are endowed differently by design.
+The finding is that the denominator is absent from the reported result, so two
+specific conclusions drawn from absolute PnL do not survive normalisation.
+**Owner decision.**
+
+**Base.** `a666d02faede3d40f046b11e60eb672c59386a94`.
+`clock-control-5h-101.json`, seed 607, 5 simulated hours.
+
+**Capital spans 510×**: `round_trip` at 265 M against `latent_liquidity` at
+135 054 M — wider than RT-028's ceiling spread produces in practice.
+
+**The top is stable.** Absolute: `triangle_arb`, `option_dealer`, `round_trip`.
+By return: `triangle_arb`, `option_dealer`, `vanna_volga_desk`. The first two
+hold, so **`triangle_arb`'s dominance is not a capital artifact** — +3.675% on
+2 220 M is the best rate as well as the largest amount. The campaign's headline
+result survives normalisation.
+
+**The middle is scrambled** — 62 rank-places of displacement over 21 classes:
+
+| class | rank by absolute | rank by return | capital | return |
+|---|---:|---:|---:|---:|
+| `latent_liquidity` | 21 | **11** | 135 054 M | −0.351% |
+| `metaorder_trader` | 6 | **18** | 1 854 M | −0.518% |
+
+`latent_liquidity` looks like the worst performer at −474 M and is mid-table per
+unit of capital. `metaorder_trader` looks sixth-best at −9.6 M and is
+fourth-from-last. Both move on capital alone.
+
+**Two conclusions that do not survive**: that `latent_liquidity` performs worst,
+and that `metaorder_trader` performs well.
+
+**Prediction accuracy.** The preregistration expected the *top three* to reorder
+materially. A single-place swap happened there; the material reordering is in the
+middle, which the prediction did not anticipate. Recorded as partially right.
+
+**With RT-028**: the ceiling and the capital are both known constants, both
+absent from the reported result, and both change how a class-level table should
+be read.

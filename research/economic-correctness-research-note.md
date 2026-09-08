@@ -2844,6 +2844,88 @@ Recorded as RT-028. The remedy is small and is the owner's: carry each class's
 binding ceiling into the population artifact so that a per-run result can be read
 per unit of allowance as well as in absolute terms.
 
+**H-042 — ranking the classes by return on capital reorders them.**
+RT-028 showed the classes are bounded at different scales. Capital is the
+sibling dimension, and the more consequential one: a ceiling limits how much a
+class can hold, but capital is what a *rate of return* divides by. The
+construction sweep already showed endowments differing by design — makers get
+10 000 ABC and 500 M USD, noise traders 10 M, dealers 150 M — so absolute PnL
+across classes is a comparison of differently-sized books.
+
+Representation change: stop reading the result as an amount and read it as a
+**rate**. The population artifact already carries each participant's initial
+marked equity in USD, so return on capital is computable from evidence that
+exists, for every class, with no new instrumentation.
+
+This is the normalisation nothing in the campaign computes. If it merely
+rescales the table, it is a footnote. If it **reorders** it, then absolute
+class-level PnL is ranking capital allocation rather than skill, and every
+comparison drawn from it inherits that.
+
+Predicted observable, recorded before measuring: the ordering changes
+materially — at least one class in the top three by absolute PnL leaves it, and
+at least one small-capital class enters. The reason to expect it is arithmetic
+rather than suspicion: E-032's absolute results span roughly ±13 M while the
+endowments span at least an order of magnitude, so the two orderings cannot both
+be dominated by the same term.
+Falsifier: the two rankings agree up to noise, which would mean capital is
+roughly uniform across classes and RT-028's ceiling spread is the only
+comparability problem.
+Mechanism family: comparability of scores, normalisation.
+
+**E-044 — H-042, ranking the classes by return on capital.**
+Preregistered above. Artifact: `research/tools/returnoncapital/main.go`.
+Base: `a666d02faede3d40f046b11e60eb672c59386a94`.
+Run: `clock-control-5h-101.json`, seed 607, 5 simulated hours.
+Reproduce: `go run research/tools/returnoncapital/main.go -file <logdir>/greeks.json`.
+
+Result: **H-042 PARTIALLY SUPPORTED, and the prediction was right about the
+wrong part of the table.**
+
+**Capital spans 510×** across classes — `round_trip` at 265 M against
+`latent_liquidity` at 135 054 M — which is a wider spread than RT-028's
+ceilings produce in practice.
+
+**The top is stable.** By absolute change: `triangle_arb`, `option_dealer`,
+`round_trip`. By return: `triangle_arb`, `option_dealer`, `vanna_volga_desk`.
+The first two hold their places on both measures, so `triangle_arb`'s dominance
+is **not** a capital artifact — it earns +3.675% on 2 220 M, the best rate in the
+population as well as the largest amount. That is worth stating positively: the
+campaign's headline result survives the normalisation.
+
+**The middle is scrambled.** Total rank displacement is **62 places over 21
+classes**, averaging three places each, with two large moves in opposite
+directions:
+
+| class | rank by absolute | rank by return | capital | return |
+|---|---:|---:|---:|---:|
+| `latent_liquidity` | 21 | **11** | 135 054 M | −0.351% |
+| `metaorder_trader` | 6 | **18** | 1 854 M | −0.518% |
+
+`latent_liquidity` looks like the population's worst performer at −474 M and is
+mid-table once its book size is accounted for; `metaorder_trader` looks
+sixth-best at −9.6 M and is fourth-from-last per unit of capital. Both move on
+capital alone.
+
+**Where the prediction was wrong.** It said "at least one class in the top three
+leaves it, and at least one small-capital class enters", which happened —
+`round_trip` out, `vanna_volga_desk` in — but as a single-place swap, not the
+material reordering the wording implied. The material reordering is in the middle
+of the table, which the prediction did not anticipate at all. Recorded as
+partially right rather than rounded up.
+
+**What it means for reading the campaign's numbers.** An absolute class-level PnL
+is a fair summary at the extremes and misleading in the middle. Two specific
+conclusions that do **not** survive normalisation: that `latent_liquidity`
+performs worst, and that `metaorder_trader` performs well. Neither is a defect in
+the simulation — the classes are endowed differently by design — but neither
+ordering can be read off the artifact as it stands, because the artifact reports
+the numerator and not the denominator in any derived form.
+
+Recorded as RT-029, together with RT-028: the ceiling and the capital are both
+known constants, both absent from the reported result, and both change how a
+class-level table should be read.
+
 ---
 
 ## F. Findings
@@ -2860,6 +2942,11 @@ See `research/red-team-findings.md` for the full records.
 - **RT-003** — bounded no-violation results (INV-2, INV-5, INV-6, identity).
 - **RT-006** — latency is delivered as configured across 225 link x channel
   rows; no unearned speed advantage. Transport only.
+- **RT-029** — capital spans **510x** across classes, and normalising by it moves
+  the table **62 rank-places over 21 classes**: `latent_liquidity` goes 21st to
+  11th, `metaorder_trader` 6th to 18th. The **top two are stable**, so
+  `triangle_arb`'s dominance is not a capital artifact. Absolute class PnL is a
+  fair summary at the extremes and misleading in the middle. **Owner decision.**
 - **RT-028** — the actor classes are bounded at **wildly different scales** —
   1 ABC for `option_value_taker`, 5 for `dated_carry_arb`, 200 for the makers,
   500 for `carry_arb`, 10 000 for `elastic_supplier` — a spread of four orders of
