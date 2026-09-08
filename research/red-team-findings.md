@@ -1857,3 +1857,63 @@ because the index is built from the same books.
 harvests a 69% standing dislocation rather than outcompeting anyone. **Any
 cross-asset or triangular conclusion drawn from this configuration measures a
 self-referential book drifting, not a market.**
+
+## RT-032 — The ABC/USD price level is a configured peg, not a market outcome
+
+**Classification.** REAL, and it is the widest-reaching finding in this audit: it
+governs what every price-level result in the campaign means.
+
+**Base.** `a666d02faede3d40f046b11e60eb672c59386a94`.
+`clock-control-5h-101.json`, seed 607, 8 simulated hours, `-log-mode full`.
+
+**Mechanism.** `ElasticSupplier` targets
+`position = −(percent above reference) × ElasticityPerPercent`. With
+`ReferenceHalfLife` at zero the reference never moves off its seed, so the
+participants are a peg at `mvBootstrapPrice` = 50 000 USD rather than a demand
+curve. The effective config confirms `"elastic_supplier_reference_half_life": 0`
+survives normalization; no default overrides it.
+
+`supplier.go` documents this exact outcome: *"A fixed reference is an exogenous
+fundamental... measured over six runs the terminal price was minus excess supply
+over aggregate elasticity to three significant figures, which is that actor's
+configuration read back out rather than a market outcome."*
+
+**Measured** (`research/tools/elasticpeg`, positions taken from wallet balances,
+not the actor's own counter):
+
+| venue | terminal mark | vs 50 000 | aggregate position | predicted by price | ratio |
+|---|---:|---:|---:|---:|---:|
+| central | 4 929 505 000 | −1.4099% | +1 692.00 ABC | +1 691.88 ABC | **1.0001** |
+| north | 4 929 380 000 | −1.4124% | +1 695.00 ABC | +1 694.88 ABC | **1.0001** |
+| south | 4 929 375 000 | −1.4125% | +1 695.36 ABC | +1 695.00 ABC | **1.0002** |
+
+Three independent venues, ratio 1.000 to four significant figures, **0 of 8
+participants at `MaxPosition` on every venue**. Not a cap, no overshoot, and not
+rate-limited — the population is fully converged onto its supply curve. The
+code's comment claims three significant figures; the measurement gives four.
+
+**Second consequence.** The three venues' terminal marks agree to within
+**0.0026%** despite deliberately heterogeneous matching rules and funding
+intervals (RT-022). Cross-venue price-level dispersion here is not a market
+outcome; all three books are pinned to the same configured reference.
+
+**Third consequence, and the link to RT-031.** `elastic_supplier_symbols` is
+`null`, so `makerSymbol(nil, i)` (`sim.go:1616`) places **all 8 suppliers on
+ABC/USD**. `CDF/USD`, `ABC/CDF` and `ABC-PERP` receive none. That is the missing
+ingredient behind RT-031: ABC/USD is pinned to four significant figures while
+ABC/CDF, with no elastic demand and a maker referencing itself, drifts −69%. The
+campaign has **one anchored book and the rest floating**.
+
+**Owner decision, not mine to make.** Whether the campaign wants a peg (a known
+correct price) or a demand curve (a belief revised toward what trades) is a
+modelling choice. The code offers both and defaults to neither: the behaviour is
+selected by a config field left at zero. What is not a choice is that
+price-level conclusions drawn from the current configuration are reporting
+`ElasticSupplierUnitsPerPercent` and `mvBootstrapPrice`, not participant
+competition.
+
+**Instrument note.** The comment at the construction site (`sim.go:3193`) says
+the participant is *"seeded at the opening price and revised toward what it
+observes, so the participant holds a private belief rather than a standing
+instruction about the correct level."* With this config's half-life of zero, it
+is not revised. The comment describes a configuration the campaign does not run.

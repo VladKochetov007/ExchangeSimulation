@@ -3077,6 +3077,120 @@ Recorded as RT-031. This is the strongest economic finding since RT-014, and
 unlike RT-014 it is not a rounding boundary: it changes what the cross-asset
 population's results mean.
 
+**H-044 (PREREGISTERED) — the ABC/USD price level is a configured peg, not a
+market outcome.**
+
+Inspection, base `a666d02faede3d40f046b11e60eb672c59386a94`:
+
+1. `clock-control-5h-101.json` omits `elastic_supplier_symbols`, so
+   `makerSymbol(nil, i)` returns `"ABC/USD"` for **all 8** suppliers
+   (`sim.go:1616`). `CDF/USD`, `ABC/CDF` and `ABC-PERP` have **no price-elastic
+   demand at all** — which is the missing ingredient RT-031 needed.
+2. The config sets `"elastic_supplier_reference_half_life": 0`, and no default
+   overrides it. `supplier.go` documents exactly what that means: *"A fixed
+   reference is an exogenous fundamental... a participant trading against
+   deviations from it is a peg rather than a demand curve: measured over six
+   runs the terminal price was minus excess supply over aggregate elasticity to
+   three significant figures, which is that actor's configuration read back out
+   rather than a market outcome."*
+3. The construction site (`sim.go:3193`) carries the opposite comment —
+   *"Seeded at the opening price and revised toward what it observes, so the
+   participant holds a private belief rather than a standing instruction"* —
+   which describes a configuration this campaign does not use.
+
+**Prediction.** With reference fixed at `mvBootstrapPrice` = 50 000 USD and
+`ElasticityPerPercent` = 15 000 000 000 base units (150 ABC per percent per
+supplier, 1 200 ABC per percent aggregate), the suppliers' terminal aggregate
+ABC position should equal
+
+    aggregate_position ≈ −1200 ABC × (terminal ABC/USD percent deviation from 50 000)
+
+E-046 measured that deviation as −1.05%, predicting **+1 260 ABC net long**.
+
+**Falsifiers.** (a) aggregate terminal position differs from the prediction by
+more than 25%; (b) any supplier sits at `MaxPosition` (10 000 ABC), which would
+make the level a cap rather than a curve; (c) suppliers appear on books other
+than ABC/USD.
+
+**Amendment, written before any result was read.** Reading
+`supplier.go:86-101` and the construction loop more carefully changes two things:
+
+- The 8 suppliers are built **per venue**, so there are 24 in total and the
+  prediction applies **per venue** against that venue's own ABC/USD terminal
+  price. That gives three independent replications inside one run, which is a
+  stronger test than the pooled version above.
+- `TargetPosition` clips at ±`MaxPosition` and the participant closes its gap at
+  `RebalanceLot` = 0.5 ABC per tick. Reaching +1 260 ABC needs ~2 520 fills per
+  venue. **Convergence lag is therefore a named alternative explanation for a
+  miss**: an aggregate position short of the prediction *in the direction of
+  zero* is evidence of rate-limiting, not evidence against the peg. Only an
+  overshoot, a sign error, or a cap hit falsifies H-044.
+
+**Discriminating experiment E-047**, preregistered here before the run: re-run
+`clock-control-5h-101.json` seed 607 with full logs, sum signed ABC fills per
+`elastic_supplier_*` role, and compare with the prediction above.
+Status: **SUPPORTED WITHIN TESTED SCOPE** by E-047 — ratio 1.000 on all three
+venues, no falsifier fired.
+
+
+**E-047 — H-044 SUPPORTED WITHIN TESTED SCOPE, in its strongest form. The
+ABC/USD terminal price is the elastic suppliers' configuration read back out.**
+Base: `a666d02faede3d40f046b11e60eb672c59386a94`.
+Run: `clock-control-5h-101.json`, seed 607, 8 simulated hours (see correction
+below), `-log-mode full`.
+Reproduce: `go run research/tools/elasticpeg/main.go -file <logdir>/greeks.json`.
+
+Aggregate terminal position of the 8 `elastic_supplier_*` participants per
+venue, taken from **wallet balances** rather than the actor's own counter, so
+the number does not depend on the actor being correct:
+
+| venue | terminal mark | vs 50 000 | aggregate position | predicted by price | ratio |
+|---|---:|---:|---:|---:|---:|
+| central | 4 929 505 000 | −1.4099% | +1 692.00 ABC | +1 691.88 ABC | **1.0001** |
+| north | 4 929 380 000 | −1.4124% | +1 695.00 ABC | +1 694.88 ABC | **1.0001** |
+| south | 4 929 375 000 | −1.4125% | +1 695.36 ABC | +1 695.00 ABC | **1.0002** |
+
+**Every preregistered falsifier fails to fire.** No participant is at
+`MaxPosition` (0 of 8 on every venue), so this is a curve and not a cap. There
+is no overshoot and no sign disagreement. The ratio is not merely within the
+25% band — it is **1.000 to four significant figures on three independent
+venues**, and it is not even below one, so the named convergence-lag confound is
+excluded too: the population is fully converged onto its supply curve.
+
+This is `supplier.go`'s own documented failure mode, reproduced exactly: *"the
+terminal price was minus excess supply over aggregate elasticity to three
+significant figures, which is that actor's configuration read back out rather
+than a market outcome."* The comment says three significant figures. The
+measurement gives four.
+
+**A second consequence, not preregistered and therefore POST-HOC.** The three
+venues' terminal marks agree to within **0.0026%** despite deliberately
+heterogeneous rules (RT-022: price-time vs pro-rata, 1h/2h/8h funding). They are
+not three environments that happen to converge; they are three books pinned to
+the same configured reference. Cross-venue price-level dispersion in this
+campaign is not a market outcome either.
+
+**Why RT-031 and this finding are the same mechanism seen twice.** The peg
+reaches exactly one book. `elastic_supplier_symbols` is `null` in the effective
+config, so `makerSymbol(nil, i)` puts **all 8 suppliers on ABC/USD**
+(`sim.go:1616`). `CDF/USD`, `ABC/CDF` and `ABC-PERP` get none. So ABC/USD is
+pinned to four significant figures while the cross book, with no elastic demand
+and a maker that references itself, drifts 69%. The campaign has one anchored
+book and the rest float.
+
+Recorded as RT-032.
+
+**CORRECTION (metadata, affects many prior records).** The simulated horizon is
+a **CLI flag**, `-duration`, defaulting to **8h** in `cmd/multivenue/main.go:234`.
+It is not in the config at all. The config's filename says `5h`, and E-022,
+E-033, E-044, E-045 and E-046 all report "5 simulated hours" — I was reading the
+**filename** rather than the run. This run logs `sim=8h0m0s`. No measured value
+changes, because the runs were what they were; the stated horizon on those
+records is wrong and should read 8h unless a record explicitly passed
+`-duration`. Same class of process error as E-033: **read what the run did, not
+what its name says.**
+
+
 ---
 
 ## F. Findings
@@ -3093,6 +3207,16 @@ See `research/red-team-findings.md` for the full records.
 - **RT-003** — bounded no-violation results (INV-2, INV-5, INV-6, identity).
 - **RT-006** — latency is delivered as configured across 225 link x channel
   rows; no unearned speed advantage. Transport only.
+- **RT-032** — the campaign's ABC/USD price level is a **configured peg**, not a
+  market outcome. All 8 elastic suppliers per venue run with
+  `elastic_supplier_reference_half_life: 0`, which `supplier.go` documents as an
+  exogenous anchor. Their aggregate terminal position equals the position their
+  venue's terminal price predicts with **ratio 1.0001 / 1.0001 / 1.0002**, no
+  participant at its cap. The three heterogeneous venues agree on the level to
+  0.0026%. Because `elastic_supplier_symbols` is null, the peg reaches **only
+  ABC/USD**: CDF/USD, ABC/CDF and ABC-PERP have no price-elastic demand, which is
+  the missing ingredient behind [[RT-031]]'s 69% drift. **One anchored book, the
+  rest floating.**
 - **RT-031** — the `ABC/CDF` cross book is **self-referential**: its maker's
   `ReferenceSymbol` is the book itself, and the index that publishes the symbol
   is a median of the same three books. It starts at its bootstrap (+0.15% high)
