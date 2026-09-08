@@ -261,10 +261,19 @@ func (s *checkpointSink) observeEvidenceOnly() uint64 {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.closed || s.binary == nil {
+	if s.closed || s.err != nil || s.binary == nil {
 		return 0
 	}
 	s.globalSequence++
+	return s.globalSequence
+}
+
+func (s *checkpointSink) finalGlobalSequence() uint64 {
+	if s == nil {
+		return 0
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return s.globalSequence
 }
 

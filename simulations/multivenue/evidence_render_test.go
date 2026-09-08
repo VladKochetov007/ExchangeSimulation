@@ -1,6 +1,7 @@
 package multivenue
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/binary"
@@ -543,8 +544,126 @@ func TestBinaryEvidenceFormatIsExplicitAndAttested(t *testing.T) {
 		attestation.Hashing != binaryGlobalExecutionHashContract || attestation.ExecutionStreamHash == "" || attestation.CanonicalExecutionStreamHash == "" {
 		t.Fatalf("binary attestation = %+v", attestation)
 	}
+	if attestation.PersistedEventRecords == nil || attestation.FinalGlobalSequence == nil ||
+		*attestation.PersistedEventRecords != 0 || *attestation.FinalGlobalSequence != attestation.EventFrames {
+		t.Fatalf("binary global ordinal attestation = %+v", attestation)
+	}
 	if _, err := os.Stat(filepath.Join(dir, "evidence-artifact-hash.json")); !os.IsNotExist(err) {
 		t.Fatalf("legacy JSON artifact exists for binary run: %v", err)
+	}
+}
+
+func TestRenderBinaryEvidenceRequiresGlobalFinalOrdinalAttestation(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		mutate func(map[string]any)
+	}{
+		{name: "missing persisted records", mutate: func(attestation map[string]any) {
+			delete(attestation, "persisted_event_records")
+		}},
+		{name: "missing final sequence", mutate: func(attestation map[string]any) {
+			delete(attestation, "final_global_sequence")
+		}},
+		{name: "wrong final sequence", mutate: func(attestation map[string]any) {
+			attestation["final_global_sequence"] = float64(2)
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			inputDir := t.TempDir()
+			eventsFile, err := os.Create(filepath.Join(inputDir, "events.evs"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			sink := newGlobalNeutralBinaryEvidence(eventsFile)
+			if err := sink.recordGlobal(1, 7, "event", "north", map[string]int{"value": 1}, "general.jsonl", 1, 1); err != nil {
+				t.Fatal(err)
+			}
+			if err := sink.finish(); err != nil {
+				t.Fatal(err)
+			}
+			if err := eventsFile.Close(); err != nil {
+				t.Fatal(err)
+			}
+			writeRenderMetadata(t, inputDir, sink, "none")
+			attestationPath := filepath.Join(inputDir, "binary-evidence-attestation.json")
+			attestationRaw, err := os.ReadFile(attestationPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var attestation map[string]any
+			if err := json.Unmarshal(attestationRaw, &attestation); err != nil {
+				t.Fatal(err)
+			}
+			test.mutate(attestation)
+			mutated, err := json.MarshalIndent(attestation, "", "  ")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(attestationPath, append(mutated, '\n'), 0644); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := RenderBinaryEvidence(inputDir, filepath.Join(t.TempDir(), "rendered")); err == nil || !strings.Contains(err.Error(), "final evidence ordinal") && !strings.Contains(err.Error(), "final global evidence sequence") {
+				t.Fatalf("invalid global ordinal attestation was accepted: %v", err)
+			}
+		})
+	}
+}
+
+func TestRenderSidecarRequiresMandatoryFieldsAndExactTypes(t *testing.T) {
+	base := `{"client_id":7,"data":{"venue_id":"north","sequence":1,"payload":{"value":1}},"event":"sidecar","sim_ts":1,"event_seq":1}`
+	tests := []struct {
+		name   string
+		mutate func(map[string]any)
+	}{
+		{name: "missing client", mutate: func(object map[string]any) { delete(object, "client_id") }},
+		{name: "missing event", mutate: func(object map[string]any) { delete(object, "event") }},
+		{name: "missing timestamp", mutate: func(object map[string]any) { delete(object, "sim_ts") }},
+		{name: "missing venue", mutate: func(object map[string]any) { delete(object["data"].(map[string]any), "venue_id") }},
+		{name: "missing sequence", mutate: func(object map[string]any) { delete(object["data"].(map[string]any), "sequence") }},
+		{name: "missing payload", mutate: func(object map[string]any) { delete(object["data"].(map[string]any), "payload") }},
+		{name: "client is string", mutate: func(object map[string]any) { object["client_id"] = "7" }},
+		{name: "timestamp is fractional", mutate: func(object map[string]any) { object["sim_ts"] = 1.5 }},
+		{name: "sequence is string", mutate: func(object map[string]any) { object["data"].(map[string]any)["sequence"] = "1" }},
+		{name: "event sequence is string", mutate: func(object map[string]any) { object["event_seq"] = "1" }},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var object map[string]any
+			if err := json.Unmarshal([]byte(base), &object); err != nil {
+				t.Fatal(err)
+			}
+			test.mutate(object)
+			raw, err := json.Marshal(object)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var event renderPersistedEvent
+			if err := unmarshalRenderSidecar(raw, &event); err == nil {
+				t.Fatal("malformed sidecar was accepted")
+			}
+		})
+	}
+}
+
+func TestRenderGlobalSidecarRejectsNullPayload(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "general.jsonl")
+	raw := []byte(`{"client_id":7,"data":{"venue_id":"north","sequence":1,"payload":null},"event":"sidecar","sim_ts":1,"event_seq":1}`)
+	if err := os.WriteFile(path, append(raw, '\n'), 0644); err != nil {
+		t.Fatal(err)
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	cursor := &renderSidecarCursor{
+		key:     renderRouteKey{venue: "north", route: "general.jsonl"},
+		file:    file,
+		scanner: bufio.NewScanner(file),
+	}
+	var digest renderArtifactDigest
+	if err := cursor.advance(&digest, true); err == nil || !strings.Contains(err.Error(), "null payload") {
+		t.Fatalf("global null payload was accepted: %v", err)
 	}
 }
 
@@ -821,14 +940,25 @@ func writeRenderMetadata(t *testing.T, inputDir string, sink *binaryEvidence, lo
 	if err := os.WriteFile(filepath.Join(inputDir, "manifest.json"), append(manifest, '\n'), 0644); err != nil {
 		t.Fatal(err)
 	}
+	var sidecarDigest renderArtifactDigest
+	for _, record := range sidecarRecords {
+		sidecarDigest.add(record)
+	}
 	digest := sink.executionHash()
 	rawDigest := sink.rawExecutionHash()
-	attestation, err := json.MarshalIndent(binaryEvidenceArtifactRecord{
+	binaryArtifact := binaryEvidenceArtifactRecord{
 		Domain: "canonical_binary_execution_frames", Ordering: "ordered_stream",
 		Hashing:     sink.hashing,
 		EventFrames: sink.count(), StreamFrames: sink.writer.Count(),
 		ExecutionStreamHash: hex.EncodeToString(digest[:]), CanonicalExecutionStreamHash: hex.EncodeToString(rawDigest[:]), UnencodablePayloads: sink.unencodableCount(),
-	}, "", "  ")
+	}
+	if sink.hashing == binaryGlobalExecutionHashContract {
+		persistedRecords := uint64(sidecarDigest.events)
+		finalGlobalSequence := binaryArtifact.EventFrames + persistedRecords
+		binaryArtifact.PersistedEventRecords = &persistedRecords
+		binaryArtifact.FinalGlobalSequence = &finalGlobalSequence
+	}
+	attestation, err := json.MarshalIndent(binaryArtifact, "", "  ")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -836,10 +966,6 @@ func writeRenderMetadata(t *testing.T, inputDir string, sink *binaryEvidence, lo
 		t.Fatal(err)
 	}
 	if logMode == "full" {
-		var sidecarDigest renderArtifactDigest
-		for _, record := range sidecarRecords {
-			sidecarDigest.add(record)
-		}
 		artifact, err := json.MarshalIndent(evidenceArtifactRecord{
 			Domain: "persisted_json_log_evidence_only", Ordering: "unordered_multiset",
 			Events: sidecarDigest.events, Digest: sidecarDigest.hex(),

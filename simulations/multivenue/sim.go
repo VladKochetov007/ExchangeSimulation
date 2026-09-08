@@ -2181,6 +2181,9 @@ func (s *Sim) closeEvidence() error {
 	if checkpointErr != nil || closeErr != nil || loggerErr != nil {
 		return errors.Join(checkpointErr, closeErr, loggerErr)
 	}
+	if evidence.Events < 0 {
+		return fmt.Errorf("multivenue: evidence-only record count is negative: %d", evidence.Events)
+	}
 	// Publish latency before any completion attestation, so a run with a failed
 	// late sidecar cannot be mistaken for complete evidence.
 	if s.latencyTelemetry != nil {
@@ -2203,6 +2206,16 @@ func (s *Sim) closeEvidence() error {
 			ExecutionStreamHash:          hex.EncodeToString(digest[:]),
 			CanonicalExecutionStreamHash: hex.EncodeToString(rawDigest[:]),
 			UnencodablePayloads:          s.checkpoints.binary.unencodableCount(),
+		}
+		if binaryArtifact.Hashing == binaryGlobalExecutionHashContract {
+			persistedRecords := uint64(evidence.Events)
+			binaryEvents := binaryArtifact.EventFrames
+			finalGlobalSequence := s.checkpoints.finalGlobalSequence()
+			if finalGlobalSequence != binaryEvents+persistedRecords {
+				return fmt.Errorf("multivenue: final global evidence sequence %d does not equal binary frames %d plus persisted sidecars %d", finalGlobalSequence, binaryEvents, persistedRecords)
+			}
+			binaryArtifact.PersistedEventRecords = &persistedRecords
+			binaryArtifact.FinalGlobalSequence = &finalGlobalSequence
 		}
 		raw, err := json.MarshalIndent(binaryArtifact, "", "  ")
 		if err != nil {
@@ -2274,14 +2287,16 @@ type evidenceArtifactRecord struct {
 }
 
 type binaryEvidenceArtifactRecord struct {
-	Domain                       string `json:"domain"`
-	Ordering                     string `json:"ordering"`
-	Hashing                      string `json:"hashing,omitempty"`
-	EventFrames                  uint64 `json:"event_frames"`
-	StreamFrames                 uint64 `json:"stream_frames"`
-	ExecutionStreamHash          string `json:"execution_stream_hash"`
-	CanonicalExecutionStreamHash string `json:"canonical_execution_stream_hash,omitempty"`
-	UnencodablePayloads          uint64 `json:"unencodable_payloads,omitempty"`
+	Domain                       string  `json:"domain"`
+	Ordering                     string  `json:"ordering"`
+	Hashing                      string  `json:"hashing,omitempty"`
+	EventFrames                  uint64  `json:"event_frames"`
+	StreamFrames                 uint64  `json:"stream_frames"`
+	ExecutionStreamHash          string  `json:"execution_stream_hash"`
+	CanonicalExecutionStreamHash string  `json:"canonical_execution_stream_hash,omitempty"`
+	UnencodablePayloads          uint64  `json:"unencodable_payloads,omitempty"`
+	PersistedEventRecords        *uint64 `json:"persisted_event_records,omitempty"`
+	FinalGlobalSequence          *uint64 `json:"final_global_sequence,omitempty"`
 }
 
 type venueLogEvent struct {
@@ -2365,11 +2380,16 @@ func (l venueLogger) LogEvidenceOnly(simTime int64, clientID uint64, eventName s
 		sequence = *l.sequence
 	}
 	globalSequence := l.sink.observeEvidenceOnly()
+	binarySink := l.sink != nil && l.sink.binary != nil
+	if binarySink && globalSequence == 0 {
+		l.sink.fail(fmt.Errorf("multivenue: binary evidence sidecar for %s did not receive a global event sequence", eventName))
+		return
+	}
 	var persistedEvent any = venueLogEvent{VenueID: l.venueID, Payload: event}
 	if l.sink.replacesRawLog() {
 		persistedEvent = sequencedVenueLogEvent{VenueID: l.venueID, Sequence: sequence, Payload: event}
 	}
-	if globalSequence != 0 {
+	if binarySink {
 		sequenced, ok := l.inner.(sequencedEventLogger)
 		if !ok {
 			l.sink.fail(fmt.Errorf("multivenue: binary evidence sidecar logger for %s does not support global event sequences", eventName))

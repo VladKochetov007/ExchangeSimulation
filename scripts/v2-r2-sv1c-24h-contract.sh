@@ -499,6 +499,9 @@ v2_r2_sv1c_require_activation_arm_artifacts() {
 		(.stream_frames | type) == "number" and (.stream_frames | floor) == .stream_frames and .stream_frames >= .event_frames and
 		(.execution_stream_hash | type) == "string" and (.execution_stream_hash | test("^[0-9a-f]{64}$")) and
 		(.canonical_execution_stream_hash | type) == "string" and (.canonical_execution_stream_hash | test("^[0-9a-f]{64}$")) and
+		(.persisted_event_records | type) == "number" and (.persisted_event_records | floor) == .persisted_event_records and .persisted_event_records >= 0 and
+		(.final_global_sequence | type) == "number" and (.final_global_sequence | floor) == .final_global_sequence and .final_global_sequence >= 0 and
+		.final_global_sequence == (.event_frames + .persisted_event_records) and
 		((.unencodable_payloads // 0) | type) == "number" and (((.unencodable_payloads // 0) | floor) == (.unencodable_payloads // 0)) and ((.unencodable_payloads // 0) | . == 0)' \
 		"$arm_dir/binary-evidence-attestation.json" >/dev/null || return 1
 }

@@ -2,6 +2,7 @@ package multivenue
 
 import (
 	"bufio"
+	"bytes"
 	"container/heap"
 	"encoding/json"
 	"errors"
@@ -207,6 +208,9 @@ func (c *renderSidecarCursor) advance(digest *renderArtifactDigest, globalOrderi
 		return fmt.Errorf("multivenue: sidecar %s/%s has incomplete persisted event", c.key.venue, c.key.route)
 	}
 	if globalOrdering {
+		if bytes.Equal(bytes.TrimSpace(event.Data.Payload), []byte("null")) {
+			return fmt.Errorf("multivenue: sidecar %s/%s has null payload in global binary evidence", c.key.venue, c.key.route)
+		}
 		if event.EventSeq == 0 || (c.lastGlobalSequence != 0 && event.EventSeq <= c.lastGlobalSequence) {
 			return fmt.Errorf("multivenue: sidecar %s/%s has non-increasing global event sequence", c.key.venue, c.key.route)
 		}
@@ -219,26 +223,59 @@ func (c *renderSidecarCursor) advance(digest *renderArtifactDigest, globalOrderi
 }
 
 func unmarshalRenderSidecar(raw []byte, event *renderPersistedEvent) error {
-	var object map[string]any
-	if err := decodeStrictJSONDocument(raw, &object, "rendered sidecar"); err != nil {
+	objects, err := decodeStrictJSONObjects(bytes.NewReader(raw), "rendered sidecar")
+	if err != nil {
 		return err
 	}
-	if err := requireExactRenderKeys(object, "client_id", "data", "event", "sim_ts", "event_seq"); err != nil {
+	if len(objects) != 1 {
+		return fmt.Errorf("rendered sidecar has %d JSON values, want exactly 1", len(objects))
+	}
+	object := objects[0]
+	if object == nil {
+		return errors.New("rendered sidecar is not an object")
+	}
+	if err := requireExactRenderKeys(object, []string{"client_id", "data", "event", "sim_ts"}, "event_seq"); err != nil {
 		return err
+	}
+	if _, err := exactUint64Field(object, "client_id"); err != nil {
+		return err
+	}
+	if _, err := exactStringField(object, "event"); err != nil {
+		return err
+	}
+	if _, err := exactInt64Field(object, "sim_ts"); err != nil {
+		return err
+	}
+	if _, present := object["event_seq"]; present {
+		if _, err := exactUint64Field(object, "event_seq"); err != nil {
+			return err
+		}
 	}
 	data, ok := object["data"].(map[string]any)
 	if !ok {
 		return errors.New("rendered sidecar data is not an object")
 	}
-	if err := requireExactRenderKeys(data, "venue_id", "sequence", "payload"); err != nil {
+	if err := requireExactRenderKeys(data, []string{"venue_id", "sequence", "payload"}); err != nil {
+		return err
+	}
+	if _, err := exactStringField(data, "venue_id"); err != nil {
+		return err
+	}
+	if _, err := exactUint64Field(data, "sequence"); err != nil {
 		return err
 	}
 	return json.Unmarshal(raw, event)
 }
 
-func requireExactRenderKeys(object map[string]any, allowed ...string) error {
-	allowedKeys := make(map[string]struct{}, len(allowed))
-	for _, key := range allowed {
+func requireExactRenderKeys(object map[string]any, required []string, optional ...string) error {
+	allowedKeys := make(map[string]struct{}, len(required)+len(optional))
+	for _, key := range required {
+		if _, present := object[key]; !present {
+			return fmt.Errorf("missing JSON field %q", key)
+		}
+		allowedKeys[key] = struct{}{}
+	}
+	for _, key := range optional {
 		allowedKeys[key] = struct{}{}
 	}
 	for key := range object {

@@ -357,8 +357,12 @@ cleanup_rendered_input() {
 }
 trap 'cleanup_raw_stage; cleanup_rendered_input' EXIT
 runtime_canonical_digest=""
+runtime_full_evidence_digest=""
+binary_hashing=""
 if [[ "$evidence_format" == "evstream_v3" ]]; then
 	[[ -x "$renderer" ]] || fail "missing binary evidence renderer: $renderer"
+	binary_hashing=$(jq -er '.hashing | select(type == "string")' "$cell/binary-evidence-attestation.json") ||
+		fail "binary evidence attestation omits its hash contract"
 	renderer_go_version=$(v2_r2_binary_go_version "$renderer")
 	v2_r2_is_go_127 "$renderer_go_version" || fail "renderer is not built with the pinned Go 1.27 toolchain: $renderer_go_version"
 	renderer_revision=$(go version -m "$renderer" | awk '$1 == "build" && index($2, "vcs.revision=") == 1 {sub("vcs.revision=", "", $2); print $2; exit}')
@@ -370,13 +374,20 @@ if [[ "$evidence_format" == "evstream_v3" ]]; then
 		fail "renderer is not a clean reproducible build of current HEAD"
 	rendered_dir=$(mktemp -d)
 	render_report=$("$renderer" -dir "$cell" -out "$rendered_dir" -route-compression "$render_route_compression") || fail "binary evidence rendering failed"
+	if [[ "$binary_hashing" == "route_and_global_sequence_neutral_v2" ]]; then
+		rendered_full_hash=$(jq -er '.canonical_full_evidence_hash | select(type == "string" and test("^[0-9a-f]{64}$"))' <<<"$render_report") ||
+			fail "renderer omitted its canonical full-evidence hash"
+		runtime_full_evidence_digest="$rendered_full_hash"
+	fi
 	jq -e --argjson event_frames "$(jq -er '.event_frames' "$cell/binary-evidence-attestation.json")" \
 		--arg execution_hash "$(jq -er '.execution_stream_hash' "$cell/binary-evidence-attestation.json")" \
 		--arg canonical_hash "$(jq -er '.canonical_execution_stream_hash' "$cell/binary-evidence-attestation.json")" \
+		--arg hashing "$binary_hashing" --arg full_hash "$runtime_full_evidence_digest" \
 		--arg route_compression "$render_route_compression" \
 		'.event_frames == $event_frames and .execution_stream_hash == $execution_hash and
 		 .canonical_execution_stream_hash == $canonical_hash and
-		 (.routes | type) == "number" and .route_compression == $route_compression' \
+		 (.routes | type) == "number" and .route_compression == $route_compression and
+		 (if $hashing == "route_and_global_sequence_neutral_v2" then .canonical_full_evidence_hash == $full_hash else true end)' \
 		<<<"$render_report" >/dev/null || fail "renderer report does not match binary attestation"
 	# Report-derived metrics also consume the immutable instrumented market-data
 	# sidecars. Link them into the rendered input namespace without copying them.
@@ -455,7 +466,15 @@ if [[ "$evidence_format" == "evstream_v3" ]]; then
 			(.execution_stream_hash | test("^[0-9a-f]{64}$")) and
 			(.canonical_execution_stream_hash | type) == "string" and
 			(.canonical_execution_stream_hash | test("^[0-9a-f]{64}$")) and
-			((.unencodable_payloads // 0) == 0)) | .hashing' \
+			((.unencodable_payloads // 0) == 0) and
+			(try (if .hashing == "route_and_global_sequence_neutral_v2" then
+				((.persisted_event_records | type) == "number" and
+				 (.final_global_sequence | type) == "number" and
+				 .persisted_event_records == (.persisted_event_records | floor) and
+				 .final_global_sequence == (.final_global_sequence | floor) and
+				 .persisted_event_records >= 0 and .final_global_sequence >= 0 and
+				 .final_global_sequence == (.event_frames + .persisted_event_records))
+			 else true end) catch false) | .hashing' \
 		"$cell/binary-evidence-attestation.json") || fail "invalid runtime binary evidence attestation"
 else
 	jq -e '.domain == "persisted_json_records" and .ordering == "unordered_multiset" and
@@ -562,10 +581,13 @@ write_terminal_failure_artifacts() {
 		jq -n --arg execution_hash "$(jq -er '.execution_stream_hash' "$cell/binary-evidence-attestation.json")" \
 			--arg canonical_hash "$(jq -er '.canonical_execution_stream_hash' "$cell/binary-evidence-attestation.json")" \
 			--argjson event_frames "$(jq -er '.event_frames' "$cell/binary-evidence-attestation.json")" \
-			'{schema_version: 1, result: {domain: "rendered_binary_json_records",
+			--arg full_hash "$runtime_full_evidence_digest" \
+			'{schema_version: 1, result: ({domain: "rendered_binary_json_records",
 			 ordering: "venue_sequence_reconstructed", source_execution_stream_hash: $execution_hash,
 			 source_canonical_execution_stream_hash: $canonical_hash,
-			 source_binary_event_frames: $event_frames, status: "TERMINAL_FAILURE_DIAGNOSTIC"}}' >"$temporary"
+			 source_binary_event_frames: $event_frames,
+			 status: "TERMINAL_FAILURE_DIAGNOSTIC"} +
+			 (if $full_hash == "" then {} else {canonical_full_evidence_hash: $full_hash} end))}' >"$temporary"
 	mv "$temporary" "$analysis_dir/evidenceartifacthash.json"
 
 		temporary=$(mktemp "$analysis_dir/streamhash.json.tmp-XXXXXX")
@@ -638,8 +660,9 @@ write_terminal_failure_artifacts() {
 		--arg renderer_route_compression "$render_route_compression" --arg source_revision_mode "$source_revision_mode" \
 		--arg raw_source_revision "$metadata_revision" --argjson analyzer_modified "$analyzer_modified_json" \
 		--argjson required_artifacts "$required_json" --argjson artifact_sha256 "$artifact_sha256" \
-			--argjson runtime_evidence_events "$runtime_events" --arg runtime_evidence_digest "$runtime_digest" \
-			--arg runtime_canonical_digest "$runtime_canonical_digest" \
+				--argjson runtime_evidence_events "$runtime_events" --arg runtime_evidence_digest "$runtime_digest" \
+				--arg runtime_canonical_digest "$runtime_canonical_digest" \
+				--arg runtime_full_evidence_digest "$runtime_full_evidence_digest" \
 		--arg contract "$contract_version" --arg cell "$cell_name" --argjson seed "$seed" \
 		--arg simulator_revision "$metadata_revision" --arg simulator_sha256 "$simulator_sha256" \
 		--argjson simulator_trimpath true --arg simulator_cgo_enabled "$binary_cgo_enabled" \
@@ -663,8 +686,9 @@ write_terminal_failure_artifacts() {
 		 config_sha256: $config_sha256, analysis_contract: $contract, integrity_contract: $contract,
 		 activation_contract: $contract, completion_sentinels: $completion_sentinels,
 		 required_artifacts: $required_artifacts, artifact_sha256: $artifact_sha256,
-			runtime_evidence_artifact: {representation: $evidence_format, event_frames: $runtime_evidence_events,
-			 execution_stream_hash: $runtime_evidence_digest, canonical_execution_stream_hash: $runtime_canonical_digest}, terminal_failure_diagnostic: true,
+			 runtime_evidence_artifact: ({representation: $evidence_format, event_frames: $runtime_evidence_events,
+				 execution_stream_hash: $runtime_evidence_digest, canonical_execution_stream_hash: $runtime_canonical_digest} +
+				 (if $runtime_full_evidence_digest == "" then {} else {canonical_full_evidence_hash: $runtime_full_evidence_digest} end)), terminal_failure_diagnostic: true,
 		 inactive_contracts: ["fundingcarry", "termcarry", "datedcarryp5", "datedmandatep5", "perpreplenishment"],
 		 raw_log_policy: "retained; this extractor has no prune authority"}' >"$temporary"
 	mv "$temporary" "$analysis_dir/analysis-metadata.json"
@@ -715,12 +739,13 @@ if [[ "$evidence_format" == "evstream_v3" ]]; then
 	rendered_canonical_hash=$(jq -er '.canonical_execution_stream_hash' "$cell/binary-evidence-attestation.json")
 	rendered_frames=$(jq -er '.event_frames' "$cell/binary-evidence-attestation.json")
 	rendered_tmp=$(mktemp "$analysis_dir/evidenceartifacthash.json.tmp-XXXXXX")
-	jq --arg execution_hash "$rendered_hash" --arg canonical_hash "$rendered_canonical_hash" --argjson event_frames "$rendered_frames" \
+	jq --arg execution_hash "$rendered_hash" --arg canonical_hash "$rendered_canonical_hash" --arg full_hash "$runtime_full_evidence_digest" --argjson event_frames "$rendered_frames" \
 		'.result.domain = "rendered_binary_json_records" |
 		 .result.ordering = "venue_sequence_reconstructed" |
 		 .result.source_execution_stream_hash = $execution_hash |
 		 .result.source_canonical_execution_stream_hash = $canonical_hash |
-		 .result.source_binary_event_frames = $event_frames' \
+		 .result.source_binary_event_frames = $event_frames |
+		 (if $full_hash == "" then . else .result.canonical_full_evidence_hash = $full_hash end)' \
 		"$analysis_dir/evidenceartifacthash.json" >"$rendered_tmp"
 	mv "$rendered_tmp" "$analysis_dir/evidenceartifacthash.json"
 fi
@@ -1093,9 +1118,14 @@ if [[ "$evidence_format" == "evstream_v3" ]]; then
 	runtime_digest=$(jq -er '.execution_stream_hash' "$cell/binary-evidence-attestation.json")
 	runtime_canonical_digest=$(jq -er '.canonical_execution_stream_hash' "$cell/binary-evidence-attestation.json")
 	runtime_binary_hashing=$(jq -er '.hashing' "$cell/binary-evidence-attestation.json")
-	jq -e --arg execution_hash "$runtime_digest" --argjson event_frames "$runtime_events" \
+	jq -e --arg execution_hash "$runtime_digest" --arg full_hash "$runtime_full_evidence_digest" --arg hashing "$runtime_binary_hashing" --argjson event_frames "$runtime_events" \
 		'.result.domain == "rendered_binary_json_records" and .result.ordering == "venue_sequence_reconstructed" and
-		 .result.source_execution_stream_hash == $execution_hash and .result.source_binary_event_frames == $event_frames' \
+		 .result.source_execution_stream_hash == $execution_hash and .result.source_binary_event_frames == $event_frames and
+		 (if $hashing == "route_and_global_sequence_neutral_v2" then
+			(.result.canonical_full_evidence_hash | type) == "string" and
+			(.result.canonical_full_evidence_hash | test("^[0-9a-f]{64}$")) and
+			.result.canonical_full_evidence_hash == $full_hash
+		 else true end)' \
 		"$analysis_dir/evidenceartifacthash.json" >/dev/null || fail "rendered binary evidence hash domain mismatch"
 	jq -e --arg canonical_hash "$runtime_canonical_digest" \
 		'.result.source_canonical_execution_stream_hash == $canonical_hash' \
@@ -1153,8 +1183,9 @@ jq -n \
 	--argjson required_artifacts "$required_json" \
 	--argjson artifact_sha256 "$artifact_sha256" \
 	--argjson runtime_evidence_events "$runtime_events" \
-	--arg runtime_evidence_digest "$runtime_digest" \
-	--arg runtime_canonical_digest "$runtime_canonical_digest" \
+			--arg runtime_evidence_digest "$runtime_digest" \
+			--arg runtime_canonical_digest "$runtime_canonical_digest" \
+			--arg runtime_full_evidence_digest "$runtime_full_evidence_digest" \
 	--arg contract "$contract_version" \
 	--arg cell "$cell_name" \
 	--argjson seed "$seed" \
@@ -1190,7 +1221,8 @@ jq -n \
 			completion_sentinels: $completion_sentinels, required_artifacts: $required_artifacts,
 		artifact_sha256: $artifact_sha256,
 		runtime_evidence_artifact: ({representation: $evidence_format, event_frames: $runtime_evidence_events, execution_stream_hash: $runtime_evidence_digest} +
-			(if $runtime_canonical_digest == "" then {} else {canonical_execution_stream_hash: $runtime_canonical_digest} end)),
+			(if $runtime_canonical_digest == "" then {} else {canonical_execution_stream_hash: $runtime_canonical_digest} end) +
+			(if $runtime_full_evidence_digest == "" then {} else {canonical_full_evidence_hash: $runtime_full_evidence_digest} end)),
 		inactive_contracts: ["fundingcarry", "termcarry", "datedcarryp5", "datedmandatep5", "perpreplenishment"],
 		raw_log_policy: "retained; this extractor has no prune authority"}' >"$metadata_tmp"
 mv "$metadata_tmp" "$analysis_dir/analysis-metadata.json"

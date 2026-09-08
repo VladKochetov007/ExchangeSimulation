@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"exchange_sim/evstream"
@@ -203,6 +204,19 @@ type recordingOnlyLogger struct{}
 
 func (recordingOnlyLogger) LogEvent(int64, uint64, string, any) {}
 
+type recordingSequencedLogger struct {
+	ordinaryCalls  int
+	sequencedCalls int
+}
+
+func (l *recordingSequencedLogger) LogEvent(int64, uint64, string, any) {
+	l.ordinaryCalls++
+}
+
+func (l *recordingSequencedLogger) LogEventWithSequence(int64, uint64, string, uint64, any) {
+	l.sequencedCalls++
+}
+
 func TestBinaryEvidenceOnlyFailsClosedForUnsupportedSequenceLogger(t *testing.T) {
 	sink := &checkpointSink{binary: newGlobalNeutralBinaryEvidence(io.Discard), replaceRaw: true}
 	logger := venueLogger{venueID: "north", route: "general.jsonl", inner: recordingOnlyLogger{}, sink: sink}
@@ -212,6 +226,37 @@ func TestBinaryEvidenceOnlyFailsClosedForUnsupportedSequenceLogger(t *testing.T)
 	}
 	if err := sink.close(); err == nil {
 		t.Fatal("binary evidence close concealed unsupported sidecar logger")
+	}
+}
+
+func TestBinaryEvidenceOnlyFailsClosedAfterSinkClosureOrError(t *testing.T) {
+	tests := []struct {
+		name  string
+		setup func(*checkpointSink) error
+	}{
+		{name: "closed", setup: func(sink *checkpointSink) error {
+			return sink.close()
+		}},
+		{name: "errored", setup: func(sink *checkpointSink) error {
+			sink.fail(errors.New("injected binary sink failure"))
+			return nil
+		}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			sink := &checkpointSink{binary: newGlobalNeutralBinaryEvidence(io.Discard), replaceRaw: true}
+			if err := test.setup(sink); err != nil {
+				t.Fatal(err)
+			}
+			logger := &recordingSequencedLogger{}
+			venueLogger{venueID: "north", route: "general.jsonl", inner: logger, sink: sink}.LogEvidenceOnly(1, 7, "sidecar_event", map[string]int{"value": 1})
+			if logger.ordinaryCalls != 0 || logger.sequencedCalls != 0 {
+				t.Fatalf("failed binary sink fell back to logger: ordinary=%d sequenced=%d", logger.ordinaryCalls, logger.sequencedCalls)
+			}
+			if sink.err == nil || !strings.Contains(sink.err.Error(), "did not receive a global event sequence") {
+				t.Fatalf("failed binary sink did not record fail-closed sidecar error: %v", sink.err)
+			}
+		})
 	}
 }
 

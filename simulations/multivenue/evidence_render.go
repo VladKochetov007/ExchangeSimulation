@@ -331,6 +331,19 @@ func validateBinaryAttestation(inputDir string, attestation binaryEvidenceArtifa
 	if attestation.Hashing == binaryGlobalExecutionHashContract && logMode != "full" && logMode != "none" {
 		return fmt.Errorf("multivenue: global binary evidence has unsupported log mode %q", logMode)
 	}
+	if attestation.Hashing == binaryGlobalExecutionHashContract {
+		if attestation.PersistedEventRecords == nil || attestation.FinalGlobalSequence == nil {
+			return fmt.Errorf("multivenue: global binary attestation lacks final evidence ordinal")
+		}
+		persistedRecords := *attestation.PersistedEventRecords
+		if sidecarDigest.events < 0 || persistedRecords != uint64(sidecarDigest.events) {
+			return fmt.Errorf("multivenue: global binary attestation persisted record count %d does not match sidecars %d", persistedRecords, sidecarDigest.events)
+		}
+		expectedFinalGlobal := eventFrames + persistedRecords
+		if *attestation.FinalGlobalSequence != expectedFinalGlobal {
+			return fmt.Errorf("multivenue: final global evidence sequence %d does not equal binary frames %d plus persisted sidecars %d", *attestation.FinalGlobalSequence, eventFrames, persistedRecords)
+		}
+	}
 	if logMode == "full" {
 		raw, err := readRenderRegularFile(filepath.Join(inputDir, "evidence-only-artifact-hash.json"), "read evidence-only attestation")
 		if err != nil {
