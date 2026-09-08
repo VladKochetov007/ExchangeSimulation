@@ -321,10 +321,14 @@ if jq '.control.supplier_count = 1' "$temp_root/comparison-cdfliquidity.json" >"
 	exit 1
 fi
 
-# Generate the comparison with the real analysis producer, then pass that
-# serialized output through the complete SV1B activation-provenance validator.
-# The reduced fixture above protects the comparison predicate; this fixture
-# protects the producer-to-provenance boundary that consumes its JSON schema.
+# Generate the comparison with the real analysis producer. It is deliberately
+# used as a negative substitution case below: a valid seed-607 producer result
+# must not be accepted as a seed-643, three-venue activation pair merely because
+# the surrounding attestation names seed 643.
+#
+# The reduced fixture above protects the comparison predicate. The
+# production-shaped fixture below protects the producer-to-provenance boundary
+# and exercises the exact registered activation population.
 serialized_comparison="$temp_root/serialized-cdf-comparison.json"
 EXSIM_CDF_COMPARISON_OUTPUT="$serialized_comparison" GOMAXPROCS=2 \
 	go test -count=1 ./analysis -run '^TestCDFLiquidityComparisonSerializesContractFixture$' >/dev/null || {
@@ -357,7 +361,6 @@ for arm in treatment control; do
 		terminal_failure_verified:false,terminal_outcome_status:"completed",
 		resource_guard_failed:false}' >"$full_output_root/$arm/run-status.json"
 done
-cp -- "$serialized_comparison" "$full_output_root/cdf-liquidity-comparison.json"
 fixture_true_binary=$(type -P true) || {
 	echo "could not locate an executable true binary for the provenance fixture" >&2
 	exit 1
@@ -371,7 +374,6 @@ fixture_treatment_config_sha256=$(sha256sum -- "$v2_r2_sv1_activation_config" | 
 fixture_control_config_sha256=$(sha256sum -- "$v2_r2_sv1_activation_control_config" | awk '{print $1}')
 fixture_treatment_status_sha256=$(sha256sum -- "$full_output_root/treatment/run-status.json" | awk '{print $1}')
 fixture_control_status_sha256=$(sha256sum -- "$full_output_root/control/run-status.json" | awk '{print $1}')
-fixture_comparison_sha256=$(sha256sum -- "$full_output_root/cdf-liquidity-comparison.json" | awk '{print $1}')
 fixture_review_report="$temp_root/full-review.md"
 printf '%s\n' 'independent exact-tree review fixture for serialized comparison' >"$fixture_review_report"
 fixture_review_report_sha256=$(sha256sum -- "$fixture_review_report" | awk '{print $1}')
@@ -381,64 +383,178 @@ jq -n --arg revision "$review_revision" --arg tree_sha256 "$review_tree_sha256" 
 	--arg contract "$v2_r2_sv1_review_contract" --argjson reviewed_scope "$v2_r2_sv1_review_scope" \
 	'{schema_version:1,contract:$contract,reviewed_revision:$revision,reviewed_tree_sha256:$tree_sha256,
 	 review_type:"independent_sol_xhigh",verdict:"ACCEPTED_FOR_ACTIVATION",reviewed_worktree_clean:true,
-	 holdouts_consumed:false,reviewer:"fixture-serialized-comparison-reviewer",reviewed_scope:$reviewed_scope,
-	 review_report_path:$report_path,review_report_sha256:$report_sha256}' >"$fixture_review"
+		 holdouts_consumed:false,reviewer:"fixture-serialized-comparison-reviewer",reviewed_scope:$reviewed_scope,
+		 review_report_path:$report_path,review_report_sha256:$report_sha256}' >"$fixture_review"
 IFS=$'\t' read -r fixture_host_cpu_count fixture_allowed_cpu_count fixture_cpu_affinity < <(v2_r2_sv1b_cpu_policy)
 fixture_treatment_artifacts=$(v2_r2_sv1b_artifact_records "$full_output_root/treatment")
 fixture_control_artifacts=$(v2_r2_sv1b_artifact_records "$full_output_root/control")
 fixture_activation_provenance="$temp_root/full-activation-provenance.json"
-jq -n --arg contract "$v2_r2_sv1_activation_pair_contract" --arg revision "$review_revision" \
-	--arg tree_sha256 "$review_tree_sha256" --arg output_root "$full_output_root" \
-	--arg treatment_dir "$full_output_root/treatment" --arg control_dir "$full_output_root/control" \
-	--arg comparison_path "$full_output_root/cdf-liquidity-comparison.json" \
-	--arg review_path "$fixture_review" --arg review_sha256 "$(sha256sum -- "$fixture_review" | awk '{print $1}')" \
-	--arg simulator_path "$temp_root/sv1b-simulator" --arg analyzer_path "$temp_root/sv1b-analyzer" \
-	--arg simulator_sha256 "$fixture_simulator_sha256" --arg analyzer_sha256 "$fixture_analyzer_sha256" \
-	--arg comparison_sha256 "$fixture_comparison_sha256" --arg treatment_source_config_path "$(realpath -e -- "$v2_r2_sv1_activation_config")" \
-	--arg control_source_config_path "$(realpath -e -- "$v2_r2_sv1_activation_control_config")" \
-	--arg treatment_source_config_sha256 "$fixture_treatment_config_sha256" --arg control_source_config_sha256 "$fixture_control_config_sha256" \
-	--arg treatment_config_sha256 "$fixture_treatment_config_sha256" --arg control_config_sha256 "$fixture_control_config_sha256" \
-	--arg treatment_status_sha256 "$fixture_treatment_status_sha256" --arg control_status_sha256 "$fixture_control_status_sha256" \
-	--argjson treatment_artifacts "$fixture_treatment_artifacts" --argjson control_artifacts "$fixture_control_artifacts" \
-	--argjson host_cpu_count "$fixture_host_cpu_count" --argjson allowed_cpu_count "$fixture_allowed_cpu_count" \
-	--arg cpu_affinity "$fixture_cpu_affinity" \
-	'{schema_version:3,contract:$contract,candidate_revision:$revision,candidate_tree_sha256:$tree_sha256,
-	 seed:643,simulated_horizon:"fixture",output_root:$output_root,treatment_dir:$treatment_dir,control_dir:$control_dir,
-	 treatment_source_config_path:$treatment_source_config_path,control_source_config_path:$control_source_config_path,
-	 treatment_source_config_sha256:$treatment_source_config_sha256,control_source_config_sha256:$control_source_config_sha256,
-	 simulator_binary_path:$simulator_path,analyzer_binary_path:$analyzer_path,
-	 review_attestation_path:$review_path,review_attestation_sha256:$review_sha256,comparison_path:$comparison_path,
-	 treatment_config_sha256:$treatment_config_sha256,control_config_sha256:$control_config_sha256,
-	 simulator_binary_sha256:$simulator_sha256,analyzer_binary_sha256:$analyzer_sha256,comparison_sha256:$comparison_sha256,
-	 status:"ACTIVATION_CONTRACT_SATISFIED",activation_satisfied:true,holdouts_consumed:false,
-	 treatment_runner_status:0,control_runner_status:0,treatment_terminal_status:"completed",control_terminal_status:"completed",
-	 treatment_run_status_sha256:$treatment_status_sha256,control_run_status_sha256:$control_status_sha256,
-	 treatment_terminal_outcome_sha256:"",control_terminal_outcome_sha256:"",
-	 treatment_artifacts:$treatment_artifacts,control_artifacts:$control_artifacts,
-	 resource_policy:{gomaxprocs:2,memory_limit_bytes:21474836480,gomemlimit_bytes:19327352832,
-		minimum_free_bytes:4294967296,host_cpu_count:$host_cpu_count,allowed_cpu_count:$allowed_cpu_count,
-		cpu_limit_percent:90,cpu_affinity:$cpu_affinity}}' >"$fixture_activation_provenance"
-v2_r2_require_sv1b_activation_provenance "$fixture_activation_provenance" "$review_revision" "$fixture_simulator_sha256" || {
-	echo "full activation provenance rejected the real serialized CDF comparison" >&2
-	exit 1
+
+activation_venue_ids=$(jq -ce '.venue_ids | select(type == "array" and length == 3)' "$v2_r2_sv1_activation_config")
+activation_supplier_count=$(jq -er '(.elastic_liquidity_suppliers | length) * (.venue_ids | length)' "$v2_r2_sv1_activation_config")
+activation_treatment_result="$temp_root/activation-treatment-result.json"
+jq --argjson expected_supplier_count "$activation_supplier_count" '
+	.result as $result |
+	$result.suppliers as $supplier_templates |
+	.result
+	| .supplier_count = $expected_supplier_count
+	| .decision_count = ($expected_supplier_count * 2)
+	| .fill_count = $expected_supplier_count
+	| .trading_supplier_count = $expected_supplier_count
+	| .pnl_changing_supplier_count = $expected_supplier_count
+	| .inventory_responsive_decision_count = $expected_supplier_count
+	| .cancel_count = $expected_supplier_count
+	| .withdraw_count = $expected_supplier_count
+	| .withdrawal_without_replacement_count = $expected_supplier_count
+	| .risk_state_decision_count = $expected_supplier_count
+	| .fresh_risk_state_decision_count = $expected_supplier_count
+	| .suppliers = [range(0; $expected_supplier_count) as $index
+		| ($supplier_templates[$index % ($supplier_templates | length)]
+			| .role = ("cdf_elastic_supplier_" + (($index + 1) | tostring))
+			| .max_gross_base_balance = 1
+			| .configured_max_inventory = 2)]
+' "$cdf_audit_fixture" >"$activation_treatment_result"
+jq '.result' "$temp_root/control-cdfliquidity.json" >"$temp_root/activation-control-result.json"
+
+write_activation_provenance() {
+	local output_path=$1 comparison_path=$2 comparison_sha256=$3
+	jq -n \
+		--arg contract "$v2_r2_sv1_activation_pair_contract" --arg revision "$review_revision" \
+		--arg tree_sha256 "$review_tree_sha256" --arg output_root "$full_output_root" \
+		--arg treatment_dir "$full_output_root/treatment" --arg control_dir "$full_output_root/control" \
+		--arg comparison_path "$comparison_path" \
+		--arg review_path "$fixture_review" --arg review_sha256 "$(sha256sum -- "$fixture_review" | awk '{print $1}')" \
+		--arg simulator_path "$temp_root/sv1b-simulator" --arg analyzer_path "$temp_root/sv1b-analyzer" \
+		--arg simulator_sha256 "$fixture_simulator_sha256" --arg analyzer_sha256 "$fixture_analyzer_sha256" \
+		--arg comparison_sha256 "$comparison_sha256" \
+		--arg treatment_source_config_path "$(realpath -e -- "$v2_r2_sv1_activation_config")" \
+		--arg control_source_config_path "$(realpath -e -- "$v2_r2_sv1_activation_control_config")" \
+		--arg treatment_source_config_sha256 "$fixture_treatment_config_sha256" --arg control_source_config_sha256 "$fixture_control_config_sha256" \
+		--arg treatment_config_sha256 "$fixture_treatment_config_sha256" --arg control_config_sha256 "$fixture_control_config_sha256" \
+		--arg treatment_status_sha256 "$fixture_treatment_status_sha256" --arg control_status_sha256 "$fixture_control_status_sha256" \
+		--argjson treatment_artifacts "$fixture_treatment_artifacts" --argjson control_artifacts "$fixture_control_artifacts" \
+		--argjson host_cpu_count "$fixture_host_cpu_count" --argjson allowed_cpu_count "$fixture_allowed_cpu_count" \
+		--arg cpu_affinity "$fixture_cpu_affinity" --argjson venue_ids "$activation_venue_ids" \
+		--argjson seed "$v2_r2_sv1_activation_seed" --arg horizon "$v2_r2_sv1_activation_horizon" \
+		--argjson start_nano "$v2_r2_sv1_activation_simulation_start_nano" \
+		--argjson end_nano "$v2_r2_sv1_activation_simulation_end_nano" \
+		--arg evidence_format "$v2_r2_sv1_activation_evidence_format" --arg log_mode "$v2_r2_sv1_activation_log_mode" \
+		--arg treatment_experiment_id "$(jq -er '.experiment_id' "$v2_r2_sv1_activation_config")" \
+		--arg control_experiment_id "$(jq -er '.experiment_id' "$v2_r2_sv1_activation_control_config")" \
+		--arg treatment_hypothesis_id "$(jq -er '.hypothesis_id' "$v2_r2_sv1_activation_config")" \
+		--arg control_hypothesis_id "$(jq -er '.hypothesis_id' "$v2_r2_sv1_activation_control_config")" \
+		'{schema_version:3,contract:$contract,candidate_revision:$revision,candidate_tree_sha256:$tree_sha256,
+		 seed:$seed,simulated_horizon:$horizon,
+		 simulation_start_nano:$start_nano,simulation_end_nano:$end_nano,
+		 evidence_format:$evidence_format,log_mode:$log_mode,
+		 venue_ids:$venue_ids,treatment_experiment_id:$treatment_experiment_id,
+		 control_experiment_id:$control_experiment_id,treatment_hypothesis_id:$treatment_hypothesis_id,
+		 control_hypothesis_id:$control_hypothesis_id,output_root:$output_root,
+		 treatment_dir:$treatment_dir,control_dir:$control_dir,
+		 treatment_source_config_path:$treatment_source_config_path,control_source_config_path:$control_source_config_path,
+		 treatment_source_config_sha256:$treatment_source_config_sha256,control_source_config_sha256:$control_source_config_sha256,
+		 simulator_binary_path:$simulator_path,analyzer_binary_path:$analyzer_path,
+		 review_attestation_path:$review_path,review_attestation_sha256:$review_sha256,comparison_path:$comparison_path,
+		 treatment_config_sha256:$treatment_config_sha256,control_config_sha256:$control_config_sha256,
+		 simulator_binary_sha256:$simulator_sha256,analyzer_binary_sha256:$analyzer_sha256,comparison_sha256:$comparison_sha256,
+		 status:"ACTIVATION_CONTRACT_SATISFIED",activation_satisfied:true,holdouts_consumed:false,
+		 treatment_runner_status:0,control_runner_status:0,treatment_terminal_status:"completed",control_terminal_status:"completed",
+		 treatment_run_status_sha256:$treatment_status_sha256,control_run_status_sha256:$control_status_sha256,
+		 treatment_terminal_outcome_sha256:"",control_terminal_outcome_sha256:"",
+		 treatment_artifacts:$treatment_artifacts,control_artifacts:$control_artifacts,
+		 resource_policy:{gomaxprocs:2,memory_limit_bytes:21474836480,gomemlimit_bytes:19327352832,
+		 minimum_free_bytes:4294967296,host_cpu_count:$host_cpu_count,allowed_cpu_count:$allowed_cpu_count,
+		 cpu_limit_percent:90,cpu_affinity:$cpu_affinity}}' >"$output_path"
 }
-jq 'del(.activation_satisfied)' "$full_output_root/cdf-liquidity-comparison.json" >"$temp_root/comparison-missing-pair-field.json"
-mv -- "$temp_root/comparison-missing-pair-field.json" "$full_output_root/cdf-liquidity-comparison.json"
-fixture_comparison_sha256=$(sha256sum -- "$full_output_root/cdf-liquidity-comparison.json" | awk '{print $1}')
-jq --arg comparison_sha256 "$fixture_comparison_sha256" '.comparison_sha256 = $comparison_sha256' \
-	"$fixture_activation_provenance" >"$temp_root/full-activation-provenance-missing-pair-field.json"
-if v2_r2_require_sv1b_activation_provenance "$temp_root/full-activation-provenance-missing-pair-field.json" "$review_revision" "$fixture_simulator_sha256"; then
-	echo "full activation provenance accepted a serialized comparison missing activation_satisfied" >&2
-	exit 1
-fi
+
+# A real producer output with seed 607 and the one-venue fixture provenance is
+# not a valid activation pair, even when the outer attestation claims seed 643.
 cp -- "$serialized_comparison" "$full_output_root/cdf-liquidity-comparison.json"
 fixture_comparison_sha256=$(sha256sum -- "$full_output_root/cdf-liquidity-comparison.json" | awk '{print $1}')
-jq --arg comparison_sha256 "$fixture_comparison_sha256" '.comparison_sha256 = $comparison_sha256' \
-	"$fixture_activation_provenance" >"$temp_root/full-activation-provenance-restored.json"
-jq '.activation_satisfied = false' "$temp_root/full-activation-provenance-restored.json" >"$temp_root/full-activation-provenance-false-pair-field.json"
-if v2_r2_require_sv1b_activation_provenance "$temp_root/full-activation-provenance-false-pair-field.json" "$review_revision" "$fixture_simulator_sha256"; then
-	echo "full activation provenance accepted a serialized comparison with activation_satisfied=false" >&2
+write_activation_provenance "$fixture_activation_provenance" "$full_output_root/cdf-liquidity-comparison.json" "$fixture_comparison_sha256"
+if v2_r2_require_sv1b_activation_provenance "$fixture_activation_provenance" "$review_revision" "$fixture_simulator_sha256"; then
+	echo "full activation provenance accepted a seed-607 producer result as seed-643 activation evidence" >&2
 	exit 1
 fi
+
+# Build the positive comparison from a detailed audit fixture while binding it
+# to the exact registered 4-supplier x 3-venue activation population.
+jq -n \
+	--slurpfile treatment "$activation_treatment_result" \
+	--slurpfile control "$temp_root/activation-control-result.json" \
+	--arg revision "$review_revision" --arg analyzer_sha256 "$fixture_analyzer_sha256" \
+	--arg simulator_sha256 "$fixture_simulator_sha256" --argjson seed "$v2_r2_sv1_activation_seed" \
+	--arg horizon "$v2_r2_sv1_activation_horizon" \
+	--argjson start_nano "$v2_r2_sv1_activation_simulation_start_nano" \
+	--argjson end_nano "$v2_r2_sv1_activation_simulation_end_nano" \
+	--argjson venue_ids "$activation_venue_ids" \
+	--arg evidence_format "$v2_r2_sv1_activation_evidence_format" --arg log_mode "$v2_r2_sv1_activation_log_mode" \
+	--arg treatment_config_sha256 "$fixture_treatment_config_sha256" --arg control_config_sha256 "$fixture_control_config_sha256" \
+	--arg treatment_experiment_id "$(jq -er '.experiment_id' "$v2_r2_sv1_activation_config")" \
+	--arg control_experiment_id "$(jq -er '.experiment_id' "$v2_r2_sv1_activation_control_config")" \
+	--arg treatment_hypothesis_id "$(jq -er '.hypothesis_id' "$v2_r2_sv1_activation_config")" \
+	--arg control_hypothesis_id "$(jq -er '.hypothesis_id' "$v2_r2_sv1_activation_control_config")" \
+	'
+		def run_provenance($config_sha256; $experiment_id; $hypothesis_id):
+			{config_sha256:$config_sha256,source_revision:$revision,source_modified:false,
+			 binary_sha256:$simulator_sha256,binary_goos:"linux",binary_goarch:"amd64",binary_goamd64:"v1",
+			 seed:$seed,horizon:$horizon,simulation_start_nano:$start_nano,simulation_end_nano:$end_nano,
+			 venue_ids:$venue_ids,experiment_id:$experiment_id,hypothesis_id:$hypothesis_id,
+			 evidence_format:$evidence_format,log_mode:$log_mode,valid:true};
+		 {valid:true,evidence_valid:true,activation_satisfied:true,anti_cheating_satisfied:true,
+		  provenance:{treatment:run_provenance($treatment_config_sha256; $treatment_experiment_id; $treatment_hypothesis_id),
+			 control:run_provenance($control_config_sha256; $control_experiment_id; $control_hypothesis_id),
+			 analyzer_sha256:$analyzer_sha256,analyzer_source_revision:$revision,
+			 analyzer_source_modified:false,valid:true},
+		  treatment:$treatment[0],control:$control[0]}' \
+	>"$full_output_root/cdf-liquidity-comparison.json"
+fixture_comparison_sha256=$(sha256sum -- "$full_output_root/cdf-liquidity-comparison.json" | awk '{print $1}')
+write_activation_provenance "$fixture_activation_provenance" "$full_output_root/cdf-liquidity-comparison.json" "$fixture_comparison_sha256"
+v2_r2_require_sv1b_activation_provenance "$fixture_activation_provenance" "$review_revision" "$fixture_simulator_sha256" || {
+	echo "full activation provenance rejected the production-shaped seed-643 comparison" >&2
+	exit 1
+}
+
+expect_comparison_mutation_rejected() {
+	local name=$1 filter=$2
+	local mutated_path="$full_output_root/mutated-$name.json"
+	local mutated_provenance="$temp_root/full-activation-provenance-mutated-$name.json"
+	jq "$filter" "$full_output_root/cdf-liquidity-comparison.json" >"$mutated_path"
+	local mutated_sha256
+	mutated_sha256=$(sha256sum -- "$mutated_path" | awk '{print $1}')
+	write_activation_provenance "$mutated_provenance" "$mutated_path" "$mutated_sha256"
+	if v2_r2_require_sv1b_activation_provenance "$mutated_provenance" "$review_revision" "$fixture_simulator_sha256"; then
+		echo "full activation provenance accepted mutated comparison: $name" >&2
+		exit 1
+	fi
+}
+
+expect_comparison_mutation_rejected wrong-treatment-seed '.provenance.treatment.seed = 642'
+expect_comparison_mutation_rejected wrong-source-revision '.provenance.treatment.source_revision = ("a" * 40)'
+expect_comparison_mutation_rejected wrong-binary-sha '.provenance.treatment.binary_sha256 = ("0" * 64)'
+expect_comparison_mutation_rejected wrong-config-sha '.provenance.treatment.config_sha256 = ("1" * 64)'
+expect_comparison_mutation_rejected wrong-evidence-format '.provenance.treatment.evidence_format = "jsonl"'
+expect_comparison_mutation_rejected wrong-log-mode '.provenance.treatment.log_mode = "summary"'
+expect_comparison_mutation_rejected wrong-venue-set '.provenance.treatment.venue_ids = ["north", "central"]'
+expect_comparison_mutation_rejected wrong-analyzer-sha '.provenance.analyzer_sha256 = ("2" * 64)'
+expect_comparison_mutation_rejected wrong-analyzer-revision '.provenance.analyzer_source_revision = ("b" * 40)'
+expect_comparison_mutation_rejected missing-pair-field 'del(.activation_satisfied)'
+expect_comparison_mutation_rejected false-pair-field '.activation_satisfied = false'
+expect_comparison_mutation_rejected wrong-supplier-population '.treatment.supplier_count = 11'
+
+expect_activation_provenance_mutation_rejected() {
+	local name=$1 filter=$2
+	local mutated_path="$temp_root/full-activation-provenance-mutated-$name.json"
+	jq "$filter" "$fixture_activation_provenance" >"$mutated_path"
+	if v2_r2_require_sv1b_activation_provenance "$mutated_path" "$review_revision" "$fixture_simulator_sha256"; then
+		echo "full activation provenance accepted mutated outer identity: $name" >&2
+		exit 1
+	fi
+}
+
+expect_activation_provenance_mutation_rejected wrong-outer-venue-set '.venue_ids = ["north", "central"]'
+expect_activation_provenance_mutation_rejected wrong-outer-experiment '.treatment_experiment_id = "unregistered-experiment"'
+expect_activation_provenance_mutation_rejected wrong-outer-start '.simulation_start_nano = 1735689600000000001'
+expect_activation_provenance_mutation_rejected wrong-outer-evidence-format '.evidence_format = "jsonl"'
 
 echo "V2-R2-SV1 activation output boundary contract: pass"

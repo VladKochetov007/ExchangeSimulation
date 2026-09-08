@@ -35,7 +35,12 @@ v2_r2_sv1_activation_seed=643
 v2_r2_sv1_run_hypothesis_id="V2-R2-SV1B-24H-CDF-LIQUIDITY"
 v2_r2_sv1_activation_hypothesis_prefix="V2-R2-SV1B-CDF-LIQUIDITY"
 v2_r2_sv1_activation_contract="v2-r2-sv1b-activation-provenance-v2"
-v2_r2_sv1_activation_pair_contract="v2-r2-sv1b-activation-pair-v3"
+v2_r2_sv1_activation_pair_contract="v2-r2-sv1b-activation-pair-v4"
+v2_r2_sv1_activation_horizon="5m"
+v2_r2_sv1_activation_simulation_start_nano=1735689600000000000
+v2_r2_sv1_activation_simulation_end_nano=1735689900000000000
+v2_r2_sv1_activation_evidence_format="evstream_v3"
+v2_r2_sv1_activation_log_mode="full"
 v2_r2_sv1_activation_output_prefix="v2-r2-sv1b-activation"
 v2_r2_sv1_review_contract="v2-r2-sv1b-independent-review-v2"
 v2_r2_sv1_activation_review_contract="v2-r2-sv1b-activation-review-v1"
@@ -201,6 +206,88 @@ v2_r2_sv1b_verify_artifact_records() {
 	done < <(jq -r '.[] | [.path, (.bytes | tostring), .sha256] | @tsv' <<<"$records")
 }
 
+v2_r2_sv1b_require_activation_comparison_identity() {
+	[[ $# -eq 6 ]] || return 1
+	local comparison_path=$1 provenance_path=$2 expected_revision=$3 expected_binary_sha256=$4 expected_analyzer_sha256=$5 expected_supplier_count=$6
+	local treatment_config control_config treatment_config_sha256 control_config_sha256
+	local treatment_experiment treatment_hypothesis control_experiment control_hypothesis
+	local treatment_venue_ids control_venue_ids activation_venue_ids activation_seed activation_horizon
+	local activation_start_nano activation_end_nano activation_evidence_format activation_log_mode
+	local activation_treatment_experiment activation_control_experiment
+	local activation_treatment_hypothesis activation_control_hypothesis
+	[[ -s "$comparison_path" && ! -L "$comparison_path" ]] || return 1
+	[[ -s "$provenance_path" && ! -L "$provenance_path" ]] || return 1
+	[[ "$expected_revision" =~ ^[0-9a-f]{40}$ && "$expected_binary_sha256" =~ ^[0-9a-f]{64}$ && "$expected_analyzer_sha256" =~ ^[0-9a-f]{64}$ ]] || return 1
+	[[ "$expected_supplier_count" =~ ^[1-9][0-9]*$ ]] || return 1
+	treatment_config=$(realpath -e -- "$v2_r2_sv1_activation_config") || return 1
+	control_config=$(realpath -e -- "$v2_r2_sv1_activation_control_config") || return 1
+	[[ -f "$treatment_config" && ! -L "$treatment_config" && -f "$control_config" && ! -L "$control_config" ]] || return 1
+	treatment_config_sha256=$(sha256sum -- "$treatment_config" | awk '{print $1}') || return 1
+	control_config_sha256=$(sha256sum -- "$control_config" | awk '{print $1}') || return 1
+	treatment_experiment=$(jq -er '.experiment_id | select(type == "string" and length > 0)' "$treatment_config") || return 1
+	treatment_hypothesis=$(jq -er '.hypothesis_id | select(type == "string" and length > 0)' "$treatment_config") || return 1
+	control_experiment=$(jq -er '.experiment_id | select(type == "string" and length > 0)' "$control_config") || return 1
+	control_hypothesis=$(jq -er '.hypothesis_id | select(type == "string" and length > 0)' "$control_config") || return 1
+	treatment_venue_ids=$(jq -ce '.venue_ids | select(type == "array" and length > 0 and all(.[]; type == "string" and length > 0))' "$treatment_config") || return 1
+	control_venue_ids=$(jq -ce '.venue_ids | select(type == "array" and length > 0 and all(.[]; type == "string" and length > 0))' "$control_config") || return 1
+	[[ "$treatment_venue_ids" == "$control_venue_ids" ]] || return 1
+	activation_seed=$(jq -er '.seed | select(type == "number" and floor == .)' "$provenance_path") || return 1
+	activation_horizon=$(jq -er '.simulated_horizon | select(type == "string" and length > 0)' "$provenance_path") || return 1
+	activation_start_nano=$(jq -er '.simulation_start_nano | select(type == "number" and floor == .)' "$provenance_path") || return 1
+	activation_end_nano=$(jq -er '.simulation_end_nano | select(type == "number" and floor == .)' "$provenance_path") || return 1
+	activation_evidence_format=$(jq -er '.evidence_format | select(type == "string" and length > 0)' "$provenance_path") || return 1
+	activation_log_mode=$(jq -er '.log_mode | select(type == "string" and length > 0)' "$provenance_path") || return 1
+	activation_venue_ids=$(jq -ce '.venue_ids | select(type == "array" and length > 0 and all(.[]; type == "string" and length > 0))' "$provenance_path") || return 1
+	activation_treatment_experiment=$(jq -er '.treatment_experiment_id | select(type == "string" and length > 0)' "$provenance_path") || return 1
+	activation_control_experiment=$(jq -er '.control_experiment_id | select(type == "string" and length > 0)' "$provenance_path") || return 1
+	activation_treatment_hypothesis=$(jq -er '.treatment_hypothesis_id | select(type == "string" and length > 0)' "$provenance_path") || return 1
+	activation_control_hypothesis=$(jq -er '.control_hypothesis_id | select(type == "string" and length > 0)' "$provenance_path") || return 1
+	[[ "$activation_seed" == "$v2_r2_sv1_activation_seed" && "$activation_horizon" == "$v2_r2_sv1_activation_horizon" &&
+		"$activation_start_nano" == "$v2_r2_sv1_activation_simulation_start_nano" &&
+		"$activation_end_nano" == "$v2_r2_sv1_activation_simulation_end_nano" &&
+		"$activation_evidence_format" == "$v2_r2_sv1_activation_evidence_format" &&
+		"$activation_log_mode" == "$v2_r2_sv1_activation_log_mode" &&
+		"$activation_venue_ids" == "$treatment_venue_ids" &&
+		"$activation_treatment_experiment" == "$treatment_experiment" &&
+		"$activation_control_experiment" == "$control_experiment" &&
+		"$activation_treatment_hypothesis" == "$treatment_hypothesis" &&
+		"$activation_control_hypothesis" == "$control_hypothesis" ]] || return 1
+	jq -e \
+		--arg revision "$expected_revision" \
+		--arg binary_sha256 "$expected_binary_sha256" \
+		--arg analyzer_sha256 "$expected_analyzer_sha256" \
+		--arg treatment_config_sha256 "$treatment_config_sha256" \
+		--arg control_config_sha256 "$control_config_sha256" \
+		--arg treatment_experiment "$treatment_experiment" --arg treatment_hypothesis "$treatment_hypothesis" \
+		--arg control_experiment "$control_experiment" --arg control_hypothesis "$control_hypothesis" \
+		--argjson seed "$activation_seed" --arg horizon "$activation_horizon" \
+		--argjson start_nano "$activation_start_nano" --argjson end_nano "$activation_end_nano" \
+		--argjson venue_ids "$treatment_venue_ids" --arg evidence_format "$activation_evidence_format" --arg log_mode "$activation_log_mode" \
+		'
+			type == "object" and
+			(.valid | type) == "boolean" and .valid == true and
+			(.evidence_valid | type) == "boolean" and .evidence_valid == true and
+			(.activation_satisfied | type) == "boolean" and .activation_satisfied == true and
+			(.anti_cheating_satisfied | type) == "boolean" and .anti_cheating_satisfied == true and
+			(.provenance | type) == "object" and .provenance.valid == true and
+			(.provenance.treatment | type) == "object" and (.provenance.control | type) == "object" and
+			(.provenance.analyzer_sha256 | type) == "string" and .provenance.analyzer_sha256 == $analyzer_sha256 and
+			(.provenance.analyzer_source_revision | type) == "string" and .provenance.analyzer_source_revision == $revision and
+			(.provenance.analyzer_source_modified | type) == "boolean" and .provenance.analyzer_source_modified == false and
+			all([.provenance.treatment, .provenance.control][];
+				.valid == true and .source_revision == $revision and .source_modified == false and
+				.binary_sha256 == $binary_sha256 and .binary_goos == "linux" and .binary_goarch == "amd64" and .binary_goamd64 == "v1" and
+				.seed == $seed and .horizon == $horizon and .simulation_start_nano == $start_nano and .simulation_end_nano == $end_nano and
+				.venue_ids == $venue_ids and .evidence_format == $evidence_format and .log_mode == $log_mode) and
+			.provenance.treatment.config_sha256 == $treatment_config_sha256 and
+			.provenance.control.config_sha256 == $control_config_sha256 and
+			.provenance.treatment.experiment_id == $treatment_experiment and
+			.provenance.treatment.hypothesis_id == $treatment_hypothesis and
+			.provenance.control.experiment_id == $control_experiment and
+			.provenance.control.hypothesis_id == $control_hypothesis' "$comparison_path" >/dev/null || return 1
+	v2_r2_require_cdf_supplier_comparison "$comparison_path" "$expected_supplier_count"
+}
+
 v2_r2_require_sv1b_activation_provenance() {
 	[[ $# -eq 3 ]] || return 1
 	local provenance_path=$1 expected_revision=$2 expected_binary_sha256=$3
@@ -208,6 +295,7 @@ v2_r2_require_sv1b_activation_provenance() {
 	local expected_tree_sha256 actual_sha256 treatment_artifacts control_artifacts
 	local expected_treatment_config expected_control_config treatment_config_path control_config_path
 	local treatment_source_config_sha256 control_source_config_sha256
+	local analyzer_sha256 expected_supplier_count
 	local expected_host_cpu_count expected_allowed_cpu_count expected_cpu_affinity
 	[[ "$provenance_path" == /* && "$provenance_path" != */ && "$provenance_path" != *$'\n'* && "$provenance_path" != *$'\t'* ]] || return 1
 	[[ "$expected_revision" =~ ^[0-9a-f]{40}$ && "$expected_binary_sha256" =~ ^[0-9a-f]{64}$ ]] || return 1
@@ -234,15 +322,14 @@ v2_r2_require_sv1b_activation_provenance() {
 	[[ -x "$simulator_path" && ! -L "$simulator_path" && "$(realpath -e -- "$simulator_path")" == "$simulator_path" ]] || return 1
 	[[ -x "$analyzer_path" && ! -L "$analyzer_path" && "$(realpath -e -- "$analyzer_path")" == "$analyzer_path" ]] || return 1
 	[[ "$(sha256sum -- "$simulator_path" | awk '{print $1}')" == "$expected_binary_sha256" ]] || return 1
-	actual_sha256=$(jq -er '.analyzer_binary_sha256 | select(type == "string" and test("^[0-9a-f]{64}$"))' "$provenance_path") || return 1
-	[[ "$(sha256sum -- "$analyzer_path" | awk '{print $1}')" == "$actual_sha256" ]] || return 1
+	analyzer_sha256=$(jq -er '.analyzer_binary_sha256 | select(type == "string" and test("^[0-9a-f]{64}$"))' "$provenance_path") || return 1
+	[[ "$(sha256sum -- "$analyzer_path" | awk '{print $1}')" == "$analyzer_sha256" ]] || return 1
 	v2_r2_require_sv1b_review_attestation "$review_path" "$expected_revision" || return 1
 	[[ "$review_path" != "$output_root"/* && "$review_path" != "$root_dir"/* ]] || return 1
 	actual_sha256=$(sha256sum -- "$review_path" | awk '{print $1}') || return 1
 	[[ "$actual_sha256" == "$(jq -er '.review_attestation_sha256' "$provenance_path")" ]] || return 1
 	actual_sha256=$(sha256sum -- "$comparison_path" | awk '{print $1}') || return 1
 	[[ "$actual_sha256" == "$(jq -er '.comparison_sha256 | select(type == "string" and test("^[0-9a-f]{64}$"))' "$provenance_path")" ]] || return 1
-	jq -e 'type == "object" and .valid == true and .evidence_valid == true and .activation_satisfied == true and .anti_cheating_satisfied == true' "$comparison_path" >/dev/null || return 1
 	jq -e --arg contract "$v2_r2_sv1_activation_pair_contract" --arg revision "$expected_revision" \
 		--arg tree_sha256 "$expected_tree_sha256" --argjson seed "$v2_r2_sv1_activation_seed" \
 		--argjson expected_host_cpu_count "$expected_host_cpu_count" --argjson expected_allowed_cpu_count "$expected_allowed_cpu_count" \
@@ -251,9 +338,20 @@ v2_r2_require_sv1b_activation_provenance() {
 		--argjson expected_memory_limit_bytes "$v2_r2_sv1_activation_memory_limit_bytes" \
 		--argjson expected_gomemlimit_bytes "$v2_r2_sv1_activation_gomemlimit_bytes" \
 		--argjson expected_minimum_free_bytes "$v2_r2_sv1_activation_minimum_free_bytes" \
-		--arg binary_sha256 "$expected_binary_sha256" '
+		--arg binary_sha256 "$expected_binary_sha256" \
+		--arg expected_horizon "$v2_r2_sv1_activation_horizon" \
+		--arg expected_evidence_format "$v2_r2_sv1_activation_evidence_format" \
+		--arg expected_log_mode "$v2_r2_sv1_activation_log_mode" \
+		--argjson expected_start_nano "$v2_r2_sv1_activation_simulation_start_nano" \
+		--argjson expected_end_nano "$v2_r2_sv1_activation_simulation_end_nano" '
 		type == "object" and .schema_version == 3 and .contract == $contract and
 		.candidate_revision == $revision and .candidate_tree_sha256 == $tree_sha256 and .seed == $seed and
+		.simulated_horizon == $expected_horizon and .simulation_start_nano == $expected_start_nano and
+		.simulation_end_nano == $expected_end_nano and .evidence_format == $expected_evidence_format and
+		.log_mode == $expected_log_mode and
+		(.venue_ids | type) == "array" and (.treatment_experiment_id | type) == "string" and
+		(.control_experiment_id | type) == "string" and (.treatment_hypothesis_id | type) == "string" and
+		(.control_hypothesis_id | type) == "string" and
 		.status == "ACTIVATION_CONTRACT_SATISFIED" and .activation_satisfied == true and
 		.holdouts_consumed == false and .treatment_runner_status == 0 and .control_runner_status == 0 and
 		.treatment_terminal_status == "completed" and .control_terminal_status == "completed" and
@@ -284,14 +382,16 @@ v2_r2_require_sv1b_activation_provenance() {
 	[[ -s "$treatment_config_path" && ! -L "$treatment_config_path" && -s "$control_config_path" && ! -L "$control_config_path" ]] || return 1
 	treatment_source_config_sha256=$(sha256sum -- "$treatment_config_path" | awk '{print $1}') || return 1
 	control_source_config_sha256=$(sha256sum -- "$control_config_path" | awk '{print $1}') || return 1
-	jq -e --argjson seed "$v2_r2_sv1_activation_seed" \
-		'.seed == $seed and .evidence_format == "evstream_v3" and .log_mode == "full"' "$treatment_config_path" >/dev/null || return 1
-	jq -e --argjson seed "$v2_r2_sv1_activation_seed" \
-		'.seed == $seed and .evidence_format == "evstream_v3" and .log_mode == "full"' "$control_config_path" >/dev/null || return 1
+	jq -e --argjson seed "$v2_r2_sv1_activation_seed" --arg evidence_format "$v2_r2_sv1_activation_evidence_format" --arg log_mode "$v2_r2_sv1_activation_log_mode" \
+		'.seed == $seed and .evidence_format == $evidence_format and .log_mode == $log_mode' "$treatment_config_path" >/dev/null || return 1
+	jq -e --argjson seed "$v2_r2_sv1_activation_seed" --arg evidence_format "$v2_r2_sv1_activation_evidence_format" --arg log_mode "$v2_r2_sv1_activation_log_mode" \
+		'.seed == $seed and .evidence_format == $evidence_format and .log_mode == $log_mode' "$control_config_path" >/dev/null || return 1
 	jq -e --arg treatment_config_sha256 "$treatment_source_config_sha256" \
 		--arg control_config_sha256 "$control_source_config_sha256" \
 		'.treatment_source_config_sha256 == $treatment_config_sha256 and .control_source_config_sha256 == $control_config_sha256' \
 		"$provenance_path" >/dev/null || return 1
+	expected_supplier_count=$(jq -er 'select((.elastic_liquidity_suppliers | type) == "array" and (.elastic_liquidity_suppliers | length) > 0 and (.venue_ids | type) == "array" and (.venue_ids | length) > 0) | (.elastic_liquidity_suppliers | length) * (.venue_ids | length)' "$treatment_config_path") || return 1
+	v2_r2_sv1b_require_activation_comparison_identity "$comparison_path" "$provenance_path" "$expected_revision" "$expected_binary_sha256" "$analyzer_sha256" "$expected_supplier_count" || return 1
 	for arm in treatment control; do
 		arm_dir=$([[ "$arm" == treatment ]] && printf '%s' "$treatment_dir" || printf '%s' "$control_dir")
 		jq -e --arg arm "$arm" '

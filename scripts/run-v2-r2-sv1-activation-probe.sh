@@ -57,8 +57,20 @@ audit_binary=${2:-"$root_dir/bin/cdf-liquidity-audit"}
 	echo "activation probe seed differs from the registered development activation seed: $activation_seed" >&2
 	exit 1
 }
-[[ "$(jq -er '.evidence_format' "$treatment_config")" == evstream_v3 && "$(jq -er '.evidence_format' "$control_config")" == evstream_v3 ]] || {
-	echo "activation probe requires evstream_v3 in both arms" >&2
+[[ "$(jq -er '.evidence_format' "$treatment_config")" == "$v2_r2_sv1_activation_evidence_format" && "$(jq -er '.evidence_format' "$control_config")" == "$v2_r2_sv1_activation_evidence_format" ]] || {
+	echo "activation probe requires $v2_r2_sv1_activation_evidence_format in both arms" >&2
+	exit 1
+}
+activation_venue_ids=$(jq -ce '.venue_ids | select(type == "array" and length > 0 and all(.[]; type == "string" and length > 0))' "$treatment_config") || {
+	echo "activation treatment has no valid venue set" >&2
+	exit 1
+}
+control_venue_ids=$(jq -ce '.venue_ids | select(type == "array" and length > 0 and all(.[]; type == "string" and length > 0))' "$control_config") || {
+	echo "activation control has no valid venue set" >&2
+	exit 1
+}
+[[ "$activation_venue_ids" == "$control_venue_ids" ]] || {
+	echo "activation treatment/control venue sets differ" >&2
 	exit 1
 }
 [[ "$(jq -er '.record_market_data_receipts' "$treatment_config")" == true && "$(jq -er '.record_market_data_receipts' "$control_config")" == true ]] || {
@@ -148,9 +160,9 @@ v2_r2_acquire_namespace_lock || {
 	exit 1
 }
 
-horizon=5m
-simulation_start_nano=1735689600000000000
-simulation_end_nano=1735689900000000000
+horizon="$v2_r2_sv1_activation_horizon"
+simulation_start_nano="$v2_r2_sv1_activation_simulation_start_nano"
+simulation_end_nano="$v2_r2_sv1_activation_simulation_end_nano"
 output_root=${V2_R2_SV1_ACTIVATION_ROOT:-"/home/vlad/external-scratch/${v2_r2_sv1_activation_output_prefix}-${activation_seed}-${head_revision}"}
 [[ "$output_root" == /* && "$output_root" != */ && "$output_root" != *$'\n'* && "$output_root" != *$'\t'* ]] || {
 	echo "activation output root must be an absolute, non-empty path" >&2
@@ -226,7 +238,7 @@ trap 'exit 143' TERM
 prepare_arm() {
 	local arm=$1 config=$2
 	mkdir -- "$arm"
-	"$binary" -config "$config" -logdir "$arm" -log-mode full -evidence-format evstream_v3 -write-effective-config "$arm/run-config.json"
+	"$binary" -config "$config" -logdir "$arm" -log-mode "$v2_r2_sv1_activation_log_mode" -evidence-format "$v2_r2_sv1_activation_evidence_format" -write-effective-config "$arm/run-config.json"
 	local config_sha binary_sha experiment hypothesis
 	if ! cmp -s -- "$config" "$arm/run-config.json"; then
 		echo "effective activation config differs from registered source config: $config" >&2
@@ -247,19 +259,19 @@ prepare_arm() {
 		--arg git_revision "$head_revision" \
 		--arg experiment "$experiment" \
 		--arg hypothesis "$hypothesis" \
-		--arg evidence_format evstream_v3 \
-		--arg log_mode full \
-			--arg binary_path "$binary" \
-			--arg review_attestation_path "$review_attestation" \
-			--arg review_attestation_sha256 "$review_attestation_sha256" \
-			--arg binary_go_version "$binary_go_version" \
-			--arg binary_goos "$binary_goos" --arg binary_goarch "$binary_goarch" --arg binary_goamd64 "$binary_goamd64" \
-				--argjson gomaxprocs "$activation_gomaxprocs" \
-				--argjson memory_limit_bytes "$activation_memory_limit_bytes" \
-				--argjson gomemlimit_bytes "$activation_gomemlimit_bytes" \
-				--argjson host_cpu_count "$activation_host_cpu_count" --argjson allowed_cpu_count "$activation_allowed_cpu_count" \
-				--argjson cpu_limit_percent "$v2_r2_sv1_cpu_limit_percent" --arg cpu_affinity "$activation_cpu_affinity" \
-				--argjson minimum_free_bytes "$activation_minimum_free_bytes" \
+		--arg evidence_format "$v2_r2_sv1_activation_evidence_format" \
+		--arg log_mode "$v2_r2_sv1_activation_log_mode" \
+		--arg binary_path "$binary" \
+		--arg review_attestation_path "$review_attestation" \
+		--arg review_attestation_sha256 "$review_attestation_sha256" \
+		--arg binary_go_version "$binary_go_version" \
+		--arg binary_goos "$binary_goos" --arg binary_goarch "$binary_goarch" --arg binary_goamd64 "$binary_goamd64" \
+		--argjson gomaxprocs "$activation_gomaxprocs" \
+		--argjson memory_limit_bytes "$activation_memory_limit_bytes" \
+		--argjson gomemlimit_bytes "$activation_gomemlimit_bytes" \
+		--argjson host_cpu_count "$activation_host_cpu_count" --argjson allowed_cpu_count "$activation_allowed_cpu_count" \
+		--argjson cpu_limit_percent "$v2_r2_sv1_cpu_limit_percent" --arg cpu_affinity "$activation_cpu_affinity" \
+		--argjson minimum_free_bytes "$activation_minimum_free_bytes" \
 		--argjson venue_ids "$(jq -c '.venue_ids' "$arm/run-config.json")" \
 		--arg contract "$v2_r2_sv1_activation_contract" \
 		'{schema_version: 1, contract: $contract,
@@ -268,13 +280,13 @@ prepare_arm() {
 		 config_sha256: $config_sha256, binary_sha256: $binary_sha256,
 		 git_revision: $git_revision, config_experiment_id: $experiment,
 		 hypothesis_id: $hypothesis, evidence_format: $evidence_format, log_mode: $log_mode,
-			 venue_ids: $venue_ids, binary_path: $binary_path, binary_go_version: $binary_go_version,
-			 binary_goos: $binary_goos, binary_goarch: $binary_goarch, binary_goamd64: $binary_goamd64,
-			 review_attestation_path: $review_attestation_path, review_attestation_sha256: $review_attestation_sha256,
-				 gomaxprocs: $gomaxprocs, memory_limit_bytes: $memory_limit_bytes,
-				 gomemlimit_bytes: $gomemlimit_bytes, host_cpu_count: $host_cpu_count,
-				 allowed_cpu_count: $allowed_cpu_count, cpu_limit_percent: $cpu_limit_percent,
-				 cpu_affinity: $cpu_affinity, minimum_free_bytes: $minimum_free_bytes,
+		 venue_ids: $venue_ids, binary_path: $binary_path, binary_go_version: $binary_go_version,
+		 binary_goos: $binary_goos, binary_goarch: $binary_goarch, binary_goamd64: $binary_goamd64,
+		 review_attestation_path: $review_attestation_path, review_attestation_sha256: $review_attestation_sha256,
+		 gomaxprocs: $gomaxprocs, memory_limit_bytes: $memory_limit_bytes,
+		 gomemlimit_bytes: $gomemlimit_bytes, host_cpu_count: $host_cpu_count,
+		 allowed_cpu_count: $allowed_cpu_count, cpu_limit_percent: $cpu_limit_percent,
+		 cpu_affinity: $cpu_affinity, minimum_free_bytes: $minimum_free_bytes,
 		 command: ["multivenue", "-config", "run-config.json", "-duration", $horizon,
 		           "-logdir", ".", "-log-mode", $log_mode, "-evidence-format", $evidence_format]}' \
 		>"$arm/run-metadata.json"
@@ -300,7 +312,7 @@ run_arm() {
 		return 1
 	fi
 	"${activation_cpu_launch_prefix[@]}" env GOMAXPROCS="$activation_gomaxprocs" GOMEMLIMIT="${activation_gomemlimit_bytes}B" prlimit --as="$activation_memory_limit_bytes" -- \
-		"$binary" -config "$arm/run-config.json" -duration "$horizon" -logdir "$arm" -log-mode full -evidence-format evstream_v3 \
+			"$binary" -config "$arm/run-config.json" -duration "$horizon" -logdir "$arm" -log-mode "$v2_r2_sv1_activation_log_mode" -evidence-format "$v2_r2_sv1_activation_evidence_format" \
 		>"$stdout_log" 2>"$stderr_log" &
 	simulator_pid=$!
 	while kill -0 "$simulator_pid" 2>/dev/null; do
@@ -386,8 +398,10 @@ run_arm() {
 		return 1
 	}
 	jq -e --arg revision "$head_revision" --argjson seed "$activation_seed" --argjson simulation_start_nano "$simulation_start_nano" --argjson simulation_end_nano "$simulation_end_nano" \
-		'.build.revision == $revision and .build.modified == false and .build.goos == "linux" and .build.goarch == "amd64" and .build.goamd64 == "v1" and .venue_ids == ["north", "central", "south"] and
-		 .config.seed == $seed and .config.log_mode == "full" and .config.evidence_format == "evstream_v3"' \
+		--arg evidence_format "$v2_r2_sv1_activation_evidence_format" --arg log_mode "$v2_r2_sv1_activation_log_mode" \
+		--argjson venue_ids "$activation_venue_ids" \
+		'.build.revision == $revision and .build.modified == false and .build.goos == "linux" and .build.goarch == "amd64" and .build.goamd64 == "v1" and .venue_ids == $venue_ids and
+		 .config.seed == $seed and .config.log_mode == $log_mode and .config.evidence_format == $evidence_format' \
 		"$arm/manifest.json" >/dev/null || return 1
 	jq -e --argjson simulation_start_nano "$simulation_start_nano" --argjson simulation_end_nano "$simulation_end_nano" \
 		--argjson terminal_failure "$terminal_failure" \
@@ -457,11 +471,20 @@ write_pair_provenance() {
 	local treatment_artifacts='[]' control_artifacts='[]' candidate_tree_sha256
 	local treatment_source_config_path control_source_config_path
 	local treatment_source_config_sha256 control_source_config_sha256
+	local treatment_venue_ids control_venue_ids treatment_experiment_id control_experiment_id
+	local treatment_hypothesis_id control_hypothesis_id
 	candidate_tree_sha256=$(v2_r2_sv1b_git_tree_sha256 "$head_revision") || return 1
 	treatment_source_config_path=$(realpath -e -- "$treatment_config") || return 1
 	control_source_config_path=$(realpath -e -- "$control_config") || return 1
 	treatment_source_config_sha256=$(sha256sum -- "$treatment_source_config_path" | awk '{print $1}')
 	control_source_config_sha256=$(sha256sum -- "$control_source_config_path" | awk '{print $1}')
+	treatment_venue_ids=$(jq -ce '.venue_ids | select(type == "array" and length > 0)' "$treatment_dir/run-config.json") || return 1
+	control_venue_ids=$(jq -ce '.venue_ids | select(type == "array" and length > 0)' "$control_dir/run-config.json") || return 1
+	treatment_experiment_id=$(jq -er '.experiment_id | select(type == "string" and length > 0)' "$treatment_dir/run-config.json") || return 1
+	control_experiment_id=$(jq -er '.experiment_id | select(type == "string" and length > 0)' "$control_dir/run-config.json") || return 1
+	treatment_hypothesis_id=$(jq -er '.hypothesis_id | select(type == "string" and length > 0)' "$treatment_dir/run-config.json") || return 1
+	control_hypothesis_id=$(jq -er '.hypothesis_id | select(type == "string" and length > 0)' "$control_dir/run-config.json") || return 1
+	[[ "$treatment_venue_ids" == "$control_venue_ids" ]] || return 1
 	treatment_artifacts=$(v2_r2_sv1b_artifact_records "$treatment_dir" 2>/dev/null || printf '[]\n')
 	control_artifacts=$(v2_r2_sv1b_artifact_records "$control_dir" 2>/dev/null || printf '[]\n')
 	if [[ -s "$treatment_dir/run-status.json" ]]; then
@@ -495,6 +518,11 @@ write_pair_provenance() {
 			--arg treatment_terminal_outcome_sha256 "$treatment_terminal_outcome_sha256" \
 			--arg control_terminal_outcome_sha256 "$control_terminal_outcome_sha256" \
 			--arg candidate_tree_sha256 "$candidate_tree_sha256" \
+			--argjson simulation_start_nano "$simulation_start_nano" --argjson simulation_end_nano "$simulation_end_nano" \
+			--arg evidence_format "$v2_r2_sv1_activation_evidence_format" --arg log_mode "$v2_r2_sv1_activation_log_mode" \
+			--argjson venue_ids "$treatment_venue_ids" \
+			--arg treatment_experiment_id "$treatment_experiment_id" --arg control_experiment_id "$control_experiment_id" \
+			--arg treatment_hypothesis_id "$treatment_hypothesis_id" --arg control_hypothesis_id "$control_hypothesis_id" \
 			--arg review_attestation_path "$review_attestation" \
 			--arg review_attestation_sha256 "$review_attestation_sha256" \
 			--arg simulator_binary_path "$binary" --arg analyzer_binary_path "$audit_binary" \
@@ -502,7 +530,11 @@ write_pair_provenance() {
 			--arg treatment_source_config_path "$treatment_source_config_path" --arg control_source_config_path "$control_source_config_path" \
 			--arg treatment_source_config_sha256 "$treatment_source_config_sha256" --arg control_source_config_sha256 "$control_source_config_sha256" \
 			'{schema_version: 3, contract: $contract, candidate_revision: $candidate,
-		 seed: $seed, simulated_horizon: $horizon, output_root: $output_root,
+		 seed: $seed, simulated_horizon: $horizon, simulation_start_nano: $simulation_start_nano,
+		 simulation_end_nano: $simulation_end_nano, evidence_format: $evidence_format, log_mode: $log_mode,
+		 venue_ids: $venue_ids, treatment_experiment_id: $treatment_experiment_id,
+		 control_experiment_id: $control_experiment_id, treatment_hypothesis_id: $treatment_hypothesis_id,
+		 control_hypothesis_id: $control_hypothesis_id, output_root: $output_root,
 			 candidate_tree_sha256: $candidate_tree_sha256,
 			 treatment_dir: $treatment, control_dir: $control,
 			 treatment_source_config_path: $treatment_source_config_path, control_source_config_path: $control_source_config_path,
