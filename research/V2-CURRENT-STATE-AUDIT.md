@@ -1586,3 +1586,20 @@ is required after those items are settled. Performance tip `b1847ac` remains
 the last reviewed binary-evidence revision. No pinned build, activation,
 development, capacity, freeze, or holdout world ran; holdouts `619`, `631`, and
 `641` remain untouched.
+
+## Current checkpoint: RT-065 feed refresh and RT-011 account-scope repair — 2026-09-08
+
+Exact scientific worktree: `feature/r2-cdf-survival-successor`, HEAD
+`6d083ed2de0fe1a2fc254f7fc28980eefe335965`. Economic red-team tip
+`e85e16c5e920382e5df9aa050ac5ff9b22b51661` was fetched and inspected read-only;
+the performance tip remains `b1847ac40e8b7483e6e8a3f94b3705b4058884b`.
+RT-065 is documentation-only historical evidence on old base `a666d02`, not
+current successor evidence. No performance branch implementation was merged.
+
+The current source includes the RT-011 account-scope liquidation repair with
+focused trigger-order and partial-portfolio regressions. It remains a pending
+semantic candidate until coherent same-epoch risk marks, the RT-015/016/018
+borrow/collateral policy boundary, strict financing audit behavior, clean
+mechanical gates, and fresh exact-tree independent review are complete. No
+scientific world or holdout has run at this revision; holdouts `619`, `631`,
+and `641` remain untouched.

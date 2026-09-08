@@ -1750,3 +1750,20 @@ feed remains unchanged at `b1847ac`; no binary promotion work was imported.
 
 No pinned binary, activation, development, capacity, freeze, or holdout world
 ran at this checkpoint. Holdouts `619`, `631`, and `641` remain untouched.
+
+## Append-only operational update: RT-065 feed refresh and account-scope liquidation checkpoint — 2026-09-08
+
+Fetched the asynchronous refs without switching the scientific worktree. The
+economic red-team feed advanced from `e7f63e8` to `e85e16c`; the performance
+feed remains at `b1847ac`. `e85e16c` is documentation-only historical evidence
+on old base `a666d02`: it reproduces the cross-book loss chain across seeds
+608/609/610 and does not affect the current R2/SV1B candidate. No branch code
+or historical artifact was imported or rewritten.
+
+Current scientific HEAD is `6d083ed`. RT-011 now has a minimal account-scope
+liquidation repair and focused trigger-order/partial-closure regressions. The
+repair is not yet promoted: coherent mark epochs, remaining RT-015/016/018 and
+strict financing policy, full mechanical gates, and a fresh exact-tree
+independent review are still required. No pinned build, activation, capacity,
+development, freeze, or holdout world ran. Holdouts `619`, `631`, and `641`
+remain untouched.

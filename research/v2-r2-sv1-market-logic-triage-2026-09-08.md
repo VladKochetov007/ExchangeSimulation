@@ -350,3 +350,41 @@ The performance feed remains at `b1847ac40e8b7483e6e8a3f94b3705b4058884b`;
 there is no new binary-evidence revision to inspect. No pinned build,
 activation, development, freeze, capacity, or holdout world ran. Holdouts
 `619`, `631`, and `641` remain untouched.
+
+## Asynchronous red-team refresh: RT-065 and RT-011 account-scope checkpoint — 2026-09-08
+
+The economic red-team feed was fetched without switching the scientific
+worktree. Since the reviewed tip `e7f63e839d289fdb0b5713d6be9f5fee01c4b81f`,
+only `e85e16c5e920382e5df9aa050ac5ff9b22b51661` was new. The performance feed
+remains at `b1847ac40e8b7483e6e8a3f94b3705b4058884b`; no binary-evidence
+revision was imported.
+
+`e85e16c` adds reports only. It reproduces the historical cross-book loss
+chain on old base `a666d02faede3d40f046b11e60eb672c59386a94`, seeds 608/609/610,
+eight simulated hours, with full logs. The reported `ABC/CDF` loss share is
+98.79--99.92%, execution is 51.1--53.6% below contemporaneous fair rate on
+both sides, and implied loss reconciles to measured loss at 100.2%, 87.9%, and
+100.5%. The within-seed loss-rate ratio is 27.1x at seed 608, in addition to
+the original 21.4x seed-607 result. All closure gates pass. This is classified
+as a historical structural reproduction (`RT-065`), not a defect in the
+current successor: its base predates the R2/SV1B tree, it changes no source or
+registered configuration, and it supplies no current activation evidence.
+No trajectory rerun, rescore, or historical verdict rewrite is justified.
+
+The exact scientific HEAD is now `6d083ed2de0fe1a2fc254f7fc28980eefe335965`
+(`fix: settle cross-margin liquidation at account scope`). The previously
+reproduced RT-011 mismatch was an account-level cross-margin trigger paired
+with trigger-symbol-only close/deficit handling. The repair collects all
+same-quote open margin positions in deterministic symbol/side order, closes
+them through a single account-level finalization, and defers deficit/insurance
+settlement while a residual same-quote position remains. New regressions cover
+trigger-symbol permutation and partial portfolio closure; focused exchange and
+test-package suites plus `git diff --check` passed. This is a reachable
+semantic repair, not yet an acceptance attestation: coherent same-epoch marks,
+RT-015/016/018 policy, strict financing-contract closure, and a fresh exact-tree
+independent review remain required. No world ran at this revision.
+
+No code or evidence from `e85e16c` was merged. No pinned build, activation,
+capacity, development, freeze, or holdout world ran. Holdouts `619`, `631`, and
+`641` remain untouched. The next remote comparison starts from
+`e85e16c5e920382e5df9aa050ac5ff9b22b51661` and `b1847ac40e8b7483e6e8a3f94b3705b4058884b`.
