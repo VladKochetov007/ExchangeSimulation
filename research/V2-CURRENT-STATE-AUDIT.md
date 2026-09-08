@@ -1462,3 +1462,31 @@ promotion gate is one fresh exact-tree independent Sol-xhigh review of
 `b79c4a3`, followed only if accepted by a clean pinned rebuild and a fresh
 paired seed-643 activation probe. No capacity, dev-607, freeze, or holdout
 world has run; holdouts `619`, `631`, and `641` remain untouched.
+
+## Append-only operational update: nonactivation provenance self-validation repair — 2026-09-08
+
+Independent Sol-xhigh reviewer `Euler` rejected exact scientific tree
+`43445d71d0fb5a034dd7d9c783d5fe39db205350` before any scientific run. The
+external report is retained at
+`/home/vlad/external-scratch/v2-r2-sv1b-review-43445d71d0fb5a034dd7d9c783d5fe39db205350/independent-review-report.md`
+(`191b3ab585d45555d31a8707915762cde06d163c5c5ca6bc465115d619451d85`).
+
+The rejection found that invalid-audit pair provenance was not protected by
+the single-JSON-object guard, and that the valid economic-negative branch
+could publish a nonactivation provenance file without the producer-backed
+identity, replay, and staged-publication checks used by the other branches.
+This was a measurement-boundary defect only. No world, capacity probe,
+development cell, freeze, or holdout was run, and no retained artifact or
+historical claim is changed.
+
+Commit `5182526` adds the missing single-object validation and a distinct
+nonactivation measurement contract. The activation runner now stages and
+self-validates `ACTIVATION_CONTRACT_NOT_SATISFIED` provenance, moving it to the
+canonical path only after exact arm/config/binary/resource-policy/comparison
+checks and analyzer replay pass; failed validation is retained under an
+`.invalid.json` name. The focused activation-contract suite passes, including
+concatenated-provenance rejection and activation-mode/nonactivation-mode
+separation. Full `make test`, vet, targeted race/evidence gates, and a fresh
+exact-tree Sol-xhigh review remain pending. The performance branch has no
+commit after `b1847ac` and remains unmerged; holdouts `619`, `631`, and `641`
+remain untouched.

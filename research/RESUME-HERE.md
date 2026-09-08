@@ -1615,3 +1615,32 @@ pre-existing process-helper determinism test without a race report; this is a
 test-duration limitation, not a broad race pass. A fresh exact-tree independent
 Sol-xhigh review is required before rebuilding binaries or retrying seed 643.
 Holdouts `619`, `631`, and `641` remain untouched.
+
+## Append-only operational update: nonactivation provenance self-validation repair — 2026-09-08
+
+Fresh independent Sol-xhigh reviewer `Euler` inspected exact clean tree
+`43445d71d0fb5a034dd7d9c783d5fe39db205350` and rejected promotion before any
+new build or world. The report is retained at
+`/home/vlad/external-scratch/v2-r2-sv1b-review-43445d71d0fb5a034dd7d9c783d5fe39db205350/independent-review-report.md`
+with SHA-256
+`191b3ab585d45555d31a8707915762cde06d163c5c5ca6bc465115d619451d85`.
+
+Euler identified two fail-closed protocol gaps: the invalid-audit pair
+provenance consumer still accepted a concatenated JSON stream, and a valid
+but nonactivating CDF comparison was published without producer-backed pair
+validation, exact replay, and staged publication. No simulator, capacity,
+development, freeze, or holdout world ran at the rejected tree; the prior
+invalid seed-643 evidence remains preserved and unchanged.
+
+Scientific commit `5182526` repairs both boundaries. Invalid-audit provenance
+now requires one complete top-level JSON object. The nonactivation path has a
+separate typed comparison predicate, validates the same treatment/control
+identities and resource policy as activation, replays the analyzer through the
+registered contract, and publishes `activation-provenance.json` only after a
+pending file passes validation; failed validation is retained as
+`activation-provenance.invalid.json`. A focused activation-contract suite,
+shell syntax checks, and `git diff --check` pass after the repair. The full
+mechanical gates and one new exact-tree independent Sol-xhigh review are still
+required before a pinned build or a retry of seed 643. The performance feed
+remains unchanged through `b1847ac`; no performance implementation was
+imported. Holdouts `619`, `631`, and `641` remain untouched.

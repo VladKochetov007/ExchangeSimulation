@@ -388,3 +388,29 @@ GOMAXPROCS, and effective mutations. Clean full tests, vet, and bounded
 targeted race/evidence tests pass at that exact tree. The broad race timeout is
 retained as a harness limitation. One fresh exact-tree review is now required;
 no activation or holdout may proceed until it accepts `b79c4a3`.
+
+## Append-only feed checkpoint: no new performance commits; Euler protocol rejection and repair — 2026-09-08
+
+The performance branch was fetched through unchanged last-reviewed commit
+`b1847ac40e8b7483e6e8a3f94b3705b4058884b`; the range
+`b1847ac..origin/autoresearch/v2-performance-research` is empty. No
+performance implementation was imported.
+
+Fresh independent Sol-xhigh reviewer `Euler` rejected exact scientific tree
+`43445d71d0fb5a034dd7d9c783d5fe39db205350`. The report is retained at
+`/home/vlad/external-scratch/v2-r2-sv1b-review-43445d71d0fb5a034dd7d9c783d5fe39db205350/independent-review-report.md`
+with SHA-256
+`191b3ab585d45555d31a8707915762cde06d163c5c5ca6bc465115d619451d85`.
+It identified concatenated pair-provenance acceptance and an unvalidated
+valid-but-nonactivating publication path. No simulator or holdout world ran.
+
+Scientific commit `5182526` repairs these protocol defects without changing
+R2 economics, CDF behavior, registered configs, or retained evidence. The
+invalid-audit provenance consumer now requires one complete JSON object. The
+nonactivation branch uses its own typed comparison contract and stages,
+self-validates, replays, and publishes its provenance only after the contract
+passes; failed validation is retained as invalid evidence. The focused
+contract suite passes. Full mechanical gates and a new exact-tree independent
+review are required before pinned build and seed-643 activation. The VNext
+binary-evidence work and deferred performance optimizations remain outside
+this scientific branch.
