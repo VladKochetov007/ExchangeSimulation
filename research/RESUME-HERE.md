@@ -1283,3 +1283,38 @@ development cells, freeze authorization, and holdout execution remain closed.
 The performance feed was fetched through `b1847ac` with no newer commit; no
 performance implementation was imported. Holdouts `619`, `631`, and `641`
 remain untouched.
+
+## Append-only operational update: terminal-diagnostic arm contract repair — 2026-09-08
+
+Fresh independent Sol-xhigh review `Erdos` rejected exact pushed tree
+`23594b22e06f5515501ede5413ab641786bb5602`. The review found a genuine
+protocol contradiction, not an economic failure: the registered terminal
+diagnostics amendment permits a sealed typed `PRICE_UNAVAILABLE` or
+`PRICE_DOMAIN_ERROR` endpoint as a valid negative diagnostic, and the runner
+recognized it, but the activation arm validator unconditionally required
+`exit_status == 0`, `completion_verified == true`, and
+`terminal_outcome_status == "completed"`. Thus a valid economic terminal
+failure was relabeled `INVALID_ARM_EVIDENCE` before the intended
+`UNAVAILABLE_TERMINAL_FAILURE` pair path.
+
+The finding was independently reproduced from the exact code path. Commit
+`758b10e` repairs it without changing R2 economics or activation meaning. The
+arm validator now has an explicit completed-success mode and a sealed typed
+terminal-failure mode; the latter still requires every producer artifact,
+manifest/hash link, binary attestation, checkpoint stream, and valid terminal
+outcome, but can never satisfy activation. The runner selects the mode from the
+typed outcome, stages terminal diagnostic provenance, validates the complete
+pair/hash chain, and publishes it only after validation. A new contract test
+creates both terminal-failure arms, verifies `UNAVAILABLE_TERMINAL_FAILURE`,
+and rejects a mutated outcome hash. Generic software failures remain invalid.
+
+At `758b10e`, clean `GOMAXPROCS=2 make test`, focused activation and terminal
+contracts, `GOMAXPROCS=2 go vet ./...`, all shell syntax checks, and
+`git diff --check` passed. The bounded core and targeted multivenue `-race`
+evidence/determinism suites also passed. The full multivenue race sweep’s
+pre-existing long-running P3e timeout remains a recorded limitation, not a
+pass. No activation, capacity measurement, development cell, freeze, or
+holdout run occurred. The performance branch was fetched after the semantic
+repair and still has no commit after `b1847ac`; no performance code was
+imported. A fresh exact-tree Sol-xhigh review of the post-repair tree is now
+required before pinned build or seed-643 activation.

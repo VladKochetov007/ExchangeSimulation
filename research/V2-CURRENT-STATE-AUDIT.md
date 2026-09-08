@@ -1124,3 +1124,34 @@ missing post-write validation. Commits `9b0e0a7`, `dd435bc`, `a6e2c44`, and
 claimed until a reviewer inspects the exact clean pushed tree. The performance
 branch remains reviewed through `b1847ac`, with no newer commit and no
 performance code merged. Holdouts `619`, `631`, and `641` remain untouched.
+
+## Append-only checkpoint: terminal-diagnostic arm contract repair — 2026-09-08
+
+Independent Sol-xhigh reviewer `Erdos` rejected exact tree
+`23594b22e06f5515501ede5413ab641786bb5602`. The concrete blocker was an
+integration contradiction: a sealed typed economic terminal failure passed the
+terminal-outcome filter but failed the activation arm validator’s completed-only
+status predicate, so the runner could not reach its registered
+`UNAVAILABLE_TERMINAL_FAILURE` diagnostic branch. The finding was reproduced
+independently; it did not require or justify changing R2 calendar, supplier,
+risk, or lifecycle economics.
+
+Commit `758b10e7f7965d991e2f42d54471984d206314b7` makes the outcome distinction
+explicit. Completed arms retain the strict success contract. Terminal-failure
+arms are accepted only when the endpoint is sealed, typed as
+`PRICE_UNAVAILABLE`/`PRICE_DOMAIN_ERROR`, valuation is explicitly incomplete,
+the process status is nonzero, and the complete producer artifact/hash chain
+passes. The runner stages and self-validates the diagnostic pair before
+publishing it. Activation remains unsatisfied and capacity remains unauthorized
+for any such pair. The new regression covers two diagnostic arms, the
+`UNAVAILABLE_TERMINAL_FAILURE` status, and outcome-hash mutation rejection.
+
+Validation at `758b10e`: clean `GOMAXPROCS=2 make test` passed, including the
+new terminal activation contract; focused terminal/activation contracts,
+`GOMAXPROCS=2 go vet ./...`, all shell syntax checks, `git diff --check`, and
+the bounded core plus targeted multivenue `-race` evidence/determinism suites
+passed. No simulator activation, capacity probe, registered development cell,
+freeze, or holdout was run. The historical `23594b2` rejection is retained,
+not rewritten. The current tree needs a new exact-tree independent review after
+the repair. The performance feed has no commit after `b1847ac`; no performance
+implementation was merged. Holdouts `619`, `631`, and `641` remain untouched.

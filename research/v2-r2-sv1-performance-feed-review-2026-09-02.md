@@ -178,3 +178,25 @@ tree still requires a fresh independent exact-tree Sol-xhigh review before
 build or activation. No activation, capacity, development, freeze, or holdout
 run has occurred, and holdouts `619`, `631`, and `641` remain untouched. The
 next performance marker remains `b1847ac`.
+
+## Append-only feed checkpoint: terminal-diagnostic protocol repair — 2026-09-08
+
+The fresh exact-tree Sol-xhigh review of `23594b2` found a protocol-only
+terminal-failure integration bug: a valid sealed economic terminal endpoint was
+recognized by the runner but rejected by the completed-only arm validator
+before reaching `UNAVAILABLE_TERMINAL_FAILURE`. This was independently
+reproduced and repaired on the scientific branch in `758b10e`.
+
+The repair does not import performance code or alter market economics. It
+separates completed-success and valid terminal-diagnostic arm validation,
+retains the complete producer/hash chain for the latter, and stages its pair
+provenance until self-validation succeeds. The new contract regression covers
+the diagnostic pair and a mutated outcome hash. Clean full tests, vet, syntax,
+diff-check, and bounded targeted race/evidence checks pass at the repair.
+
+The performance branch was fetched at this semantic checkpoint and still has
+no commit after `b1847ac`; the deferred `f153e12` analyzer correction and VNext
+binary evidence remain unmerged. A fresh review of the post-repair exact tree
+is required before any pinned build or activation. No activation, capacity,
+development, freeze, or holdout run occurred; holdouts `619`, `631`, and `641`
+remain untouched.
