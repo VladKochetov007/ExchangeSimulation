@@ -2794,3 +2794,58 @@ from three tools measuring the same run — `flowattrib` for the spot leg,
 `classpnl` for the class total, `marksolvency` for the mark-to-book gap — so it
 inherits each of their limits, and the book valuation ignores the depth that
 closing 3 675 contracts would consume.
+
+## RT-048 — The noise traders' loss is not a spread payment either
+
+**Classification.** REAL, and it retracts a reading I published one checkpoint
+ago. Completes the attribution of the population's three largest results.
+
+**Base.** `a666d02faede3d40f046b11e60eb672c59386a94`, seed 607, 8 h, full logs.
+
+**Measured**, loss normalised by fair-value notional (base traded x the asset's
+terminal USD mark), the same basis on every book:
+
+| book | loss | base traded | notional | rate | share of loss |
+|---|---:|---:|---:|---:|---:|
+| ABC/USD | −947 040 | 35 464.9 | 1 748 244 019 | **5.4 bps** | 0.4% |
+| CDF/USD | −2 571 725 | 794 346.1 | 2 558 985 961 | **10.0 bps** | 1.2% |
+| **ABC/CDF** | **−215 945 892** | 377 269.2 | 18 597 504 077 | **116.1 bps** | **98.4%** |
+| total | −219 464 657 | | | | |
+
+**21.4x** the pegged book's rate and **11.6x** the CDF book's, against a
+preregistered threshold of 3x. No falsifier fired.
+
+**The retraction.** After RT-047 I wrote that `noise_flow`'s −220 M is
+"uninformed flow paying spread — the only one of the three largest results that
+looks like a market outcome". **98.4% of the loss falls on one book**, at 21x
+what the same participants pay on `ABC/USD`. Uninformed flow on the pegged book
+pays 5.4 bps, which is an ordinary spread. The same actors on the cross book pay
+116 bps. That is not the venue's quoting cost.
+
+**RT-035's 1.08% is re-read, not corrected.** That figure was computed on the
+cross book's own transaction prices and I called it "an ordinary market-making
+result". On a fair-value basis it is 116 bps against 5.4 bps for the identical
+strategy one book over. The number stands; calling it ordinary required a
+comparison I had not made.
+
+**The leaderboard has one cause.**
+
+| result | magnitude | attribution |
+|---|---:|---|
+| `triangle_arb` | +174 M | 98.1% on `ABC/CDF` (RT-034) |
+| `noise_flow` | −220 M | 98.4% on `ABC/CDF` (this) |
+| `spot_maker` | +40 M at book | hedge into the unanchored perp (RT-047) |
+
+The campaign's largest gain and largest loss are **the same book**, with
+`abc_cdf_spot_maker` netting +6.9 M while passing 193 M between them.
+
+**What this does not establish.** A high rate on `ABC/CDF` does not by itself
+prove the dislocation causes it; that book also has a different tick, depth and
+maker. The measurement bounds how much of the −220 M reads as ordinary spread —
+**at the `ABC/USD` rate the cross-book flow would have cost 10.0 M rather than
+215.9 M** — and leaves 205.9 M attributed to something specific to that book
+without apportioning it among the candidates.
+
+**Scope.** One seed, one configuration. Notional uses terminal marks for the whole
+run, so these are averages against an end-of-run valuation rather than trade-time
+rates.
