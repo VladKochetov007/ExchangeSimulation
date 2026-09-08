@@ -20,6 +20,12 @@ type LiquidationAudit struct {
 	DeficitBalanceResidual   int64 `json:"deficit_balance_residual"`
 	DeficitMismatchInstants  int   `json:"deficit_mismatch_instants"`
 	InvalidLiquidations      int   `json:"invalid_liquidations"`
+	// ExecutionSummaryRecords are receipts emitted under the account-scoped
+	// liquidation contract. Historical receipts predate this contract and are
+	// deliberately excluded from these counters.
+	ExecutionSummaryRecords  int `json:"execution_summary_records"`
+	ExecutionSummaryFailures int `json:"execution_summary_failures"`
+	DuplicateDeficitRecords  int `json:"duplicate_deficit_records"`
 	// SignedOrZeroFillPrices counts present numeric fill prices that a
 	// positive-domain liquidation policy might reject upstream. They are not
 	// classified as absent/invalid evidence here: this generic reconstruction
@@ -65,9 +71,16 @@ type liquidationAccountInstant struct {
 	clientID uint64
 }
 
+type liquidationBatchKey struct {
+	venue         string
+	clientID      uint64
+	liquidationID uint64
+	timestamp     int64
+}
+
 type liquidationPositionKey struct {
-	venue, file, symbol string
-	clientID            uint64
+	venue, file, symbol, positionSide string
+	clientID                          uint64
 }
 
 type liquidationPositionBatch struct {
@@ -95,10 +108,17 @@ type liquidationPositionDelta struct {
 // event-only check would miss a transfer that silently failed to post.
 func (r *Run) MeasureLiquidations() (*LiquidationAudit, error) {
 	type liquidationPayload struct {
-		Symbol        string `json:"symbol"`
-		PositionSize  int64  `json:"position_size"`
-		FillPrice     int64  `json:"fill_price"`
-		RemainingDebt int64  `json:"remaining_debt"`
+		Symbol         string `json:"symbol"`
+		PositionSide   string `json:"position_side"`
+		LiquidationID  uint64 `json:"liquidation_id"`
+		PositionSize   int64  `json:"position_size"`
+		AttemptedQty   int64  `json:"attempted_qty"`
+		FilledQty      int64  `json:"filled_qty"`
+		RemainingQty   int64  `json:"remaining_qty"`
+		FilledNotional int64  `json:"filled_notional"`
+		VWAPPrice      int64  `json:"vwap_price"`
+		FillPrice      int64  `json:"fill_price"`
+		RemainingDebt  int64  `json:"remaining_debt"`
 	}
 	type balanceChange struct {
 		Timestamp int64  `json:"timestamp"`
@@ -116,11 +136,12 @@ func (r *Run) MeasureLiquidations() (*LiquidationAudit, error) {
 		Reason    string `json:"reason"`
 	}
 	type positionUpdate struct {
-		Timestamp int64  `json:"timestamp"`
-		ClientID  uint64 `json:"client_id"`
-		Symbol    string `json:"symbol"`
-		OldSize   int64  `json:"old_size"`
-		NewSize   int64  `json:"new_size"`
+		Timestamp    int64  `json:"timestamp"`
+		ClientID     uint64 `json:"client_id"`
+		Symbol       string `json:"symbol"`
+		PositionSide string `json:"position_side"`
+		OldSize      int64  `json:"old_size"`
+		NewSize      int64  `json:"new_size"`
 	}
 
 	result := &LiquidationAudit{}
@@ -130,6 +151,7 @@ func (r *Run) MeasureLiquidations() (*LiquidationAudit, error) {
 	debtByInstant := make(map[liquidationInstant]int64)
 	insuranceByInstant := make(map[liquidationInstant]int64)
 	balanceByInstant := make(map[liquidationInstant]int64)
+	deficitReceiptByBatch := make(map[liquidationBatchKey]struct{})
 	positionBatches := make(map[liquidationPositionKey]liquidationPositionBatch)
 	var positionWindow liquidationPositionWindow
 	row := func(venue string) *LiquidationVenue {
@@ -180,7 +202,10 @@ func (r *Run) MeasureLiquidations() (*LiquidationAudit, error) {
 				ordinal: event.Ordinal,
 				delta:   payload.NewSize - payload.OldSize,
 			})
-			key := liquidationPositionKey{venue: event.VenueID, file: event.File, clientID: clientID, symbol: symbol}
+			key := liquidationPositionKey{
+				venue: event.VenueID, file: event.File, clientID: clientID,
+				symbol: symbol, positionSide: payload.PositionSide,
+			}
 			batch, exists := positionBatches[key]
 			if !exists || batch.timestamp != event.SimTS {
 				positionBatches[key] = liquidationPositionBatch{
@@ -202,6 +227,17 @@ func (r *Run) MeasureLiquidations() (*LiquidationAudit, error) {
 			if symbol == "" {
 				symbol = event.Symbol
 			}
+			if payload.LiquidationID > 0 {
+				result.ExecutionSummaryRecords++
+				validSide := payload.PositionSide == "BOTH" || payload.PositionSide == "LONG" || payload.PositionSide == "SHORT"
+				validQuantities := payload.AttemptedQty > 0 && payload.FilledQty > 0 &&
+					payload.FilledQty <= payload.AttemptedQty &&
+					payload.RemainingQty == payload.AttemptedQty-payload.FilledQty &&
+					absLiquidationSize(payload.PositionSize) == uint64(payload.AttemptedQty)
+				if !validSide || !validQuantities {
+					result.ExecutionSummaryFailures++
+				}
+			}
 			result.Liquidations++
 			state := row(event.VenueID)
 			state.Liquidations++
@@ -217,7 +253,10 @@ func (r *Run) MeasureLiquidations() (*LiquidationAudit, error) {
 			if payload.FillPrice <= 0 {
 				result.SignedOrZeroFillPrices++
 			}
-			positionKey := liquidationPositionKey{venue: event.VenueID, file: event.File, clientID: event.ClientID, symbol: symbol}
+			positionKey := liquidationPositionKey{
+				venue: event.VenueID, file: event.File, clientID: event.ClientID,
+				symbol: symbol, positionSide: payload.PositionSide,
+			}
 			batch, found := positionBatches[positionKey]
 			if !found || batch.timestamp != event.SimTS || batch.lastOrdinal >= event.Ordinal {
 				result.PositionPathMissing++
@@ -247,6 +286,17 @@ func (r *Run) MeasureLiquidations() (*LiquidationAudit, error) {
 			// missing rather than reusing evidence from the first close.
 			delete(positionBatches, positionKey)
 			if payload.RemainingDebt > 0 {
+				if payload.LiquidationID > 0 {
+					batchKey := liquidationBatchKey{
+						venue: event.VenueID, clientID: event.ClientID,
+						liquidationID: payload.LiquidationID, timestamp: event.SimTS,
+					}
+					if _, exists := deficitReceiptByBatch[batchKey]; exists {
+						result.DuplicateDeficitRecords++
+					} else {
+						deficitReceiptByBatch[batchKey] = struct{}{}
+					}
+				}
 				key := liquidationInstant{venue: event.VenueID, symbol: symbol, timestamp: event.SimTS}
 				debtByInstant[key] += payload.RemainingDebt
 				result.LiquidationsWithDeficit++

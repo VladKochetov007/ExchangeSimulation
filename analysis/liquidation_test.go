@@ -10,6 +10,11 @@ func liquidationLine(ts int64, venue string, clientID uint64, debt int64) string
 	return fmt.Sprintf(`{"sim_ts":%d,"client_id":%d,"event":"liquidation","data":{"venue_id":%q,"payload":{"symbol":"ABC-PERP","payload":{"symbol":"ABC-PERP","position_size":-100,"fill_price":5000,"remaining_debt":%d}}}}`, ts, clientID, venue, debt)
 }
 
+func liquidationSummaryLine(ts int64, venue string, clientID, liquidationID uint64, symbol, side string, positionSize, attemptedQty, filledQty, remainingQty, filledNotional, vwapPrice, fillPrice, debt int64) string {
+	return fmt.Sprintf(`{"sim_ts":%d,"client_id":%d,"event":"liquidation","data":{"venue_id":%q,"payload":{"symbol":%q,"payload":{"symbol":%q,"position_side":%q,"liquidation_id":%d,"position_size":%d,"attempted_qty":%d,"filled_qty":%d,"remaining_qty":%d,"filled_notional":%d,"vwap_price":%d,"fill_price":%d,"remaining_debt":%d}}}}`,
+		ts, clientID, venue, symbol, symbol, side, liquidationID, positionSize, attemptedQty, filledQty, remainingQty, filledNotional, vwapPrice, fillPrice, debt)
+}
+
 func insuranceLine(ts int64, venue string, debt int64) string {
 	return fmt.Sprintf(`{"sim_ts":%d,"client_id":0,"event":"insurance_fund","data":{"venue_id":%q,"payload":{"symbol":"ABC-PERP","payload":{"timestamp":%d,"symbol":"ABC-PERP","delta":-%d,"reason":"liquidation_deficit"}}}}`, ts, venue, ts, debt)
 }
@@ -110,5 +115,49 @@ func TestLiquidationAuditRetainsSignedFillPriceAsPresent(t *testing.T) {
 	}
 	if result.Liquidations != 1 || result.InvalidLiquidations != 0 || result.SignedOrZeroFillPrices != 1 {
 		t.Fatalf("zero fill price must remain present evidence: %+v", result)
+	}
+}
+
+func TestLiquidationAuditValidatesAccountScopedExecutionSummary(t *testing.T) {
+	const instant = int64(1_000_000_000)
+	lines := []string{
+		liquidationSummaryLine(instant, "north", 7, 11, "A-PERP", "LONG", -10, 10, 4, 6, 200, 50, 50, 40),
+		liquidationSummaryLine(instant, "north", 7, 11, "B-PERP", "LONG", 10, 10, 10, 0, 1500, 150, 150, 0),
+		changeLine(instant, "north", 7, "A-PERP", "liquidation_deficit", [][3]any{{"USD", int64(-40), int64(40)}}),
+		insuranceLine(instant, "north", 40),
+	}
+	dir := writeRun(t, Report{}, map[string][]string{"north/derivatives.jsonl": lines})
+	run, err := Open(dir)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	result, err := run.MeasureLiquidations()
+	if err != nil {
+		t.Fatalf("measure: %v", err)
+	}
+	if result.ExecutionSummaryRecords != 2 || result.ExecutionSummaryFailures != 0 || result.DuplicateDeficitRecords != 0 {
+		t.Fatalf("valid execution summary = %+v", result)
+	}
+
+	lines[1] = liquidationSummaryLine(instant, "north", 7, 11, "B-PERP", "LONG", 10, 10, 10, 0, 1500, 150, 150, 40)
+	dir = writeRun(t, Report{}, map[string][]string{"north/derivatives.jsonl": lines})
+	run, _ = Open(dir)
+	result, err = run.MeasureLiquidations()
+	if err != nil {
+		t.Fatalf("measure duplicate debt: %v", err)
+	}
+	if result.ExecutionSummaryFailures != 0 || result.DuplicateDeficitRecords != 1 || result.DeficitMismatchInstants == 0 {
+		t.Fatalf("duplicate deficit attribution was accepted: %+v", result)
+	}
+
+	lines[1] = liquidationSummaryLine(instant, "north", 7, 11, "B-PERP", "LONG", 10, 10, 12, -2, 1500, 150, 150, 0)
+	dir = writeRun(t, Report{}, map[string][]string{"north/derivatives.jsonl": lines})
+	run, _ = Open(dir)
+	result, err = run.MeasureLiquidations()
+	if err != nil {
+		t.Fatalf("measure invalid quantities: %v", err)
+	}
+	if result.ExecutionSummaryFailures != 1 {
+		t.Fatalf("invalid execution summary was accepted: %+v", result)
 	}
 }
