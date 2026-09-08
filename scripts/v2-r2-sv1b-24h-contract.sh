@@ -371,7 +371,7 @@ v2_r2_sv1b_require_produced_activation_comparison() {
 	[[ $# -eq 4 ]] || return 1
 	local analyzer_path=$1 treatment_dir=$2 control_dir=$3 comparison_path=$4 replay_dir replay_path
 	[[ "$analyzer_path" == /* && "$treatment_dir" == /* && "$control_dir" == /* && "$comparison_path" == /* ]] || return 1
-	replay_dir=$(mktemp -d /tmp/v2-r2-sv1b-audit-replay.XXXXXX) || return 1
+	replay_dir=$(mktemp -d) || return 1
 	replay_path="$replay_dir/cdf-liquidity-comparison.json"
 	if ! GOMAXPROCS="${v2_r2_sv1_activation_gomaxprocs:-2}" "$analyzer_path" -treatment "$treatment_dir" -control "$control_dir" >"$replay_path"; then
 		rm -rf -- "$replay_dir"
