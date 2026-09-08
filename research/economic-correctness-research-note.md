@@ -3022,6 +3022,61 @@ artifact of my tool.
 Recorded as RT-030, status **open**, with the sign evidence attached and the
 magnitude explicitly withheld.
 
+**E-046 — RT-030 resolved: the cross book is self-referential and drifts 69%
+from its own bootstrap.**
+Base: `a666d02faede3d40f046b11e60eb672c59386a94`.
+Run: `clock-control-5h-101.json`, seed 607, 5 simulated hours, full logs.
+Reproduce: `go run research/tools/pricerange/main.go -dir <logdir> -symbol ABC-CDF -reference 1666666667`.
+
+**The unit question is settled by comparing the book to itself.** Tracing
+`ABC/CDF` against its own configured bootstrap
+(`MulDiv(mvBootstrapPrice, mvBasePrecision, mvCDFBootstrap)` = 1 666 666 667):
+
+| | price | vs bootstrap |
+|---|---:|---:|
+| high | 1 669 200 000 | **+0.15%** |
+| last | 514 200 000 | **−69.15%** |
+
+Both figures are the same book in the same units, so **no unit error of mine can
+produce this**. The book starts at its bootstrap — the +0.15% high — and ends
+3.24× below it. Over the same run `ABC/USD` moved −1.05% and `CDF/USD` +0.08%.
+The dislocation is real. Reading 1 of RT-030 is confirmed and the withheld
+magnitude is now supported.
+
+**The mechanism, and it is one line.**
+
+    crossConfig := stoikovConfig("ABC/CDF", "ABC/CDF", crossBootstrap, mvBasePrecision, crossTick)
+
+`stoikovConfig(symbol, reference, ...)` sets `ReferenceSymbol: reference`, and
+for the cross book **both arguments are `"ABC/CDF"`**. The maker quotes around
+its own book. Nothing ties the cross to the implied rate `ABC/USD ÷ CDF/USD`; the
+bootstrap seeds it at the right value and it free-runs from there.
+
+Worse, the reference is self-referential at the *population* level too. `ABC/CDF`
+is published by `spotIndexProvider`, whose consensus for a symbol is the **median
+of the three venues' own mids of that symbol**. So the cross market's reference is
+a consensus of itself, and all three venues can drift together — which is exactly
+what E-045 measured, with mean |residual| of 37.8-38.2% on all three.
+
+The code names this failure mode itself, in `anchor.go`: *"a market with no
+reference of its own falls back to its book midpoint and becomes
+self-referential."* The cross book is that case, and the index publishing its
+symbol does not rescue it, because the index for that symbol is built from the
+same books.
+
+**What it means for the campaign's numbers.** Triangular consistency is enforced
+by nobody except `triangle_arb`, which is capped like every other class
+(RT-028). E-044's headline — `triangle_arb` at **+3.675%**, best in the
+population on both absolute and return measures, while `abc_cdf_spot_maker` loses
+12.6 M as the counterparty — is now explained: it is harvesting a 69% standing
+dislocation, not outcompeting anyone. **Any conclusion about cross-asset or
+triangular dynamics drawn from this configuration is measuring a self-referential
+book drifting, not a market.**
+
+Recorded as RT-031. This is the strongest economic finding since RT-014, and
+unlike RT-014 it is not a rounding boundary: it changes what the cross-asset
+population's results mean.
+
 ---
 
 ## F. Findings
@@ -3038,7 +3093,15 @@ See `research/red-team-findings.md` for the full records.
 - **RT-003** — bounded no-violation results (INV-2, INV-5, INV-6, identity).
 - **RT-006** — latency is delivered as configured across 225 link x channel
   rows; no unearned speed advantage. Transport only.
-- **RT-030** — **OPEN.** The triangular residual holds one sign for essentially
+- **RT-031** — the `ABC/CDF` cross book is **self-referential**: its maker's
+  `ReferenceSymbol` is the book itself, and the index that publishes the symbol
+  is a median of the same three books. It starts at its bootstrap (+0.15% high)
+  and ends **−69.15%** below it while `ABC/USD` moves −1.05%. Nothing enforces
+  triangular consistency except a capped arbitrageur. `triangle_arb`'s +3.675%
+  is harvesting a standing dislocation, not outcompeting anyone. **Any
+  cross-asset conclusion from this configuration is measuring a drifting
+  self-referential book.**
+- **RT-030** — **RESOLVED by E-046 (see RT-031).** Was open. The triangular residual holds one sign for essentially
   the whole run (6 to 36 sign flips in five hours; dominant sign 98.9-99.7% of
   instants), so `triangle_arb`'s +3.675% is not a competed market outcome. The
   measured magnitude — a 3.2x gap between the observed cross mid and both the

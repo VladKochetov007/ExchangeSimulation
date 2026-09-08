@@ -1807,3 +1807,53 @@ sets an initial price and does not pin the book.
 quotes around its own book's mid, the book can drift arbitrarily from the implied
 rate and the dislocation is real with a mechanism. If it quotes around the implied
 cross rate, my units are wrong and the residual is my tool's artifact.
+
+## RT-031 — The cross book is self-referential and drifts 69% from its bootstrap
+
+**Classification.** REAL, and it changes what the cross-asset population's
+results mean. Resolves RT-030's withheld magnitude.
+
+**Base.** `a666d02faede3d40f046b11e60eb672c59386a94`.
+`clock-control-5h-101.json`, seed 607, 5 simulated hours.
+
+**The unit question is settled by comparing the book to itself.** `ABC/CDF`
+against its own configured bootstrap
+(`MulDiv(mvBootstrapPrice, mvBasePrecision, mvCDFBootstrap)` = 1 666 666 667):
+
+| | price | vs bootstrap |
+|---|---:|---:|
+| high | 1 669 200 000 | **+0.15%** |
+| last | 514 200 000 | **−69.15%** |
+
+Same book, same units, so no unit error can produce this. It starts at its
+bootstrap and ends 3.24× below. `ABC/USD` moved −1.05% and `CDF/USD` +0.08% over
+the same run.
+
+**The mechanism is one line:**
+
+```go
+crossConfig := stoikovConfig("ABC/CDF", "ABC/CDF", crossBootstrap, mvBasePrecision, crossTick)
+```
+
+`stoikovConfig(symbol, reference, …)` sets `ReferenceSymbol: reference`, and both
+arguments are `"ABC/CDF"`. **The maker quotes around its own book.** Nothing ties
+the cross to the implied rate `ABC/USD ÷ CDF/USD`.
+
+**And it is self-referential at the population level too.** `ABC/CDF` is
+published by `spotIndexProvider`, whose consensus is the **median of the three
+venues' own mids of that symbol** — a consensus of itself. All three venues drift
+together, which is what E-045 measured: mean |residual| 37.8–38.2% on all three,
+with 6–36 sign flips in five hours.
+
+The code names this failure mode in `anchor.go`: *"a market with no reference of
+its own falls back to its book midpoint and becomes self-referential."* The cross
+book is that case, and the index publishing its symbol does not rescue it,
+because the index is built from the same books.
+
+**Consequence.** Triangular consistency is enforced by nobody except
+`triangle_arb`, itself capped like every class (RT-028). E-044's headline —
+`triangle_arb` best in the population on both absolute and return measures at
++3.675%, `abc_cdf_spot_maker` losing 12.6 M as counterparty — is explained: it
+harvests a 69% standing dislocation rather than outcompeting anyone. **Any
+cross-asset or triangular conclusion drawn from this configuration measures a
+self-referential book drifting, not a market.**
