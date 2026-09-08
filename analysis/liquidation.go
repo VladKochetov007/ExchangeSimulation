@@ -3,29 +3,37 @@ package analysis
 import (
 	"fmt"
 	"sort"
+
+	"exchange_sim/types"
 )
 
 // LiquidationAudit independently reconciles the observable liquidation,
 // account-deficit, and insurance-fund streams. It does not infer that a
 // liquidation was economically correct merely because an event was emitted.
 type LiquidationAudit struct {
-	Liquidations             int   `json:"liquidations"`
-	LiquidationChecks        int   `json:"liquidation_checks"`
-	AffectedAccounts         int   `json:"affected_accounts"`
-	LiquidationsWithDeficit  int   `json:"liquidations_with_deficit"`
-	TotalDeficit             int64 `json:"total_deficit"`
-	InsuranceDeficit         int64 `json:"insurance_deficit"`
-	BalanceDeficitCredit     int64 `json:"balance_deficit_credit"`
-	DeficitInsuranceResidual int64 `json:"deficit_insurance_residual"`
-	DeficitBalanceResidual   int64 `json:"deficit_balance_residual"`
-	DeficitMismatchInstants  int   `json:"deficit_mismatch_instants"`
-	InvalidLiquidations      int   `json:"invalid_liquidations"`
+	Liquidations                   int   `json:"liquidations"`
+	LiquidationChecks              int   `json:"liquidation_checks"`
+	AffectedAccounts               int   `json:"affected_accounts"`
+	LiquidationsWithDeficit        int   `json:"liquidations_with_deficit"`
+	TotalDeficit                   int64 `json:"total_deficit"`
+	InsuranceDeficit               int64 `json:"insurance_deficit"`
+	BalanceDeficitCredit           int64 `json:"balance_deficit_credit"`
+	DeficitInsuranceResidual       int64 `json:"deficit_insurance_residual"`
+	DeficitBalanceResidual         int64 `json:"deficit_balance_residual"`
+	DeficitMismatchInstants        int   `json:"deficit_mismatch_instants"`
+	DeficitBalanceMismatchAccounts int   `json:"deficit_balance_mismatch_accounts"`
+	InvalidLiquidations            int   `json:"invalid_liquidations"`
 	// ExecutionSummaryRecords are receipts emitted under the account-scoped
 	// liquidation contract. Historical receipts predate this contract and are
 	// deliberately excluded from these counters.
-	ExecutionSummaryRecords  int `json:"execution_summary_records"`
-	ExecutionSummaryFailures int `json:"execution_summary_failures"`
-	DuplicateDeficitRecords  int `json:"duplicate_deficit_records"`
+	ExecutionSummaryRecords          int `json:"execution_summary_records"`
+	ExecutionSummaryFailures         int `json:"execution_summary_failures"`
+	DuplicateExecutionSummaryRecords int `json:"duplicate_execution_summary_records"`
+	DuplicateDeficitRecords          int `json:"duplicate_deficit_records"`
+	MissingLiquidationIDs            int `json:"missing_liquidation_ids"`
+	PositionPathOrphaned             int `json:"position_path_orphaned"`
+	UnboundDeficitRecords            int `json:"unbound_deficit_records"`
+	BalanceIdentityFailures          int `json:"balance_identity_failures"`
 	// SignedOrZeroFillPrices counts present numeric fill prices that a
 	// positive-domain liquidation policy might reject upstream. They are not
 	// classified as absent/invalid evidence here: this generic reconstruction
@@ -81,6 +89,20 @@ type liquidationBatchKey struct {
 type liquidationPositionKey struct {
 	venue, file, symbol, positionSide string
 	clientID                          uint64
+	timestamp                         int64
+}
+
+type liquidationCheckKey struct {
+	venue     string
+	clientID  uint64
+	timestamp int64
+}
+
+type liquidationReceiptKey struct {
+	venue, symbol, positionSide string
+	clientID                    uint64
+	liquidationID               uint64
+	timestamp                   int64
 }
 
 type liquidationPositionBatch struct {
@@ -119,6 +141,7 @@ func (r *Run) MeasureLiquidations() (*LiquidationAudit, error) {
 		VWAPPrice      int64  `json:"vwap_price"`
 		FillPrice      int64  `json:"fill_price"`
 		RemainingDebt  int64  `json:"remaining_debt"`
+		BasePrecision  int64  `json:"base_precision"`
 	}
 	type balanceChange struct {
 		Timestamp int64  `json:"timestamp"`
@@ -149,9 +172,13 @@ func (r *Run) MeasureLiquidations() (*LiquidationAudit, error) {
 	venueAccounts := make(map[string]map[Participant]struct{})
 	venueRows := make(map[string]*LiquidationVenue)
 	debtByInstant := make(map[liquidationInstant]int64)
+	debtByAccount := make(map[liquidationAccountInstant]int64)
 	insuranceByInstant := make(map[liquidationInstant]int64)
 	balanceByInstant := make(map[liquidationInstant]int64)
+	balanceByAccount := make(map[liquidationAccountInstant]int64)
 	deficitReceiptByBatch := make(map[liquidationBatchKey]struct{})
+	executionReceipts := make(map[liquidationReceiptKey]struct{})
+	liquidationChecks := make(map[liquidationCheckKey]int)
 	positionBatches := make(map[liquidationPositionKey]liquidationPositionBatch)
 	var positionWindow liquidationPositionWindow
 	row := func(venue string) *LiquidationVenue {
@@ -179,6 +206,11 @@ func (r *Run) MeasureLiquidations() (*LiquidationAudit, error) {
 		switch event.Name {
 		case "liquidation_check":
 			result.LiquidationChecks++
+			if event.ClientID != 0 {
+				liquidationChecks[liquidationCheckKey{
+					venue: event.VenueID, clientID: event.ClientID, timestamp: event.SimTS,
+				}]++
+			}
 		case "position_update":
 			var payload positionUpdate
 			if event.Decode(&payload) != nil {
@@ -204,10 +236,10 @@ func (r *Run) MeasureLiquidations() (*LiquidationAudit, error) {
 			})
 			key := liquidationPositionKey{
 				venue: event.VenueID, file: event.File, clientID: clientID,
-				symbol: symbol, positionSide: payload.PositionSide,
+				symbol: symbol, positionSide: payload.PositionSide, timestamp: event.SimTS,
 			}
 			batch, exists := positionBatches[key]
-			if !exists || batch.timestamp != event.SimTS {
+			if !exists {
 				positionBatches[key] = liquidationPositionBatch{
 					timestamp: event.SimTS, firstOld: payload.OldSize, lastNew: payload.NewSize,
 					firstOrdinal: event.Ordinal, lastOrdinal: event.Ordinal, continuous: true,
@@ -234,9 +266,33 @@ func (r *Run) MeasureLiquidations() (*LiquidationAudit, error) {
 					payload.FilledQty <= payload.AttemptedQty &&
 					payload.RemainingQty == payload.AttemptedQty-payload.FilledQty &&
 					absLiquidationSize(payload.PositionSize) == uint64(payload.AttemptedQty)
-				if !validSide || !validQuantities {
+				validFields := liquidationSummaryFieldsPresent(event.Raw()) == nil
+				validPricing := false
+				if validFields {
+					// Signed contracts may legitimately report a negative or zero
+					// execution price. Validate the fixed-point identity without
+					// imposing a positive-price market domain here.
+					validPricing = payload.BasePrecision > 0 && payload.FilledQty > 0
+					if validPricing {
+						expectedNotional, ok := types.TryMulDiv(payload.FilledQty, payload.VWAPPrice, payload.BasePrecision)
+						validPricing = ok && expectedNotional == payload.FilledNotional
+					}
+				}
+				if !validSide || !validQuantities || !validFields || !validPricing {
 					result.ExecutionSummaryFailures++
 				}
+				receiptKey := liquidationReceiptKey{
+					venue: event.VenueID, symbol: symbol, positionSide: payload.PositionSide,
+					clientID: event.ClientID, liquidationID: payload.LiquidationID, timestamp: event.SimTS,
+				}
+				if _, exists := executionReceipts[receiptKey]; exists {
+					result.DuplicateExecutionSummaryRecords++
+					result.ExecutionSummaryFailures++
+				} else {
+					executionReceipts[receiptKey] = struct{}{}
+				}
+			} else {
+				result.MissingLiquidationIDs++
 			}
 			result.Liquidations++
 			state := row(event.VenueID)
@@ -255,7 +311,7 @@ func (r *Run) MeasureLiquidations() (*LiquidationAudit, error) {
 			}
 			positionKey := liquidationPositionKey{
 				venue: event.VenueID, file: event.File, clientID: event.ClientID,
-				symbol: symbol, positionSide: payload.PositionSide,
+				symbol: symbol, positionSide: payload.PositionSide, timestamp: event.SimTS,
 			}
 			batch, found := positionBatches[positionKey]
 			if !found || batch.timestamp != event.SimTS || batch.lastOrdinal >= event.Ordinal {
@@ -299,6 +355,14 @@ func (r *Run) MeasureLiquidations() (*LiquidationAudit, error) {
 				}
 				key := liquidationInstant{venue: event.VenueID, symbol: symbol, timestamp: event.SimTS}
 				debtByInstant[key] += payload.RemainingDebt
+				if event.ClientID == 0 {
+					result.UnboundDeficitRecords++
+				} else {
+					debtByAccount[liquidationAccountInstant{
+						liquidationInstant: key,
+						clientID:           event.ClientID,
+					}] += payload.RemainingDebt
+				}
 				result.LiquidationsWithDeficit++
 				result.TotalDeficit += payload.RemainingDebt
 				state.LiquidationsWithDeficit++
@@ -321,7 +385,20 @@ func (r *Run) MeasureLiquidations() (*LiquidationAudit, error) {
 			for _, change := range payload.Changes {
 				credit += change.Delta
 			}
-			balanceByInstant[liquidationInstant{venue: event.VenueID, symbol: symbol, timestamp: timestamp}] += credit
+			instant := liquidationInstant{venue: event.VenueID, symbol: symbol, timestamp: timestamp}
+			balanceByInstant[instant] += credit
+			clientID := event.ClientID
+			if payload.ClientID != 0 && clientID != 0 && payload.ClientID != clientID {
+				result.BalanceIdentityFailures++
+			}
+			if clientID == 0 {
+				result.UnboundDeficitRecords++
+			} else {
+				balanceByAccount[liquidationAccountInstant{
+					liquidationInstant: instant,
+					clientID:           clientID,
+				}] += credit
+			}
 			result.BalanceDeficitCredit += credit
 			row(event.VenueID).BalanceDeficitCredit += credit
 		case "insurance_fund":
@@ -344,17 +421,26 @@ func (r *Run) MeasureLiquidations() (*LiquidationAudit, error) {
 	}); err != nil {
 		return nil, fmt.Errorf("liquidation audit: scan: %w", err)
 	}
+	for key, batch := range positionBatches {
+		if !reducedSameSide(batch.firstOld, batch.lastNew) {
+			continue
+		}
+		checkKey := liquidationCheckKey{venue: key.venue, clientID: key.clientID, timestamp: batch.timestamp}
+		if liquidationChecks[checkKey] > 0 {
+			// A reducing position batch at a liquidation-check instant must have
+			// exactly one receipt. Leaving it unmatched would let an omitted
+			// execution summary pass as if no liquidation happened.
+			result.PositionPathOrphaned++
+		}
+	}
 	for key, debt := range debtByInstant {
 		insurance := insuranceByInstant[key]
-		balance := balanceByInstant[key]
-		if debt != insurance || debt != balance {
+		if debt != insurance {
 			result.DeficitMismatchInstants++
 		}
 		result.DeficitInsuranceResidual += debt - insurance
-		result.DeficitBalanceResidual += debt - balance
 		state := row(key.venue)
 		state.DeficitInsuranceResidual += debt - insurance
-		state.DeficitBalanceResidual += debt - balance
 	}
 	for key, insurance := range insuranceByInstant {
 		if _, exists := debtByInstant[key]; !exists && insurance != 0 {
@@ -366,6 +452,21 @@ func (r *Run) MeasureLiquidations() (*LiquidationAudit, error) {
 	for key, balance := range balanceByInstant {
 		if _, exists := debtByInstant[key]; !exists && balance != 0 {
 			result.DeficitMismatchInstants++
+		}
+	}
+	for key, debt := range debtByAccount {
+		balance := balanceByAccount[key]
+		if debt != balance {
+			result.DeficitMismatchInstants++
+			result.DeficitBalanceMismatchAccounts++
+			result.DeficitBalanceResidual += debt - balance
+			row(key.venue).DeficitBalanceResidual += debt - balance
+		}
+	}
+	for key, balance := range balanceByAccount {
+		if _, exists := debtByAccount[key]; !exists && balance != 0 {
+			result.DeficitMismatchInstants++
+			result.DeficitBalanceMismatchAccounts++
 			result.DeficitBalanceResidual -= balance
 			row(key.venue).DeficitBalanceResidual -= balance
 		}
@@ -384,6 +485,13 @@ func reducedSameSide(before, after int64) bool {
 		return false
 	}
 	return after == 0 || (before < 0) == (after < 0)
+}
+
+func liquidationSummaryFieldsPresent(raw []byte) error {
+	return decodeRequiredJSON(raw, &struct{}{},
+		"symbol", "position_side", "liquidation_id", "position_size",
+		"attempted_qty", "filled_qty", "remaining_qty", "filled_notional",
+		"vwap_price", "fill_price", "remaining_debt", "base_precision")
 }
 
 func absLiquidationSize(value int64) uint64 {

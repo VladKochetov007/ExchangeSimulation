@@ -21,6 +21,7 @@ type LiquidationEvent struct {
 	FillNotional  int64  `json:"filled_notional"`
 	VWAPPrice     int64  `json:"vwap_price"`
 	FillPrice     int64  `json:"fill_price"`
+	BasePrecision int64  `json:"base_precision"`
 	RemainingDebt int64  `json:"remaining_debt"`
 }
 

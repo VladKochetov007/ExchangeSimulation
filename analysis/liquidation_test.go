@@ -11,7 +11,7 @@ func liquidationLine(ts int64, venue string, clientID uint64, debt int64) string
 }
 
 func liquidationSummaryLine(ts int64, venue string, clientID, liquidationID uint64, symbol, side string, positionSize, attemptedQty, filledQty, remainingQty, filledNotional, vwapPrice, fillPrice, debt int64) string {
-	return fmt.Sprintf(`{"sim_ts":%d,"client_id":%d,"event":"liquidation","data":{"venue_id":%q,"payload":{"symbol":%q,"payload":{"symbol":%q,"position_side":%q,"liquidation_id":%d,"position_size":%d,"attempted_qty":%d,"filled_qty":%d,"remaining_qty":%d,"filled_notional":%d,"vwap_price":%d,"fill_price":%d,"remaining_debt":%d}}}}`,
+	return fmt.Sprintf(`{"sim_ts":%d,"client_id":%d,"event":"liquidation","data":{"venue_id":%q,"payload":{"symbol":%q,"payload":{"symbol":%q,"position_side":%q,"liquidation_id":%d,"position_size":%d,"attempted_qty":%d,"filled_qty":%d,"remaining_qty":%d,"filled_notional":%d,"vwap_price":%d,"fill_price":%d,"base_precision":1,"remaining_debt":%d}}}}`,
 		ts, clientID, venue, symbol, symbol, side, liquidationID, positionSize, attemptedQty, filledQty, remainingQty, filledNotional, vwapPrice, fillPrice, debt)
 }
 
@@ -22,6 +22,16 @@ func insuranceLine(ts int64, venue string, debt int64) string {
 func liquidationPositionLine(ts int64, venue string, clientID uint64, oldSize, newSize int64) string {
 	return fmt.Sprintf(`{"sim_ts":%d,"client_id":%d,"event":"position_update","data":{"venue_id":%q,"payload":{"symbol":"ABC-PERP","payload":{"timestamp":%d,"client_id":%d,"symbol":"ABC-PERP","old_size":%d,"new_size":%d}}}}`,
 		ts, clientID, venue, ts, clientID, oldSize, newSize)
+}
+
+func liquidationPositionSideLine(ts int64, venue string, clientID uint64, symbol, side string, oldSize, newSize int64) string {
+	return fmt.Sprintf(`{"sim_ts":%d,"client_id":%d,"event":"position_update","data":{"venue_id":%q,"payload":{"symbol":%q,"payload":{"timestamp":%d,"client_id":%d,"symbol":%q,"position_side":%q,"old_size":%d,"new_size":%d}}}}`,
+		ts, clientID, venue, symbol, ts, clientID, symbol, side, oldSize, newSize)
+}
+
+func liquidationCheckLine(ts int64, venue string, clientID uint64) string {
+	return fmt.Sprintf(`{"sim_ts":%d,"client_id":%d,"event":"liquidation_check","data":{"venue_id":%q,"payload":{"timestamp":%d,"client_id":%d,"symbol":"ABC-PERP"}}}`,
+		ts, clientID, venue, ts, clientID)
 }
 
 func TestLiquidationAuditReconcilesDeficitThreeWays(t *testing.T) {
@@ -159,5 +169,78 @@ func TestLiquidationAuditValidatesAccountScopedExecutionSummary(t *testing.T) {
 	}
 	if result.ExecutionSummaryFailures != 1 {
 		t.Fatalf("invalid execution summary was accepted: %+v", result)
+	}
+}
+
+func TestLiquidationAuditRejectsOrphanedReducingPositionBatch(t *testing.T) {
+	const instant = int64(1_000_000_000)
+	lines := []string{
+		liquidationCheckLine(instant, "north", 7),
+		liquidationPositionSideLine(instant, "north", 7, "ABC-PERP", "LONG", -100, -40),
+	}
+	dir := writeRun(t, Report{}, map[string][]string{"north/derivatives.jsonl": lines})
+	run, err := Open(dir)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	result, err := run.MeasureLiquidations()
+	if err != nil {
+		t.Fatalf("measure: %v", err)
+	}
+	if result.PositionPathOrphaned != 1 {
+		t.Fatalf("omitted liquidation receipt was not rejected: %+v", result)
+	}
+}
+
+func TestLiquidationAuditBindsDeficitCreditToTheLiquidatedAccount(t *testing.T) {
+	const instant = int64(1_000_000_000)
+	lines := []string{
+		liquidationLine(instant, "north", 7, 40),
+		changeLine(instant, "north", 8, "ABC-PERP", "liquidation_deficit", [][3]any{{"USD", int64(-40), int64(40)}}),
+		insuranceLine(instant, "north", 40),
+	}
+	dir := writeRun(t, Report{}, map[string][]string{"north/derivatives.jsonl": lines})
+	run, err := Open(dir)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	result, err := run.MeasureLiquidations()
+	if err != nil {
+		t.Fatalf("measure: %v", err)
+	}
+	if result.DeficitMismatchInstants != 2 || result.DeficitBalanceMismatchAccounts != 2 {
+		t.Fatalf("wrong-account deficit credit was accepted: %+v", result)
+	}
+}
+
+func TestLiquidationAuditRejectsDuplicateExecutionReceiptAndVWAPMismatch(t *testing.T) {
+	const instant = int64(1_000_000_000)
+	valid := liquidationSummaryLine(instant, "north", 7, 11, "A-PERP", "LONG", -10, 10, 4, 6, 200, 50, 50, 0)
+	duplicate := []string{valid, valid}
+	dir := writeRun(t, Report{}, map[string][]string{"north/derivatives.jsonl": duplicate})
+	run, err := Open(dir)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	result, err := run.MeasureLiquidations()
+	if err != nil {
+		t.Fatalf("measure duplicate: %v", err)
+	}
+	if result.DuplicateExecutionSummaryRecords != 1 || result.ExecutionSummaryFailures != 1 {
+		t.Fatalf("duplicate execution receipt was accepted: %+v", result)
+	}
+
+	mismatched := liquidationSummaryLine(instant, "north", 7, 12, "A-PERP", "LONG", -10, 10, 4, 6, 201, 50, 50, 0)
+	dir = writeRun(t, Report{}, map[string][]string{"north/derivatives.jsonl": {mismatched}})
+	run, err = Open(dir)
+	if err != nil {
+		t.Fatalf("open mismatch: %v", err)
+	}
+	result, err = run.MeasureLiquidations()
+	if err != nil {
+		t.Fatalf("measure mismatch: %v", err)
+	}
+	if result.ExecutionSummaryFailures != 1 {
+		t.Fatalf("inconsistent notional/VWAP summary was accepted: %+v", result)
 	}
 }

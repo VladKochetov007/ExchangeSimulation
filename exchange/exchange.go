@@ -2525,6 +2525,7 @@ type liquidationFill struct {
 	symbol         string
 	positionSide   string
 	positionSize   int64
+	basePrecision  int64
 	attemptedQty   int64
 	filledQty      int64
 	remainingQty   int64
@@ -2651,7 +2652,8 @@ func (e *DefaultExchange) liquidatePosition(clientID uint64, client *Client, sym
 	e.chargeClearanceFee(clientID, client, symbol, inst, stats.filledNotional, timestamp)
 	return liquidationFill{
 		symbol: symbol, positionSide: pos.PositionSide.String(), positionSize: pos.Size,
-		attemptedQty: attemptedQty, filledQty: stats.filledQty, remainingQty: stats.remainingQty,
+		basePrecision: inst.BasePrecision(),
+		attemptedQty:  attemptedQty, filledQty: stats.filledQty, remainingQty: stats.remainingQty,
 		filledNotional: stats.filledNotional, vwapPrice: stats.vwapPrice, fillPrice: stats.fillPrice,
 	}, true
 }
@@ -2724,6 +2726,7 @@ func (e *DefaultExchange) finalizeAccountLiquidation(clientID uint64, client *Cl
 				"attempted_qty": fill.attemptedQty, "filled_qty": fill.filledQty,
 				"remaining_qty": fill.remainingQty, "filled_notional": fill.filledNotional,
 				"vwap_price": fill.vwapPrice, "fill_price": fill.fillPrice,
+				"base_precision": fill.basePrecision,
 				"remaining_debt": remainingDebt,
 			})
 		}
@@ -2734,7 +2737,7 @@ func (e *DefaultExchange) finalizeAccountLiquidation(clientID uint64, client *Cl
 				PositionSize: fill.positionSize, AttemptedQty: fill.attemptedQty,
 				FilledQty: fill.filledQty, RemainingQty: fill.remainingQty,
 				FillNotional: fill.filledNotional, VWAPPrice: fill.vwapPrice,
-				FillPrice: fill.fillPrice, RemainingDebt: remainingDebt,
+				FillPrice: fill.fillPrice, BasePrecision: fill.basePrecision, RemainingDebt: remainingDebt,
 			})
 		}
 	}
