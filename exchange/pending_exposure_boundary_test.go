@@ -17,8 +17,17 @@ func TestSettlementPendingExposureStopsSiblingOrdersAndBorrow(t *testing.T) {
 	ex.AddInstrument(active)
 	ex.AddInstrument(pending)
 	ex.ConnectNewClient(1, map[string]int64{}, &FixedFee{})
+	ex.ConnectNewClient(2, map[string]int64{}, &FixedFee{})
 	ex.AddPerpBalance(1, "USD", 1_000)
+	ex.AddPerpBalance(2, "USD", 1_000)
 	ex.Positions.UpdatePosition(1, pending.Symbol(), 1, 100, Buy, PositionBoth)
+	activeOrder := ex.PlaceOrder(1, &OrderRequest{
+		RequestID: 1, Symbol: active.Symbol(), Side: Buy, Type: LimitOrder,
+		Price: 100, Qty: 1, TimeInForce: GTC, Visibility: Normal,
+	})
+	if !activeOrder.Success {
+		t.Fatalf("resting sibling order rejected before pending transition: %#v", activeOrder)
+	}
 	if err := ex.EnableBorrowing(BorrowingConfig{
 		Enabled: true, PriceSource: NewStaticPriceOracle(map[string]int64{"USD": 1}), AutoBorrowPerp: true,
 	}); err != nil {
@@ -31,16 +40,27 @@ func TestSettlementPendingExposureStopsSiblingOrdersAndBorrow(t *testing.T) {
 	if _, ok := ex.settlementPending[pending.Symbol()]; !ok {
 		t.Fatal("unavailable expiry did not enter settlement-pending state")
 	}
+	if len(ex.Books[active.Symbol()].Bids.Orders) != 0 || len(ex.Clients[1].OrderIDs) != 0 {
+		t.Fatalf("pending transition retained sibling resting order: bids=%d order_ids=%v", len(ex.Books[active.Symbol()].Bids.Orders), ex.Clients[1].OrderIDs)
+	}
+	matchingSell := ex.PlaceOrder(2, &OrderRequest{
+		RequestID: 2, Symbol: active.Symbol(), Side: Sell, Type: LimitOrder,
+		Price: 100, Qty: 1, TimeInForce: GTC, Visibility: Normal,
+	})
+	if !matchingSell.Success || len(ex.Books[active.Symbol()].Bids.Orders) != 0 || len(ex.Books[active.Symbol()].Asks.Orders) != 1 {
+		t.Fatalf("sibling trade after pending transition = %#v, bids=%d asks=%d", matchingSell, len(ex.Books[active.Symbol()].Bids.Orders), len(ex.Books[active.Symbol()].Asks.Orders))
+	}
 
+	nextOrderID := ex.NextOrderID
 	response := ex.PlaceOrder(1, &OrderRequest{
-		RequestID: 1, Symbol: active.Symbol(), Side: Buy, Type: LimitOrder,
+		RequestID: 3, Symbol: active.Symbol(), Side: Buy, Type: LimitOrder,
 		Price: 100, Qty: 1, TimeInForce: GTC, Visibility: Normal,
 	})
 	if response.Success || response.Error != etypes.RejectSettlementPendingExposure {
 		t.Fatalf("sibling order after pending transition = %#v, want account-settlement-pending rejection", response)
 	}
-	if ex.NextOrderID != 1 || len(ex.Books[active.Symbol()].Bids.Orders) != 0 {
-		t.Fatal("pending-exposure order rejection mutated the active book")
+	if ex.NextOrderID != nextOrderID || len(ex.Books[active.Symbol()].Bids.Orders) != 0 {
+		t.Fatalf("pending-exposure order rejection mutated the active book: next_order_id=%d/%d bids=%d", ex.NextOrderID, nextOrderID, len(ex.Books[active.Symbol()].Bids.Orders))
 	}
 
 	oldBalance := ex.Clients[1].PerpBalances["USD"]

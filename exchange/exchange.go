@@ -1681,6 +1681,12 @@ func (e *DefaultExchange) updateAllPerpPrices() {
 	deferred := make([]deferredPrice, 0)
 	for _, symbol := range markSymbols {
 		book := e.Books[symbol]
+		if exp, ok := book.Instrument.(Expirable); ok && timestamp >= exp.ExpiryNano() {
+			// Contractual expiry is a lifecycle boundary, not a liquidation
+			// opportunity. CheckExpiries will settle or quarantine the contract;
+			// this pass must not publish a final risk mark or force a trade first.
+			continue
+		}
 		if _, pending := e.settlementPending[symbol]; pending {
 			// Expiry already halted this contract. Settlement sampling continues
 			// in UpdateDerivativeMarks, but mark/funding/liquidation work must
@@ -1996,6 +2002,7 @@ func (e *DefaultExchange) buildAccountMarginProfile(clientID uint64, quote, trig
 // Caller must hold e.mu.
 func (e *DefaultExchange) buildAccountMarginProfileAtEpoch(clientID uint64, quote, triggerSymbol string, triggerMark int64, markEpoch uint64) (accountMarginProfile, error) {
 	var p accountMarginProfile
+	timestamp := e.Clock.NowUnixNano()
 	// Cross-margin marks can fail on the first unmarked book and emit the
 	// reason into the execution evidence.  A map walk here therefore made the
 	// ordered execution digest depend on the process's map hash seed (the
@@ -2018,6 +2025,12 @@ func (e *DefaultExchange) buildAccountMarginProfileAtEpoch(clientID uint64, quot
 					// instead of allowing active sibling risk to ignore it.
 					return accountMarginProfile{}, fmt.Errorf("cross-margin exposure for %s is settlement-pending", symbol)
 				}
+			}
+			continue
+		}
+		if exp, ok := book.Instrument.(Expirable); ok && timestamp >= exp.ExpiryNano() {
+			if e.clientHasOpenPositionOnSymbolLocked(clientID, symbol) {
+				return accountMarginProfile{}, fmt.Errorf("cross-margin exposure for %s has expired", symbol)
 			}
 			continue
 		}
@@ -2119,6 +2132,9 @@ func (e *DefaultExchange) checkPositionMarginerLiquidationsAtEpoch(markEpoch uin
 	symbols := make([]string, 0)
 	for symbol, book := range e.Books {
 		if _, pending := e.settlementPending[symbol]; !pending {
+			if exp, ok := book.Instrument.(Expirable); ok && timestamp >= exp.ExpiryNano() {
+				continue
+			}
 			if _, ok := book.Instrument.(PositionMarginer); ok {
 				symbols = append(symbols, symbol)
 			}
@@ -2232,9 +2248,23 @@ func (e *DefaultExchange) CheckLiquidations(symbol string, perp *PerpFutures, ma
 // makes the profile consume only marks committed by the same completed batch;
 // this is the path used by automation after it installs all marks.
 func (e *DefaultExchange) checkLiquidationsAtEpoch(symbol string, perp *PerpFutures, markPrice int64, markEpoch uint64) {
+	if perp == nil {
+		return
+	}
 	quote := perp.QuoteAsset()
+	timestamp := e.Clock.NowUnixNano()
 
 	e.mu.Lock()
+	book := e.Books[symbol]
+	if book == nil || marginCore(book.Instrument) != perp || book.Instrument.QuoteAsset() != quote {
+		e.mu.Unlock()
+		e.reportPriceUnavailable(timestamp, symbol, "liquidation", fmt.Errorf("liquidation contract %s is not the registered margin book", symbol))
+		return
+	}
+	if exp, ok := book.Instrument.(Expirable); ok && timestamp >= exp.ExpiryNano() {
+		e.mu.Unlock()
+		return
+	}
 	defer e.mu.Unlock()
 	if _, pending := e.settlementPending[symbol]; pending {
 		return
@@ -2265,13 +2295,13 @@ func (e *DefaultExchange) checkLiquidationsAtEpoch(symbol string, perp *PerpFutu
 
 		profileEpoch := markEpoch
 		if profileEpoch == 0 {
-			positions := e.collectAccountLiquidationPositionsLocked(clientID, quote)
+			positions := e.collectAccountLiquidationPositionsLocked(clientID, quote, timestamp)
 			exposedSymbols := make(map[string]struct{}, len(positions))
 			for _, position := range positions {
 				exposedSymbols[position.symbol] = struct{}{}
 			}
 			if len(exposedSymbols) > 1 {
-				if !e.accountMarkEpochReadyLocked(clientID, quote, e.markEpoch) {
+				if !e.accountMarkEpochReadyLocked(clientID, quote, e.markEpoch, timestamp) {
 					e.reportPriceUnavailable(e.Clock.NowUnixNano(), symbol, "liquidation", fmt.Errorf("cross-margin account %d has no coherent mark epoch", clientID))
 					continue
 				}
@@ -2292,8 +2322,6 @@ func (e *DefaultExchange) checkLiquidationsAtEpoch(symbol string, perp *PerpFutu
 		equity := client.PerpBalance(quote) - client.BorrowedPerpPortion(quote) + equityContribution
 		maintenanceMargin := profile.Maintenance
 		warningMargin := profile.Warning
-
-		timestamp := e.Clock.NowUnixNano()
 
 		if equity < maintenanceMargin {
 			if log := e.getLogger("_global"); log != nil {
@@ -2381,7 +2409,7 @@ type liquidationFill struct {
 // position in canonical symbol/side order. A cross-margin breach is an account
 // event: choosing only the symbol whose mark arrived first lets a profitable
 // sibling hide or expose a deficit depending on event order.
-func (e *DefaultExchange) collectAccountLiquidationPositionsLocked(clientID uint64, quote string) []liquidationPosition {
+func (e *DefaultExchange) collectAccountLiquidationPositionsLocked(clientID uint64, quote string, timestamp int64) []liquidationPosition {
 	positions := e.Positions.GetAllPositions(clientID)
 	slices.SortFunc(positions, func(a, b Position) int {
 		if order := cmp.Compare(a.Symbol, b.Symbol); order != 0 {
@@ -2399,6 +2427,9 @@ func (e *DefaultExchange) collectAccountLiquidationPositionsLocked(clientID uint
 		if _, pending := e.settlementPending[position.Symbol]; pending {
 			continue
 		}
+		if exp, ok := book.Instrument.(Expirable); ok && timestamp >= exp.ExpiryNano() {
+			continue
+		}
 		_, isMargined := book.Instrument.(etypes.Margined)
 		_, isPositionMargined := book.Instrument.(etypes.PositionMarginer)
 		if !isMargined && !isPositionMargined {
@@ -2409,11 +2440,11 @@ func (e *DefaultExchange) collectAccountLiquidationPositionsLocked(clientID uint
 	return result
 }
 
-func (e *DefaultExchange) accountMarkEpochReadyLocked(clientID uint64, quote string, markEpoch uint64) bool {
+func (e *DefaultExchange) accountMarkEpochReadyLocked(clientID uint64, quote string, markEpoch uint64, timestamp int64) bool {
 	if markEpoch == 0 {
 		return false
 	}
-	positions := e.collectAccountLiquidationPositionsLocked(clientID, quote)
+	positions := e.collectAccountLiquidationPositionsLocked(clientID, quote, timestamp)
 	seenSymbols := make(map[string]struct{}, len(positions))
 	for _, position := range positions {
 		if _, seen := seenSymbols[position.symbol]; seen {
@@ -2444,8 +2475,8 @@ func (e *DefaultExchange) accountMarkEpochReadyLocked(clientID uint64, quote str
 	return len(seenSymbols) > 0
 }
 
-func (e *DefaultExchange) hasOpenAccountLiquidationPositionLocked(clientID uint64, quote string) bool {
-	return len(e.collectAccountLiquidationPositionsLocked(clientID, quote)) > 0
+func (e *DefaultExchange) hasOpenAccountLiquidationPositionLocked(clientID uint64, quote string, timestamp int64) bool {
+	return len(e.collectAccountLiquidationPositionsLocked(clientID, quote, timestamp)) > 0
 }
 
 // liquidateAccount closes the complete same-quote portfolio before it settles
@@ -2454,7 +2485,7 @@ func (e *DefaultExchange) hasOpenAccountLiquidationPositionLocked(clientID uint6
 // never socialized away merely because a different symbol was attempted first.
 // Caller must hold e.mu.Lock().
 func (e *DefaultExchange) liquidateAccount(clientID uint64, client *Client, quote string, timestamp int64) {
-	positions := e.collectAccountLiquidationPositionsLocked(clientID, quote)
+	positions := e.collectAccountLiquidationPositionsLocked(clientID, quote, timestamp)
 	fills := make([]liquidationFill, 0, len(positions))
 	for _, target := range positions {
 		fill, ok := e.liquidatePosition(clientID, client, target.symbol, &target.position, target.instrument, timestamp)
@@ -2533,7 +2564,7 @@ func (e *DefaultExchange) finalizeAccountLiquidation(clientID uint64, client *Cl
 	// Defer deficit socialization until all same-quote liquidation attempts have
 	// either closed or become terminally unfillable.
 	debt := int64(0)
-	if !e.hasOpenAccountLiquidationPositionLocked(clientID, quote) {
+	if !e.hasOpenAccountLiquidationPositionLocked(clientID, quote, timestamp) {
 		balance := client.PerpBalances[quote]
 		if balance < 0 {
 			debt = -balance

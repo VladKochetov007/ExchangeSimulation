@@ -1,5 +1,7 @@
 package exchange
 
+import "slices"
+
 // ForcedCancelNotification is sent to a client's gateway when the exchange
 // cancels an order on its behalf (e.g. during liquidation) without a client
 // cancel request. Actors decode this via decodeResponse to clean up state.
@@ -103,5 +105,22 @@ func (e *DefaultExchange) cancelClientOrdersOnBook(client *Client, book *OrderBo
 		// actor with a ghost pending order that blocks its quoting loop
 		// forever (randomwalk postmortem bug 3).
 		gw.enqueueResponse(Response{Success: true, Data: &ForcedCancelNotification{OrderID: orderID, RemainingQty: remainingQty}})
+	}
+}
+
+// cancelClientOrdersAcrossBooksLocked cancels every resting order for a
+// client in canonical book order. Settlement-pending exposure is account-wide:
+// leaving a sibling-book order live would allow the account to trade after one
+// of its positions has become unpriceable and permanently halted.
+// Caller must hold e.mu.Lock().
+func (e *DefaultExchange) cancelClientOrdersAcrossBooksLocked(client *Client) {
+	symbols := make([]string, 0, len(e.Books))
+	for symbol := range e.Books {
+		symbols = append(symbols, symbol)
+	}
+	slices.Sort(symbols)
+	for _, symbol := range symbols {
+		book := e.Books[symbol]
+		e.cancelClientOrdersOnBook(client, book, book.Instrument)
 	}
 }

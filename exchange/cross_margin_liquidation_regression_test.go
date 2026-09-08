@@ -3,6 +3,7 @@ package exchange
 import (
 	"reflect"
 	"testing"
+	"time"
 )
 
 type crossMarginLiquidationOutcome struct {
@@ -142,5 +143,37 @@ func TestPublicCrossMarginLiquidationFailsClosedWithoutCoherentMarkEpoch(t *test
 	}
 	if got := ex.ExchangeBalance.InsuranceFund["USD"]; got != 0 {
 		t.Fatalf("public mixed-epoch call changed insurance: %d", got)
+	}
+}
+
+func TestExactExpiryPrecedesPublicLiquidation(t *testing.T) {
+	clock := &expiryManualClock{now: 99}
+	ex := NewExchange(2, clock)
+	defer ex.Shutdown()
+	future := NewExpiringFutures("EXACT-FUT", "ABC", "USD", 1, 1, 1, 1, clock.now+1)
+	ex.AddInstrument(future)
+	ex.ConnectNewClient(1, nil, &FixedFee{})
+	ex.ConnectNewClient(2, nil, &FixedFee{})
+	ex.AddPerpBalance(1, "USD", 1_000)
+	ex.AddPerpBalance(2, "USD", 1_000_000)
+	if delta := ex.Positions.UpdatePosition(1, future.Symbol(), 10, 100, Buy, PositionBoth); delta.NewSize != 10 {
+		t.Fatalf("exact-expiry position delta = %#v", delta)
+	}
+	response := ex.PlaceOrder(2, &OrderRequest{
+		RequestID: 1, Symbol: future.Symbol(), Side: Buy, Type: LimitOrder,
+		Price: 50, Qty: 10, TimeInForce: GTC, PositionSide: PositionBoth,
+	})
+	if !response.Success {
+		t.Fatalf("exact-expiry covering bid rejected: %s", response.Error)
+	}
+
+	clock.Advance(time.Nanosecond)
+	ex.CheckLiquidations(future.Symbol(), future.Perp(), 50)
+	position := ex.Positions.GetPosition(1, future.Symbol())
+	if position == nil || position.Size != 10 {
+		t.Fatalf("exact-expiry public liquidation changed position: %#v", position)
+	}
+	if len(ex.Books[future.Symbol()].Bids.Orders) != 1 {
+		t.Fatalf("exact-expiry public liquidation changed covering book: %d bids", len(ex.Books[future.Symbol()].Bids.Orders))
 	}
 }

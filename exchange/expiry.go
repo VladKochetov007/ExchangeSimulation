@@ -113,7 +113,14 @@ func (e *DefaultExchange) deferExpiredSettlementLocked(symbol string, now int64,
 		}
 		slices.Sort(clientIDs)
 		for _, clientID := range clientIDs {
-			e.cancelClientOrdersOnBook(e.Clients[clientID], book, inst)
+			client := e.Clients[clientID]
+			if e.clientHasOpenPositionOnSymbolLocked(clientID, symbol) {
+				e.cancelClientOrdersAcrossBooksLocked(client)
+				continue
+			}
+			// Orders on the expiring book are invalid for every client, even
+			// when that client has no retained position in the contract.
+			e.cancelClientOrdersOnBook(client, book, inst)
 		}
 	}
 	pending.Attempts++
