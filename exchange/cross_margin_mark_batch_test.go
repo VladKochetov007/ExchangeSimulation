@@ -116,3 +116,50 @@ func TestCrossMarginOptionRiskUsesImmutableSnapshotInputs(t *testing.T) {
 		t.Fatalf("live option mark/configuration mutation changed snapshot risk: %#v", position)
 	}
 }
+
+func TestUpdateDerivativeMarksStoresCompleteOptionRiskSnapshot(t *testing.T) {
+	clock := &expiryManualClock{now: 100}
+	ex := NewExchange(2, clock)
+	defer ex.Shutdown()
+	spot := NewSpotInstrument("ABC/USD", "ABC", "USD", 1, 1, 1, 1)
+	option := NewEuropeanOption("ABC-C-100", "ABC", "USD", spot.Symbol(), 1, 1, 1, 1, 100, clock.now+int64(time.Hour), true)
+	ex.AddInstrument(spot)
+	ex.AddInstrument(option)
+	addTwoSidedQuote(t, ex.Books[spot.Symbol()], 100, 120)
+
+	epoch := ex.UpdateDerivativeMarks()
+	if epoch == 0 {
+		t.Fatal("derivative mark pass did not commit an option epoch")
+	}
+	snapshot, ok := ex.riskMarkSnapshots[option.Symbol()]
+	if !ok {
+		t.Fatal("option risk snapshot was not recorded")
+	}
+	underlying, err := option.UnderlyingMark()
+	if err != nil {
+		t.Fatalf("option underlying mark: %v", err)
+	}
+	premium, err := option.MarkPremium()
+	if err != nil {
+		t.Fatalf("option premium mark: %v", err)
+	}
+	if snapshot.underlying != underlying || snapshot.mark != premium || snapshot.maintenanceBps != option.Margin.MMBps || snapshot.timestamp != clock.now {
+		t.Fatalf("option risk snapshot = %#v, want underlying=%d mark=%d maintenance=%d timestamp=%d", snapshot, underlying, premium, option.Margin.MMBps, clock.now)
+	}
+}
+
+func TestCrossMarginRiskRejectsMixedSnapshotTimestamps(t *testing.T) {
+	ex, a, b := seedCrossMarginLiquidationCase(t)
+	defer ex.Shutdown()
+	snapshot := ex.riskMarkSnapshots[b.Symbol()]
+	snapshot.timestamp++
+	ex.riskMarkSnapshots[b.Symbol()] = snapshot
+
+	ex.checkLiquidationsAtEpoch(a.Symbol(), a, 50, ex.markEpoch)
+	for _, symbol := range []string{a.Symbol(), b.Symbol()} {
+		position := ex.Positions.GetPosition(1, symbol)
+		if position == nil || position.Size != 10 {
+			t.Fatalf("mixed snapshot timestamp changed %s position: %#v", symbol, position)
+		}
+	}
+}

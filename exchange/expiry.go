@@ -522,9 +522,15 @@ func (e *DefaultExchange) UpdateDerivativeMarks() uint64 {
 					delete(e.markEpochBySymbol, symbol)
 					continue
 				}
+				underlying, err := option.UnderlyingMark()
+				if err != nil {
+					delete(e.markEpochBySymbol, symbol)
+					continue
+				}
 				e.riskMarkSnapshots[symbol] = riskMarkSnapshot{
-					book: e.Books[symbol], mark: mark,
-					epoch: completedMarkEpoch, timestamp: now,
+					book: e.Books[symbol], mark: mark, underlying: underlying,
+					maintenanceBps: option.Margin.MMBps,
+					epoch:          completedMarkEpoch, timestamp: now,
 				}
 			}
 		}

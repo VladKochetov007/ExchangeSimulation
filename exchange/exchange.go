@@ -2039,6 +2039,18 @@ type riskMarkSnapshot struct {
 	timestamp      int64
 }
 
+func bindRiskSnapshotTimestamp(snapshot riskMarkSnapshot, expected *int64, bound *bool) error {
+	if !*bound {
+		*expected = snapshot.timestamp
+		*bound = true
+		return nil
+	}
+	if snapshot.timestamp != *expected {
+		return fmt.Errorf("cross-margin mark snapshots have different timestamps: %d and %d", *expected, snapshot.timestamp)
+	}
+	return nil
+}
+
 func (e *DefaultExchange) committedRiskSnapshotLocked(symbol string, book *OrderBook, markEpoch uint64) (riskMarkSnapshot, error) {
 	snapshot, ok := e.riskMarkSnapshots[symbol]
 	if !ok || snapshot.epoch != markEpoch || snapshot.book != book {
@@ -2068,6 +2080,8 @@ func (e *DefaultExchange) buildAccountMarginProfile(clientID uint64, quote, trig
 func (e *DefaultExchange) buildAccountMarginProfileAtEpoch(clientID uint64, quote, triggerSymbol string, triggerMark int64, markEpoch uint64) (accountMarginProfile, error) {
 	var p accountMarginProfile
 	timestamp := e.Clock.NowUnixNano()
+	var snapshotTimestamp int64
+	var snapshotTimestampBound bool
 	// Cross-margin marks can fail on the first unmarked book and emit the
 	// reason into the execution evidence.  A map walk here therefore made the
 	// ordered execution digest depend on the process's map hash seed (the
@@ -2105,8 +2119,17 @@ func (e *DefaultExchange) buildAccountMarginProfileAtEpoch(clientID uint64, quot
 			// mark-to-market and maintenance; skipping them makes a short-vol
 			// account invisible to the risk engine and unliquidatable.
 			if pm, ok := book.Instrument.(PositionMarginer); ok && book.Instrument.QuoteAsset() == quote {
-				if markEpoch != 0 && e.clientHasOpenPositionOnSymbolLocked(clientID, symbol) && e.markEpochBySymbol[symbol] != markEpoch {
-					return accountMarginProfile{}, fmt.Errorf("cross-margin mark epoch for %s is unavailable", symbol)
+				if markEpoch != 0 && e.clientHasOpenPositionOnSymbolLocked(clientID, symbol) {
+					if e.markEpochBySymbol[symbol] != markEpoch {
+						return accountMarginProfile{}, fmt.Errorf("cross-margin mark epoch for %s is unavailable", symbol)
+					}
+					snapshot, err := e.committedRiskSnapshotLocked(symbol, book, markEpoch)
+					if err != nil {
+						return accountMarginProfile{}, err
+					}
+					if err := bindRiskSnapshotTimestamp(snapshot, &snapshotTimestamp, &snapshotTimestampBound); err != nil {
+						return accountMarginProfile{}, err
+					}
 				}
 				if err := e.addPositionMarginerExposure(&p, clientID, symbol, book.Instrument, pm, book, markEpoch); err != nil {
 					return accountMarginProfile{}, err
@@ -2135,6 +2158,9 @@ func (e *DefaultExchange) buildAccountMarginProfileAtEpoch(clientID uint64, quot
 			var err error
 			snapshot, err = e.committedRiskSnapshotLocked(symbol, book, markEpoch)
 			if err != nil {
+				return accountMarginProfile{}, err
+			}
+			if err := bindRiskSnapshotTimestamp(snapshot, &snapshotTimestamp, &snapshotTimestampBound); err != nil {
 				return accountMarginProfile{}, err
 			}
 		}
