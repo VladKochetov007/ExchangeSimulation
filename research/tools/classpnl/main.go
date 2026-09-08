@@ -141,6 +141,7 @@ func main() {
 	}
 
 	byClass := map[string]*classTotals{}
+	endMarksByVenue := map[string]map[string]int64{}
 	var participants []participantRow
 	endMarks := map[string]int64{}
 	var totalCarry, totalGross int64
@@ -153,6 +154,12 @@ func main() {
 		}
 		for asset, mark := range row.Marks {
 			endMarks[asset] = mark
+		}
+		if endMarksByVenue[row.VenueID] == nil {
+			endMarksByVenue[row.VenueID] = make(map[string]int64, len(row.Marks))
+		}
+		for asset, mark := range row.Marks {
+			endMarksByVenue[row.VenueID][asset] = mark
 		}
 		revaluation := int64(0)
 		for asset, balance := range open.balances {
@@ -192,11 +199,15 @@ func main() {
 	// measurement that caught this.
 	take := int64(0)
 	for _, l := range data.VenueLedgers {
+		// A venue's fees are valued at that venue's own marks. The venues do not
+		// agree on them (E-047), so a single global mark map would price one
+		// venue's revenue with another's prices.
+		marks := endMarksByVenue[l.VenueID]
 		for asset, amount := range l.FeeRevenue {
-			take += convertToReport(amount, asset, endMarks)
+			take += convertToReport(amount, asset, marks)
 		}
 		for asset, amount := range l.InsuranceFund {
-			take += convertToReport(amount, asset, endMarks)
+			take += convertToReport(amount, asset, marks)
 		}
 	}
 

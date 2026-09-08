@@ -2307,3 +2307,68 @@ tolerance. A gate calibrated in one asset cannot detect a multi-asset omission.
 The lesson is not to tighten the tolerance — at 1% the runs passed legitimately —
 but that **a conservation check must enumerate every asset the system can move
 value in, not the one the report is denominated in.**
+
+## RT-040 — Marks are per venue, and collapsing them hid the last of the residual
+
+**Classification.** INSTRUMENT DEFECT in this audit's tooling. Same shape as
+RT-039, one level down. Strengthens the simulator's conservation result; changes
+no published ranking.
+
+**Base.** `a666d02faede3d40f046b11e60eb672c59386a94`, seed 607, 8 h, full logs,
+5 130 138 `OrderFill` records.
+
+**Why the gap had to be zero.** For a participant holding no derivative position,
+equity is `Σ_asset net_asset × mark`, and terminal net asset is the initial
+balance plus the fill-derived delta. So carry-adjusted PnL reduces to
+`Σ fill_delta_asset × mark_final`, which is exactly what `flowattrib` computes
+from the fill stream. For a spot-only class the two must be identical. They were
+not: `abc_cdf_spot_maker` −20 786, `cdf_spot_maker` +3 680, `elastic_supplier`
+−2 285.
+
+**Cause.** Both tools built `endMarks[asset] = mark` while iterating terminal
+rows — **last write wins**. Marks are published **per venue**, and the venues do
+not agree: RT-032 measured the terminal ABC mark at 4 929 505 000 on `central`,
+4 929 380 000 on `north`, 4 929 375 000 on `south`. One venue's prices were being
+applied to another venue's inventory.
+
+**After keying marks by `(venue, asset)`:**
+
+    Σ carry-adjusted pnl   −9 890 673 USD
+    exchange take          +9 890 673 USD
+    residual                        −0 USD   (0.0000% of gross)
+
+| class | gap before | gap after |
+|---|---:|---:|
+| abc_cdf_spot_maker | −20 786 | **+1** |
+| cdf_spot_maker | +3 680 | **+1** |
+| elastic_supplier | −2 285 | **+1** |
+| latent_liquidity | −677 | **0** |
+| metaorder_trader | ~0 | **0** |
+| round_trip | ~0 | **0** |
+| triangle_arb | −14 436 | **−3** |
+
+Every spot-only class within **3 USD**. There is **no unexplained non-fill
+accounting term** for spot participants. `noise_flow` (0.3%) and the derivative
+classes (±100%) are unchanged in meaning — they trade books this tool does not
+fold in.
+
+**No published ranking moves.** `classpnl`'s per-class carry-adjusted figures are
+bit-identical to RT-033's, because that path always used `row.Marks`, the
+participant's own row. Fill-attribution figures move ~0.01% —
+`triangle_arb`'s `ABC/CDF` contribution 170 904 176 → 170 923 896, its extraction
+from the cross maker 157 661 074 → 157 679 289 — leaving **RT-034's 98.1% and
+92.3% unchanged**. Findings annotated, not reissued.
+
+**Net effect: a real conservation result for the simulator.** Two computations
+from different sources — a 5.13 M-record fill stream and 252 account snapshots —
+agree to 1 USD, and the population's trading loss equals the venue's take to the
+unit.
+
+**The recurring shape, stated so it stops recurring.** RT-039 was "a value can
+live in an **asset** the tool does not enumerate". This is "a value can live in a
+**venue** the tool does not enumerate". Both are the same error — collapsing a
+dimension the system actually varies over — and both hid inside a quantity that a
+self-test compares against, which is why no gate fired. Rule for the remaining
+work: **before trusting a reconciliation, enumerate every dimension the system
+prices along and confirm the instrument keys on all of them.** Asset and venue
+are now covered. Time is not, and a mark is a point-in-time quantity.

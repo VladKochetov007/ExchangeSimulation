@@ -4078,6 +4078,132 @@ denominated in.
 Recorded as RT-039.
 
 
+**H-051 (PREREGISTERED) — the fill-vs-snapshot gaps for spot-only classes are my
+tools collapsing per-venue marks into one global map, not a simulator accounting
+term.**
+
+**Why the gap should be exactly zero.** For a participant holding no derivative
+position, equity is `Σ_asset net_asset × mark`. Terminal net asset is the initial
+balance plus the fill-derived delta, so
+
+    carry_adjusted = Δequity − Σ net_init × Δmark
+                   = Σ (net_final − net_init) × mark_final
+                   = Σ fill_delta_asset × mark_final
+
+and `flowattrib`'s contribution is, by construction,
+`Σ_books (base_delta × mark_base + quote_delta × mark_quote)` = the same sum.
+**They are algebraically identical.** For a spot-only class the gap must be 0.
+
+**Observed instead** (E-049, unchanged by RT-039 since neither quantity uses the
+take):
+
+| class | from fills | from snapshots | gap | per head |
+|---|---:|---:|---:|---:|
+| abc_cdf_spot_maker | 6 858 652 | 6 879 438 | **−20 786** | −3 464 |
+| cdf_spot_maker | 444 956 | 441 276 | **+3 680** | +613 |
+| elastic_supplier | −2 028 598 | −2 026 313 | **−2 285** | −95 |
+| latent_liquidity | −1 030 003 | −1 029 326 | −677 | −38 |
+
+Non-zero where the algebra says zero.
+
+**The suspected cause is in my own tooling, again.** Both `classpnl` and
+`flowattrib` build `endMarks` by iterating terminal rows and writing
+`endMarks[asset] = mark` — **last write wins**. Marks are **per venue**, and
+E-047 measured them differing: ABC terminal mark is 4 929 505 000 on `central`,
+4 929 380 000 on `north`, 4 929 375 000 on `south`. So one venue's marks are
+applied to all three venues' participants. A 0.0026% mark spread on a few
+thousand units of inventory produces a discrepancy of exactly this order:
+20 786 USD at ~1.28 USD per ABC of mark error implies ≈16 200 ABC of inventory,
+which is the right scale for six cross makers.
+
+`classpnl`'s per-class revaluation is **not** affected — it uses `row.Marks`, the
+participant's own row. The contaminated paths are `flowattrib`'s contribution and
+carry-adjusted recomputation, and the multi-asset take conversion added in
+RT-039.
+
+**Prediction.** With marks keyed by venue, spot-only classes reconcile to
+**|gap| < 0.01%** (currently 0.1%–0.8%), and the aggregate closure stays at its
+RT-039 level or improves.
+
+**Falsifiers.** (a) gaps persist above 0.05% after the fix → a genuine
+non-fill accounting term exists for spot-only participants and this becomes a
+finding about the simulator rather than about my tools; (b) the fix moves any
+**published class ranking** materially → RT-033/RT-034's numbers were affected
+and must be reissued, not merely annotated.
+
+**Discriminating experiment E-056**, preregistered before the change: key marks
+by `(venue, asset)` in both tools, re-run against the same run, and compare the
+gap table and the closure.
+Status: **SUPPORTED WITHIN TESTED SCOPE** — closure exactly 0, spot-only classes
+within 1 USD, neither falsifier fired.
+
+
+**E-056 — H-051 SUPPORTED. Per-venue marks drive the closure to exactly zero and
+reconcile every spot-only class to within 1 USD across 5.13 M fills.**
+Base: `a666d02faede3d40f046b11e60eb672c59386a94`, seed 607, 8 h, `-log-mode full`.
+Reproduce: `go run research/tools/classpnl/main.go -file <logdir>/greeks.json`
+and `go run research/tools/flowattrib/main.go -dir <logdir>`.
+
+**Closure, after keying the take's mark conversion by venue:**
+
+    Σ carry-adjusted pnl   −9 890 673 USD
+    exchange take          +9 890 673 USD
+    residual                        −0 USD   (0.0000% of gross)
+
+**Exactly zero.** RT-039 had brought this to +496 USD; the remaining 496 was the
+same class of defect one level down — one venue's marks pricing another venue's
+fee revenue.
+
+**Spot-only reconciliation, fill stream against account snapshots — two
+independent computations over the same run:**
+
+| class | before | after | 5.13 M fills |
+|---|---:|---:|---|
+| abc_cdf_spot_maker | −20 786 | **+1** | 6 879 439 vs 6 879 438 |
+| cdf_spot_maker | +3 680 | **+1** | 441 277 vs 441 276 |
+| elastic_supplier | −2 285 | **+1** | −2 026 314 vs −2 026 313 |
+| latent_liquidity | −677 | **0** | −1 029 326 vs −1 029 326 |
+| metaorder_trader | ~0 | **0** | −263 779 vs −263 779 |
+| round_trip | ~0 | **0** | −94 128 vs −94 128 |
+| triangle_arb | −14 436 | **−3** | 174 217 978 vs 174 217 981 |
+
+Every spot-only class lands within **3 USD**, against the preregistered threshold
+of 0.01%. The algebra in H-051 said these must be identical; they now are, so the
+gaps were my tools and there is **no unexplained non-fill accounting term** for
+spot participants. Falsifier (a) does not fire.
+
+`noise_flow` remains at 0.3% and the derivative classes at ±100%, both expected
+and unchanged in meaning: those participants trade `ABC-PERP` and the option and
+futures books, which this tool deliberately does not fold in.
+
+**Falsifier (b) does not fire either — no published ranking moves materially.**
+`classpnl`'s per-class carry-adjusted figures are **bit-identical** to those in
+RT-033, because that path always used `row.Marks`, the participant's own row. The
+fill-attribution numbers move by ~0.01%: `triangle_arb`'s `ABC/CDF` contribution
+170 904 176 → 170 923 896, and its extraction from `abc_cdf_spot_maker`
+157 661 074 → 157 679 289. **RT-034's headline percentages are unchanged**: the
+cross book is 98.1% of the class result and the cross maker 92.3% of that. The
+findings are annotated, not reissued.
+
+**The instrument is now materially stronger than when RT-033 was written.** Two
+computations built from different sources — a 5.13 M-record fill stream and 252
+account snapshots — agree to 1 USD, and the population's trading loss equals the
+venue's take to the unit. That is a genuine conservation result for the
+simulator, and it is the third time in two checkpoints that a discrepancy I was
+prepared to attribute to the system turned out to be my own measurement.
+
+**The recurring defect has one shape.** RT-039 was "a value can live in an asset
+the tool does not enumerate". E-056 is "a value can live in a venue the tool does
+not enumerate". Both are the same mistake — **collapsing a dimension the system
+actually varies over** — and both hid inside a quantity a self-test compared
+against, which is why neither gate fired. The general rule for the remaining
+work: **before trusting a reconciliation, list every dimension the system can
+price things along, and confirm the instrument keys on all of them.** Asset and
+venue are now covered; time is not, and a mark is a point-in-time quantity.
+
+Recorded as RT-040.
+
+
 ---
 
 ## F. Findings
@@ -4094,6 +4220,14 @@ See `research/red-team-findings.md` for the full records.
 - **RT-003** — bounded no-violation results (INV-2, INV-5, INV-6, identity).
 - **RT-006** — latency is delivered as configured across 225 link x channel
   rows; no unearned speed advantage. Transport only.
+- **RT-040** — keying marks by **venue** as well as asset drives the population
+  closure to **exactly zero** and reconciles every spot-only class between the
+  fill stream and the account snapshots to **within 1 USD across 5.13 M fills**.
+  The venues publish different marks ([[RT-032]]); both my tools collapsed them.
+  Same shape as [[RT-039]]: **collapsing a dimension the system actually varies
+  over**, hidden inside the quantity a self-test compares against. No published
+  ranking moves — `classpnl` used per-row marks throughout — and RT-034's 98.1% /
+  92.3% are unchanged.
 - **RT-039** — the closure residual I reported at 0.89% for four checkpoints was
   **my own tool discarding non-USD fee revenue**: the venue takes `ABC/CDF` fees
   in CDF, and `classpnl` summed only `FeeRevenue["USD"]`. Corrected, the

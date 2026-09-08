@@ -112,6 +112,11 @@ type key struct {
 	client uint64
 }
 
+// markKey scopes a mark to the venue that published it.
+type markKey struct {
+	venue, asset string
+}
+
 // tradeKey identifies one execution. Trade ids are a per-book sequence, so the
 // venue and symbol both belong in the key or executions from different books
 // collide.
@@ -152,8 +157,12 @@ func main() {
 	}
 
 	roleOf := map[key]string{}
-	startMarks := map[string]int64{}
-	endMarks := map[string]int64{}
+	// Marks are published per venue and the venues do not agree: E-047 measured
+	// the terminal ABC mark differing across all three. Collapsing them into one
+	// map applies one venue's prices to another venue's inventory, which is the
+	// defect H-051 was written to test.
+	startMarks := map[markKey]int64{}
+	endMarks := map[markKey]int64{}
 	type opening struct {
 		equity   int64
 		balances map[string]int64
@@ -163,7 +172,7 @@ func main() {
 		roleOf[key{row.VenueID, row.ClientID}] = class(row.Role)
 		start[key{row.VenueID, row.ClientID}] = opening{row.Account.Equity, row.balances()}
 		for asset, mark := range row.Marks {
-			startMarks[asset] = mark
+			startMarks[markKey{row.VenueID, asset}] = mark
 		}
 	}
 	carryAdjusted := map[string]float64{}
@@ -173,11 +182,12 @@ func main() {
 			continue
 		}
 		for asset, mark := range row.Marks {
-			endMarks[asset] = mark
+			endMarks[markKey{row.VenueID, asset}] = mark
 		}
 		revaluation := 0.0
 		for asset, balance := range open.balances {
-			revaluation += float64(balance) / assetPrecision(asset) * float64(row.Marks[asset]-startMarks[asset])
+			revaluation += float64(balance) / assetPrecision(asset) *
+				float64(row.Marks[asset]-startMarks[markKey{row.VenueID, asset}])
 		}
 		carryAdjusted[class(row.Role)] += float64(row.Account.Equity-open.equity) - revaluation
 	}
@@ -248,8 +258,9 @@ func main() {
 			case quote:
 				quoteUnits -= float64(fill.FeeAmount)
 			}
-			value := baseUnits/assetPrecision(base)*float64(endMarks[base]) +
-				quoteUnits/assetPrecision(quote)*float64(endMarks[quote])
+			venue := record.Data.VenueID
+			value := baseUnits/assetPrecision(base)*float64(endMarks[markKey{venue, base}]) +
+				quoteUnits/assetPrecision(quote)*float64(endMarks[markKey{venue, quote}])
 			if contribution[name] == nil {
 				contribution[name] = map[string]float64{}
 			}
