@@ -1762,3 +1762,48 @@ middle, which the prediction did not anticipate. Recorded as partially right.
 **With RT-028**: the ceiling and the capital are both known constants, both
 absent from the reported result, and both change how a class-level table should
 be read.
+
+## RT-030 — The triangular residual never changes sign (magnitude withheld)
+
+**Status: OPEN.** The sign result is recorded; the magnitude claim is withheld
+pending one named check.
+
+**Base.** `a666d02faede3d40f046b11e60eb672c59386a94`.
+`clock-control-5h-101.json`, seed 607, 5 simulated hours, full logs.
+
+E-044 showed `triangle_arb` earning **+81.6 M on 2 220 M (+3.675%)** in five
+hours while almost every other class lost money. Triangular arbitrage is riskless
+by construction, so something must be quoting inconsistently for five hours.
+
+**The sign test, across ~16 000 instants per venue where all three books are
+two-sided:**
+
+| venue | positive | negative | sign flips | dominant sign |
+|---|---:|---:|---:|---:|
+| north | 16 438 | 159 | **6** | 99.0% |
+| central | 15 607 | 54 | **36** | 99.7% |
+| south | 15 704 | 169 | **14** | 98.9% |
+
+Six sign changes in five hours. **This is not an inconsistency being competed
+away** — the residual holds one sign for essentially the entire run on every
+venue. The arbitrageur's profit is not a contested market outcome.
+
+**The magnitude, and why it is withheld.** Mean |residual| 38%, max 68.8%.
+Terminal north state: `ABC/USD` 49 476.20 USD/ABC, `CDF/USD` 3 001.50 USD/CDF,
+implied cross **16.4838** CDF/ABC, observed `ABC/CDF` **5.1415** CDF/ABC — a
+ratio of **3.206**. The configuration's own bootstrap,
+`MulDiv(mvBootstrapPrice, mvBasePrecision, mvCDFBootstrap)` = 1 666 666 667 =
+**16.6667** CDF/ABC, matches the implied rate and not the observed book.
+
+Two readings: a real 3.2× dislocation that `triangle_arb` harvests and
+`abc_cdf_spot_maker` pays for (−12.6 M, sign fits), or an error in my unit
+scaling. A standing 3.2× dislocation with an arbitrageur present is not what a
+working ecology looks like, and this audit has caught twelve instrument errors,
+three of them confident readings at the wrong scale. The bootstrap matching the
+implied rate favours the first reading but does not settle it, since a bootstrap
+sets an initial price and does not pin the book.
+
+**The decisive check, cheap and named**: read `abc_cdf_spot_maker`'s anchor. If it
+quotes around its own book's mid, the book can drift arbitrarily from the implied
+rate and the dislocation is real with a mechanism. If it quotes around the implied
+cross rate, my units are wrong and the residual is my tool's artifact.

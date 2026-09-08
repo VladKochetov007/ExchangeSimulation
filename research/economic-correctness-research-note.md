@@ -2926,6 +2926,102 @@ Recorded as RT-029, together with RT-028: the ceiling and the capital are both
 known constants, both absent from the reported result, and both change how a
 class-level table should be read.
 
+**H-043 — the triangular arbitrageur harvests a pricing artifact, not a market.**
+E-044 produced a number worth interrogating rather than filing: `triangle_arb`
+earns **+81.6 M on 2 220 M in five hours — +3.675%** — while every other class
+except the option dealer loses money and the population as a whole is down.
+
+Triangular arbitrage is riskless by construction: it profits from an
+inconsistency between `ABC/USD`, `CDF/USD` and the cross `ABC/CDF`. Someone must
+therefore be quoting inconsistently, persistently, for five hours. Two readings:
+
+- **Market.** The cross book is quoted independently, the inconsistency appears
+  and is competed away, and the residual oscillates around zero. The arb is doing
+  its designed job of disciplining the cross, and its profit is the ecology
+  working.
+- **Artifact.** The cross maker anchors to something other than the implied rate
+  `ABC/USD ÷ CDF/USD`, so the residual is persistently one-signed and the arb is
+  harvesting a modelling choice rather than outcompeting anyone. Its entire
+  result would then be a property of the configuration.
+
+Discriminating observable: the sign history of the triangular residual
+`implied − actual` over the run. **Oscillation around zero is a market; a
+persistent sign is an artifact.** Magnitude alone cannot separate them, which is
+why the test is on sign persistence rather than on size.
+
+Predicted observable, recorded before measuring: persistently one-signed. The
+reason is the return itself — 3.675% riskless in five hours is not what a
+contested inconsistency pays, and `abc_cdf_spot_maker` is simultaneously among
+the larger absolute losers at −12.6 M, which is the shape of a counterparty being
+picked off on one side rather than trading around a fair value.
+Falsifier: the residual changes sign repeatedly and spends comparable time on
+each side, which would make the profit a competed market outcome and this
+hypothesis wrong.
+Mechanism family: designed-ecology validity, artifact versus market.
+
+**E-045 — H-043, the triangular residual. SUPPORTED on sign, UNRESOLVED on
+cause.**
+Preregistered above. Artifact: `research/tools/triangleresidual/main.go`.
+Base: `a666d02faede3d40f046b11e60eb672c59386a94`.
+Run: `clock-control-5h-101.json`, seed 607, 5 simulated hours, full logs.
+Reproduce: `go run research/tools/triangleresidual/main.go -dir <logdir> -venue north`.
+
+**The sign test is decisive.** Across ~16 000 instants per venue where all three
+books carry a two-sided mid:
+
+| venue | positive | negative | sign flips | dominant sign holds |
+|---|---:|---:|---:|---:|
+| north | 16 438 | 159 | **6** | 99.0% |
+| central | 15 607 | 54 | **36** | 99.7% |
+| south | 15 704 | 169 | **14** | 98.9% |
+
+Six sign changes in five hours on north. This is **not** a contested
+inconsistency being competed away; the residual holds one sign for essentially
+the whole run on all three venues. H-043's discriminating prediction — persistent
+sign, not oscillation — is supported.
+
+**The magnitude is where I stop and flag my own instrument.** Mean |residual| is
+**38%**, max 68.8%. Terminal book state on north:
+
+| | value | per unit |
+|---|---:|---|
+| `ABC/USD` mid | 4 947 620 000 | 49 476.20 USD per ABC |
+| `CDF/USD` mid | 300 150 000 | 3 001.50 USD per CDF |
+| implied cross | — | **16.4838 CDF per ABC** |
+| `ABC/CDF` mid | 514 150 000 | **5.1415 CDF per ABC** |
+
+A ratio of **3.206**. And the configuration's own intended bootstrap for the
+cross is `MulDiv(mvBootstrapPrice, mvBasePrecision, mvCDFBootstrap)` =
+1 666 666 667, i.e. **16.6667 CDF per ABC** — which matches the implied rate and
+not the observed book.
+
+**Two readings, and I am not choosing between them on this evidence.**
+
+1. **Real dislocation.** The cross book has drifted 3.2× from the rate its own
+   bootstrap sets, `triangle_arb` has been harvesting it all run (+81.6 M,
+   +3.675%), and `abc_cdf_spot_maker` has been paying for it (−12.6 M). The
+   persistent sign and the matching PnL signs both fit.
+2. **My units.** A 3.2× standing dislocation with an arbitrageur present is not
+   what a working ecology looks like, and this campaign has now caught twelve
+   instrument errors — three of which were confident readings of a quantity whose
+   scale I had wrong.
+
+The configured bootstrap matching the implied rate is evidence for reading 1, since
+it makes 16.67 the intended cross rate rather than a number I constructed. But it
+is not conclusive: the bootstrap sets an initial price, and nothing forces the
+book to stay there.
+
+**Not recorded as a finding.** The sign result stands on its own and is recorded
+as such. The magnitude claim is held back pending the decisive check, which is
+cheap and named: read `abc_cdf_spot_maker`'s anchor to see whether it quotes
+around the implied cross rate or around its own book's mid. If the latter, the
+book can drift arbitrarily far from the implied rate and reading 1 is confirmed
+with a mechanism; if the former, my units are wrong and the residual is an
+artifact of my tool.
+
+Recorded as RT-030, status **open**, with the sign evidence attached and the
+magnitude explicitly withheld.
+
 ---
 
 ## F. Findings
@@ -2942,6 +3038,14 @@ See `research/red-team-findings.md` for the full records.
 - **RT-003** — bounded no-violation results (INV-2, INV-5, INV-6, identity).
 - **RT-006** — latency is delivered as configured across 225 link x channel
   rows; no unearned speed advantage. Transport only.
+- **RT-030** — **OPEN.** The triangular residual holds one sign for essentially
+  the whole run (6 to 36 sign flips in five hours; dominant sign 98.9-99.7% of
+  instants), so `triangle_arb`'s +3.675% is not a competed market outcome. The
+  measured magnitude — a 3.2x gap between the observed cross mid and both the
+  implied rate and the configuration's own bootstrap — is **withheld pending a
+  units check**, because a standing 3.2x dislocation with an arbitrageur present
+  is not what a working ecology looks like. Next: read `abc_cdf_spot_maker`'s
+  anchor.
 - **RT-029** — capital spans **510x** across classes, and normalising by it moves
   the table **62 rank-places over 21 classes**: `latent_liquidity` goes 21st to
   11th, `metaorder_trader` 6th to 18th. The **top two are stable**, so
