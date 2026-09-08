@@ -70,12 +70,12 @@
   ],
   "normalizer_registration": {
     "path": "research/v2-r2-sv1c-24h-config-normalizer-registration.json",
-    "sha256": "1c9ab5c4c64cd256551522e17e64f36b229044036d6c8cd738c5e0b854e761dd"
+    "sha256": "89601246181058c3fec5dd70bbe56d4e580fc9c97c2f9636e6b1b2371f42f6a4"
   },
   "normalizer": {
     "path": "bin/multivenue",
-    "sha256": "dde13e4eda920b874eadba81a360ece3ff0951d2ef907acd1ddff24b800f5c87",
-    "revision": "c2a752f3bb5d6b38c8ad8ee066ad91bbf355aae0",
+    "sha256": "0a77f7a1e0d68c6e8e1c6152195f2d9e77c90f9300fd0a20a7e2665ec507b0d4",
+    "revision": "40929831eb023d2c991417a726d5b42adc672fe5",
     "go_version": "go1.27.0",
     "package": "exchange_sim/cmd/multivenue"
   },

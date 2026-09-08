@@ -3,8 +3,8 @@
   "contract": "v2-r2-sv1c-24h-config-normalizer-registration-v1",
   "candidate": "V2-R2-SV1C-24H-CDF-LIQUIDITY-STRICT-RISK",
   "path": "bin/multivenue",
-  "sha256": "dde13e4eda920b874eadba81a360ece3ff0951d2ef907acd1ddff24b800f5c87",
-  "source_revision": "c2a752f3bb5d6b38c8ad8ee066ad91bbf355aae0",
+  "sha256": "0a77f7a1e0d68c6e8e1c6152195f2d9e77c90f9300fd0a20a7e2665ec507b0d4",
+  "source_revision": "40929831eb023d2c991417a726d5b42adc672fe5",
   "go_version": "go1.27.0",
   "package": "exchange_sim/cmd/multivenue",
   "module": "exchange_sim",
@@ -20,5 +20,5 @@
     "vcs_modified": false
   },
   "build_command": "CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOAMD64=v1 GOTOOLCHAIN=local go build -trimpath -buildvcs=true -o bin/multivenue ./cmd/multivenue",
-  "clean_reproduction": "two clean builds from source_revision produced this identical digest"
+  "clean_reproduction": "two clean Go 1.27 builds from source_revision produced this identical digest"
 }
