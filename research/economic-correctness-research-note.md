@@ -6806,6 +6806,122 @@ condition — not the cap — is the perpetual's real control variable.
 Recorded as RT-062.
 
 
+**H-075 (PREREGISTERED) — the maker's index anchor is self-referential for
+**every** symbol, not just the cross book: the venues agree with each other far
+more closely than any of them agrees with spot.**
+
+**Correction of a reading I nearly published.** I was about to describe the perp
+maker as purely self-anchored because `stoikovConfig("ABC-PERP", "ABC-PERP", …)`
+passes its own symbol as `ReferenceSymbol`. Checking further,
+**`AnchorToIndex: s.Config.MakerAnchor != "own_mid"` is true** (`maker_anchor:
+"consensus"`) with **`IndexWeight: 0.3`** — so the maker is *not* purely
+self-anchored; it blends 30% of an index. That looked like a genuine tether and
+would have made my framing wrong.
+
+**But the index is built from the same books.** `sim.go:2849` feeds
+`observeVenueMid(symbol, venue.ID, mid)` for each of `ABC/USD`, `ABC-PERP`,
+`CDF/USD`, `ABC/CDF` using **that symbol's own midpoint**, and
+`spotIndexProvider.Price` returns the median across venues. So the index for
+`ABC-PERP` is the median of the three venues' **perp** mids — not spot. The maker
+is 70% its own mid and 30% a consensus of mids exactly like its own. [[RT-031]]
+recorded this for `ABC/CDF` ("a consensus of itself"); it holds for **every**
+symbol the provider publishes.
+
+**The behavioural signature this predicts.** If the anchor is a cross-venue
+consensus of the same instrument, the three venues should be pulled tightly toward
+*each other* while the group drifts freely from spot. If instead any spot tether
+existed, the basis would be small.
+
+**Claim (preregistered on a held-out seed).** On a seed not yet run — **611** —
+the cross-venue dispersion of the `ABC-PERP` basis (max − min across the three
+venues) is **under 0.2 pp**, while the basis level itself is **beyond 1 pp** from
+spot. The ratio of level to dispersion exceeds **10×**.
+
+**Falsifiers.**
+(a) dispersion **exceeds 1 pp** → the venues are not tightly coupled and the
+consensus is not doing the work I claim;
+(b) the basis level is **under 0.2 pp** → there is an effective spot tether after
+all and the whole "unanchored" framing across [[RT-044]] and [[RT-058]] is wrong;
+(c) dispersion and level are **comparable** (ratio under 3×) → the coupling is not
+distinguishable from the drift and the test cannot separate them.
+
+**POST-HOC note, labelled as such.** The same pattern is already visible in
+existing runs — seeds 607/608 show cross-venue dispersion of 0.096, 0.019, 0.116
+and 0.076 pp against levels spanning −0.14% to −12.63%. Those data predate this
+hypothesis and are **not** evidence for it; seed 611 is the test.
+
+**What this does not claim.** A self-referential anchor is not automatically
+wrong — a consensus across venues is a reasonable design for a multi-venue index.
+The finding is that it provides **no exogenous reference**, so it cannot be what
+holds an instrument to its underlying, and the campaign's remaining tethers are
+the ones already measured as saturated ([[RT-043]]) or clamped ([[RT-044]]).
+
+**Discriminating experiment E-079**, preregistered before the run: seed **611**,
+8 h, `-log-mode full`, `perpbasis` reporting all three venues.
+Status: **SUPPORTED WITHIN TESTED SCOPE** — dispersion 0.115 pp against a
+12.30 pp level, ratio 107x; no falsifier fired.
+
+
+**E-079 — H-075 SUPPORTED on the held-out seed. The venues track each other **107×
+more closely** than any of them tracks spot. Incidentally, the baseline spread is
+**11.20 pp** at n=5, not the 3.78 pp [[RT-062]] reported.**
+Base: `a666d02faede3d40f046b11e60eb672c59386a94`, seed **611** (held out,
+baseline config), 8 h, `-log-mode full`.
+Reproduce: `go run research/tools/perpbasis/main.go -dir <logdir>`.
+
+| venue | mean basis | worst | beyond clamp |
+|---|---:|---:|---:|
+| central | −12.322% | −39.681% | 52.1% |
+| north | −12.348% | −39.712% | 52.2% |
+| south | −12.233% | −39.598% | 51.9% |
+
+**Cross-venue dispersion 0.115 pp against a level of 12.30 pp — a ratio of
+107×.** Claim thresholds were dispersion <0.2 pp, level >1 pp, ratio >10×; all
+three are met on a seed chosen and registered before it was run. No falsifier
+fires.
+
+**What it confirms.** The maker blends 70% its own mid with 30% an index — and
+that index is the **median of the three venues' own perp mids** (`sim.go:2849`
+feeds `observeVenueMid` each symbol's own midpoint). So the anchor pulls the three
+books toward **each other** and provides no reference to the underlying. The
+behavioural signature is exactly that: the venues agree to a tenth of a percentage
+point while the group sits 12 points from spot. [[RT-031]] recorded this for
+`ABC/CDF`; it holds for **every symbol the provider publishes**.
+
+**A correction I nearly needed and did not.** I was about to describe the perp
+maker as purely self-anchored from `ReferenceSymbol` alone. `AnchorToIndex` is
+**true** with weight 0.3, which looked like a real tether and would have made that
+framing wrong. It is not a tether, because the index is built from the same books
+— but the distinction only survived because I checked before writing.
+
+**Incidental and more consequential: the baseline is far less stable than I
+reported.** Adding seed 611, the baseline mean basis across five seeds is
+**−4.90, −4.79, −1.12, −4.21, −12.32** — a spread of **11.20 pp**, against the
+**3.78 pp** RT-062 published at n=4. **RT-062 understated it by 3×.**
+
+**What that does to [[RT-061]]/RT-062's treatment comparison.** The cap ablation's
+convergent runs (−0.14% to −0.22%) still lie **outside the entire observed
+baseline range** (best baseline |basis| is 1.12%), so they remain suggestive. But
+its bad run (−12.56%) is now indistinguishable from an ordinary baseline seed
+(−12.32%). **With a baseline spanning 11 pp, neither four nor five runs per arm
+can resolve this treatment**, and RT-062's "converges on three of four" should be
+read as an observation about four draws from a wide distribution rather than a
+measured effect size.
+
+**The honest state of the perpetual question.** Its basis ranges over an order of
+magnitude across seeds under the *unmodified* configuration. Anything measured on
+one or two runs — including several figures earlier in this campaign, such as
+[[RT-044]]'s −29% quoted from seed 607 — describes a draw, not the system. The
+tools are right; the sample sizes were not.
+
+**Scope.** Five baseline seeds, four ablation seeds, one configuration. Dispersion
+is across three venues within a run, which share flow and are not independent
+replicates — that is precisely why their tight agreement is evidence of a shared
+anchor rather than of stability.
+
+Recorded as RT-063.
+
+
 ---
 
 ## F. Findings
@@ -6822,6 +6938,16 @@ See `research/red-team-findings.md` for the full records.
 - **RT-003** — bounded no-violation results (INV-2, INV-5, INV-6, identity).
 - **RT-006** — latency is delivered as configured across 225 link x channel
   rows; no unearned speed advantage. Transport only.
+- **RT-063** — **the maker's index anchor is self-referential for every symbol.**
+  It blends 70% own mid with 30% an index that is the **median of the venues' own
+  mids of the same instrument**, so it pulls the books toward each other and
+  supplies no reference to the underlying. Confirmed on held-out seed 611:
+  cross-venue dispersion **0.115 pp** against a level of **12.30 pp** — the venues
+  track each other **107x** more closely than they track spot. Generalises
+  [[RT-031]] from the cross book to the whole population. **Incidentally corrects
+  [[RT-062]]: baseline spread is 11.20 pp at n=5, not 3.78 pp** — so the perp basis
+  ranges over an order of magnitude between seeds, and single-seed figures earlier
+  in this campaign (including [[RT-044]]'s −29%) describe a draw, not the system.
 - **RT-062** — **the variance hypothesis is dead and [[RT-061]] was too strong.**
   At n=4 the baseline spread is **3.78 pp** (−1.12% to −4.90%), so the baseline is
   *not* tightly stable and the "manufactured stability" framing is retired

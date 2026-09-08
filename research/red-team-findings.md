@@ -3647,3 +3647,67 @@ results too: **a single contradicting seed refutes reliability, not causation.**
 `noise_flow` direction, and early-run basis trajectory against 607/609/610. If one
 identifiable condition flips the treatment's sign, that condition rather than the
 cap is the perpetual's real control variable.
+
+**UPDATED BY RT-063.** A fifth baseline seed (611) gives a mean basis of
+**−12.32%**, so the baseline spread is **11.20 pp**, not the 3.78 pp reported
+here — an understatement of 3x. The ablation's bad run (−12.56%) is therefore
+indistinguishable from an ordinary baseline draw. "Converges on three of four"
+should be read as four draws from a wide distribution rather than a measured
+effect size; with an 11 pp baseline range, neither arm's sample resolves this
+treatment.
+
+## RT-063 — Every maker's index anchor is a consensus of its own books
+
+**Classification.** REAL, and it generalises RT-031 from the cross book to the
+whole maker population. Also corrects RT-062's baseline-spread figure by 3x.
+
+**Base.** `a666d02faede3d40f046b11e60eb672c59386a94`, seed **611** held out and
+registered before running, 8 h, full logs.
+
+**Mechanism, verified in three places.** `stoikovConfig` passes each book its own
+symbol as `ReferenceSymbol`, but **`AnchorToIndex` is true** (`maker_anchor:
+"consensus"`) with **`IndexWeight: 0.3`** — so the maker is not purely
+self-anchored, and that alone would have made a "no tether" framing wrong. The
+index, however, is built from the same books: `sim.go:2849` calls
+`observeVenueMid(symbol, venue.ID, mid)` for `ABC/USD`, `ABC-PERP`, `CDF/USD` and
+`ABC/CDF` using **that symbol's own midpoint**, and `spotIndexProvider.Price`
+returns the median across venues. The anchor is therefore 70% own mid plus 30%
+a consensus of mids exactly like it — **no exogenous reference at all**.
+
+**Behavioural confirmation on the held-out seed.**
+
+| venue | mean basis | worst | beyond clamp |
+|---|---:|---:|---:|
+| central | −12.322% | −39.681% | 52.1% |
+| north | −12.348% | −39.712% | 52.2% |
+| south | −12.233% | −39.598% | 51.9% |
+
+**Cross-venue dispersion 0.115 pp against a 12.30 pp level — a ratio of 107x.**
+The anchor pulls the three books tightly toward each other while the group drifts
+freely from the underlying, which is exactly what a same-instrument consensus
+predicts. Registered thresholds (dispersion <0.2 pp, level >1 pp, ratio >10x) are
+all met.
+
+**Not a criticism of consensus indices as such.** A median across venues is a
+reasonable multi-venue index design. The finding is that it supplies **no
+exogenous reference**, so it cannot be what holds an instrument to its underlying,
+and the campaign's remaining tethers are the ones already measured as saturated
+(RT-043) or clamped (RT-044).
+
+**Incidental and more consequential.** Adding seed 611, baseline mean basis across
+five seeds is **−4.90, −4.79, −1.12, −4.21, −12.32** — a spread of **11.20 pp**
+against the **3.78 pp** RT-062 published at n=4, an understatement of 3x. The cap
+ablation's convergent runs (−0.14% to −0.22%) still fall outside the entire
+baseline range, so they remain suggestive; but its bad run (−12.56%) is now
+indistinguishable from an ordinary baseline draw. **With an 11 pp baseline range,
+neither four nor five runs per arm resolves that treatment.**
+
+**Consequence for this campaign's own figures.** The perpetual's basis ranges over
+an order of magnitude between seeds under the unmodified configuration. Single-run
+numbers quoted earlier — including RT-044's −29% from seed 607 — describe a draw,
+not the system. The tools were right; the sample sizes were not.
+
+**Scope.** Five baseline seeds, four ablation seeds, one configuration. Dispersion
+is measured across three venues inside a run, which share flow and are not
+independent replicates — which is why their tight agreement is evidence of a
+shared anchor rather than of stability.
