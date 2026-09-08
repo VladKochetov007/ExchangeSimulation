@@ -5,7 +5,8 @@ root_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 runner="$root_dir/scripts/run-v2-r2-sv1-activation-probe.sh"
 source "$root_dir/scripts/v2-r2-sv1b-24h-contract.sh"
 fixture_root=$(mktemp -d)
-trap 'rm -rf -- "$fixture_root"' EXIT
+review_root=$(mktemp -d)
+trap 'rm -rf -- "$fixture_root" "$review_root"' EXIT
 
 rg -F 'expected_arm_outcome=terminal_failure' "$runner" >/dev/null || {
 	echo "activation runner does not route terminal failures to the diagnostic arm contract" >&2
@@ -48,8 +49,8 @@ start=$v2_r2_sv1_activation_simulation_start_nano
 end=$v2_r2_sv1_activation_simulation_end_nano
 IFS=$'\t' read -r host_cpu_count allowed_cpu_count cpu_affinity < <(v2_r2_sv1b_cpu_policy)
 
-review_report_path="$fixture_root/review-report.md"
-review_attestation_path="$fixture_root/review-attestation.json"
+review_report_path="$review_root/review-report.md"
+review_attestation_path="$review_root/review-attestation.json"
 printf 'Synthetic contract fixture review for exact revision %s.\n' "$revision" >"$review_report_path"
 review_report_sha256=$(sha256sum -- "$review_report_path" | awk '{print $1}')
 jq -n --arg contract "$v2_r2_sv1_review_contract" --arg revision "$revision" --arg tree "$tree_sha256" \
