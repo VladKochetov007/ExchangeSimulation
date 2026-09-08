@@ -2488,3 +2488,66 @@ the claim. Cumulative rate was the claim and it is supported. This is the third
 preregistration-design error in the campaign, after a level-uncertainty falsifier
 written for an ordering hypothesis (RT-036) and an ablation that could not
 ablate (RT-038).
+
+## RT-043 — The funding controller saturates and latches at its cap
+
+**Classification.** REAL. Second finding on the derivative side. Also confirms
+RT-042's boundary explanation by direct test.
+
+**Base.** `a666d02faede3d40f046b11e60eb672c59386a94`, seed 607, **12 h**, full
+logs.
+
+**Mechanism.** `sim.go:2757` builds the calculator as
+`&instrument.SimpleFundingCalc{BaseRate: 1, Damping: 100, MaxRate: 75}`.
+`Damping` enters as `premium x Damping / 100`, so **100 is a multiplier of 1.0 —
+no damping at all**. The rate is the raw mark-to-index premium in bps plus 1 bp,
+shaped only by a hard clamp at ±75.
+
+**Measured.**
+
+| venue | settlements | at ±75 cap | mean \|rate\| | settled rates (bps, in order) |
+|---|---:|---:|---:|---|
+| central | 11 (h=1…11) | **7 (64%)** | 51.8 | −14, −1, −75, −9, −21, **−75, −75, −75, −75, −75, −75** |
+| south | 5 (h=2,4,6,8,10) | **3 (60%)** | 46.8 | 1, −8, **−75, −75, −75** |
+| north | 1 (h=8) | **1 (100%)** | 75.0 | −75 |
+
+Against a preregistered threshold of 25% at the cap, the measurement is 64%, 60%
+and 100%.
+
+**The sequence matters more than the fraction.** On `central` the **last six
+consecutive settlements are all pinned at −75**, on `south` the last three. From
+hour 6 the funding rate is a constant and the controller has stopped responding
+to the premium. It does not clip occasionally; it **latches at its limit and
+never returns**.
+
+**How far past the limit.** At h=11 `central`'s perp mark is 4 769 999 250 against
+an ABC/USD mark of 4 911 390 000 — a basis of **−2.88%, or 3.8x the ±0.75% cap**.
+Funding has under a third of the authority needed to close the gap it exists to
+close. (Caveat: perp mark read at h=11, spot mark at the h=12 snapshot; spot
+drifts ~0.2%/h, so ~2.7% survives the timing mismatch.)
+
+**RT-042's boundary explanation is confirmed by direct test.** At a 12 h horizon
+`north` settles **exactly once, at h=8.0**, `central` 11 times at h=1…11, and
+`south` 5 times at h=2,4,6,8,10 — every count and every timestamp as predicted
+from the strict interval-multiple rule. The count arithmetic that failed in
+RT-042's preregistration is now correct and verified against logged timestamps
+rather than inferred.
+
+**Economic consequence.** The perpetual's tether detaches once the basis exceeds
+0.75% and never reattaches. `carry_arb`, `funding_carry_arb` and `dated_carry_arb`
+all trade a funding signal that is a constant for half the run.
+
+**Third anchorless instrument, third route.** The cross book quotes around itself
+(RT-031); `north`'s perp never funds (RT-042); every venue's perp detaches past
+0.75% (this). Meanwhile ABC/USD is held rigid by a configured peg (RT-032). The
+campaign's price system is one pegged book with a set of instruments floating
+away from it.
+
+**Scope.** One seed, one configuration, 12 h. Saturation fraction and basis
+magnitude are single-seed. The direction — persistent discount, latched cap —
+held on all three venues in this run; those share no order flow but are not
+independent samples.
+
+**Owner decision.** `funding_max_rate_bps` and `Damping` are configurable. Whether
+a 75 bps cap with no damping is the intended model is not mine to decide; that it
+does not restrain a −2.88% basis is measurement.

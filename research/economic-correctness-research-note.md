@@ -4418,6 +4418,114 @@ whose every published run is 8 h.
 Recorded as RT-042.
 
 
+**H-054 (PREREGISTERED) — the funding controller is saturated: the mark/index
+premium routinely exceeds the ±75 bps cap, so funding supplies no proportional
+restoring force. Plus a direct test of [[RT-042]]'s boundary explanation.**
+
+**Parameters, from `sim.go:2757`:**
+
+    &instrument.SimpleFundingCalc{BaseRate: 1, Damping: 100, MaxRate: s.Config.FundingMaxRateBps}
+
+with `funding_max_rate_bps: 75`. `Damping: 100` enters the formula as
+`premium × Damping / 100`, i.e. a multiplier of **1.0 — no damping at all**. The
+rate is therefore the raw mark-to-index premium in bps, plus 1 bp, hard-clamped
+at ±75 bps.
+
+**Why saturation matters.** A funding rate pinned at its cap is a bang-bang
+signal: once the premium exceeds 0.75%, further divergence produces **no
+additional restoring force**, and the rate stops carrying information about the
+premium's size. Every basis and carry strategy in the population —
+`carry_arb`, `funding_carry_arb`, `dated_carry_arb` — trades on that signal.
+E-058 measured mean |rate| of **38.57 bps on `central` and 28.00 on `south`
+against a cap of 75**, which is high enough to suspect the cap binds often.
+
+**Second claim, testing my own explanation.** RT-042 attributed `north`'s zero
+settlements to a horizon boundary — its first settlement falls at t = 8 h, the
+end of the run — rather than to a broken scheduler. That explanation makes a
+sharp prediction at a **12 h** horizon: `north` should settle **exactly once**,
+at t = 8 h.
+
+**Predictions.**
+1. **≥25%** of settlements sit exactly at the ±75 bps cap.
+2. At 12 h: `north` settles **exactly 1** time, `south` **5**, `central` **11**
+   (strict interval multiples inside the horizon).
+
+**Falsifiers.**
+(a) **<5%** of settlements at the cap → not saturated, claim 1 falsified and the
+funding signal is proportional after all;
+(b) `north` ≠ 1 at 12 h → RT-042's boundary explanation is **wrong**, the
+scheduler is doing something else, and that finding must be reopened;
+(c) `central` ≠ 11 or `south` ≠ 5 → the strict-multiple rule I inferred in E-058
+is wrong, and the count arithmetic that already tripped falsifier (b) there is
+still not right.
+
+**Cost note.** A 12 h full-log run is ≈18 GB against 32 GB of tmpfs. Chosen over
+24 h for that reason; it still discriminates every prediction above.
+
+**Discriminating experiment E-059**, preregistered before the run: seed 607,
+`-duration 12h`, `-log-mode full`; report per-venue settlement counts and the
+full distribution of settled rates including the fraction at ±`MaxRate`.
+Status: **SUPPORTED WITHIN TESTED SCOPE** on both claims; no falsifier fired.
+
+
+**E-059 — H-054 SUPPORTED on both claims. The funding controller saturates and
+stays saturated, and [[RT-042]]'s boundary explanation is confirmed exactly.**
+Base: `a666d02faede3d40f046b11e60eb672c59386a94`, seed 607, **12 h**,
+`-log-mode full`, 18 GB.
+Reproduce: parse `funding_settlement` events per venue from the log tree.
+
+| venue | settlements | at ±75 cap | mean \|rate\| | settled rates (bps, in order) |
+|---|---:|---:|---:|---|
+| central | 11 (h=1…11) | **7 (64%)** | 51.8 | −14, −1, −75, −9, −21, **−75, −75, −75, −75, −75, −75** |
+| south | 5 (h=2,4,6,8,10) | **3 (60%)** | 46.8 | 1, −8, **−75, −75, −75** |
+| north | 1 (h=8) | **1 (100%)** | 75.0 | −75 |
+
+**Claim 1 supported, far beyond the predicted threshold.** I predicted ≥25% of
+settlements at the cap; the measurement is **64% / 60% / 100%**. Falsifier (a)
+(<5%) does not fire.
+
+**The time series is worse than the fraction.** On `central` **the last six
+consecutive settlements are all pinned at −75**, and on `south` the last three.
+From hour 6 onward the funding rate is a constant, and the controller has stopped
+responding to the premium entirely. This is not occasional clipping; it is a
+mechanism that **latches at its limit and never returns**.
+
+**How far past the limit.** At hour 11 `central`'s perp mark is **4 769 999 250**
+against an ABC/USD mark of **4 911 390 000** — a perp basis of **−2.88%**, which
+is **3.8× the ±0.75% cap**. Funding has less than a third of the authority it
+would need to close the gap it is supposed to close. *(Caveat: the perp mark is
+read at h=11 and the spot mark at the h=12 terminal snapshot; spot drifts on the
+order of 0.2%/h, so roughly 2.7% of the gap survives the timing mismatch.)*
+
+**Claim 2 supported: RT-042's boundary explanation is confirmed.** `north`
+settles **exactly once, at h = 8.0**, precisely as predicted from the strict
+interval-multiple rule. `central` settles 11 times at h=1…11 and `south` 5 times
+at h=2,4,6,8,10 — every count and every timestamp as predicted. Falsifiers (b)
+and (c) do not fire, and the count arithmetic that failed in E-058 is now correct
+and verified against timestamps rather than inferred.
+
+**What this means economically.** `Damping: 100` is a multiplier of 1.0 — no
+damping — so the rate is the raw premium, and the only shaping is a hard clamp.
+The result is a perpetual whose tether **detaches** once the basis exceeds 0.75%
+and never reattaches. Every basis and carry strategy in the population
+(`carry_arb`, `funding_carry_arb`, `dated_carry_arb`) trades a signal that is a
+constant for half the run.
+
+**This is the third instrument in this campaign with no working anchor**, each
+found by a different route: the cross book quotes around itself ([[RT-031]]),
+`north`'s perp never funds at all ([[RT-042]]), and now every venue's perp
+detaches from its index once the basis passes 0.75% ([[RT-043]]). Meanwhile
+`ABC/USD` is held rigid by a configured peg ([[RT-032]]). The campaign's price
+system is one pegged book and a set of instruments floating away from it.
+
+**Scope.** One seed, one configuration, 12 h. The saturation fraction and the
+basis magnitude are single-seed; the *direction* (persistent discount, latched
+cap) held across all three venues within this run, which are not independent
+samples but do share no order flow.
+
+Recorded as RT-043.
+
+
 ---
 
 ## F. Findings
@@ -4434,6 +4542,15 @@ See `research/red-team-findings.md` for the full records.
 - **RT-003** — bounded no-violation results (INV-2, INV-5, INV-6, identity).
 - **RT-006** — latency is delivered as configured across 225 link x channel
   rows; no unearned speed advantage. Transport only.
+- **RT-043** — the funding controller **saturates and latches**. With
+  `Damping: 100` (a multiplier of 1.0, i.e. none) the rate is the raw premium
+  hard-clamped at ±75 bps; **64% / 60% / 100%** of settlements sit at the cap, and
+  on `central` **the last six consecutive settlements are all −75**. The perp
+  basis reaches **−2.88%, 3.8x the cap**, so funding has under a third of the
+  authority needed to close it. Every carry and basis strategy trades a signal
+  that is constant for half the run. Also **confirms [[RT-042]]'s boundary
+  explanation exactly**: at 12 h `north` settles once at h=8, `central` 11 times,
+  `south` 5 times — every count and timestamp as predicted.
 - **RT-042** — funding is **not scaled by the settlement interval**
   (`SimpleFundingCalc.Calculate` takes no interval; `funding.go:753` applies the
   rate directly), so cumulative funding over 8 h is **270 : 84 : 0 bps** on
