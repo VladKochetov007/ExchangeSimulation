@@ -1640,3 +1640,31 @@ trajectory exists, no rerun/rescore decision is triggered by this checkpoint.
 The next promotion boundary is a fresh exact-tree independent Sol-xhigh review
 of the complete successor, followed only if accepted by a pinned Go 1.27 build
 and the registered seed-643 activation probe.
+
+## Append-only audit update: new performance-port feed and clean archive provenance — 2026-09-08
+
+The exact scientific source checkpoint is
+`4e4b6d00eafc6df4084793331beb57ac49280a27` on
+`feature/r2-cdf-survival-successor`, with no cherry-pick in progress. The new
+remote performance-port tip `39768df` was inspected read-only. It diverges
+from the scientific tree at `a666d02` and is not a merge source. The original
+performance marker is still `b1847ac`, and the economic red-team marker is
+still `e85e16c`; neither has a newer commit.
+
+The port's market-data fingerprint optimization is classified as deferred
+performance-only work. Its analyzer determinism and symbol-less spot-book
+corrections are independently implemented on the scientific branch in
+`498a476` and `4d6ecf3`; no port source was imported. Its reported markout
+changes are old-base analyzer corrections requiring rescore before any reuse,
+not current simulator evidence. Its old-base capacity observation does not
+transfer. R2 calendar semantics, CDF economics, strict-risk policy, binary
+evidence contract, retained artifacts, and holdout boundaries are unchanged.
+
+An exact-archive provenance reproduction succeeded: a Go 1.27 temporary
+normalizer rebuilt all registered SV1C configs and the manifest byte-for-byte;
+the SV1C contract and focused Go packages passed from that archive. No
+activation, capacity, development, freeze, or holdout world ran, and no
+evidence was deleted. The next promotion gate is a fresh exact-tree
+independent review, followed only on acceptance by pinned binaries and the
+registered seed-643 activation probe. Holdouts `619`, `631`, and `641` remain
+untouched.

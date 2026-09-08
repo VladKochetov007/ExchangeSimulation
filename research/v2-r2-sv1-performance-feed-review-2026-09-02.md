@@ -441,3 +441,41 @@ questions or limitations and were not silently imported. The current
 diagnostics are still in canonical binary evidence. No activation, capacity,
 development, freeze, or holdout run occurred. The next performance comparison
 starts after `b1847ac4`.
+
+## Append-only feed checkpoint: port promotion package against exact SV1C tree — 2026-09-08
+
+At this checkpoint the scientific worktree is clean at exact HEAD
+`4e4b6d00eafc6df4084793331beb57ac49280a27` on
+`feature/r2-cdf-survival-successor`. The newly inspected remote
+`origin/perf/r2-cdf-survival-port` is at `39768df` and is a divergent branch
+whose common base is `a666d02`; it is not a merge candidate. The original
+asynchronous performance feed remains at `b1847ac`, with no newer commit.
+
+The port's promotion package recommends three independently attributable
+items. The market-data fingerprint fast path (`2797d0f`, fuzz follow-up
+`606889c`) is performance-only: its report measures roughly 1--2% simulator
+wall reduction, 37/40 paired rounds faster, unchanged execution streams, and
+zero mismatches in 24.2 million differential fuzz cases. It is deferred from
+this scientific tree because it is not needed to cross the current promotion
+boundary and has not been independently A/B-tested against this exact SV1C
+candidate.
+
+The two analyzer repairs are already present independently on this scientific
+branch: deterministic tie ordering via `498a476`, and symbol-less spot-book
+separation via `4d6ecf3`. The current `analysis/reaction.go` falls back from a
+missing payload symbol to the source book path, and its time-tie ordering uses
+the event origin; `analysis/resting.go` uses a deterministic name tie-breaker.
+They were inspected against the port's reproductions and were not copied or
+cherry-picked. The port's reported spot-maker markout changes are analyzer
+output corrections on its old base, not current simulator-semantic evidence;
+any historical claim based on the old pooled metric requires retained-evidence
+rescore before reuse.
+
+The port report explicitly keeps binary evidence experimental. It supplies no
+new evidence-contract promotion authorization and no reason to alter the
+SV1C R2 calendar, finite CDF roster, strict-risk boundary, or historical
+evidence. Its capacity observations were made on an older base and are not
+transferred to this candidate. No code, configs, logs, or historical evidence
+were imported or deleted; no activation, capacity, development, freeze, or
+holdout world ran. The next feed marker is `b1847ac` for the original feed and
+`39768df` for the port branch.

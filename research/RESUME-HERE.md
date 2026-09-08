@@ -1799,3 +1799,37 @@ development, freeze, or holdout run occurred. Holdouts `619`, `631`, and `641`
 remain forbidden before explicit freeze authorization. Next: obtain one fresh
 exact-tree Sol-xhigh review, then—only if accepted—build clean Go 1.27 binaries
 and run the authorized seed-643 activation probe.
+
+## Append-only operational update: port-feed refresh and clean SV1C archive gate — 2026-09-08
+
+The exact scientific source checkpoint before this documentation update is
+`4e4b6d00eafc6df4084793331beb57ac49280a27`, clean and pushed on
+`feature/r2-cdf-survival-successor`. The asynchronous refs were fetched again
+without switching worktrees. The economic red-team tip remains
+`e85e16c5e920382e5df9aa050ac5ff9b22b51661`; the original performance feed
+remains `b1847ac40e8b7483e6e8a3f94b3705b4058884b`; and the newly inspected
+divergent performance-port tip is `origin/perf/r2-cdf-survival-port`
+`39768df`. No branch was merged.
+
+The port promotion package is based on old `a666d02`. Its analyzer fixes are
+already independently present in the scientific tree (`498a476` deterministic
+tie ordering and `4d6ecf3` symbol-less spot-book separation). Its fingerprint
+fast path is deferred performance work; the port explicitly supplies no new
+binary-evidence promotion authorization. Its historical markout and capacity
+observations are not transferred to this successor. No economic, calendar,
+CDF-roster, risk, evidence, or historical result was changed.
+
+A clean `git archive` reproduction of exact source `4e4b6d0` built a temporary
+normalizer with Go 1.27, regenerated all seven registered SV1C configs and the
+provenance manifest byte-for-byte, passed the SV1C contract, and passed the
+focused archive suites (`evstream`, `types`, `exchange`, `analysis`, and
+`simulations/multivenue`). This was a clean-source provenance check only; no
+activation, capacity, development, freeze, or holdout world ran. No retained
+evidence was deleted. Disk remained approximately 58 GiB free and available
+memory approximately 24 GiB during the check.
+
+The next gate remains one fresh exact-tree independent Sol-xhigh review of the
+SV1C R2 calendar, finite CDF supplier, strict-risk and fail-closed evidence
+contracts. Only an accepted review may authorize pinned Go 1.27 binaries and
+the registered seed-643 activation probe. Holdouts `619`, `631`, and `641`
+remain untouched.
