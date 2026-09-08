@@ -1490,3 +1490,38 @@ separation. Full `make test`, vet, targeted race/evidence gates, and a fresh
 exact-tree Sol-xhigh review remain pending. The performance branch has no
 commit after `b1847ac` and remains unmerged; holdouts `619`, `631`, and `641`
 remain untouched.
+
+## Append-only operational update: economic red-team feed triage — 2026-09-08
+
+The current scientific worktree remains
+`feature/r2-cdf-survival-successor` at exact HEAD
+`498a476071b505b5f5033ebb36d9b79c513451e8`. I fetched the repository refs
+read-only: economic red-team tip `f346b617`, performance-port tip `39768dfe`,
+superseded port tip `899a6113`, unchanged asynchronous performance marker
+`b1847ac4`, and older scientific ref `230e78f`. No performance branch was
+merged and no evidence was deleted.
+
+The red-team base was `a666d02`, so its seven-hour dev-607 observations are
+not current SV1B evidence. Independent reproduction and minimal repairs on the
+scientific branch are now recorded in
+`research/v2-r2-sv1-market-logic-triage-2026-09-08.md`: conservation recording
+(`9299b00`), stored-order preservation in the buffered receipt oracle
+(`b0f40c8`), symbol-correct reaction markouts (`4d6ecf3`), and deterministic
+reaction/resting analysis (`498a476`). These are detector/analyzer repairs;
+the first removes false violations and the latter three require rescore/replay
+from immutable raw evidence, not simulator reruns.
+
+The remaining reported economic observations were adjudicated as bounded
+rounding, explicit pending-risk policy, wallet/leverage policy questions,
+latent static-oracle limitations, or participant behavior. None authorizes an
+unregistered economic change to the CDF successor. The registered binary
+no-log path has a checkpoint-backed logger, so the old log-only silence finding
+does not apply to the current `evstream_v3` contract; legacy no-sink modes must
+not claim full audit coverage.
+
+Zeno's independent Sol-xhigh rejection of the pre-repair `e85f632` tree for
+RT-001 is retained at the external report path documented in the triage note.
+It is not acceptance of the current tree. No activation, capacity,
+development, freeze, or holdout world ran at this checkpoint. The next
+promotion gate is a clean mechanical suite and a new exact-tree independent
+review before any pinned build or seed-643 retry.

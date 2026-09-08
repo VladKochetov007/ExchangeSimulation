@@ -1644,3 +1644,41 @@ mechanical gates and one new exact-tree independent Sol-xhigh review are still
 required before a pinned build or a retry of seed 643. The performance feed
 remains unchanged through `b1847ac`; no performance implementation was
 imported. Holdouts `619`, `631`, and `641` remain untouched.
+
+## Append-only operational update: asynchronous economic red-team triage — 2026-09-08
+
+Fetched and inspected the newly visible repository refs without switching the
+scientific worktree. `origin/redteam/economic-audit` is at `f346b61`,
+`origin/perf/r2-cdf-survival-port` at `39768df`, `origin/perf/ffa-gen0-port`
+at `899a611`, and the asynchronous performance marker remains `b1847ac`; no
+new binary-evidence commit was available and no performance implementation was
+imported. The older `origin/autoresearch/ffa-ecology-gen0` ref is at `230e78f`
+and was not merged because it is an older divergent scientific state.
+
+The red-team reports were based on `a666d02`, not the current successor. Four
+issues were independently reproduced on their pre-fix scientific revisions:
+expiry settlement bypassed the conservation tracker; the buffered receipt
+oracle sorted away stored-order corruption; reaction pooled symbol-less spot
+books; and reaction/resting outputs were nondeterministic on tied records.
+They are repaired respectively by `9299b00`, `b0f40c8`, `4d6ecf3`, and
+`498a476`, with focused regressions. The first changes only false conservation
+diagnostics; the other three are analyzer/review corrections. Immutable raw
+evidence is sufficient for rescore/replay; no simulator trajectory rerun is
+required for these findings.
+
+The same feed's option-expiry rounding, wallet-segregation, cross-margin
+liquidation scope, pending-settlement fail-closed policy, financing remainder,
+borrow valuation/static collateral oracle, borrowed-spot enforcement, and
+option-maker observations remain documented specification/limitation items.
+They were not silently retuned. In the registered `evstream_v3` no-log path,
+the checkpoint-backed logger remains installed, so failure diagnostics are
+still in canonical binary evidence even when venue JSONL is disabled. The
+invalid seed-643 attempt remains retained as invalid audit evidence; no
+development or holdout world was run. Exact current state and classifications
+are in `research/v2-r2-sv1-market-logic-triage-2026-09-08.md`.
+
+Current HEAD is `498a476071b505b5f5033ebb36d9b79c513451e8` and the worktree is
+clean. The next gate is clean full tests/vet/targeted race, followed by one
+fresh exact-tree Sol-xhigh review; only an accepted review permits a pinned
+Go 1.27 build and the paired seed-643 activation probe. Holdouts remain
+forbidden before explicit freeze authorization.

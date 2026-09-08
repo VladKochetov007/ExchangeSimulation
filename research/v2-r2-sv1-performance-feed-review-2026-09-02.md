@@ -414,3 +414,30 @@ contract suite passes. Full mechanical gates and a new exact-tree independent
 review are required before pinned build and seed-643 activation. The VNext
 binary-evidence work and deferred performance optimizations remain outside
 this scientific branch.
+
+## Append-only feed checkpoint: repository red-team/performance refs — 2026-09-08
+
+The current scientific tree is exact HEAD
+`498a476071b505b5f5033ebb36d9b79c513451e8`. The newly fetched refs were
+inspected without merging: economic red-team `origin/redteam/economic-audit`
+at `f346b617`, performance port `origin/perf/r2-cdf-survival-port` at
+`39768dfe`, superseded port `origin/perf/ffa-gen0-port` at `899a6113`, and
+older scientific ref `origin/autoresearch/ffa-ecology-gen0` at `230e78f`.
+The asynchronous binary feed remains unchanged at the last-reviewed marker
+`b1847ac4`; its prototype and indexed analytics remain deferred.
+
+The red-team reports use base `a666d02`, not the current successor. Four
+pre-fix problems were independently reproduced and repaired on the scientific
+branch: expiry conservation tracking (`9299b00`), buffered receipt ordering
+(`b0f40c8`), symbol-less spot reaction identity (`4d6ecf3`), and analyzer tie
+determinism (`498a476`). These do not alter actor state or simulator
+trajectories. They require detector/analyzer rescore from retained raw evidence
+where old reports used the affected metrics; no historical world rerun is
+indicated.
+
+The remaining red-team observations are recorded as model/specification
+questions or limitations and were not silently imported. The current
+`evstream_v3` no-log route retains a checkpoint-backed logger, so its failure
+diagnostics are still in canonical binary evidence. No activation, capacity,
+development, freeze, or holdout run occurred. The next performance comparison
+starts after `b1847ac4`.
