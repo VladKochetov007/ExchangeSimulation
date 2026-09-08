@@ -2960,3 +2960,58 @@ is now fully attributable.
 cadence, so a fill may be compared against a rate up to a second stale. Depth is
 not modelled separately; VWAP uses executed prices, which already reflect whatever
 depth was consumed.
+
+## RT-051 — Every out-of-the-money option loses its bid; every in-the-money one does not
+
+**Classification.** REAL, and the first finding on the option surface, which no
+instrument in this audit had examined. Mechanism deliberately not claimed.
+
+**Base.** `a666d02faede3d40f046b11e60eb672c59386a94`, seed 607, 8 h, full logs.
+50 option books, terminal spot 49 295.05.
+
+**Measured** (`research/tools/bookspread`):
+
+| group | n | two-sided (min) | two-sided (median) | half-spread (median) |
+|---|---:|---:|---:|---:|
+| **in the money** | 25 | **99.9%** | 99.9% | 10.0% |
+| **out of the money** | 25 | **21.4%** | **58.3%** | **76.8%** |
+
+**The separation is total.** The worst ITM book is 99.9% two-sided; the best OTM
+book is 98.8%. There is no overlap — a partition, not a tendency.
+
+**The missing side is always the bid.** In all 12 books that are two-sided less
+than half the time, no-bid dominates. Across the surface, ask-only snapshots (no
+bid) reach **16 962** while bid-only (no ask) never exceeds **18**. **A holder of
+an out-of-the-money option cannot sell it** for 21% to 79% of the run.
+
+**Not a deep-OTM artifact.** All 12 worst books lie within **5.5% of spot**. The
+most extreme near-the-money case is `49000-P`, **0.6% from spot**, two-sided only
+**22.1%** of the time. The natural innocent explanation — worthless options
+attract no bid — was the preregistered falsifier most likely to fire, and it does
+not.
+
+**Mechanism not determined, and the first guess was checked and refuted.** The
+obvious explanation is that OTM bids round below one tick and are never placed.
+**False.** Sampling `49000-P`: bid **1 600 000**, ask **31 400 000** — a **16 USD
+bid against a 314 USD ask** on the same contract, a bid at 5% of the ask rather
+than an absent one. The healthy `49000-C` quotes 585 against 879. OTM quotes are
+extremely skewed toward the ask and the bid vanishes intermittently; why is
+unmeasured and stays unclaimed.
+
+**Consequence for the fairness question.** RT-045 established that
+`option_dealer`, `option_flow`, `option_value_taker` and `vanna_volga_desk` earn
+their entire results in these books. Half the surface has no bid for much of the
+run, and where a bid exists the median half-spread is 76.8%. Any result attributed
+to option strategy skill was obtained in a market where one side of half the
+instruments is frequently absent.
+
+**Next experiment.** Identify who supplies each side of an option book, from
+maker/taker roles on fills, and whether the dealer's quoting is skewed by
+construction or its bid is withdrawn by a risk limit. That separates a
+quoting-policy artifact from an inventory constraint, in one pass over evidence
+already collected.
+
+**Scope.** One seed, one configuration. Moneyness uses terminal spot, so a book
+classified OTM may have been ITM earlier; that softens the partition at the 49 000
+strike and cannot explain it, since `49000-C` (ITM by 0.6%) is 99.9% two-sided
+while `49000-P` (OTM by 0.6%) is 22.1%.

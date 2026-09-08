@@ -62,8 +62,14 @@ func main() {
 	}
 
 	// halfSpreads is keyed by book and holds relative half-spreads in bps.
+	// Counting one-sided snapshots is not enough: a book with no bid cannot be
+	// exited, while a book with no ask merely cannot be entered. Those are
+	// different defects, so the sides are counted separately.
 	halfSpreads := map[string][]float64{}
 	oneSided := map[string]int{}
+	bidOnly := map[string]int{}
+	askOnly := map[string]int{}
+	empty := map[string]int{}
 
 	files, _ := filepath.Glob(filepath.Join(*logDir, "venues", "*", "*.jsonl"))
 	nested, _ := filepath.Glob(filepath.Join(*logDir, "venues", "*", "*", "*.jsonl"))
@@ -96,6 +102,14 @@ func main() {
 			}
 			if len(shot.Bids) == 0 || len(shot.Asks) == 0 {
 				oneSided[symbol]++
+				switch {
+				case len(shot.Bids) > 0:
+					bidOnly[symbol]++
+				case len(shot.Asks) > 0:
+					askOnly[symbol]++
+				default:
+					empty[symbol]++
+				}
 				continue
 			}
 			bid, ask := shot.Bids[0].Price, shot.Asks[0].Price
@@ -109,25 +123,44 @@ func main() {
 		handle.Close()
 	}
 
-	books := make([]string, 0, len(halfSpreads))
+	// A book that was never two-sided has no half-spread sample at all, so it
+	// would vanish from a listing keyed on halfSpreads. Those are exactly the
+	// most broken books, so they are carried explicitly.
+	seen := map[string]bool{}
 	for book := range halfSpreads {
+		seen[book] = true
+	}
+	for book := range oneSided {
+		seen[book] = true
+	}
+	books := make([]string, 0, len(seen))
+	for book := range seen {
 		books = append(books, book)
 	}
 	sort.Strings(books)
 
-	fmt.Printf("%-26s %10s %10s %10s %10s %10s %12s\n",
-		"book", "samples", "median", "mean", "p90", "max", "one-sided")
+	fmt.Printf("%-26s %9s %9s %9s %9s %9s %9s %9s\n",
+		"book", "2-sided", "2-sided%", "median", "p90", "bid-only", "ask-only", "empty")
 	for _, book := range books {
 		values := halfSpreads[book]
 		sort.Float64s(values)
 		n := len(values)
+		if n == 0 {
+			fmt.Printf("%-26s %9d %8.1f%% %10s %10s %9d %9d %9d\n",
+				book, 0, 0.0, "-", "-", bidOnly[book], askOnly[book], empty[book])
+			continue
+		}
 		mean := 0.0
 		for _, v := range values {
 			mean += v
 		}
 		mean /= float64(n)
-		fmt.Printf("%-26s %10d %8.2fbp %8.2fbp %8.2fbp %8.2fbp %12d\n",
-			book, n, values[n/2], mean, values[n*9/10], values[n-1], oneSided[book])
+		_ = mean
+		total := n + oneSided[book]
+		share := float64(n) / float64(total) * 100
+		fmt.Printf("%-26s %9d %8.1f%% %8.2fbp %8.2fbp %9d %9d %9d\n",
+			book, n, share, values[n/2], values[n*9/10],
+			bidOnly[book], askOnly[book], empty[book])
 	}
 	fmt.Printf("\nhalf-spreads are relative to the midpoint, in basis points\n")
 }

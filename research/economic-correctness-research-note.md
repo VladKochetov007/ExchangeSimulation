@@ -5347,6 +5347,127 @@ include whatever depth was consumed.
 Recorded as RT-050.
 
 
+**H-062 (PREREGISTERED) — the option books are one-sided for most of the run, so
+option positions cannot be exited and the option "market" is not one.**
+
+**New lineage.** The `ABC/CDF` chain is closed end to end ([[RT-050]]). The
+option and dated-futures books have never been audited: [[RT-045]] showed
+`option_dealer`, `option_flow`, `option_value_taker` and `vanna_volga_desk`
+earning **nothing** in any spot book, so their entire results come from surfaces
+no instrument in this campaign has examined.
+
+**The observation that motivates it**, already sitting in E-065's output and not
+chased at the time:
+
+| book | samples | median half-spread | one-sided snapshots |
+|---|---:|---:|---:|
+| ABC-…-48000-C | 21 606 | 7.1% | 12 |
+| ABC-…-48000-P | 9 076 | **75.4%** | **12 542** |
+| ABC-…-49000-P | 7 134 | **97.4%** | **14 484** |
+| ABC-…-51000-C | 10 239 | **96.8%** | **11 379** |
+| ABC-…-52000-P | 21 606 | 6.5% | 12 |
+
+**The obvious innocent explanation must be tested, not assumed.** A deep
+out-of-the-money option is nearly worthless, so a one-tick absolute spread is a
+huge *relative* spread and a missing bid is unremarkable. That is falsifier (c)
+and it is a live possibility for most of these books.
+
+**But one row resists it.** `49000-P` is one-sided in **14 484** snapshots while
+terminal ABC is **49 295** — a strike within 0.6% of spot, i.e. **at the money**,
+not deep OTM. An at-the-money option with no market two-thirds of the time is not
+explained by worthlessness.
+
+**Claims.**
+1. A majority of option books are one-sided for **>50%** of their snapshots.
+2. The missing side is predominantly the **bid** — nobody bids, so a holder
+   cannot exit.
+3. The one-sidedness is **not** confined to deep OTM strikes: at least one book
+   within 2% of spot is one-sided for >50% of its snapshots.
+
+**Falsifiers.**
+(a) typical one-sidedness **<20%** → the books are fine and E-065's counts were
+dominated by a few dead strikes;
+(b) the missing side is predominantly the **ask** → the story is that options
+cannot be bought rather than sold, a different and less serious finding;
+(c) every book with >50% one-sidedness is **more than 5% out of the money** →
+this is ordinary deep-OTM behaviour, no defect, and claim 3 fails. **This is the
+falsifier I expect to be closest.**
+
+**Instrument.** Extend `bookspread` to report, per book, the fraction of
+snapshots that are two-sided, bid-only and ask-only, so the missing side is
+identified rather than inferred from a count.
+
+**Discriminating experiment E-067**, preregistered before the run: seed 607, 8 h,
+`-log-mode full`; report per option book the two-sided fraction, which side is
+missing, and the strike's distance from terminal spot.
+Status: **MIXED** — claim 1 falsified (24%, not a majority), claims 2 and 3
+supported, falsifier (c) does not fire.
+
+
+**E-067 — H-062 MIXED. Claim 1 falsified as written; claims 2 and 3 supported,
+and the surface splits perfectly on moneyness: every in-the-money option has a
+two-sided market, every out-of-the-money option loses its bid.**
+Base: `a666d02faede3d40f046b11e60eb672c59386a94`, seed 607, 8 h, `-log-mode full`.
+Reproduce: `go run research/tools/bookspread/main.go -dir <logdir>`.
+
+50 option books, terminal spot **49 295.05**:
+
+| group | n | two-sided (min) | two-sided (median) | half-spread (median) |
+|---|---:|---:|---:|---:|
+| **in the money** | 25 | **99.9%** | 99.9% | 10.0% |
+| **out of the money** | 25 | **21.4%** | **58.3%** | **76.8%** |
+
+**The separation is total: the worst ITM book (99.9% two-sided) is better than the
+best OTM book (98.8%).** Not a tendency — a partition.
+
+**Claim 1 FALSIFIED as written.** I predicted "a majority of option books are
+one-sided for >50% of their snapshots". Only **12 of 50 (24%)** are. The
+prediction was wrong; the structure it was groping at is sharper than the
+threshold I chose.
+
+**Claim 2 SUPPORTED, overwhelmingly.** The missing side is the **bid**, in **12 of
+12** broken books. Across the whole surface, ask-only (no bid) reaches **16 962**
+snapshots while bid-only (no ask) never exceeds **18**. **Holders of
+out-of-the-money options cannot sell them** for 21%–79% of the run.
+
+**Claim 3 SUPPORTED, and falsifier (c) — the one I expected to be closest — does
+not fire.** Every one of the 12 worst books is within **5.5% of spot**; none is
+deep out of the money. The most broken near-ATM case is `49000-P` at **−0.6% from
+spot**, two-sided only **22.1%** of the time. The "deep OTM options are worthless,
+so a missing bid is unremarkable" explanation is excluded by measurement rather
+than by argument.
+
+**The mechanism is NOT determined, and I checked before guessing.** My first
+explanation was that OTM bids round down below one tick and are therefore not
+placed. **That is wrong.** Sampling `49000-P` directly: bid **1 600 000**, ask
+**31 400 000** — in USD, a **16 USD bid against a 314 USD ask** on the same
+option, a bid at 5% of the ask rather than an absent one. The healthy `49000-C`
+quotes 585 against 879. So OTM quotes are extremely skewed toward the ask, and
+the bid vanishes only some of the time. **Why** is unmeasured, and after five
+mechanism sentences in this campaign that turned out wrong, it stays unclaimed.
+
+**Why it matters for the fairness question.** [[RT-045]] showed `option_dealer`,
+`option_flow`, `option_value_taker` and `vanna_volga_desk` earning their entire
+results in books no instrument here had examined. Half that surface has **no bid
+at all** for much of the run, and where a bid exists the half-spread is 76.8%. Any
+result attributed to option strategy skill is a result obtained in a market where
+one side of half the instruments is frequently absent.
+
+**Next experiment, highest information gain.** Identify who supplies each side of
+an option book — from maker/taker roles on fills per book — and whether the
+dealer's quoting is skewed by construction or the bid is being withdrawn by a
+risk limit. That distinguishes a quoting-policy artifact from an inventory
+constraint, and it is one pass over evidence already collected.
+
+**Scope.** One seed, one configuration. Moneyness is computed against the
+**terminal** spot; a book classified OTM at the end may have been ITM earlier, so
+the partition is cleanest for strikes far from 49 295 and softest for `49000`.
+That caveat cannot explain the result, since `49000-C` (ITM by 0.6%) is 99.9%
+two-sided while `49000-P` (OTM by 0.6%) is 22.1%.
+
+Recorded as RT-051.
+
+
 ---
 
 ## F. Findings
@@ -5363,6 +5484,16 @@ See `research/red-team-findings.md` for the full records.
 - **RT-003** — bounded no-violation results (INV-2, INV-5, INV-6, identity).
 - **RT-006** — latency is delivered as configured across 225 link x channel
   rows; no unearned speed advantage. Transport only.
+- **RT-051** — the option surface **splits perfectly on moneyness**: all 25
+  in-the-money books are **99.9%** two-sided, all 25 out-of-the-money books drop
+  to a median of **58.3%** and a minimum of **21.4%**, with median half-spreads of
+  10.0% against **76.8%**. The worst ITM book is better than the best OTM book —
+  a partition, not a tendency. The missing side is always the **bid** (no-bid
+  reaches 16 962 snapshots, no-ask never exceeds 18), so **OTM option holders
+  cannot sell**. Not a deep-OTM artifact: all 12 worst books are within 5.5% of
+  spot, the worst being `49000-P` at **−0.6%**. Mechanism **not determined** — the
+  rounding explanation was checked and is false (bid 16 USD against a 314 USD
+  ask, not absent).
 - **RT-050** — the cross book's cost is **realised at execution**. Across
   **216 529 fills** `noise_flow` buys ABC at **−51.50%** and sells at **−50.51%**
   against the venue's own contemporaneous consensus rate; the implied loss of
