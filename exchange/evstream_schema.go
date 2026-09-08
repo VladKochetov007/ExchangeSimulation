@@ -528,6 +528,9 @@ func RenderPayloadJSONVersioned(schemaID, schemaVersion uint16, payload []byte, 
 }
 
 func currentSchemaVersion(schemaID uint16) uint16 {
+	if schemaID == SchemaBookSnapshot {
+		return 3
+	}
 	if schemaID == SchemaVenueBalance {
 		return 2
 	}

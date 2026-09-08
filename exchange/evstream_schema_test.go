@@ -376,6 +376,28 @@ func TestRenderPayloadJSONRejectsUnknownSchemaVersion(t *testing.T) {
 	}
 }
 
+func TestRenderPayloadJSONUsesCurrentBookSnapshotSchema(t *testing.T) {
+	original := bookSnapshotEvidence{
+		Asks:           []PriceLevel{{Price: 101, VisibleQty: 7}},
+		Bids:           []PriceLevel{{Price: 99, VisibleQty: 5}},
+		SourceSequence: 17,
+		PublicAsks:     []PriceLevel{{Price: 101, VisibleQty: 3}},
+		PublicBids:     []PriceLevel{{Price: 99, VisibleQty: 2}},
+	}
+	frame, reader := roundTripFrame(t, original)
+	rendered, err := RenderPayloadJSON(frame.Header.SchemaID, frame.Payload, reader)
+	if err != nil {
+		t.Fatalf("render current snapshot schema: %v", err)
+	}
+	want, err := json.Marshal(original)
+	if err != nil {
+		t.Fatalf("marshal expected snapshot: %v", err)
+	}
+	if !bytes.Equal(rendered, want) {
+		t.Fatalf("rendered %s, want %s", rendered, want)
+	}
+}
+
 func TestHighVolumeTypedPayloadsPreserveLegacyJSONShape(t *testing.T) {
 	typedCases := []struct {
 		name  string
