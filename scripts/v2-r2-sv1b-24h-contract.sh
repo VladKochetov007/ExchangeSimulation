@@ -425,6 +425,9 @@ v2_r2_sv1b_require_terminal_failure_pair_provenance() {
 		.activation_satisfied == false and .anti_cheating_satisfied == false and .measurement_valid == true and
 		.treatment_terminal_status == $treatment_status and .control_terminal_status == $control_status' \
 		"$comparison_path" >/dev/null || return 1
+	actual_sha256=$(sha256sum -- "$comparison_path" | awk '{print $1}') || return 1
+	expected_sha256=$(jq -er '.comparison_sha256 | select(type == "string" and test("^[0-9a-f]{64}$"))' "$provenance_path") || return 1
+	[[ "$actual_sha256" == "$expected_sha256" ]] || return 1
 	for arm in treatment control; do
 		arm_dir=$([[ "$arm" == treatment ]] && printf '%s' "$treatment_dir" || printf '%s' "$control_dir")
 		arm_config=$([[ "$arm" == treatment ]] && printf '%s' "$v2_r2_sv1_activation_config" || printf '%s' "$v2_r2_sv1_activation_control_config")

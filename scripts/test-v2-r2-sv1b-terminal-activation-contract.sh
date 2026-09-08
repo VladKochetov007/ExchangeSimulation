@@ -150,4 +150,9 @@ if v2_r2_sv1b_require_terminal_failure_pair_provenance "$fixture_root/mutated-pr
 	echo "terminal-failure pair accepted a mismatched outcome hash" >&2
 	exit 1
 fi
+jq '.comparison_sha256 = ("2" * 64)' "$provenance_path" >"$fixture_root/mutated-comparison-provenance.json"
+if v2_r2_sv1b_require_terminal_failure_pair_provenance "$fixture_root/mutated-comparison-provenance.json" "$revision" "$binary_sha256"; then
+	echo "terminal-failure pair accepted a mismatched comparison hash" >&2
+	exit 1
+fi
 printf 'V2-R2-SV1B terminal-failure activation contract: pass\n'
