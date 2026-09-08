@@ -163,13 +163,21 @@ expect_checkpoint_rejected() {
 	fi
 }
 
+expect_checkpoint_rejected_with_bounds() {
+	local fixture_name=$1 lower_bound=$2 upper_bound=$3
+	if v2_r2_require_checkpoint_stream "$fixture_root/$fixture_name" "$lower_bound" "$upper_bound" evstream_v3; then
+		echo "invalid terminal checkpoint stream was accepted: $fixture_name" >&2
+		exit 1
+	fi
+}
+
 v2_r2_require_checkpoint_stream "$fixture_root/treatment/checkpoints.jsonl" "$start" "$end" evstream_v3
 v2_r2_sv1b_require_checkpoint_attestation_binding \
 	"$fixture_root/treatment/checkpoints.jsonl" "$fixture_root/treatment/binary-evidence-attestation.json"
 
-jq -c 'if .sim_time == 1735689600000000000 then .sim_time = 1735689600000000000.5 else . end' \
+jq -c 'if .event_count == 0 then .sim_time = 0.5 else .sim_time = 10 end' \
 	"$fixture_root/treatment/checkpoints.jsonl" >"$fixture_root/fractional-sim-time-checkpoint.jsonl"
-expect_checkpoint_rejected fractional-sim-time-checkpoint.jsonl
+expect_checkpoint_rejected_with_bounds fractional-sim-time-checkpoint.jsonl 0 10
 jq -c 'if .event_count == 0 then .event_count = 0.5 else . end' \
 	"$fixture_root/treatment/checkpoints.jsonl" >"$fixture_root/fractional-event-count-checkpoint.jsonl"
 expect_checkpoint_rejected fractional-event-count-checkpoint.jsonl
