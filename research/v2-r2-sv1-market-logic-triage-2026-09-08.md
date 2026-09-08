@@ -313,3 +313,40 @@ The exact scientific tree is now `ad4c2bf176442700ebf4d4e264d0e7b2ce7ecf90`. RT-
 | RT-014 carried remainder repair | semantic successor repair awaiting exact-tree review | retain commit; run RT-002 and remaining risk-policy gates before promotion |
 
 No branch implementation from the economic red-team or performance branches was merged. No pinned build, activation, capacity, development, freeze, or holdout world ran at this checkpoint; holdouts `619`, `631`, and `641` remain untouched.
+
+## Asynchronous red-team refresh: RT-064 and clean RT-014 checkpoint — 2026-09-08
+
+The economic red-team feed advanced from the previously reviewed `4640215` to
+`e7f63e839d289fdb0b5713d6be9f5fee01c4b81f`. The new commit is documentation and
+historical analysis only. It preregistered and then reproduced the old
+construction-order fairness finding (RT-037) on base
+`a666d02faede3d40f046b11e60eb672c59386a94`, seeds 608/609/610, eight simulated
+hours, with JSON venue logs disabled. On the price-time venue the earlier
+registered maker won 19/24 paired comparisons overall and 12/12 on the
+material `ABC-PERP` and `ABC/CDF` books; the same runs' pro-rata controls had a
+median absolute difference of 0.000% (37/48 exactly zero, maximum 0.20%).
+
+This is classified as a reproduced historical structural result, not a
+simulator defect: the measured effect is the expected price-time consequence
+of arrival order under the old participant construction, while pro-rata is the
+registered within-run null. It is not a result from the current SV1B tree, is
+not a registered SV1B acceptance predicate, and does not justify changing the
+matching rule or participant roster. Any later fairness claim must disclose
+construction order and venue rule; no historical trajectory was rewritten and
+no rerun was needed.
+
+The scientific branch then committed the RT-014 debt-lifecycle checkpoint as
+`77921bf` (`fix: bind interest audit to debt lifecycle`) and pushed it. The
+checkpoint adds explicit debt state to successor borrow/repay receipts,
+reconstructs debt and rate continuity in the conservation audit, binds
+remainder closure to terminal debt-zeroing, rejects mutable financing-rate
+replacement while debt is outstanding, and serializes terminal remainder-map
+presence. Focused `analysis`, `exchange`, and `types` tests, `git diff --check`,
+and a clean bounded two-core `make test` all passed. The prior Turing rejection
+was of the pre-commit/incomplete RT-014 state; `77921bf` still requires a fresh
+exact-tree independent review and is not yet a promotion attestation.
+
+The performance feed remains at `b1847ac40e8b7483e6e8a3f94b3705b4058884b`;
+there is no new binary-evidence revision to inspect. No pinned build,
+activation, development, freeze, capacity, or holdout world ran. Holdouts
+`619`, `631`, and `641` remain untouched.

@@ -1563,3 +1563,26 @@ Exact current scientific HEAD: `ad4c2bf176442700ebf4d4e264d0e7b2ce7ecf90`, branc
 The economic red-team feed was fetched read-only through `801e10a6347b82842841f4d3ef92e20bbe002d19`; only `801e10a` was new since the prior `aa1de8d` checkpoint. RT-061 is a paired seed-607/608, old-base (`a666d02`) ablation of `carry_max_position`, and refutes RT-060's proposed capacity remedy because the treatment moves the basis in opposite directions across seeds. It does not alter the current SV1B economics, registered configuration, or historical evidence, and no branch code was merged. The performance feed remains at `b1847ac` with no new binary-evidence revision.
 
 The exact current candidate remains blocked at the semantic promotion gate by the independent RT-002/RT-011/RT-015/RT-016/RT-018 review findings. RT-014 is repaired but still needs fresh exact-tree independent acceptance together with the remaining repairs. No pinned build, activation, development, freeze, or holdout run has occurred at this checkpoint; holdouts `619`, `631`, and `641` remain untouched.
+
+## Append-only state update: remote fairness reproduction and RT-014 checkpoint — 2026-09-08
+
+The latest economic red-team tip is `e7f63e839d289fdb0b5713d6be9f5fee01c4b81f`,
+following reviewed tip `4640215`. It is an old-base (`a666d02`) historical
+reproduction across seeds 608/609/610. The report finds a construction-order
+advantage under price-time matching (19/24 pairs overall; 12/12 on material
+books) and no economically material advantage under the same-run pro-rata
+controls (median 0.000%, 37/48 exact ties). Classify it as a reproduced
+matching/arrival-order structural observation, not a current SV1B semantic
+blocker; preserve the limitation that construction order must be disclosed in
+fairness interpretations. No branch code or historical evidence was imported
+or rewritten.
+
+The current scientific branch is clean at pushed revision `77921bf`, which
+contains the RT-014 debt-lifecycle and financing-authority checkpoint. The
+focused suites and clean bounded two-core `make test` pass. This is a
+mechanical checkpoint only: prior independent rejection remains applicable to
+the unresolved RT-011/015/016/018 policy boundary, and a new exact-tree review
+is required after those items are settled. Performance tip `b1847ac` remains
+the last reviewed binary-evidence revision. No pinned build, activation,
+development, capacity, freeze, or holdout world ran; holdouts `619`, `631`, and
+`641` remain untouched.

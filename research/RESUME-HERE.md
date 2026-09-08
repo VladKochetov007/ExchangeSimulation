@@ -1726,3 +1726,27 @@ The exact scientific successor tree is now `ad4c2bf176442700ebf4d4e264d0e7b2ce7e
 At the next remote-feed checkpoint, `origin/redteam/economic-audit` advanced from `aa1de8d` to `801e10a`. Its RT-061 paired multi-seed cap ablation is based on the old `a666d02` 8-hour campaign, not the current SV1B tree or registered 24-hour candidate. It refutes the proposed causal interpretation of RT-060: a tenfold `carry_max_position` increase produces opposite basis responses at seeds 607 and 608, despite using the added capacity. This is a valid historical red-team result and a falsification of a proposed remedy, not an authorization to retune the current CDF successor. No code or configs were imported; no current SV1B trajectory is invalidated or rerun.
 
 The asynchronous binary-evidence feed remains unchanged at `b1847ac`; no performance implementation was imported. Holdouts `619`, `631`, and `641` remain untouched. The next active gate is the rejected-review repair sequence: complete RT-002 option-expiry fail-closed/accounting hardening, then address or explicitly guard RT-011, RT-015, RT-016, and RT-018 with focused regressions and fresh exact-tree independent review. No pinned build, activation probe, capacity run, development cell, freeze, or holdout run is authorized at this checkpoint.
+
+## Append-only operational update: RT-064 refresh and RT-014 clean checkpoint — 2026-09-08
+
+The economic red-team branch was fetched again. Since the prior marker
+`4640215`, only `e7f63e839d289fdb0b5713d6be9f5fee01c4b81f` was new. It records a
+three-seed historical reproduction of RT-037 on old base `a666d02`, not on the
+current SV1B candidate: earlier construction order wins 19/24 price-time
+pairs overall and 12/12 on the material perp and ABC/CDF books, while the
+same-run pro-rata controls have median difference 0.000% and 37/48 exact
+ties. This is an expected matching-rule/arrival-order structural result, not a
+new code defect or a reason to alter the current roster. It is retained as a
+scope warning for future fairness claims; no historical run was rerun.
+
+RT-014 checkpoint `77921bf` is now pushed. It carries debt-linked borrow and
+repay evidence, recurrence and closure checks, private financing-rate
+authority, outstanding-debt configuration protection, and explicit terminal
+remainder-map serialization. Focused tests and clean bounded two-core
+`make test` passed. The worktree is clean, but the exact tree remains blocked
+until the remaining RT-011/015/016/018 policy items are resolved and a fresh
+independent Sol-xhigh reviewer accepts the complete tree. The performance
+feed remains unchanged at `b1847ac`; no binary promotion work was imported.
+
+No pinned binary, activation, development, capacity, freeze, or holdout world
+ran at this checkpoint. Holdouts `619`, `631`, and `641` remain untouched.
