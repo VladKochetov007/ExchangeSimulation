@@ -1387,3 +1387,39 @@ the post-repair tree, pinned builds and the paired seed-643 activation remain
 closed. The performance branch was fetched through unchanged marker `b1847ac`
 with no new commits; no performance implementation was imported. Holdouts
 `619`, `631`, and `641` remain untouched.
+
+## Append-only operational update: Godel checkpoint/provenance rejection and repair — 2026-09-08
+
+Independent Sol-xhigh reviewer `Godel` reviewed the exact clean successor tree
+at `9b9abc4f8fa8fbcf62321d2154cb1a29a9b4ef88` and **REJECTED** promotion to
+pinned build and seed-643 activation. The review was read-only; it ran no
+scientific, capacity, development, or holdout worlds.
+
+The first blocker was reproduced independently: the terminal-pair validator
+accepted a one-row `checkpoints.jsonl`, while the real runner's shared
+`v2_r2_require_checkpoint_stream` requires at least an ordinary checkpoint plus
+one repeated terminal row. The valid terminal fixture therefore did not model
+the producer checkpoint contract, leaving a hash-consistent but incomplete
+terminal diagnostic admissible. The second blocker was that the successful
+`v2_r2_require_sv1b_activation_provenance` path recorded renderer fields in
+runner output but did not require or pin-check them during replay validation.
+
+Commit `8953b51` makes the minimal repair. All SV1B arm validators now invoke
+the strict checkpoint-stream predicate for both completed and terminal arms.
+The terminal fixture now emits a start ordinary row, an end ordinary row, and
+the identical explicit final row; it rejects missing-terminal, truncated,
+out-of-order, and non-repeated-terminal mutations. Successful activation
+provenance now requires `renderer_binary_path`, validates its pinned Go
+1.27.0 `evsrender` build identity and SHA-256, and binds both recorded fields
+in the exact provenance predicate.
+
+Focused terminal and activation contracts and clean `GOMAXPROCS=2 make test`
+passed at `8953b51`; the bounded vet/race gate was launched from the same clean
+revision. The expected parser error from the intentionally truncated negative
+checkpoint fixture is non-fatal and is part of the rejection test. No
+activation, capacity, registered development cell, freeze authorization, or
+holdout execution occurred, so no historical simulator rerun is indicated.
+The prior `Faraday` rejection remains a rejection of its exact old tree; it is
+not rewritten as acceptance. A new exact-tree independent Sol-xhigh review is
+required after this repair. The performance feed remains unchanged after
+`b1847ac`; no performance implementation was imported.

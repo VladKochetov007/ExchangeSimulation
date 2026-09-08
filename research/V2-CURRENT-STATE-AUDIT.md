@@ -1229,3 +1229,47 @@ post-repair tree has not been accepted yet. A fresh exact-tree independent
 Sol-xhigh review is the next promotion gate. The performance feed remains
 unchanged after `b1847ac`; its analyzer candidate `f153e12` and VNext binary
 format remain unmerged. Holdouts `619`, `631`, and `641` remain untouched.
+
+## Append-only checkpoint: Godel exact-tree rejection and checkpoint repair — 2026-09-08
+
+At exact clean HEAD `9b9abc4f8fa8fbcf62321d2154cb1a29a9b4ef88`, independent
+Sol-xhigh reviewer `Godel` returned **REJECT** before pinned build or seed-643
+activation. The report identified two high-severity protocol blockers.
+
+1. The terminal pair path checked terminal-arm file hashes and binary stream
+   reconstruction but did not call the shared
+   `v2_r2_require_checkpoint_stream` semantic validator. Its positive fixture
+   contained one final checkpoint, although the runner contract requires an
+   ordinary checkpoint followed by exactly one identical final attestation.
+   Independent reproduction showed the shared validator rejects that one-row
+   file while the terminal pair path accepted it.
+
+2. The successful activation provenance path recorded renderer identity but did
+   not parse, pin-check, or bind `renderer_binary_path` and
+   `renderer_binary_sha256`. A renderer substitution could therefore pass the
+   successful-path identity predicate without changing arm or comparison
+   hashes.
+
+Disposition for both findings: protocol/provenance blocker, not a simulator
+semantic change. Neither condition activated in historical experiments: the
+SV1B candidate had no activation, capacity, development, freeze, or holdout
+execution, and predecessor R2 evidence is not reinterpreted. No rerun or
+offline repair is required.
+
+Commit `8953b51` repairs the boundary. `v2_r2_sv1b_require_activation_arm_artifacts`
+now applies the strict checkpoint validator to completed and terminal arms.
+The terminal contract emits a coherent three-row ordinary/end/final stream and
+tests missing-terminal, truncated, out-of-order, and non-repeated-terminal
+mutations. `v2_r2_require_sv1b_activation_provenance` now requires a real
+recorded renderer path, validates the pinned `exchange_sim/cmd/evsrender`
+Go 1.27.0 binary and digest, and binds both renderer fields in its top-level
+predicate. The earlier legal-wait and renderer-backed terminal reconstruction
+repairs remain intact.
+
+Focused contracts and clean `GOMAXPROCS=2 make test` passed at `8953b51`; vet
+and bounded race checks were run from that exact clean revision. The expected
+JSON parse diagnostic comes only from the deliberately truncated negative
+fixture. The performance branch was fetched through unchanged marker
+`b1847ac`; no new performance commit or implementation was imported. The
+post-repair tree needs a fresh exact-tree independent review before any
+external acceptance attestation, pinned build, or activation probe.

@@ -240,3 +240,25 @@ outcome and stream-truncation mutations. Clean full tests, vet, shell syntax,
 diff-check, and bounded race/evidence gates pass at `0475c74`. No activation,
 capacity, development, freeze, or holdout run occurred. A fresh exact-tree
 review remains required; the performance feed is still deferred at `b1847ac`.
+
+## Append-only feed checkpoint: no new performance commits; Godel protocol rejection — 2026-09-08
+
+`origin/autoresearch/v2-performance-research` was fetched again and has no
+commit after the last reviewed marker `b1847ac`. The deferred `f153e12`
+reaction-analyzer correction and the VNext binary-evidence prototype remain
+outside the scientific branch.
+
+The fresh independent Sol-xhigh review of exact scientific HEAD `9b9abc4`
+rejected the current promotion boundary for two protocol reasons, not for
+performance work: terminal-pair validation accepted a one-row checkpoint file
+that the real runner rejects, and successful activation provenance did not
+validate its recorded renderer identity. These findings were independently
+reproduced. Scientific commit `8953b51` adds shared checkpoint validation to
+all SV1B arms, makes the terminal fixture runner-compliant with four negative
+checkpoint mutations, and pins/binds the successful-path renderer identity.
+
+The repair does not alter R2 economics, calendar/lifecycle behavior, CDF
+supplier logic, or historical evidence. Clean focused contracts and full
+`make test` passed at `8953b51`; no simulator activation, capacity probe,
+development cell, freeze, or holdout was run. A new exact-tree independent
+review is required before promotion. No performance patch was merged.
