@@ -2767,6 +2767,83 @@ than to a suspicion.
 RT-027 is closed: **design**. The caveat about class-level comparison stands and
 is recorded against the parameter that causes it.
 
+**H-041 — the classes are not all playing the same game, because only some of
+them have a ceiling.**
+E-042 traced `dated_carry_arb`'s collapse to a named parameter: a 50-lot net
+position cap per contract. That is not a defect, but it has a consequence the
+campaign's class-level numbers do not carry — a capped class stops compounding
+once it is full, while an uncapped one keeps going for the whole run.
+
+Generalise it. If some classes are bounded by a configured ceiling and others
+are not, then a per-run comparison between them is not a comparison of
+strategies; it is partly a comparison of **how long each was allowed to keep
+playing**. That is the same shape as RT-022's environment term, arriving through
+the actor configuration rather than the venue.
+
+The sweep is static and cheap: enumerate every actor construction in
+`simulations/multivenue/sim.go` and record which carry a position, trade-count or
+notional ceiling and which do not.
+
+Predicted observable, recorded before sweeping: a **mixed** population — the
+derivative desks carry explicit caps because unbounded derivative exposure would
+be reckless, while the flow and maker classes are bounded by capital or by their
+own inventory logic rather than by a hard limit. If that is what the sweep finds,
+the finding is not that anything is wrong but that **class-level rankings need
+the ceiling column beside them**, and that column does not currently exist.
+Falsifier: every class has an equivalent ceiling, which would make the playing
+time uniform and RT-027's caveat specific to one class rather than structural.
+Mechanism family: population validity, comparability of scores.
+
+**E-043 — H-041, the classes are not given the same board.**
+Preregistered above. Static sweep of every actor construction in
+`simulations/multivenue/sim.go`.
+Base: `a666d02faede3d40f046b11e60eb672c59386a94`.
+
+Result: **H-041 SUPPORTED, and the spread is larger than the prediction
+allowed for.** Every ceiling below is expressed in the same unit —
+`mvBasePrecision`, one ABC — so they are directly comparable:
+
+| class | ceiling | in ABC | source |
+|---|---|---:|---|
+| `option_value_taker` | `OptionValueTakerMaxPosition` default | **1** | `sim.go:1216` |
+| `dated_carry_arb` | `MaxPosPerSym` | **5** | `sim.go:3441` |
+| `fixed_distance_maker` | `MaxInventory` | **200** | `sim.go:3361` |
+| `imbalance_maker` | `MaxInventory` | **200** | `sim.go:3376` |
+| `carry_arb` | `CarryMaxPosition` default | **500** | `sim.go:1171` |
+| `elastic_supplier` | `MaxPosition` | **10 000** | `sim.go:3587` |
+| `parity_arb` | `MaxTrades: 100 000` | — | count, not position |
+
+**Four orders of magnitude separate the tightest position ceiling from the
+loosest** — 1 ABC for the option value taker against 10 000 for the elastic
+supplier. `dated_carry_arb`, whose collapse started this thread, sits at 5: forty
+times tighter than a maker and two thousand times tighter than a supplier.
+
+**What this does to a class-level number.** A per-run result is the product of
+edge per unit and units allowed. Two classes with identical skill and identical
+opportunity will post results differing by their ceiling ratio, and the ceilings
+here differ by up to 2 000×. E-032's magnitudes line up with exactly that
+reading: `elastic_supplier` at −10.6 M and `triangle_arb` at +13.6 M against
+`dated_carry_arb` at −2.6 M is as much a statement about allowances as about
+strategies.
+
+**This is not a defect.** Unbounded derivative exposure would be reckless, and a
+tight cap on an option value taker is prudent risk design. The prediction
+anticipated a mixed population and that is what the sweep found. What it did not
+anticipate is the **magnitude** of the spread, and that is the part worth
+recording.
+
+**The finding is that the ceiling is not reported beside the score.** Nothing in
+`greeks.json`, `terminal-outcome.json` or the population artifact carries the
+constraint each class was operating under, so a reader comparing class rows has
+no way to normalise for it. RT-022 established an environment term coming from
+the venue; this is the same shape arriving through the actor configuration, and
+unlike the venue term it is a **known constant**, available at construction, that
+could simply be emitted.
+
+Recorded as RT-028. The remedy is small and is the owner's: carry each class's
+binding ceiling into the population artifact so that a per-run result can be read
+per unit of allowance as well as in absolute terms.
+
 ---
 
 ## F. Findings
@@ -2783,6 +2860,13 @@ See `research/red-team-findings.md` for the full records.
 - **RT-003** — bounded no-violation results (INV-2, INV-5, INV-6, identity).
 - **RT-006** — latency is delivered as configured across 225 link x channel
   rows; no unearned speed advantage. Transport only.
+- **RT-028** — the actor classes are bounded at **wildly different scales** —
+  1 ABC for `option_value_taker`, 5 for `dated_carry_arb`, 200 for the makers,
+  500 for `carry_arb`, 10 000 for `elastic_supplier` — a spread of four orders of
+  magnitude, and **no artifact reports the ceiling beside the score**. Not a
+  defect; prudent risk design. But a class-level comparison cannot be normalised
+  for it from the evidence a run emits. **Owner decision**, and the remedy is to
+  emit a constant already known at construction.
 - **RT-027** — no actor class is inert, but `dated_carry_arb` collapses to
   **0.003** of its first-half order rate while the dated board thins from three
   contracts to one. **Resolved in E-042: design, not a stall** — a 50-lot net

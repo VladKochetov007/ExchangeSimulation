@@ -1682,3 +1682,42 @@ an uncapped class compounds for the full run. A class-level ranking across the t
 compares different things — not because either is broken, but because the
 parameter binds one and not the other. That is now attributable to a named
 configuration value rather than to a suspicion.
+
+## RT-028 — The classes are not given the same board, and the board is not reported
+
+**Classification.** Not a defect — prudent risk design. The finding is that the
+constraint is **invisible in the evidence**, so class-level results cannot be
+normalised for it. **Owner decision**; the remedy is to emit a constant already
+known at construction.
+
+**Base.** `a666d02faede3d40f046b11e60eb672c59386a94`.
+
+Every ceiling below is in the same unit, `mvBasePrecision` = one ABC:
+
+| class | ceiling | in ABC | source |
+|---|---|---:|---|
+| `option_value_taker` | `OptionValueTakerMaxPosition` default | **1** | `sim.go:1216` |
+| `dated_carry_arb` | `MaxPosPerSym` | **5** | `sim.go:3441` |
+| `fixed_distance_maker` | `MaxInventory` | **200** | `sim.go:3361` |
+| `imbalance_maker` | `MaxInventory` | **200** | `sim.go:3376` |
+| `carry_arb` | `CarryMaxPosition` default | **500** | `sim.go:1171` |
+| `elastic_supplier` | `MaxPosition` | **10 000** | `sim.go:3587` |
+| `parity_arb` | `MaxTrades: 100 000` | — | a trade count, not a position |
+
+**Four orders of magnitude** separate the tightest from the loosest.
+`dated_carry_arb`, whose collapse opened this thread (RT-027), sits at 5 — forty
+times tighter than a maker, two thousand times tighter than a supplier.
+
+**Consequence for a class-level number.** A per-run result is edge per unit times
+units allowed. Two classes with identical skill and identical opportunity post
+results differing by their ceiling ratio. E-032's magnitudes read consistently
+with that: `elastic_supplier` −10.6 M and `triangle_arb` +13.6 M against
+`dated_carry_arb` −2.6 M is as much a statement about allowances as about
+strategies.
+
+**Why it is worth recording despite not being a defect.** Nothing in
+`greeks.json`, `terminal-outcome.json` or the population artifact carries the
+constraint a class operated under. RT-022 found an environment term arriving
+through the venue; this is the same shape arriving through the actor
+configuration — except that unlike the venue term it is a **known constant** at
+construction time and could simply be emitted beside the score.
