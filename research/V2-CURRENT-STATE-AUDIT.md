@@ -1603,3 +1603,40 @@ borrow/collateral policy boundary, strict financing audit behavior, clean
 mechanical gates, and fresh exact-tree independent review are complete. No
 scientific world or holdout has run at this revision; holdouts `619`, `631`,
 and `641` remain untouched.
+
+## Operational reconciliation — 2026-09-08, `f0f5fba`
+
+This append-only audit update supersedes the older exact-HEAD descriptions
+above for operational state; it does not rewrite their historical claims.
+
+The active scientific worktree is clean on branch
+`feature/r2-cdf-survival-successor` at
+`f0f5fba982802ed5d632c1d0bb4c1bcc50ca308e`. No cherry-pick is in progress.
+The full `make test` that was already running at the prior checkpoint completed
+normally with exit status 0. `go vet ./...`, targeted race checks, focused
+`evstream`/`types`/`exchange` tests, and production binary-evidence contract,
+renderer, determinism, and R2 calendar tests are green at this exact tree.
+
+The semantic delta in `f0f5fba` is narrow: option snapshots created by
+`UpdateDerivativeMarks` retain all inputs used by strict option risk, and
+cross-margin profile construction rejects exposed same-quote snapshots whose
+timestamps disagree. It does not alter the R2 calendar, CDF supplier roster,
+the eight historical ABC/USD suppliers, or the binary evidence representation.
+The possible conservative delay between an option-only mark epoch and the next
+full perpetual mark epoch is explicitly retained for independent adjudication.
+
+The remote red-team and asynchronous performance refs were fetched without
+switching worktrees. No new commit exists after the reviewed markers
+`e85e16c5e920382e5df9aa050ac5ff9b22b51661` and
+`b1847ac40e8b7483e6e8a3f94b3705b4058884b`; no performance implementation was
+merged. Existing `bin/` files are not treated as a current clean provenance
+build. Disk and RAM checks at this checkpoint reported approximately 59 GiB
+free and 25 GiB available memory, with no evidence deletion.
+
+No simulator, activation, capacity, development, freeze, or holdout world has
+run at this successor HEAD. Holdouts `619`, `631`, and `641` remain untouched.
+The historical artifacts were not rewritten; because no accepted successor
+trajectory exists, no rerun/rescore decision is triggered by this checkpoint.
+The next promotion boundary is a fresh exact-tree independent Sol-xhigh review
+of the complete successor, followed only if accepted by a pinned Go 1.27 build
+and the registered seed-643 activation probe.

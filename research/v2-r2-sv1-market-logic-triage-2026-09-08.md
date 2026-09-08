@@ -388,3 +388,52 @@ No code or evidence from `e85e16c` was merged. No pinned build, activation,
 capacity, development, freeze, or holdout world ran. Holdouts `619`, `631`, and
 `641` remain untouched. The next remote comparison starts from
 `e85e16c5e920382e5df9aa050ac5ff9b22b51661` and `b1847ac40e8b7483e6e8a3f94b3705b4058884b`.
+
+## Mechanical gate checkpoint: complete option snapshots — 2026-09-08
+
+The exact scientific tree is now clean and pushed at
+`f0f5fba982802ed5d632c1d0bb4c1bcc50ca308e`, branch
+`feature/r2-cdf-survival-successor`. This checkpoint contains the minimal
+snapshot-completeness repair identified while reviewing the strict cross-margin
+path. `UpdateDerivativeMarks` now records an option's underlying mark and
+maintenance-rate input together with its premium, book identity, epoch, and
+timestamp. Strict cross-margin profile construction also binds all exposed
+same-quote position snapshots to one timestamp and fails closed on a mixed
+timestamp set. The regressions cover both complete option snapshot contents and
+the mixed-timestamp rejection.
+
+The repair is intentionally not a broad scheduling rewrite. The expiry cadence
+can create an option-only completed epoch while a perpetual snapshot remains at
+an earlier epoch; a cross-margin portfolio spanning both classes therefore
+defers risk until a coherent full mark set exists. This is a conservative
+fail-closed liveness consequence and remains an explicit question for the fresh
+independent review, rather than being silently treated as economic equivalence.
+
+The exact-tree mechanical checks completed as follows:
+
+* clean `make test`, including all Go packages and the integrated, activation,
+  terminal, survival, score, and archive contract scripts;
+* clean `go vet ./...`;
+* targeted `go test -race` across exchange, analysis, and the relevant
+  cross-margin, expiry, liquidation, supplier, risk, and evidence multivenue
+  tests, with no race reports;
+* focused `go test` for `evstream`, `evstream/exsim`, `types`, `exchange`, and
+  the production binary-evidence, renderer, determinism, and calendar tests;
+* `git diff --check` on the clean tree.
+
+The asynchronous refs were fetched read-only immediately before this
+checkpoint. Neither `origin/redteam/economic-audit` nor
+`origin/autoresearch/v2-performance-research` had a commit newer than the
+reviewed markers `e85e16c5e920382e5df9aa050ac5ff9b22b51661` and
+`b1847ac40e8b7483e6e8a3f94b3705b4058884b`, respectively. No performance code
+was imported. Existing binary files are not a clean pinned-build attestation;
+the Go 1.27 rebuild remains pending acceptance of the exact current tree.
+
+No activation, capacity, development, freeze, or holdout world ran at this
+checkpoint. The current successor has no accepted trajectory whose historical
+impact could require a rerun. Older raw evidence and verdicts retain their
+original binary identities and are not rewritten or rescored by this note; no
+old result is promoted to corrected-semantics evidence. Holdouts `619`, `631`,
+and `641` remain untouched. The next gate is one fresh exact-tree independent
+Sol-xhigh review of the R2 calendar, finite CDF supplier, strict risk boundary,
+liquidation evidence, analyzer hardening, and binary evidence contract.

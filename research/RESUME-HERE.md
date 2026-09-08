@@ -1767,3 +1767,35 @@ strict financing policy, full mechanical gates, and a fresh exact-tree
 independent review are still required. No pinned build, activation, capacity,
 development, freeze, or holdout world ran. Holdouts `619`, `631`, and `641`
 remain untouched.
+
+## 2026-09-08 continuation — exact snapshot gate at `f0f5fba`
+
+The active successor worktree is clean at pushed HEAD
+`f0f5fba982802ed5d632c1d0bb4c1bcc50ca308e` on
+`feature/r2-cdf-survival-successor`. The previously interrupted full gate was
+allowed to finish normally and exited 0. All Go packages passed, including the
+long multivenue package, and every integrated long-run, activation, terminal,
+survival, score, and archive contract passed. The malformed-fixture diagnostics
+printed by the negative contract cases were expected and did not fail the gate.
+
+`go vet ./...`, the bounded targeted race matrix, the focused evstream/types/
+exchange suites, and the production binary-evidence/rendering/determinism/
+calendar tests also passed. CPU use was capped at two cores for the long checks;
+the host remained well below the memory limit. At the checkpoint the filesystem
+reported approximately 59 GiB available and memory reported approximately 25
+GiB available. No evidence was deleted.
+
+The current commit completes option risk snapshots with underlying and
+maintenance inputs and rejects mixed snapshot timestamps in strict cross-margin
+risk. This is a semantic hardening checkpoint, not a new world or a clean
+binary build. The expiry-only mark cadence may conservatively defer mixed
+option/perpetual risk until a coherent full epoch; this explicit liveness
+tradeoff is included in the fresh reviewer brief.
+
+The asynchronous red-team and performance refs were fetched read-only at this
+checkpoint. There were no commits newer than red-team `e85e16c` and performance
+`b1847ac`; no performance branch was merged. No activation, capacity,
+development, freeze, or holdout run occurred. Holdouts `619`, `631`, and `641`
+remain forbidden before explicit freeze authorization. Next: obtain one fresh
+exact-tree Sol-xhigh review, then—only if accepted—build clean Go 1.27 binaries
+and run the authorized seed-643 activation probe.
