@@ -5,8 +5,8 @@
 # and leaves every artifact in place for independent review.
 set -euo pipefail
 
-if [[ $# -gt 2 ]]; then
-	echo "usage: $0 [multivenue-binary] [cdf-liquidity-audit-binary]" >&2
+if [[ $# -gt 3 ]]; then
+	echo "usage: $0 [multivenue-binary] [cdf-liquidity-audit-binary] [evsrender-binary]" >&2
 	exit 2
 fi
 
@@ -48,8 +48,9 @@ treatment_config="$v2_r2_sv1_activation_config"
 control_config="$v2_r2_sv1_activation_control_config"
 binary=${1:-"$root_dir/bin/multivenue"}
 audit_binary=${2:-"$root_dir/bin/cdf-liquidity-audit"}
-[[ -x "$binary" && -x "$audit_binary" && -s "$treatment_config" && -s "$control_config" ]] || {
-	echo "missing activation configs or executable: $treatment_config $control_config $binary $audit_binary" >&2
+renderer=${3:-"$root_dir/bin/evsrender"}
+[[ -x "$binary" && -x "$audit_binary" && -x "$renderer" && -s "$treatment_config" && -s "$control_config" ]] || {
+	echo "missing activation configs or executable: $treatment_config $control_config $binary $audit_binary $renderer" >&2
 	exit 1
 }
 
@@ -120,12 +121,17 @@ v2_r2_is_go_127 "$binary_go_version" || { echo "multivenue binary is not Go 1.27
 v2_r2_is_go_127 "$audit_go_version" || { echo "CDF analyzer is not Go 1.27: $audit_go_version" >&2; exit 1; }
 binary_sha256=$(sha256sum -- "$binary" | awk '{print $1}')
 analyzer_sha256=$(sha256sum -- "$audit_binary" | awk '{print $1}')
+renderer_sha256=$(sha256sum -- "$renderer" | awk '{print $1}')
 v2_r2_sv1b_require_pinned_binary "$binary" "$head_revision" "$binary_sha256" "exchange_sim/cmd/multivenue" || {
 	echo "multivenue binary failed the direct pinned-build identity check" >&2
 	exit 1
 }
 v2_r2_sv1b_require_pinned_binary "$audit_binary" "$head_revision" "$analyzer_sha256" "exchange_sim/cmd/cdf-liquidity-audit" || {
 	echo "CDF analyzer failed the direct pinned-build identity check" >&2
+	exit 1
+}
+v2_r2_sv1b_require_pinned_binary "$renderer" "$head_revision" "$renderer_sha256" "exchange_sim/cmd/evsrender" || {
+	echo "evstream renderer failed the direct pinned-build identity check" >&2
 	exit 1
 }
 
@@ -546,7 +552,8 @@ write_pair_provenance() {
 			--arg treatment_hypothesis_id "$treatment_hypothesis_id" --arg control_hypothesis_id "$control_hypothesis_id" \
 			--arg review_attestation_path "$review_attestation" \
 			--arg review_attestation_sha256 "$review_attestation_sha256" \
-			--arg simulator_binary_path "$binary" --arg analyzer_binary_path "$audit_binary" \
+			--arg simulator_binary_path "$binary" --arg analyzer_binary_path "$audit_binary" --arg renderer_binary_path "$renderer" \
+			--arg renderer_binary_sha256 "$renderer_sha256" \
 			--argjson treatment_artifacts "$treatment_artifacts" --argjson control_artifacts "$control_artifacts" \
 			--arg treatment_source_config_path "$treatment_source_config_path" --arg control_source_config_path "$control_source_config_path" \
 			--arg treatment_source_config_sha256 "$treatment_source_config_sha256" --arg control_source_config_sha256 "$control_source_config_sha256" \
@@ -564,7 +571,8 @@ write_pair_provenance() {
 			 review_attestation_path: $review_attestation_path, review_attestation_sha256: $review_attestation_sha256,
 			 comparison_path: ($output_root + "/cdf-liquidity-comparison.json"),
 		 treatment_config_sha256: $treatment_config_sha256, control_config_sha256: $control_config_sha256,
-		 simulator_binary_sha256: $binary_sha256, analyzer_binary_sha256: $analyzer_sha256,
+			 simulator_binary_sha256: $binary_sha256, analyzer_binary_sha256: $analyzer_sha256,
+			 renderer_binary_path: $renderer_binary_path, renderer_binary_sha256: $renderer_binary_sha256,
 		 comparison_sha256: (if $comparison_sha256 == "" then null else $comparison_sha256 end),
 		 status: $pair_status, activation_satisfied: $activation_satisfied,
 		 treatment_runner_status: $treatment_run_status, control_runner_status: $control_run_status,
