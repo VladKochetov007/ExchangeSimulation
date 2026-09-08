@@ -1485,3 +1485,30 @@ occurred, so no historical simulator rerun is indicated. The performance feed
 was fetched again and remains unchanged after last-reviewed `b1847ac`; no
 performance code was imported. A fresh exact-tree independent Sol-xhigh review
 is required before pinned builds or seed-643 activation.
+
+## Append-only operational update: Bacon checkpoint-validator promotion rejection and repair — 2026-09-08
+
+Independent Sol-xhigh reviewer `Bacon` reviewed exact scientific HEAD
+`afbbdbe0a16750704f28828cd190e3d172ab0979` and **REJECTED** promotion. The
+review found that `V2_R2_CHECKPOINT_GO` could select an arbitrary executable,
+so `/bin/true` could make strict checkpoint validation succeed without parsing
+the stream. It also found that the exact validator was not wired into the
+capacity probe, shared capacity revalidation, or the registered 24-hour runner,
+and that `go run` was not a provenance-pinned executable boundary.
+
+This was a protocol fail-open defect, not a simulator or economic result, and
+no SV1B activation, capacity, development, freeze, or holdout run had occurred.
+Scientific commit `8fbb725` removes the override and `go run`, registers only a
+canonical `exchange_sim/cmd/checkpointvalidate` Go 1.27.0 binary, rechecks its
+revision/build metadata/SHA-256 at each invocation, routes all SV1B production
+checkpoint paths through it, and binds its identity into arm, pair, capacity,
+and run metadata. Commit `66206cb` adds a regression proving the override and
+unregistered-validator paths fail closed.
+
+Clean terminal, activation, and integrated contract fixtures; focused
+`evstream`, `types`, `exchange`, and `multivenue` tests; full
+`GOMAXPROCS=2 make test`; `go vet ./...`; and the bounded targeted race suite
+pass at `66206cb`. The performance feed remains unchanged after `b1847ac`; no
+performance implementation was imported. A fresh exact-tree independent
+Sol-xhigh review is required before any pinned scientific build or seed-643
+activation.

@@ -1337,3 +1337,27 @@ remain untouched and predecessor R2 remains the archived negative control. The
 performance branch was fetched at this checkpoint and still has no commit
 after `b1847ac`; its binary prototype and `f153e12` analyzer work remain
 deferred. One fresh exact-tree Sol-xhigh review is required next.
+
+## Append-only operational update: Bacon checkpoint-validator promotion rejection and repair — 2026-09-08
+
+Independent Sol-xhigh reviewer `Bacon` rejected exact clean tree
+`afbbdbe0a16750704f28828cd190e3d172ab0979` before any successor run. The
+checkpoint helper trusted `V2_R2_CHECKPOINT_GO`, allowing an arbitrary absolute
+executable such as `/bin/true` to bypass strict parsing. The review also found
+legacy three-argument checkpoint calls in the capacity and 24-hour successor
+paths and no pinned executable/provenance identity for the `go run` validator.
+
+The defect was independently adjudicated as a fail-open measurement-boundary
+bug. It never activated in an SV1B experiment: activation, capacity,
+development, freeze, and holdouts `619`, `631`, and `641` remain untouched.
+Commit `8fbb725` removes the override, introduces immutable registration of a
+canonical Go 1.27.0 `checkpointvalidate` binary with package/revision/build
+metadata/SHA-256 checks, routes activation/capacity/cell/extraction validation
+through the registered binary, and binds its identity into all SV1B provenance
+surfaces. Commit `66206cb` adds an explicit bypass regression.
+
+Clean focused suites, full `GOMAXPROCS=2 make test`, `go vet ./...`, and the
+bounded targeted race suite pass at `66206cb`. No economic or historical
+artifact was changed. The performance branch remains reviewed through
+`b1847ac` with no new commit and no imported implementation. One fresh exact
+tree Sol-xhigh review is required before pinned builds or activation.

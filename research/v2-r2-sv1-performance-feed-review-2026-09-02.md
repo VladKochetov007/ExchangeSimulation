@@ -302,3 +302,23 @@ or holdout run occurred and no historical artifact was rewritten.
 The current successor remains closed at the fresh-review boundary: obtain one
 new exact-tree Sol-xhigh review of R2/CDF semantics, correctness hardening, and
 the binary evidence contract before pinned builds or activation.
+
+## Append-only feed checkpoint: Bacon rejection and pinned-validator repair — 2026-09-08
+
+The performance branch was fetched through unchanged marker `b1847ac`; no new
+performance commit was found and no performance implementation was imported.
+
+Independent Sol-xhigh reviewer `Bacon` rejected exact scientific tree
+`afbbdbe0a16750704f28828cd190e3d172ab0979`. The checkpoint helper allowed the
+environment-selected `V2_R2_CHECKPOINT_GO` executable, so `/bin/true` could
+bypass strict binary checkpoint validation. The exact helper was also absent
+from successor capacity/cell revalidation paths and used mutable `go run`.
+
+The scientific repair is `8fbb725`: a canonical, registered
+`cmd/checkpointvalidate` Go 1.27.0 binary is pinned by package, revision,
+reproducible-build metadata, and SHA-256, rechecked at every invocation;
+activation, capacity, 24-hour cell, and extraction paths use exact validation;
+and arm/pair/capacity/run provenance binds the validator identity. `66206cb`
+adds the direct override/unregistered-validator regression. Clean full tests,
+vet, focused suites, and targeted race checks pass at `66206cb`. No SV1B or
+holdout run occurred; a new exact-tree Sol-xhigh review remains required.
