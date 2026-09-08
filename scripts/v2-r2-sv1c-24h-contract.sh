@@ -495,7 +495,7 @@ v2_r2_sv1c_require_activation_arm_artifacts() {
 	v2_r2_sv1c_require_checkpoint_attestation_binding "$arm_dir/checkpoints.jsonl" "$arm_dir/binary-evidence-attestation.json" || return 1
 	jq -e '
 		type == "object" and .domain == "canonical_binary_execution_frames" and .ordering == "ordered_stream" and
-		.hashing == "route_sequence_neutral_v1" and (.event_frames | type) == "number" and (.event_frames | floor) == .event_frames and .event_frames > 0 and
+		.hashing == "route_and_global_sequence_neutral_v2" and (.event_frames | type) == "number" and (.event_frames | floor) == .event_frames and .event_frames > 0 and
 		(.stream_frames | type) == "number" and (.stream_frames | floor) == .stream_frames and .stream_frames >= .event_frames and
 		(.execution_stream_hash | type) == "string" and (.execution_stream_hash | test("^[0-9a-f]{64}$")) and
 		(.canonical_execution_stream_hash | type) == "string" and (.canonical_execution_stream_hash | test("^[0-9a-f]{64}$")) and
@@ -537,7 +537,8 @@ v2_r2_sv1c_require_terminal_arm_reconstruction() {
 		(.routes | type) == "number" and .routes > 0 and
 		.route_compression == "none" and
 		.execution_stream_hash == $attestation[0].execution_stream_hash and
-		.canonical_execution_stream_hash == $attestation[0].canonical_execution_stream_hash' \
+		.canonical_execution_stream_hash == $attestation[0].canonical_execution_stream_hash and
+		(.canonical_full_evidence_hash | type) == "string" and (.canonical_full_evidence_hash | test("^[0-9a-f]{64}$"))' \
 		"$report_path" >/dev/null; then
 		rm -rf -- "$render_root"
 		return 1

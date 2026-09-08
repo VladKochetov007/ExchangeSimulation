@@ -447,15 +447,16 @@ if [[ "$extractor_variant" == sv1 ]]; then
 fi
 
 if [[ "$evidence_format" == "evstream_v3" ]]; then
-	jq -e '.domain == "canonical_binary_execution_frames" and .ordering == "ordered_stream" and
-		 .hashing == "route_sequence_neutral_v1" and
-		 (.event_frames | type) == "number" and .event_frames > 0 and
-		 (.stream_frames | type) == "number" and .stream_frames >= .event_frames and
-		 (.execution_stream_hash | test("^[0-9a-f]{64}$")) and
-		 (.canonical_execution_stream_hash | type) == "string" and
-		 (.canonical_execution_stream_hash | test("^[0-9a-f]{64}$")) and
-		 (.unencodable_payloads // 0) == 0' \
-		"$cell/binary-evidence-attestation.json" >/dev/null || fail "invalid runtime binary evidence attestation"
+	binary_hashing=$(jq -er '
+		select(.domain == "canonical_binary_execution_frames" and .ordering == "ordered_stream" and
+			(.hashing == "route_sequence_neutral_v1" or .hashing == "route_and_global_sequence_neutral_v2") and
+			(.event_frames | type) == "number" and .event_frames > 0 and
+			(.stream_frames | type) == "number" and .stream_frames >= .event_frames and
+			(.execution_stream_hash | test("^[0-9a-f]{64}$")) and
+			(.canonical_execution_stream_hash | type) == "string" and
+			(.canonical_execution_stream_hash | test("^[0-9a-f]{64}$")) and
+			((.unencodable_payloads // 0) == 0)) | .hashing' \
+		"$cell/binary-evidence-attestation.json") || fail "invalid runtime binary evidence attestation"
 else
 	jq -e '.domain == "persisted_json_records" and .ordering == "unordered_multiset" and
 		 (.events | type) == "number" and .events > 0 and (.digest | test("^[0-9a-f]{64}$"))' \
@@ -572,7 +573,8 @@ write_terminal_failure_artifacts() {
 			--arg canonical_hash "$(jq -er '.canonical_execution_stream_hash' "$cell/binary-evidence-attestation.json")" \
 			--argjson event_frames "$(jq -er '.event_frames' "$cell/binary-evidence-attestation.json")" \
 			--argjson stream_frames "$(jq -er '.stream_frames' "$cell/binary-evidence-attestation.json")" \
-			'{schema_version: 1, result: {domain: "canonical_binary_execution_frames", ordering: "ordered_stream", hashing: "route_sequence_neutral_v1",
+			--arg hashing "$binary_hashing" \
+			'{schema_version: 1, result: {domain: "canonical_binary_execution_frames", ordering: "ordered_stream", hashing: $hashing,
 			 event_frames: $event_frames, stream_frames: $stream_frames, execution_stream_hash: $execution_hash,
 			 canonical_execution_stream_hash: $canonical_hash,
 			 status: "TERMINAL_FAILURE_DIAGNOSTIC"}}' >"$temporary"
@@ -1090,6 +1092,7 @@ if [[ "$evidence_format" == "evstream_v3" ]]; then
 	runtime_events=$(jq -er '.event_frames' "$cell/binary-evidence-attestation.json")
 	runtime_digest=$(jq -er '.execution_stream_hash' "$cell/binary-evidence-attestation.json")
 	runtime_canonical_digest=$(jq -er '.canonical_execution_stream_hash' "$cell/binary-evidence-attestation.json")
+	runtime_binary_hashing=$(jq -er '.hashing' "$cell/binary-evidence-attestation.json")
 	jq -e --arg execution_hash "$runtime_digest" --argjson event_frames "$runtime_events" \
 		'.result.domain == "rendered_binary_json_records" and .result.ordering == "venue_sequence_reconstructed" and
 		 .result.source_execution_stream_hash == $execution_hash and .result.source_binary_event_frames == $event_frames' \
@@ -1107,8 +1110,8 @@ else
 		"$analysis_dir/evidenceartifacthash.json" >/dev/null || fail "offline evidence hash domain mismatch"
 fi
 	if [[ "$terminal_failure" == true ]]; then
-		jq -e '.result.domain == "canonical_binary_execution_frames" and .result.ordering == "ordered_stream" and
-			.result.hashing == "route_sequence_neutral_v1" and
+		jq -e --arg hashing "$runtime_binary_hashing" '.result.domain == "canonical_binary_execution_frames" and .result.ordering == "ordered_stream" and
+			.result.hashing == $hashing and
 			(.result.event_frames | type) == "number" and (.result.stream_frames | type) == "number" and
 			(.result.execution_stream_hash | test("^[0-9a-f]{64}$")) and
 			(.result.canonical_execution_stream_hash | test("^[0-9a-f]{64}$"))' \
