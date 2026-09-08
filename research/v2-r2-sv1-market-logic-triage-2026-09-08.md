@@ -214,6 +214,50 @@ The performance-port fingerprint optimization, binary prototype, and indexed
 analytics work remain deferred. The next asynchronous feed comparison starts
 from `b1847ac40e8b7483e6e8a3f94b3705b4058884b`.
 
+## Independent review checkpoint: Euler rejection of exact current tree — 2026-09-08
+
+After the mechanical gate completed on the exact scientific revision, fresh
+independent Sol-xhigh reviewer `Euler` inspected the predecessor review tree
+`498a476071b505b5f5033ebb36d9b79c513451e8` (the source tree was unchanged by
+the later documentation-only checkpoint) and rejected full SV1B promotion.
+The reviewer response is retained in the orchestration record, but no local
+report file or SHA was materialized. It has no acceptance attestation; its
+review is a blocking negative gate and cannot be reused as a promotion
+artifact.
+
+The review identifies the following concrete pre-activation concerns:
+
+* RT-002: unequal option expiry positions can leave a book-level quote-unit
+  residual because payoff is truncated per position; the accounting contract
+  must explicitly route or otherwise account for this residual before a
+  24-hour candidate can claim exact conservation.
+* RT-011: cross-margin risk is aggregated across books while the liquidation
+  action is trigger-symbol scoped; the successor must define and test the
+  action invariant, or fail closed on a policy it cannot justify.
+* RT-014: per-minute collateral interest floors without a carried fractional
+  remainder. Euler reports this can activate in the current auto-borrow path,
+  so a successor must either carry the remainder with auditable state or
+  explicitly narrow the registered financing claim.
+* RT-015/016: the borrow gate values wallet/oracle collateral rather than a
+  risk-coherent unencumbered portfolio, and CDF collateral uses a static
+  price source. The successor must inject an explicit collateral policy,
+  exclude dynamic CDF collateral, or provide a reviewed coherent valuation;
+  this cannot remain an unstated leverage rule.
+* RT-018: borrowed spot debt has no complete account-risk enforcement entry
+  point. The successor must guard or reject undercollateralized spot debt, or
+  prove the registered population cannot enter that state.
+
+RT-005 (wallet segregation), RT-012 (pending exposure fail-closed), and
+RT-055/056 (conditional option-maker behavior) remain specification or
+participant-behavior matters, but their policy boundaries must be stated in
+the successor contract. No new world ran at the rejected tree, and no
+holdout was inspected. The prior invalid seed-643 attempt remains preserved.
+
+The current full test/vet/focused gate is green. It does not promote the
+candidate: the review rejection blocks the pinned rebuild and activation until
+the concrete economic invariants above are preregistered, regression-tested,
+implemented where required, and accepted by a new exact-tree review.
+
 ## Independent review record
 
 Sol-xhigh reviewer Zeno independently rejected the exact pre-repair tree

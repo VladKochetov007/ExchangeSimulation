@@ -1616,6 +1616,29 @@ test-duration limitation, not a broad race pass. A fresh exact-tree independent
 Sol-xhigh review is required before rebuilding binaries or retrying seed 643.
 Holdouts `619`, `631`, and `641` remain untouched.
 
+## Append-only operational update: Euler exact-tree market-logic rejection — 2026-09-08
+
+The post-repair mechanical gate completed successfully on the current source
+tree: clean `make test`, `go vet ./...`, and focused `evstream`, `types`,
+`exchange`, and `simulations/multivenue` suites passed under the bounded
+two-core profile. Fresh independent Sol-xhigh reviewer `Euler` nevertheless
+rejected promotion of the exact predecessor tree `498a476`. The reviewer
+response is retained in the orchestration record, but no local report file or
+SHA was materialized, so it is a blocking review signal rather than a reusable
+promotion artifact.
+
+The rejection reopens the scientific semantic gate for RT-002 option-expiry
+rounding, RT-011 cross-margin liquidation scope, RT-014 fractional financing
+accrual, RT-015 borrow collateral valuation, RT-016 static CDF collateral, and
+RT-018 borrowed-spot debt enforcement. These are now blocking successor
+contract items, not reasons to run a world or consume a holdout. They will be
+specified, minimally repaired or explicitly guarded, regression-tested, and
+reviewed again on the exact resulting tree. The R2 calendar and finite CDF
+supplier semantics remain unchanged; historical evidence remains immutable.
+
+No pinned build, activation, capacity, development, freeze, or holdout world
+has run after this review. Holdouts `619`, `631`, and `641` remain untouched.
+
 ## Append-only operational update: nonactivation provenance self-validation repair — 2026-09-08
 
 Fresh independent Sol-xhigh reviewer `Euler` inspected exact clean tree

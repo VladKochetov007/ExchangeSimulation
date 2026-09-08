@@ -1088,6 +1088,25 @@ freeze, or holdout execution is authorized. Next are `go vet`, bounded targeted
 race/evidence/determinism checks, and one fresh independent Sol-xhigh review.
 Holdouts `619`, `631`, and `641` remain untouched.
 
+## Append-only operational update: current exact-tree review is rejected — 2026-09-08
+
+The clean post-repair mechanical gate passed (`make test`, `go vet ./...`, and
+the focused evidence/exchange/multivenue suites under the two-core resource
+profile). Independent Sol-xhigh reviewer `Euler` then rejected promotion of
+the exact source predecessor `498a476`. The reviewer response is retained in
+the orchestration record, but no local report file or SHA was materialized, so
+it is a blocking review signal rather than a reusable promotion artifact.
+
+The blocking review concerns are RT-002 option-expiry residual accounting,
+RT-011 trigger-symbol-scoped action under cross-margin risk, RT-014 interest
+remainder loss, RT-015 incomplete borrow collateral valuation, RT-016 static
+CDF collateral policy, and RT-018 missing borrowed-spot risk enforcement.
+They must be resolved as explicit successor semantics or guarded by a
+precommitted proof before the next pinned build. This is a promotion-boundary
+state update; it does not invalidate or rewrite historical results and does
+not authorize any development or holdout execution. The R2 calendar/lifecycle
+and finite CDF supplier design remain preserved.
+
 ## Append-only operational update: activation preflight caught noncanonical configs — 2026-09-08
 
 On exact tree `07b394b`, the correctly parameterized activation runner stopped
