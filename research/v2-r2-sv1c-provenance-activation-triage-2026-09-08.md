@@ -171,3 +171,25 @@ No auxiliary implementation was imported, binary evidence remains a separate
 promotion candidate, and no evidence or holdout was consumed. The candidate is
 still awaiting a fresh exact-tree independent Sol-xhigh review before any
 activation authorization.
+
+## Append-only update: clean normalizer provenance gate — 2026-09-08
+
+The stale normalizer registration was refreshed in commit
+`188e8727fb8e14a55cf2964a2c8448c9a523850f` without changing any registered
+configuration bytes. The registration now names source revision
+`40929831eb023d2c991417a726d5b42adc672fe5` and normalizer digest
+`0a77f7a1e0d68c6e8e1c6152195f2d9e77c90f9300fd0a20a7e2665ec507b0d4`.
+Two clean Go 1.27 builds from that exact ancestor reproduced the digest and
+reported `vcs.modified=false`.
+
+The subsequent clean full `make test` gate completed with status zero. All Go
+packages, integrated-long-run, R2, SV1 activation, SV1B terminal-failure,
+SV1C strict-risk/provenance, survival, paired-survival, and archive contracts
+passed. The deliberate corruption/mutation fixtures emitted expected rejection
+diagnostics and did not count as failures. No successor world, activation
+probe, capacity run, freeze decision, or holdout was executed.
+
+The exact candidate is now mechanically ready for one fresh independent
+Sol-xhigh review. The review must assess the complete tree, including R2
+calendar semantics, risk/funding/expiry hardening, forced-fill identity, the
+finite CDF supplier, and the unchanged JSON/evstream evidence contract.
