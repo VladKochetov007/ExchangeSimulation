@@ -188,7 +188,7 @@ jq -n \
 	 preregistration: {path: $preregistration_path, sha256: $preregistration_hash},
 	 capacity_ordering: {path: $capacity_order_path, sha256: $capacity_order_hash},
 		 capacity_calibration: {
-			 contract: "v2-r2-sv1b-24h-binary-capacity-v4",
+				contract: "v2-r2-sv1b-24h-binary-capacity-v5",
 				 mode: "production_capacity_measurement",
 				 calibration_only: true,
 				 cpu_limit_percent: 90,
