@@ -59,6 +59,7 @@ func lifecycleStrictLiquidationLine(ts int64, venue string, clientID uint64, sym
 
 func openStrictLifecycleRun(t *testing.T, lines []string) *Run {
 	t.Helper()
+	lines = addStrictGlobalSequences(lines)
 	dir := writeRun(t, Report{}, map[string][]string{
 		"north/derivatives/ABC-PERP.jsonl": lines,
 	})
@@ -70,6 +71,14 @@ func openStrictLifecycleRun(t *testing.T, lines []string) *Run {
 		t.Fatalf("open strict run: %v", err)
 	}
 	return run
+}
+
+func addStrictGlobalSequences(lines []string) []string {
+	sequenced := make([]string, len(lines))
+	for index, line := range lines {
+		sequenced[index] = strings.Replace(line, `{"sim_ts":`, fmt.Sprintf(`{"event_seq":%d,"sim_ts":`, index+1), 1)
+	}
+	return sequenced
 }
 
 func strictTradeLifecycleLines(tradeTimestamp int64) []string {
@@ -247,36 +256,17 @@ func TestOrderLifecycleSuccessorRequiresExplicitForcedMarker(t *testing.T) {
 	strictReceipt := lifecycleStrictLiquidationLine(instant, "north", 7, "ABC-PERP", "BOTH", 1, 99, -10, 10, 10, 0)
 	makeRun := func(t *testing.T, fill string) *Run {
 		t.Helper()
-		dir := writeRun(t, Report{}, map[string][]string{
-			"north/derivatives/ABC-PERP.jsonl": {fill, strictReceipt},
-		})
-		if err := os.WriteFile(filepath.Join(dir, "run-config.json"), []byte(`{"evidence_format":"evstream_v3"}`), 0o644); err != nil {
-			t.Fatalf("write successor descriptor: %v", err)
-		}
-		run, err := Open(dir)
-		if err != nil {
-			t.Fatalf("open successor: %v", err)
-		}
-		return run
+		return openStrictLifecycleRun(t, []string{fill, strictReceipt})
 	}
 
 	strictFill := lifecycleStrictForcedFillLine(instant, "north", 7, 99, "ABC-PERP", "BUY", "BOTH", 10, 10, 0, true, 1)
-	strictDir := writeRun(t, Report{}, map[string][]string{
-		"north/derivatives/ABC-PERP.jsonl": {
-			lifecycleTradeLine(instant-2, "north", 1, 100, 10, "BUY", 99, 100),
-			lifecycleAcceptedLine(instant-1, "north", 8, 100, "LIMIT", "GTC", 10),
-			strictFill,
-			lifecycleStrictFillLine(instant, "north", 8, 100, "ABC-PERP", "SELL", "BOTH", 10, 10, 0, true, 1, "maker", false, 0),
-			strictReceipt,
-		},
+	strictRun := openStrictLifecycleRun(t, []string{
+		lifecycleAcceptedLine(instant-2, "north", 8, 100, "LIMIT", "GTC", 10),
+		lifecycleTradeLine(instant-1, "north", 1, 100, 10, "BUY", 99, 100),
+		strictFill,
+		lifecycleStrictFillLine(instant, "north", 8, 100, "ABC-PERP", "SELL", "BOTH", 10, 10, 0, true, 1, "maker", false, 0),
+		strictReceipt,
 	})
-	if err := os.WriteFile(filepath.Join(strictDir, "run-config.json"), []byte(`{"evidence_format":"evstream_v3"}`), 0o644); err != nil {
-		t.Fatalf("write strict descriptor: %v", err)
-	}
-	strictRun, err := Open(strictDir)
-	if err != nil {
-		t.Fatalf("open strict run: %v", err)
-	}
 	forced, err := strictRun.MeasureOrderLifecycle()
 	if err != nil {
 		t.Fatalf("measure forced successor fill: %v", err)
@@ -295,22 +285,13 @@ func TestOrderLifecycleSuccessorRequiresExplicitForcedMarker(t *testing.T) {
 
 func TestOrderLifecycleRejectsForcedIdentityOnAcceptedOrder(t *testing.T) {
 	const instant = int64(1_000_000_000)
-	dir := writeRun(t, Report{}, map[string][]string{
-		"north/derivatives/ABC-PERP.jsonl": {
-			lifecycleTradeLine(instant-2, "north", 1, 100, 10, "BUY", 99, 100),
-			lifecycleAcceptedLine(instant-1, "north", 7, 99, "LIMIT", "GTC", 10),
-			lifecycleAcceptedLine(instant-1, "north", 8, 100, "LIMIT", "GTC", 10),
-			lifecycleStrictForcedFillLine(instant, "north", 7, 99, "ABC-PERP", "BUY", "BOTH", 10, 10, 0, true, 1),
-			lifecycleStrictFillLine(instant, "north", 8, 100, "ABC-PERP", "SELL", "BOTH", 10, 10, 0, true, 1, "maker", false, 0),
-		},
+	run := openStrictLifecycleRun(t, []string{
+		lifecycleAcceptedLine(instant-2, "north", 7, 99, "LIMIT", "GTC", 10),
+		lifecycleAcceptedLine(instant-2, "north", 8, 100, "LIMIT", "GTC", 10),
+		lifecycleTradeLine(instant-1, "north", 1, 100, 10, "BUY", 99, 100),
+		lifecycleStrictForcedFillLine(instant, "north", 7, 99, "ABC-PERP", "BUY", "BOTH", 10, 10, 0, true, 1),
+		lifecycleStrictFillLine(instant, "north", 8, 100, "ABC-PERP", "SELL", "BOTH", 10, 10, 0, true, 1, "maker", false, 0),
 	})
-	if err := os.WriteFile(filepath.Join(dir, "run-config.json"), []byte(`{"evidence_format":"evstream_v3"}`), 0o644); err != nil {
-		t.Fatalf("write successor descriptor: %v", err)
-	}
-	run, err := Open(dir)
-	if err != nil {
-		t.Fatalf("open successor: %v", err)
-	}
 	result, err := run.MeasureOrderLifecycle()
 	if err != nil {
 		t.Fatalf("measure successor: %v", err)
@@ -322,18 +303,9 @@ func TestOrderLifecycleRejectsForcedIdentityOnAcceptedOrder(t *testing.T) {
 
 func TestOrderLifecycleCountsMissingForcedReceiptFill(t *testing.T) {
 	const instant = int64(1_000_000_000)
-	dir := writeRun(t, Report{}, map[string][]string{
-		"north/derivatives/ABC-PERP.jsonl": {
-			lifecycleStrictLiquidationLine(instant, "north", 7, "ABC-PERP", "BOTH", 1, 99, -10, 10, 10, 0),
-		},
+	run := openStrictLifecycleRun(t, []string{
+		lifecycleStrictLiquidationLine(instant, "north", 7, "ABC-PERP", "BOTH", 1, 99, -10, 10, 10, 0),
 	})
-	if err := os.WriteFile(filepath.Join(dir, "run-config.json"), []byte(`{"evidence_format":"evstream_v3"}`), 0o644); err != nil {
-		t.Fatalf("write successor descriptor: %v", err)
-	}
-	run, err := Open(dir)
-	if err != nil {
-		t.Fatalf("open successor: %v", err)
-	}
 	result, err := run.MeasureOrderLifecycle()
 	if err != nil {
 		t.Fatalf("measure successor: %v", err)
@@ -386,11 +358,11 @@ func TestOrderLifecycleStrictTradeMutationsFailClosed(t *testing.T) {
 			name: "fill_before_trade",
 			mutate: func(lines []string) []string {
 				mutated := append([]string{}, lines...)
-				mutated[2] = lifecycleTradeLine(5, "north", 7, 100, 10, "BUY", 99, 100)
+				mutated[2], mutated[3] = mutated[3], mutated[2]
 				return mutated
 			},
 			check: func(t *testing.T, result *OrderLifecycleAudit) {
-				if result.TradeCausalityFailures != 2 || result.TradeCompletenessFailures != 1 {
+				if result.TradeCausalityFailures != 1 || result.TradeCompletenessFailures != 1 {
 					t.Fatalf("causal mutation was not rejected: %+v", result)
 				}
 			},
@@ -424,8 +396,8 @@ func TestOrderLifecycleStrictTradeMutationsFailClosed(t *testing.T) {
 
 func TestOrderLifecycleStrictForcedReceiptMutationsFailClosed(t *testing.T) {
 	validLines := []string{
-		lifecycleTradeLine(1, "north", 1, 100, 10, "BUY", 99, 100),
-		lifecycleAcceptedLine(2, "north", 8, 100, "LIMIT", "GTC", 10),
+		lifecycleAcceptedLine(1, "north", 8, 100, "LIMIT", "GTC", 10),
+		lifecycleTradeLine(2, "north", 1, 100, 10, "BUY", 99, 100),
 		lifecycleStrictForcedFillLine(3, "north", 7, 99, "ABC-PERP", "BUY", "BOTH", 10, 10, 0, true, 1),
 		lifecycleStrictFillLine(3, "north", 8, 100, "ABC-PERP", "SELL", "BOTH", 10, 10, 0, true, 1, "maker", false, 0),
 		lifecycleStrictLiquidationLine(3, "north", 7, "ABC-PERP", "BOTH", 1, 99, -10, 10, 10, 0),

@@ -1,10 +1,10 @@
 package analysis
 
 // evidenceOrder identifies a persisted record well enough to establish
-// causality. Reconstructed binary evidence carries an optional global frame
-// sequence, which is authoritative whenever both records have it. Historical
-// JSON logs retain the timestamp/file/ordinal fallback because they have no
-// global order field.
+// causality. Reconstructed successor evidence carries an optional logical
+// global sequence, which is authoritative whenever both records have it.
+// Historical JSON logs retain the timestamp/file/ordinal fallback because they
+// have no global order field.
 type evidenceOrder struct {
 	timestamp      int64
 	file           string

@@ -1,7 +1,9 @@
 package analysis
 
 import (
+	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 
 	"exchange_sim/types"
@@ -37,17 +39,19 @@ type OrderLifecycleAudit struct {
 	ClientMismatches            int                   `json:"client_mismatches"`
 	MalformedAcceptedRecords    int                   `json:"malformed_accepted_records"`
 	MalformedFillRecords        int                   `json:"malformed_fill_records"`
-	MalformedTradeRecords       int                   `json:"malformed_trade_records"`
+	MalformedTradeRecords       int                   `json:"malformed_trade_records,omitempty"`
 	MalformedCancelRecords      int                   `json:"malformed_cancel_records"`
 	MalformedLiquidations       int                   `json:"malformed_liquidation_records"`
-	TradeRecords                int                   `json:"trade_records"`
-	DuplicateTradeRecords       int                   `json:"duplicate_trade_records"`
-	TradeIdentityFailures       int                   `json:"trade_identity_failures"`
-	TradeFieldMismatches        int                   `json:"trade_field_mismatches"`
-	TradeCausalityFailures      int                   `json:"trade_causality_failures"`
-	TradeCompletenessFailures   int                   `json:"trade_completeness_failures"`
-	ForcedNotionalMismatches    int                   `json:"forced_notional_mismatches"`
-	ForcedReceiptOrderFailures  int                   `json:"forced_receipt_order_failures"`
+	TradeRecords                int                   `json:"trade_records,omitempty"`
+	DuplicateTradeRecords       int                   `json:"duplicate_trade_records,omitempty"`
+	TradeIdentityFailures       int                   `json:"trade_identity_failures,omitempty"`
+	TradeFieldMismatches        int                   `json:"trade_field_mismatches,omitempty"`
+	TradeCausalityFailures      int                   `json:"trade_causality_failures,omitempty"`
+	AcceptanceCausalityFailures int                   `json:"acceptance_causality_failures,omitempty"`
+	TradeCompletenessFailures   int                   `json:"trade_completeness_failures,omitempty"`
+	ForcedNotionalMismatches    int                   `json:"forced_notional_mismatches,omitempty"`
+	ForcedReceiptOrderFailures  int                   `json:"forced_receipt_order_failures,omitempty"`
+	GlobalSequenceFailures      int                   `json:"global_sequence_failures,omitempty"`
 	Checks                      []OrderLifecycleCheck `json:"checks,omitempty"`
 }
 
@@ -70,6 +74,7 @@ type orderLifecycleKey struct {
 }
 
 type orderLifecycleState struct {
+	order     evidenceOrder
 	clientID  uint64
 	quantity  int64
 	filled    int64
@@ -213,6 +218,7 @@ func (r *Run) MeasureOrderLifecycle() (*OrderLifecycleAudit, error) {
 	states := make(map[orderLifecycleKey]*orderLifecycleState)
 	liquidations := make(map[orderLifecycleLiquidationKey]orderLifecycleLiquidationReceipt)
 	trades := make(map[orderLifecycleTradeKey]orderLifecycleTrade)
+	globalSequences := make(map[uint64]struct{})
 	strictFills := make([]orderLifecycleFill, 0)
 	unknownFills := make([]orderLifecycleUnknownFill, 0)
 	var mu sync.Mutex
@@ -228,6 +234,9 @@ func (r *Run) MeasureOrderLifecycle() (*OrderLifecycleAudit, error) {
 		}
 		result.Checks = append(result.Checks, OrderLifecycleCheck{VenueID: key.venueID, File: key.file, OrderID: key.orderID, Failure: failure})
 	}
+	validPositionSide := func(positionSide string) bool {
+		return positionSide == "BOTH" || positionSide == "LONG" || positionSide == "SHORT"
+	}
 
 	// Lifecycle state is order-sensitive within each book. A single worker
 	// preserves file order; the file component of the key still prevents
@@ -236,6 +245,17 @@ func (r *Run) MeasureOrderLifecycle() (*OrderLifecycleAudit, error) {
 	if err := r.Scan(scan, func(event Event) {
 		mu.Lock()
 		defer mu.Unlock()
+		if r.strictLifecycleIdentity {
+			if event.GlobalSequence == 0 {
+				result.GlobalSequenceFailures++
+				addFailure(orderLifecycleKey{venueID: event.VenueID, file: event.File}, nil, "missing_global_event_sequence")
+			} else if _, exists := globalSequences[event.GlobalSequence]; exists {
+				result.GlobalSequenceFailures++
+				addFailure(orderLifecycleKey{venueID: event.VenueID, file: event.File}, nil, "duplicate_global_event_sequence")
+			} else {
+				globalSequences[event.GlobalSequence] = struct{}{}
+			}
+		}
 		switch event.Name {
 		case "OrderAccepted":
 			var payload acceptedPayload
@@ -254,6 +274,7 @@ func (r *Run) MeasureOrderLifecycle() (*OrderLifecycleAudit, error) {
 				clientID = event.ClientID
 			}
 			states[key] = &orderLifecycleState{
+				order:     eventEvidenceOrder(event),
 				clientID:  clientID,
 				quantity:  payload.Qty,
 				immediate: payload.Type != "LIMIT" || payload.TimeInForce != "GTC",
@@ -270,8 +291,12 @@ func (r *Run) MeasureOrderLifecycle() (*OrderLifecycleAudit, error) {
 				identityPresent = decodeRequiredJSON(event.Raw(), &payload,
 					"order_id", "symbol", "qty", "filled_qty", "remaining_qty", "is_full",
 					"trade_id", "price", "side", "role", "position_side") == nil
-				if payload.Symbol == "" || payload.Side != "BUY" && payload.Side != "SELL" ||
-					payload.Role != "taker" && payload.Role != "maker" || payload.PositionSide == "" {
+				routedSymbol := event.Symbol
+				if routedSymbol == "" {
+					routedSymbol = lifecycleRouteSymbol(event.File)
+				}
+				if payload.Symbol == "" || (routedSymbol != "" && payload.Symbol != routedSymbol) || payload.Side != "BUY" && payload.Side != "SELL" ||
+					payload.Role != "taker" && payload.Role != "maker" || !validPositionSide(payload.PositionSide) || payload.Price == 0 {
 					identityPresent = false
 				}
 				if !identityPresent {
@@ -477,6 +502,10 @@ func (r *Run) MeasureOrderLifecycle() (*OrderLifecycleAudit, error) {
 				result.TradeCausalityFailures++
 				addFailure(fill.key, state, "fill_before_trade")
 			}
+			if state != nil && !evidenceAfter(trade.order, state.order) {
+				result.AcceptanceCausalityFailures++
+				addFailure(fill.key, state, "trade_before_acceptance")
+			}
 			fieldsMatch := fill.quantity == trade.quantity && fill.price == trade.price
 			if !fieldsMatch {
 				result.TradeFieldMismatches++
@@ -523,7 +552,7 @@ func (r *Run) MeasureOrderLifecycle() (*OrderLifecycleAudit, error) {
 		}
 		groups := make(map[orderLifecycleLiquidationKey]*forcedFillGroup)
 		for _, unknown := range unknownFills {
-			if !unknown.identityPresent || unknown.forced == nil || !*unknown.forced || unknown.liquidationID == nil || *unknown.liquidationID == 0 || unknown.symbol == "" || unknown.positionSide == "" || unknown.side == "" {
+			if !unknown.identityPresent || unknown.forced == nil || !*unknown.forced || unknown.liquidationID == nil || *unknown.liquidationID == 0 || unknown.symbol == "" || !validPositionSide(unknown.positionSide) || unknown.side == "" {
 				result.UnlinkedFills++
 				result.LiquidationIdentityFailures++
 				addFailure(unknown.key, nil, "fill_without_exact_liquidation_identity")
@@ -655,4 +684,18 @@ func (r *Run) MeasureOrderLifecycle() (*OrderLifecycleAudit, error) {
 		return result.Checks[i].Failure < result.Checks[j].Failure
 	})
 	return result, nil
+}
+
+func lifecycleRouteSymbol(path string) string {
+	base := filepath.Base(path)
+	base = strings.TrimSuffix(base, filepath.Ext(base))
+	if base == "" || base == "general" || base == "derivatives" {
+		return ""
+	}
+	if strings.Contains(filepath.ToSlash(path), "/spot/") {
+		if separator := strings.IndexByte(base, '-'); separator > 0 {
+			return base[:separator] + "/" + base[separator+1:]
+		}
+	}
+	return base
 }

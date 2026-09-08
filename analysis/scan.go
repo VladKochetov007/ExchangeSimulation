@@ -26,8 +26,8 @@ type Event struct {
 	// Sequence is the venue-wide persisted event sequence. It is distinct from
 	// Ordinal, which is only the physical line position in one routed file.
 	Sequence uint64
-	// GlobalSequence is the evstream frame sequence when this record was
-	// reconstructed from canonical binary evidence. It is optional for
+	// GlobalSequence is the logical persisted-event sequence when this record
+	// was reconstructed from successor binary evidence. It is optional for
 	// historical JSON logs and is distinct from the venue-local Sequence.
 	GlobalSequence uint64
 	// Ordinal is the one-based physical record position in File. It permits
