@@ -17,9 +17,12 @@ v2_r2_sv1_contract_path="scripts/v2-r2-sv1c-24h-contract.sh"
 v2_r2_sv1_contract_loader_path="scripts/v2-r2-sv1-contract-loader.sh"
 v2_r2_sv1_config_normalizer_path="bin/multivenue"
 v2_r2_sv1_config_normalizer_package="exchange_sim/cmd/multivenue"
+v2_r2_sv1_config_normalizer_registration_path="research/v2-r2-sv1c-24h-config-normalizer-registration.json"
+v2_r2_sv1_config_normalizer_registration_contract="v2-r2-sv1c-24h-config-normalizer-registration-v1"
 v2_r2_sv1_contract_dependency_paths=(
 	scripts/v2-r2-sv1-24h-contract.sh
 	scripts/v2-integrated-longrun-r2-contract.sh
+	scripts/v2-r2-sv1-terminal-outcome.jq
 )
 v2_r2_sv1_withdrawal_measurement_path="research/v2-r2-sv1c-withdrawal-measurement-amendment-2026-09-08.md"
 v2_r2_sv1_activation_diagnostics_path="research/v2-r2-sv1c-activation-diagnostics-amendment-2026-09-08.md"
@@ -36,7 +39,7 @@ v2_r2_sv1_completion_sentinels='["greeks.json", "latency.json", "terminal-outcom
 v2_r2_sv1_require_positive_loss_budget=true
 v2_r2_sv1_require_no_replacement_withdrawal=true
 v2_r2_sv1_experiment_prefix="v2-r2-sv1c-24h"
-v2_r2_sv1_config_provenance_contract="v2-r2-sv1c-24h-config-provenance-v3"
+v2_r2_sv1_config_provenance_contract="v2-r2-sv1c-24h-config-provenance-v5"
 v2_r2_sv1_config_dir="$root_dir/research/configs/v2-r2-sv1c-24h"
 v2_r2_sv1_config_provenance_manifest="$root_dir/research/v2-r2-sv1c-24h-config-provenance.json"
 v2_r2_sv1_seeds=(643 647 653)
@@ -144,26 +147,83 @@ v2_r2_sv1c_binary_metadata_value() {
 		}' <<<"$metadata"
 }
 
+v2_r2_sv1c_sha256_file() {
+	[[ $# -eq 1 ]] || return 1
+	local file=$1 checksum digest
+	[[ -f "$file" && ! -L "$file" ]] || return 1
+	checksum=$(sha256sum -- "$file") || return 1
+	digest=${checksum%% *}
+	[[ "$digest" =~ ^[0-9a-f]{64}$ ]] || return 1
+	printf '%s\n' "$digest"
+}
+
+v2_r2_sv1c_require_normalizer_registration() {
+	[[ $# -eq 2 ]] || return 1
+	local root_dir=$1 registration=$2 registration_relative working_blob committed_blob status_output
+	registration_relative="$v2_r2_sv1_config_normalizer_registration_path"
+	[[ "$registration" == "$root_dir/$registration_relative" ]] || return 1
+	[[ "$registration" == /* && "$registration" != */ && "$registration" != *$'\n'* && "$registration" != *$'\t'* ]] || return 1
+	[[ -s "$registration" && ! -L "$registration" && "$(realpath -e -- "$registration")" == "$registration" ]] || return 1
+	git -C "$root_dir" diff --quiet HEAD -- "$registration_relative" || return 1
+	git -C "$root_dir" diff --cached --quiet -- "$registration_relative" || return 1
+	status_output=$(git -C "$root_dir" status --porcelain=v1 --untracked-files=all --ignored -- "$registration_relative") || return 1
+	[[ -z "$status_output" ]] || return 1
+	working_blob=$(git -C "$root_dir" hash-object -- "$registration") || return 1
+	committed_blob=$(git -C "$root_dir" rev-parse "HEAD:$registration_relative") || return 1
+	[[ "$working_blob" == "$committed_blob" ]] || return 1
+	jq -e \
+		--arg contract "$v2_r2_sv1_config_normalizer_registration_contract" \
+		--arg candidate "$v2_r2_sv1_candidate_id" \
+		--arg path "$v2_r2_sv1_config_normalizer_path" \
+		--arg package "$v2_r2_sv1_config_normalizer_package" '
+		keys == ["build", "build_command", "candidate", "clean_reproduction", "contract", "go_version", "module", "package", "path", "schema_version", "sha256", "source_revision"] and
+		.schema_version == 1 and .contract == $contract and .candidate == $candidate and
+		.path == $path and (.sha256 | type == "string" and test("^[0-9a-f]{64}$")) and
+		(.source_revision | type == "string" and test("^[0-9a-f]{40}$")) and
+		.go_version == "go1.27.0" and .package == $package and .module == "exchange_sim" and
+		(.build | keys == ["buildmode", "cgo_enabled", "compiler", "goamd64", "goarch", "goos", "trimpath", "vcs", "vcs_modified"] and
+			.buildmode == "exe" and .compiler == "gc" and .trimpath == true and .cgo_enabled == "0" and
+			.goos == "linux" and .goarch == "amd64" and .goamd64 == "v1" and
+			.vcs == "git" and .vcs_modified == false) and
+		.build_command == "CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOAMD64=v1 GOTOOLCHAIN=local go build -trimpath -buildvcs=true -o bin/multivenue ./cmd/multivenue" and
+		(.clean_reproduction | type == "string" and length > 0)' \
+		"$registration" >/dev/null
+}
+
 v2_r2_sv1c_require_normalizer_source_revision() {
 	[[ $# -eq 2 ]] || return 1
-	local root_dir=$1 normalizer_revision=$2 current_revision
+	local root_dir=$1 normalizer_revision=$2 current_revision go_work status_output
+	local -a source_pathspecs=(
+		'*.go' '*.s' '*.S' '*.asm' '*.syso' '*.c' '*.h' '*.cc' '*.cpp' '*.cxx' '*.m' '*.mm'
+		'go.mod' 'go.sum' 'go.work' 'go.work.sum' 'vendor/**' 'vendor/modules.txt'
+	)
 	[[ -e "$root_dir/.git" && "$normalizer_revision" =~ ^[0-9a-f]{40}$ ]] || return 1
 	current_revision=$(git -C "$root_dir" rev-parse HEAD) || return 1
 	[[ "$current_revision" =~ ^[0-9a-f]{40}$ ]] || return 1
 	git -C "$root_dir" cat-file -e "$normalizer_revision^{commit}" || return 1
 	git -C "$root_dir" merge-base --is-ancestor "$normalizer_revision" "$current_revision" || return 1
-	# A normalizer built from an ancestor remains valid only when no Go or
-	# module input changed between that build and the manifest's current tree.
-	git -C "$root_dir" diff --quiet "$normalizer_revision" "$current_revision" -- '*.go' 'go.mod' 'go.sum' || return 1
-	git -C "$root_dir" diff --quiet "$current_revision" -- '*.go' 'go.mod' 'go.sum' || return 1
-	git -C "$root_dir" diff --cached --quiet -- '*.go' 'go.mod' 'go.sum' || return 1
-	[[ -z "$(git -C "$root_dir" status --porcelain --untracked-files=all -- '*.go' 'go.mod' 'go.sum')" ]] || return 1
+	# Keep the source closure conservative: any build-relevant tracked file
+	# change requires a fresh registered build, while unrelated documentation
+	# commits remain allowed after the binary is registered.
+	git -C "$root_dir" diff --quiet "$normalizer_revision" "$current_revision" -- "${source_pathspecs[@]}" || return 1
+	git -C "$root_dir" diff --quiet "$current_revision" -- "${source_pathspecs[@]}" || return 1
+	git -C "$root_dir" diff --cached --quiet -- "${source_pathspecs[@]}" || return 1
+	status_output=$(git -C "$root_dir" status --porcelain=v1 --untracked-files=all --ignored -- "${source_pathspecs[@]}") || return 1
+	[[ -z "$status_output" ]] || return 1
+	go_work=$(cd -- "$root_dir" && go env GOWORK) || return 1
+	[[ -z "$go_work" || "$go_work" == off ]] || return 1
+	command -v rg >/dev/null 2>&1 || return 1
+	if rg --hidden --glob '!.git/**' --glob '*.go' -n '^[[:space:]]*//go:embed([[:space:]]|$)' "$root_dir" >/dev/null 2>&1; then
+		return 1
+	else
+		[[ $? -eq 1 ]] || return 1
+	fi
 }
 
 v2_r2_sv1c_require_pinned_binary() {
 	[[ $# -eq 4 ]] || return 1
 	local binary=$1 expected_revision=$2 expected_sha256=$3 expected_package=$4
-	local metadata go_version package_path module_path
+	local metadata go_version package_path module_path actual_sha256
 	local buildmode compiler trimpath cgo_enabled goos goarch goamd64 vcs vcs_revision vcs_modified
 	[[ "$binary" == /* && "$binary" != */ && "$binary" != *$'\n'* && "$binary" != *$'\t'* ]] || return 1
 	[[ "$expected_revision" =~ ^[0-9a-f]{40}$ && "$expected_sha256" =~ ^[0-9a-f]{64}$ ]] || return 1
@@ -186,7 +246,8 @@ v2_r2_sv1c_require_pinned_binary() {
 		"$buildmode" == "exe" && "$compiler" == "gc" && "$trimpath" == "true" && "$cgo_enabled" == "0" &&
 		"$goos" == "linux" && "$goarch" == "amd64" && "$goamd64" == "v1" && "$vcs" == "git" &&
 		"$vcs_revision" == "$expected_revision" && "$vcs_modified" == "false" ]] || return 1
-	[[ "$(sha256sum -- "$binary" | awk '{print $1}')" == "$expected_sha256" ]]
+	actual_sha256=$(v2_r2_sv1c_sha256_file "$binary") || return 1
+	[[ "$actual_sha256" == "$expected_sha256" ]]
 }
 
 v2_r2_sv1c_require_checkpoint_validator_attestation_binding() {

@@ -30,6 +30,8 @@ source "$selected_contract"
 [[ "$v2_r2_sv1_config_dir" == "$root_dir/research/configs/v2-r2-sv1c-24h" ]] || exit 1
 [[ "$v2_r2_sv1_config_provenance_manifest" == "$root_dir/research/v2-r2-sv1c-24h-config-provenance.json" ]] || exit 1
 [[ "$v2_r2_sv1_activation_config" == "$root_dir/research/configs/v2-r2-sv1c/activation-643.json" ]] || exit 1
+[[ "$v2_r2_sv1_config_normalizer_registration_path" == "research/v2-r2-sv1c-24h-config-normalizer-registration.json" ]] || exit 1
+[[ "$v2_r2_sv1_config_normalizer_registration_contract" == "v2-r2-sv1c-24h-config-normalizer-registration-v1" ]] || exit 1
 [[ "$v2_r2_sv1_activation_arm_status_contract" == "v2-r2-sv1c-activation-arm-status-v1" ]] || exit 1
 [[ "$v2_r2_sv1_review_contract" == "v2-r2-sv1c-independent-review-v1" ]] || exit 1
 [[ "$v2_r2_sv1_predecessor_id" != "V2-R2-SV1" ]] || exit 1
@@ -46,10 +48,37 @@ jq -e --arg contract_path "$v2_r2_sv1_contract_path" --arg loader_path "$v2_r2_s
 	 (.contract_definition.sha256 | test("^[0-9a-f]{64}$"))) and
 	(.contract_loader.path == $loader_path and
 	 (.contract_loader.sha256 | test("^[0-9a-f]{64}$"))) and
-	(.contract_dependencies | map(.path) == ["scripts/v2-r2-sv1-24h-contract.sh", "scripts/v2-integrated-longrun-r2-contract.sh"]) and
+	(.contract_dependencies | map(.path) == ["scripts/v2-r2-sv1-24h-contract.sh", "scripts/v2-integrated-longrun-r2-contract.sh", "scripts/v2-r2-sv1-terminal-outcome.jq"]) and
 	(.contract_dependencies | all(.sha256 | test("^[0-9a-f]{64}$")))
 ' "$v2_r2_sv1_config_provenance_manifest" >/dev/null || {
 	echo "SV1C provenance does not bind its complete contract graph" >&2
+	exit 1
+}
+normalizer_registration_file="$root_dir/$v2_r2_sv1_config_normalizer_registration_path"
+v2_r2_sv1c_require_normalizer_registration "$root_dir" "$normalizer_registration_file" || {
+	echo "SV1C normalizer registration is invalid" >&2
+	exit 1
+}
+(
+	registration_backup=$(mktemp)
+	registration_mutation=$(mktemp)
+	trap 'cp -- "$registration_backup" "$normalizer_registration_file"; rm -f -- "$registration_backup" "$registration_mutation"' EXIT
+	cp -- "$normalizer_registration_file" "$registration_backup"
+	for mutation in '.sha256 = ("0" * 64)' '.build.compiler = "tampered"'; do
+		jq "$mutation" "$registration_backup" >"$registration_mutation"
+		cp -- "$registration_mutation" "$normalizer_registration_file"
+		if v2_r2_sv1c_require_normalizer_registration "$root_dir" "$normalizer_registration_file"; then
+			echo "SV1C accepted a mutable normalizer registration: $mutation" >&2
+			exit 1
+		fi
+		cp -- "$registration_backup" "$normalizer_registration_file"
+	done
+)
+jq -e --arg path "$v2_r2_sv1_config_normalizer_registration_path" \
+	--arg sha256 "$(sha256sum -- "$normalizer_registration_file" | awk '{print $1}')" \
+	'.normalizer_registration.path == $path and .normalizer_registration.sha256 == $sha256' \
+	"$v2_r2_sv1_config_provenance_manifest" >/dev/null || {
+	echo "SV1C provenance does not bind its normalizer registration" >&2
 	exit 1
 }
 
@@ -64,6 +93,26 @@ done
 v2_r2_sv1_candidate_id="$registered_candidate"
 
 "$checker"
+
+manifest_backup=$(mktemp)
+manifest_mutation_fixture=$(mktemp)
+cp -- "$v2_r2_sv1_config_provenance_manifest" "$manifest_backup"
+restore_manifest() {
+	cp -- "$manifest_backup" "$v2_r2_sv1_config_provenance_manifest"
+	rm -f -- "$manifest_backup" "$manifest_mutation_fixture"
+}
+trap restore_manifest EXIT
+for mutation in '.contract_dependencies[2].sha256 = ("0" * 64)' '.normalizer.go_version = "tampered"' '.normalizer.package = "tampered"' '.normalizer_registration.sha256 = ("0" * 64)'; do
+	jq "$mutation" "$manifest_backup" >"$manifest_mutation_fixture"
+	cp -- "$manifest_mutation_fixture" "$v2_r2_sv1_config_provenance_manifest"
+	if V2_R2_SV1_CONTRACT_SCRIPT="$contract" "$checker"; then
+		echo "SV1C accepted mutated normalizer provenance: $mutation" >&2
+		exit 1
+	fi
+	cp -- "$manifest_backup" "$v2_r2_sv1_config_provenance_manifest"
+done
+rm -f -- "$manifest_backup" "$manifest_mutation_fixture"
+trap - EXIT
 
 strict_config_valid() {
 	jq -e '

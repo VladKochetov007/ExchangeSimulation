@@ -62,7 +62,7 @@ fi
 		for required_file in terminal-outcome.json evidence-manifest.json manifest.json greeks.json latency.json checkpoints.jsonl binary-evidence-attestation.json; do
 			printf '{}\n' >"$arm/$required_file"
 		done
-		v2_r2_write_activation_arm_status "$arm" 0 completed false metadata 1 now 2 3 false ""
+		v2_r2_write_activation_arm_status "$arm" 0 completed false "$(printf '%064d' 0)" 1 now 2 3 false ""
 		jq -e --arg expected_contract "$expected_contract" \
 			'.schema_version == 2 and .contract == $expected_contract and .exit_status == 0 and .completion_verified == true' \
 			"$arm/run-status.json" >/dev/null
@@ -70,6 +70,22 @@ fi
 	write_status_fixture sv1b "$v2_r2_sv1_activation_arm_status_contract"
 	source "$root_dir/scripts/v2-r2-sv1c-24h-contract.sh"
 	write_status_fixture sv1c "$v2_r2_sv1_activation_arm_status_contract"
+	for missing_file in terminal-outcome.json evidence-manifest.json manifest.json greeks.json latency.json checkpoints.jsonl binary-evidence-attestation.json; do
+		missing_arm="$temp_root/status-missing-${missing_file//./-}"
+		mkdir -- "$missing_arm"
+		for required_file in terminal-outcome.json evidence-manifest.json manifest.json greeks.json latency.json checkpoints.jsonl binary-evidence-attestation.json; do
+			printf '{}\n' >"$missing_arm/$required_file"
+		done
+		rm -- "$missing_arm/$missing_file"
+		if v2_r2_write_activation_arm_status "$missing_arm" 0 completed false "$(printf '%064d' 0)" 1 now 2 3 false ""; then
+			echo "activation status writer accepted missing input: $missing_file" >&2
+			exit 1
+		fi
+		[[ ! -e "$missing_arm/run-status.json" && ! -e "$missing_arm/run-status.json.tmp-$$" ]] || {
+			echo "activation status writer published partial status for missing input: $missing_file" >&2
+			exit 1
+		}
+	done
 )
 for required_binding in \
 	'--argjson activation_gomaxprocs "$activation_gomaxprocs"' \

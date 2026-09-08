@@ -10,6 +10,31 @@ source_dir="$root_dir/research/configs/v2-integrated-longrun-r2"
 activation_config="$root_dir/research/configs/v2-r2-sv1c/activation-643.json"
 activation_control_config="$root_dir/research/configs/v2-r2-sv1c/activation-643-control.json"
 source "$root_dir/scripts/v2-r2-sv1c-24h-contract.sh"
+normalizer_registration="$root_dir/$v2_r2_sv1_config_normalizer_registration_path"
+v2_r2_sv1c_require_normalizer_registration "$root_dir" "$normalizer_registration" || {
+	echo "config normalizer registration is missing or invalid: $normalizer_registration" >&2
+	exit 1
+}
+normalizer_registration_sha256=$(v2_r2_sv1c_sha256_file "$normalizer_registration") || {
+	echo "could not hash config normalizer registration" >&2
+	exit 1
+}
+registered_normalizer_sha256=$(jq -er '.sha256 | select(type == "string" and test("^[0-9a-f]{64}$"))' "$normalizer_registration") || {
+	echo "config normalizer registration omits its digest" >&2
+	exit 1
+}
+registered_normalizer_revision=$(jq -er '.source_revision | select(type == "string" and test("^[0-9a-f]{40}$"))' "$normalizer_registration") || {
+	echo "config normalizer registration omits its source revision" >&2
+	exit 1
+}
+registered_normalizer_go_version=$(jq -er '.go_version | select(type == "string")' "$normalizer_registration") || {
+	echo "config normalizer registration omits its Go version" >&2
+	exit 1
+}
+registered_normalizer_package=$(jq -er '.package | select(type == "string")' "$normalizer_registration") || {
+	echo "config normalizer registration omits its package" >&2
+	exit 1
+}
 normalizer_input=${V2_R2_SV1C_CONFIG_NORMALIZER_BIN:-"$root_dir/$v2_r2_sv1_config_normalizer_path"}
 normalizer=$(realpath -e -- "$normalizer_input") || {
 	echo "could not resolve config normalizer: $normalizer_input" >&2
@@ -19,24 +44,51 @@ normalizer=$(realpath -e -- "$normalizer_input") || {
 	echo "config normalizer must be the registered path: $root_dir/$v2_r2_sv1_config_normalizer_path" >&2
 	exit 1
 }
-normalizer_sha256=$(sha256sum -- "$normalizer" | awk '{print $1}')
-normalizer_metadata=$(go version -m -- "$normalizer") || {
-	echo "could not read config normalizer build metadata" >&2
+[[ "$normalizer_registration_sha256" =~ ^[0-9a-f]{64}$ && "$registered_normalizer_sha256" =~ ^[0-9a-f]{64}$ ]] || {
+	echo "config normalizer registration hash is malformed" >&2
 	exit 1
 }
-normalizer_revision=$(v2_r2_sv1c_binary_metadata_value "$normalizer_metadata" "vcs.revision") || {
-	echo "config normalizer does not expose exactly one VCS revision" >&2
+normalizer_sha256=$(v2_r2_sv1c_sha256_file "$normalizer") || {
+	echo "could not hash config normalizer" >&2
 	exit 1
 }
+[[ "$normalizer_sha256" == "$registered_normalizer_sha256" ]] || {
+	echo "config normalizer digest does not match the precommitted registration" >&2
+	exit 1
+}
+normalizer_revision="$registered_normalizer_revision"
 v2_r2_sv1c_require_normalizer_source_revision "$root_dir" "$normalizer_revision" || {
 	echo "config normalizer source revision is not an unchanged registered Go input tree" >&2
 	exit 1
 }
-v2_r2_sv1c_require_pinned_binary "$normalizer" "$normalizer_revision" "$normalizer_sha256" "$v2_r2_sv1_config_normalizer_package" || {
-	echo "config normalizer is not a pinned Go 1.27 build of its registered source tree" >&2
+v2_r2_sv1c_require_pinned_binary "$normalizer" "$normalizer_revision" "$normalizer_sha256" "$registered_normalizer_package" || {
+	echo "config normalizer is not the precommitted pinned Go 1.27 build" >&2
 	exit 1
 }
-normalizer_go_version=$(go version -m -- "$normalizer" | sed -n '1s/.*: //p')
+normalizer_go_version="$registered_normalizer_go_version"
+normalizer_package="$registered_normalizer_package"
+normalizer_snapshot=$(mktemp /tmp/sv1c-normalizer-snapshot.XXXXXX)
+trap 'rm -f -- "$normalizer_snapshot"' EXIT
+cp -- "$normalizer" "$normalizer_snapshot" || {
+	echo "could not snapshot config normalizer" >&2
+	exit 1
+}
+chmod --reference="$normalizer" "$normalizer_snapshot" || {
+	echo "could not preserve config normalizer executable mode" >&2
+	exit 1
+}
+normalizer_snapshot_sha256=$(v2_r2_sv1c_sha256_file "$normalizer_snapshot") || {
+	echo "could not hash config normalizer snapshot" >&2
+	exit 1
+}
+[[ "$normalizer_snapshot_sha256" == "$normalizer_sha256" ]] || {
+	echo "config normalizer changed while it was being snapshotted" >&2
+	exit 1
+}
+v2_r2_sv1c_require_pinned_binary "$normalizer_snapshot" "$normalizer_revision" "$normalizer_sha256" "$normalizer_package" || {
+	echo "config normalizer snapshot failed the precommitted pinned-build check" >&2
+	exit 1
+}
 candidate="V2-R2-SV1C-24H-CDF-LIQUIDITY-STRICT-RISK"
 control_hypothesis="V2-R2-SV1C-24H-CDF-LIQUIDITY-STRICT-RISK-CONTROL"
 date="2026-09-08"
@@ -110,7 +162,7 @@ write_config() {
 	fi
 	normalized_dir=$(mktemp -d)
 	normalized="$normalized_dir/run-config.json"
-	"$normalizer" -config "$temporary" -logdir "$normalized_dir" -write-effective-config "$normalized" >/dev/null 2>&1
+	"$normalizer_snapshot" -config "$temporary" -logdir "$normalized_dir" -write-effective-config "$normalized" >/dev/null 2>&1
 	[[ -s "$normalized" ]] || { echo "config normalizer produced no effective config: $output" >&2; exit 1; }
 	mv -- "$normalized" "$output"
 	rmdir -- "$normalized_dir" 2>/dev/null || true
@@ -229,11 +281,13 @@ jq -n \
 	--arg contract_loader_path "$contract_loader_path" \
 	--arg contract_loader_hash "$contract_loader_hash" \
 	--argjson contract_dependencies "$contract_dependencies" \
+	--arg normalizer_registration_path "$v2_r2_sv1_config_normalizer_registration_path" \
+	--arg normalizer_registration_sha256 "$normalizer_registration_sha256" \
 	--arg normalizer_path "$v2_r2_sv1_config_normalizer_path" \
 	--arg normalizer_sha256 "$normalizer_sha256" \
 	--arg normalizer_revision "$normalizer_revision" \
 	--arg normalizer_go_version "$normalizer_go_version" \
-	--arg normalizer_package "$v2_r2_sv1_config_normalizer_package" \
+	--arg normalizer_package "$normalizer_package" \
 	--arg withdrawal_measurement_path "$withdrawal_measurement_path" \
 	--arg withdrawal_measurement_hash "$withdrawal_measurement_hash" \
 	--arg activation_diagnostics_path "$activation_diagnostics_path" \
@@ -246,7 +300,7 @@ jq -n \
 	--argjson capacity_cases "$capacity_cases" \
 	--argjson authorized_launch_config_hashes "$authorized_launch_config_hashes" \
 	'{schema_version: 1,
-		 contract: "v2-r2-sv1c-24h-config-provenance-v3",
+		 contract: "v2-r2-sv1c-24h-config-provenance-v5",
 	 candidate: $candidate,
 	 predecessor: "V2-R2-SV1B-24H-CDF-LIQUIDITY",
 	 source_configs: {"dev-607.json": $source_hash, "dev-607-none.json": $no_log_source_hash},
@@ -267,6 +321,7 @@ jq -n \
 		 contract_definition: {path: $contract_definition_path, sha256: $contract_definition_hash},
 		 contract_loader: {path: $contract_loader_path, sha256: $contract_loader_hash},
 		 contract_dependencies: $contract_dependencies,
+		 normalizer_registration: {path: $normalizer_registration_path, sha256: $normalizer_registration_sha256},
 		 normalizer: {path: $normalizer_path, sha256: $normalizer_sha256, revision: $normalizer_revision, go_version: $normalizer_go_version, package: $normalizer_package},
 	 withdrawal_measurement: {path: $withdrawal_measurement_path, sha256: $withdrawal_measurement_hash},
 	 activation_diagnostics: {path: $activation_diagnostics_path, sha256: $activation_diagnostics_hash},

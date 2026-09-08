@@ -96,14 +96,27 @@ if [[ "$v2_r2_sv1_candidate_id" == V2-R2-SV1C-* ]]; then
 			fail "SV1C contract dependency hash is missing: $expected_dependency_path"
 		[[ "$actual_dependency_sha" == "$expected_dependency_sha" ]] || fail "SV1C contract dependency hash mismatch: $expected_dependency_path"
 	done
+	verify_bound_manifest_file normalizer_registration "$v2_r2_sv1_config_normalizer_registration_path" "SV1C normalizer registration"
+	normalizer_registration_file="$root_dir/$v2_r2_sv1_config_normalizer_registration_path"
+	v2_r2_sv1c_require_normalizer_registration "$root_dir" "$normalizer_registration_file" || fail "SV1C normalizer registration is invalid"
+	registered_normalizer_path=$(jq -er '.path | select(type == "string")' "$normalizer_registration_file") || fail "SV1C normalizer registration omits path"
+	registered_normalizer_sha256=$(jq -er '.sha256 | select(type == "string" and test("^[0-9a-f]{64}$"))' "$normalizer_registration_file") || fail "SV1C normalizer registration omits digest"
+	registered_normalizer_revision=$(jq -er '.source_revision | select(type == "string" and test("^[0-9a-f]{40}$"))' "$normalizer_registration_file") || fail "SV1C normalizer registration omits source revision"
+	registered_normalizer_go_version=$(jq -er '.go_version | select(type == "string")' "$normalizer_registration_file") || fail "SV1C normalizer registration omits Go version"
+	registered_normalizer_package=$(jq -er '.package | select(type == "string")' "$normalizer_registration_file") || fail "SV1C normalizer registration omits package"
 	normalizer_path=$(jq -er '.normalizer.path | select(type == "string")' "$provenance_manifest") || fail "SV1C provenance omits config normalizer path"
-	[[ "$normalizer_path" == "$v2_r2_sv1_config_normalizer_path" ]] || fail "SV1C provenance names an unexpected config normalizer"
+	[[ "$normalizer_path" == "$v2_r2_sv1_config_normalizer_path" && "$normalizer_path" == "$registered_normalizer_path" ]] || fail "SV1C provenance names an unexpected config normalizer"
 	normalizer_file="$root_dir/$normalizer_path"
 	[[ -x "$normalizer_file" && ! -L "$normalizer_file" && "$(realpath -e -- "$normalizer_file")" == "$normalizer_file" ]] || fail "SV1C config normalizer is missing or symlinked"
 	normalizer_revision=$(jq -er '.normalizer.revision | select(type == "string" and test("^[0-9a-f]{40}$"))' "$provenance_manifest") || fail "SV1C provenance omits config normalizer revision"
-	v2_r2_sv1c_require_normalizer_source_revision "$root_dir" "$normalizer_revision" || fail "SV1C config normalizer source revision is not an unchanged registered Go input tree"
 	normalizer_sha256=$(jq -er '.normalizer.sha256 | select(type == "string" and test("^[0-9a-f]{64}$"))' "$provenance_manifest") || fail "SV1C provenance omits config normalizer hash"
-	v2_r2_sv1c_require_pinned_binary "$normalizer_file" "$normalizer_revision" "$normalizer_sha256" "$v2_r2_sv1_config_normalizer_package" ||
+	normalizer_go_version=$(jq -er '.normalizer.go_version | select(type == "string")' "$provenance_manifest") || fail "SV1C provenance omits config normalizer Go version"
+	normalizer_package=$(jq -er '.normalizer.package | select(type == "string")' "$provenance_manifest") || fail "SV1C provenance omits config normalizer package"
+	[[ "$normalizer_revision" == "$registered_normalizer_revision" && "$normalizer_sha256" == "$registered_normalizer_sha256" &&
+		"$normalizer_go_version" == "$registered_normalizer_go_version" && "$normalizer_package" == "$registered_normalizer_package" ]] ||
+		fail "SV1C config normalizer metadata is inconsistent with its precommitted registration"
+	v2_r2_sv1c_require_normalizer_source_revision "$root_dir" "$registered_normalizer_revision" || fail "SV1C config normalizer source revision is not an unchanged registered Go input tree"
+	v2_r2_sv1c_require_pinned_binary "$normalizer_file" "$registered_normalizer_revision" "$registered_normalizer_sha256" "$registered_normalizer_package" ||
 		fail "SV1C config normalizer is not the registered pinned Go 1.27 build"
 fi
 if v2_r2_is_successor_candidate; then

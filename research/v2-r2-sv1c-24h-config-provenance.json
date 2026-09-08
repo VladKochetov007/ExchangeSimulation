@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "contract": "v2-r2-sv1c-24h-config-provenance-v3",
+  "contract": "v2-r2-sv1c-24h-config-provenance-v5",
   "candidate": "V2-R2-SV1C-24H-CDF-LIQUIDITY-STRICT-RISK",
   "predecessor": "V2-R2-SV1B-24H-CDF-LIQUIDITY",
   "source_configs": {
@@ -44,11 +44,11 @@
   },
   "generator": {
     "path": "scripts/render-v2-r2-sv1c-24h-configs.sh",
-    "sha256": "af6b546d4490a85ed60a099e4169c517b9a25ca0d2d0dfd3304ba337d5d4b72d"
+    "sha256": "b9578671ad4f56be70555df775cc213b314fa67ca8ddb14bcd41e1e71a34a3c2"
   },
   "contract_definition": {
     "path": "scripts/v2-r2-sv1c-24h-contract.sh",
-    "sha256": "24f720dfcd38db8d562bc216a206582b1e4d494caa3b9860dbed0b4e73b4e316"
+    "sha256": "220ed0545fb6015e3ecd0a1c6c70a6016f2f4dc0264c216709f53d1d1271754f"
   },
   "contract_loader": {
     "path": "scripts/v2-r2-sv1-contract-loader.sh",
@@ -62,11 +62,19 @@
     {
       "path": "scripts/v2-integrated-longrun-r2-contract.sh",
       "sha256": "deef6138a7304f7833c1019928945bdc3cfc5beea06ee5c55b1ff58f943da242"
+    },
+    {
+      "path": "scripts/v2-r2-sv1-terminal-outcome.jq",
+      "sha256": "a06f2e1661ef9a1a451e21c882fd496c1de35e8b1aae9fb7d6b83164edbc5372"
     }
   ],
+  "normalizer_registration": {
+    "path": "research/v2-r2-sv1c-24h-config-normalizer-registration.json",
+    "sha256": "1c9ab5c4c64cd256551522e17e64f36b229044036d6c8cd738c5e0b854e761dd"
+  },
   "normalizer": {
     "path": "bin/multivenue",
-    "sha256": "e7ee995ebbbc8f60387afe1fe527061f30087c735235f060e6606d5536744cfb",
+    "sha256": "dde13e4eda920b874eadba81a360ece3ff0951d2ef907acd1ddff24b800f5c87",
     "revision": "c2a752f3bb5d6b38c8ad8ee066ad91bbf355aae0",
     "go_version": "go1.27.0",
     "package": "exchange_sim/cmd/multivenue"
