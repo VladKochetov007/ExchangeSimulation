@@ -2372,3 +2372,56 @@ self-test compares against, which is why no gate fired. Rule for the remaining
 work: **before trusting a reconciliation, enumerate every dimension the system
 prices along and confirm the instrument keys on all of them.** Asset and venue
 are now covered. Time is not, and a mark is a point-in-time quantity.
+
+## RT-041 — The concentration result reproduces on three independent seeds
+
+**Classification.** REPRODUCTION. Promotes RT-031, RT-034 and RT-035 from
+single-seed to reproduced, and replaces their point figures with ranges.
+
+**Base.** `a666d02faede3d40f046b11e60eb672c59386a94`, 8 h, `-log-mode full`,
+seeds 607/608/609.
+
+**Thresholds were preregistered before either reproduction run**, so this is a
+test rather than a description.
+
+| seed | `ABC/CDF` share | maker share | USD per ABC | % of notional | base traded | cross book last |
+|---|---:|---:|---:|---:|---:|---:|
+| 607 | 98.11% | 92.25% | 24 082 | 48.85% | 6 547.6 | −69.15% |
+| 608 | 99.14% | 92.48% | 25 929 | 52.49% | 6 531.0 | −82.86% |
+| 609 | 99.63% | 92.96% | 28 104 | 57.12% | 6 766.4 | −83.15% |
+| **threshold** | **>=90%** | **>=80%** | — | **>=20%** | — | **<=-30%** |
+
+All four pass on every seed; no falsifier fires.
+
+**The reproduction is stronger evidence than the original measurement.** The
+levels move a lot between seeds — `triangle_arb`'s total is 174.2 M / 184.7 M /
+205.3 M, and `abc_cdf_spot_maker`'s **net** result swings **5.4x**, from +6.88 M
+at seed 607 to +36.92 M at 608. Against that, the structure barely moves: book
+share spans 1.5 pp, counterparty share **0.71 pp**, and the base traded against
+the maker spans **3.6%** (6 531–6 766 ABC).
+
+That near-constant traded quantity is the signature of the position caps
+(RT-028): the arbitrageur trades about the same amount in every run, and the seed
+sets only what each unit is worth. A structure this stable across seeds whose
+levels swing five-fold is not an artifact of one run.
+
+**Quote as ranges from now on**: book share 98–99.6%, counterparty share
+92.3–93.0%, extraction 49–57% of notional, cross-book terminal deviation −69% to
+−83%.
+
+**POST-HOC, not preregistered and not claimed.** The extraction rate rises with
+the depth of the dislocation across the three seeds (−69.15%/48.85%,
+−82.86%/52.49%, −83.15%/57.12%). The ordering is monotone and in the direction
+the mechanism predicts, but three points with two nearly tied on the independent
+variable is not a quantitative law. Consistent with RT-035's causal story, not
+confirmation of it.
+
+**Scope.** Three seeds of one configuration. Nothing here speaks to other
+configurations, horizons, or scenarios, and the dislocation's depth is plainly
+seed-sensitive. The promotion is to "structural within this configuration", not
+"universal".
+
+**Method note against myself.** This belonged before RT-034 was written, not four
+checkpoints after. The protocol requires a fresh run before promoting a result,
+and three findings' worth of percentages were published from a single seed first.
+The reproduction happened to support them, which is luck rather than process.

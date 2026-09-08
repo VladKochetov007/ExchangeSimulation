@@ -4204,6 +4204,105 @@ venue are now covered; time is not, and a mark is a point-in-time quantity.
 Recorded as RT-040.
 
 
+**H-052 (PREREGISTERED) — [[RT-034]]/[[RT-035]]'s concentration result is
+structural, not a property of seed 607.**
+
+**Why this is overdue.** Every headline in this session — the 98.1% book share,
+the 92.3% counterparty share, the 48.9%-of-notional extraction rate — comes from
+**one seed**. The protocol requires a fresh run before a result is promoted to
+supported, and I have not done it for the campaign's largest claim. Until now the
+claim is properly `INCONCLUSIVE ACROSS SEEDS`, whatever its internal evidence.
+
+**There is already a reason to doubt naive transfer.** The seed sweep in E-055
+showed `abc_cdf_spot_maker` at **+6 879 438 (seed 607)** but **+36 922 938 (seed
+608)** — a 5.4× swing in the very counterparty the mechanism runs through, and
+`noise_flow` at −220.2 M vs −265.6 M. The *levels* clearly move a lot between
+seeds. The question is whether the *structure* does.
+
+**Claims under test, stated as thresholds before the runs:**
+
+1. `ABC/CDF` is **≥90%** of `triangle_arb`'s total contribution (607: 98.1%).
+2. `abc_cdf_spot_maker` is **≥80%** of `triangle_arb`'s `ABC/CDF` contribution
+   (607: 92.3%).
+3. `triangle_arb`'s extraction rate from the cross maker is **≥20% of notional**
+   (607: 48.9%) — the claim that this cannot be spread or adverse selection.
+4. The cross book's terminal price is **≥30% below** its bootstrap (607: −69.15%),
+   i.e. [[RT-031]]'s dislocation is not seed-specific.
+
+**Falsifiers.** Any of the four thresholds missed on **either** seed 608 or 609
+falsifies H-052 for that claim, and the corresponding finding is downgraded from
+a general statement about the configuration to a statement about seed 607.
+Partial failure is reported per claim rather than averaged into a verdict.
+
+**What would count as the interesting outcome.** If levels swing 5× while the
+four structural ratios hold, that is stronger evidence for the mechanism than the
+original single-seed measurement: it would show the dislocation and its
+harvesting are properties of the configuration, with the seed setting only the
+scale.
+
+**Discriminating experiment E-057**, preregistered before either run: seeds 608
+and 609, 8 h, `-log-mode full`, `flowattrib` for the shares and `pricerange` for
+the cross book's deviation from bootstrap.
+Status: **SUPPORTED WITHIN TESTED SCOPE** — all four thresholds pass on both
+reproduction seeds.
+
+
+**E-057 — H-052 SUPPORTED on all four claims and all three seeds. The levels
+swing 5×; the structure holds to under one percentage point.**
+Base: `a666d02faede3d40f046b11e60eb672c59386a94`, 8 h, `-log-mode full`, seeds
+607/608/609. Reproduce: `flowattrib -dir <logdir>` and
+`pricerange -dir <logdir> -symbol ABC-CDF -reference 1666666667`.
+
+| seed | `ABC/CDF` share | maker share | USD per ABC | % of notional | base traded | cross book last |
+|---|---:|---:|---:|---:|---:|---:|
+| 607 | 98.11% | 92.25% | 24 082 | 48.85% | 6 547.6 | −69.15% |
+| 608 | 99.14% | 92.48% | 25 929 | 52.49% | 6 531.0 | −82.86% |
+| 609 | 99.63% | 92.96% | 28 104 | 57.12% | 6 766.4 | −83.15% |
+| **threshold** | **≥90%** | **≥80%** | — | **≥20%** | — | **≤−30%** |
+
+**All four preregistered thresholds pass on every seed. No falsifier fires.**
+
+**The reproduction is stronger than the original measurement, for the reason
+preregistered as "the interesting outcome".** The *levels* move a great deal
+between seeds — `triangle_arb`'s total is 174.2 M / 184.7 M / 205.3 M, and
+`abc_cdf_spot_maker`'s **net** result swings 5.4× (+6.88 M at 607 to +36.92 M at
+608, E-055). Against that, the structural ratios are nearly constant:
+
+- book share **98.11 → 99.63%**, a 1.5 pp spread;
+- counterparty share **92.25 → 92.96%**, a **0.71 pp spread**;
+- base traded against the maker **6 547.6 / 6 531.0 / 6 766.4 ABC**, a 3.6%
+  spread.
+
+A quantity that stable across seeds whose levels swing 5× is not a coincidence of
+one run. The near-constant traded quantity is the signature of the position caps
+([[RT-028]]): the arbitrageur trades **about the same amount every time** and the
+seed sets only what each unit is worth.
+
+**A relationship I did not preregister, so POST-HOC.** Extraction rate rises with
+the depth of the dislocation across the three seeds — −69.15% / 48.85%,
+−82.86% / 52.49%, −83.15% / 57.12%. The ordering is monotone and the direction is
+what the mechanism predicts, but three points with two nearly tied on the
+independent variable is not evidence of a quantitative law, and I am not claiming
+one. It is consistent with, not confirmation of, [[RT-035]]'s causal story.
+
+**Status changes.** [[RT-031]], [[RT-034]] and [[RT-035]] move from single-seed
+to **reproduced across three independent seeds**. Their headline percentages
+should be quoted as ranges — book share 98–99.6%, counterparty share 92.3–93.0%,
+extraction 49–57% of notional, cross-book terminal deviation −69% to −83% — not
+as the seed-607 point values I published.
+
+**What this does not establish.** Three seeds of one configuration. Nothing here
+speaks to other configurations, other horizons, or the campaign's other
+scenarios, and the dislocation's *depth* is clearly seed-sensitive (−69% to
+−83%). The claim promoted is "structural within this configuration", not
+"universal".
+
+**Method note.** This should have been run before RT-034 was written, not four
+checkpoints later. The protocol requires a fresh run before promoting a result,
+and I published three findings' worth of percentages from a single seed first.
+The reproduction happened to support them; that is luck, not process.
+
+
 ---
 
 ## F. Findings
@@ -4220,6 +4319,14 @@ See `research/red-team-findings.md` for the full records.
 - **RT-003** — bounded no-violation results (INV-2, INV-5, INV-6, identity).
 - **RT-006** — latency is delivered as configured across 225 link x channel
   rows; no unearned speed advantage. Transport only.
+- **RT-041** — [[RT-031]]/[[RT-034]]/[[RT-035]] **reproduce on three independent
+  seeds**. Levels swing 5.4x (the cross maker's net is +6.88 M at seed 607 and
+  +36.92 M at 608) while the structure barely moves: book share **98.1-99.6%**,
+  counterparty share **92.3-93.0%** (0.71 pp spread), extraction **49-57% of
+  notional**, cross-book terminal deviation **-69% to -83%**. Base traded against
+  the maker is 6 531-6 766 ABC, a 3.6% spread - the signature of the position
+  caps ([[RT-028]]) fixing the quantity while the seed sets only its value.
+  Headline figures should now be quoted as these ranges, not seed-607 points.
 - **RT-040** — keying marks by **venue** as well as asset drives the population
   closure to **exactly zero** and reconciles every spot-only class between the
   fill stream and the account snapshots to **within 1 USD across 5.13 M fills**.
