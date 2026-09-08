@@ -6333,6 +6333,126 @@ missed transfer unlikely.
 Recorded as RT-058.
 
 
+**H-070 (PREREGISTERED) — the arbitrageurs are too small to converge anything:
+convergence failure across three instruments is a **capacity** limit, not a
+strategy one.**
+
+**The synthesis this tests.** [[RT-058]] closed a pattern: every instrument in the
+campaign is either pinned by configuration ([[RT-032]]'s peg) or has no working
+tether — the cross book self-references ([[RT-031]]), the perp's tether saturates
+([[RT-043]]/[[RT-044]]), the future is self-anchored on purpose and *the design
+names arbitrage as the thing that should converge it*. In all three the stated or
+implied convergence force is an arbitrageur. **None of them converges.** The
+question is whether the arbitrageurs are outmatched or merely inactive.
+
+**One number already points at the answer.** [[RT-048]] measured `triangle_arb`
+trading **6 547.6 ABC** against `abc_cdf_spot_maker` on `ABC/CDF` while
+`noise_flow` moved **377 269.2 ABC** on the same book. The arbitrageur is **1.7%
+of the flow**. A participant that small cannot move a price no matter how large
+the mispricing it sees.
+
+**Claims.**
+1. On every dislocated book — `ABC/CDF`, the `ABC-FUT-*` contracts and
+   `ABC-PERP` — the designated arbitrageur class accounts for **under 5%** of
+   traded base volume.
+2. The constraint is the **cap**, not the opportunity: the arbitrageurs reach
+   their configured position limits ([[RT-046]] measured all six `carry_arb` at
+   exactly 500 contracts).
+3. Therefore convergence failure is arithmetic — the class cannot trade enough to
+   close a gap — rather than a strategy that declines to act.
+
+**Falsifiers.**
+(a) an arbitrageur class exceeds **20%** of volume on a dislocated book → capacity
+is adequate there and the failure has another cause, which would make this
+finding wrong where it matters most;
+(b) the arbitrageurs are **not** at their caps → they are choosing not to trade,
+so the binding constraint is an entry threshold or a signal, not size. RT-046
+found `carry_arb` at its cap only **31–44% of the time**, so this is a live
+possibility and claim 2 may fail even if claim 1 holds;
+(c) the dislocated books are dominated by the **makers** rather than by flow →
+the "arb versus flow" framing is the wrong comparison and the denominator must be
+restated.
+
+**What this can establish.** A capacity ceiling is a design parameter, not a bug:
+if the arbitrageurs are 2% of volume by construction, then no configuration of
+their strategy would converge these books, and the campaign's convergence
+questions were unanswerable before they were asked. That is a statement about
+what the experiment **can** measure, which is the most useful thing an audit can
+say about a negative result.
+
+**Instrument.** New Go tool `research/tools/bookshare`: traded base volume per
+book per participant class, from the fill stream, with each class's share.
+
+**Discriminating experiment E-075**, preregistered before the run: seed 607, 8 h,
+`-log-mode full`.
+Status: **MIXED** — claim 1 falsified (perp arb is 24.3% of taker flow), claim 2
+stands, claim 3 right in substance but wrong in variable.
+
+
+**E-075 — H-070 MIXED, and the split is the finding. Capacity explains the cross
+book and the futures; it does **not** explain the perpetual, where the arbitrageur
+is a quarter of taker flow and the basis is still −29%.**
+Base: `a666d02faede3d40f046b11e60eb672c59386a94`, seed 607, 8 h, `-log-mode full`.
+Reproduce: `go run research/tools/bookshare/main.go -dir <logdir>`.
+
+| book | total volume | maker share | designated arb | % of total | **% of taker side** |
+|---|---:|---:|---|---:|---:|
+| ABC/CDF | 789 548 | 48.2% | `triangle_arb` | 0.9% | **1.7%** |
+| CDF/USD | 1 602 899 | 49.6% | `triangle_arb` | 0.4% | **0.9%** |
+| ABC-FUT | 1 205 | 50.0% | `dated_carry_arb` | 2.6% | **5.3%** |
+| **ABC-PERP** | 116 722 | 47.9% | `carry_arb` | 12.6% | **24.3%** |
+
+*(One maker is ~50% of every book, which is mechanical when volume is counted per
+fill side — the maker is on one side of nearly every trade. The taker-side column
+is the meaningful one.)*
+
+**Claim 1 FALSIFIED as stated.** I predicted every designated arbitrageur under
+5% of volume. `carry_arb` is **12.6% of total and 24.3% of taker flow** on the
+perpetual. Falsifier (a), which needed >20% of *total*, does not fire — but the
+threshold I actually wrote is missed, and by a factor of 2.5.
+
+**The split is the result.** On `ABC/CDF` the arbitrageur is **1.7% of taker
+flow** against a book [[RT-031]] measured at −69% from fair; on the futures it is
+**5.3%** against a basis [[RT-058]] measured at +27% to +99%. In those two, a
+participant that small cannot move the price and **capacity is a sufficient
+explanation**. On the perpetual it is **24.3%** — not small at all — and
+[[RT-044]] still measured the book **−29% from index**. **Capacity does not
+explain the perpetual.**
+
+**What does, and it is already in the record.** [[RT-046]] measured every
+`carry_arb` pinned at exactly **500 contracts**, so the class can hold at most
+**3 000 contracts** while trading **14 744** — a turnover of **4.9×**. **The
+arbitrageur has flow but no balance sheet.** Moving a price requires *holding* the
+other side of the imbalance, not churning through it. Claim 3's arithmetic framing
+is right in substance and wrong in variable: the binding constraint is the
+**position cap**, not the volume share, and volume share is what I chose to
+measure.
+
+**Claim 2 stands and is the one that matters.** The caps bind (RT-046's six
+participants at exactly their limit), and they bind on the quantity that governs
+price impact rather than the one I predicted.
+
+**A second result, unplanned.** The dated futures book carries **1 205 contracts
+of total volume against 205 926 on `ABC/USD` — 0.59%**, and 0.15% of `ABC/CDF`.
+**The futures market barely exists.** That materially qualifies [[RT-058]]: the
+basis fails to converge partly because there is almost no one there to converge
+it, which is a thinner claim than "arbitrage was tested and failed" and I am
+weakening RT-058's framing accordingly.
+
+**Net.** Across three unanchored instruments the convergence force is 1.7%, 5.3%
+and 24.3% of taker flow, capped at positions far below the imbalances it faces,
+and in the one case where its flow is substantial the cap still prevents it from
+holding a position that would matter. **The campaign's convergence questions were
+posed to participants configured too small to answer them** — for two of the three
+by volume, and for all three by position limit.
+
+**Scope.** One seed, one configuration. Volume is per fill side; "designated
+arbitrageur" is my reading of which class is meant to converge each book, which
+the config does not state explicitly.
+
+Recorded as RT-059.
+
+
 ---
 
 ## F. Findings
@@ -6349,6 +6469,15 @@ See `research/red-team-findings.md` for the full records.
 - **RT-003** — bounded no-violation results (INV-2, INV-5, INV-6, identity).
 - **RT-006** — latency is delivered as configured across 225 link x channel
   rows; no unearned speed advantage. Transport only.
+- **RT-059** — the convergence force is **1.7% of taker flow on `ABC/CDF`, 5.3% on
+  the futures, but 24.3% on `ABC-PERP`** — so capacity explains two of the three
+  unanchored instruments and **not** the perpetual, where the basis is still −29%.
+  What does explain it is the **position cap**, not volume: [[RT-046]]'s six
+  `carry_arb` are capped at 3 000 contracts combined while trading 14 744, a
+  **4.9x turnover** — **flow without balance sheet**. Also measured, unplanned:
+  the dated futures book is **0.59% of `ABC/USD` volume**, so [[RT-058]]'s
+  convergence failure is partly that **the futures market barely exists** — a
+  qualification that weakens RT-058's framing.
 - **RT-058** — **the dated futures never converge.** Median basis is **+27.4%** in
   the final half hour to expiry and **+99.15%** at the expiry instant (futures mid
   9 814 120 000 against a spot of 4 929 505 000 — **1.99x its underlying**), with
