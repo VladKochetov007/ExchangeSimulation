@@ -26,6 +26,10 @@ type Event struct {
 	// Sequence is the venue-wide persisted event sequence. It is distinct from
 	// Ordinal, which is only the physical line position in one routed file.
 	Sequence uint64
+	// GlobalSequence is the evstream frame sequence when this record was
+	// reconstructed from canonical binary evidence. It is optional for
+	// historical JSON logs and is distinct from the venue-local Sequence.
+	GlobalSequence uint64
 	// Ordinal is the one-based physical record position in File. It permits
 	// analyzers to distinguish causal order among same-timestamp records in one
 	// persisted log; SimTS alone is not sufficient at lifecycle boundaries.
@@ -70,6 +74,7 @@ type envelope struct {
 	ClientID uint64          `json:"client_id"`
 	Event    string          `json:"event"`
 	Data     json.RawMessage `json:"data"`
+	EventSeq uint64          `json:"event_seq"`
 }
 
 type dataLayer struct {
@@ -180,7 +185,8 @@ func scanFile(path string, keep map[string]bool, needles [][]byte, visit func(Ev
 		}
 		event := Event{
 			SimTS: env.SimTS, ClientID: env.ClientID, Name: env.Event,
-			VenueID: outer.VenueID, Symbol: outer.Symbol, Sequence: outer.Sequence, File: path, Ordinal: ordinal,
+			VenueID: outer.VenueID, Symbol: outer.Symbol, Sequence: outer.Sequence, GlobalSequence: env.EventSeq,
+			File: path, Ordinal: ordinal,
 			payload: outer.Payload,
 		}
 		// Unwrap the derivative nesting: an inner payload means the fields sit

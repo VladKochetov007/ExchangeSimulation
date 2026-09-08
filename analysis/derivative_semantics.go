@@ -10,9 +10,10 @@ import (
 // position at which it became effective. Funding can share a timestamp with a
 // later fill, so SimTS alone is not enough to recover its contemporaneous side.
 type posPoint struct {
-	at, size int64
-	file     string
-	ordinal  int64
+	at, size       int64
+	file           string
+	ordinal        int64
+	globalSequence uint64
 }
 
 type perpPositionKey struct {
@@ -26,12 +27,12 @@ type perpPositionKey struct {
 // funded perpetual at a given instant. Funding is contract-specific; summing
 // dated-future or another perpetual exposure on the venue would make a valid
 // payment look correctly directed for the wrong reason.
-func perpSideAt(history map[perpPositionKey][]posPoint, venue string, client uint64, symbol string, at int64, file string, ordinal int64) (int64, bool) {
+func perpSideAt(history map[perpPositionKey][]posPoint, venue string, client uint64, symbol string, at int64, file string, ordinal int64, globalSequence uint64) (int64, bool) {
 	var total int64
 	known := false
 	for _, side := range []string{"BOTH", "LONG", "SHORT"} {
 		points := history[perpPositionKey{venue: venue, clientID: client, symbol: symbol, side: side}]
-		size, sideKnown := sizeAt(points, at, file, ordinal)
+		size, sideKnown := sizeAt(points, at, file, ordinal, globalSequence)
 		if !sideKnown {
 			continue
 		}
@@ -49,13 +50,13 @@ func perpSideAt(history map[perpPositionKey][]posPoint, venue string, client uin
 // same-timestamp points before the record are eligible; points after it, and
 // same-timestamp points from a physically separate file without a global order,
 // are deliberately excluded.
-func sizeAt(points []posPoint, at int64, file string, ordinal int64) (int64, bool) {
+func sizeAt(points []posPoint, at int64, file string, ordinal int64, globalSequence uint64) (int64, bool) {
 	var size int64
 	known := false
 	var selected evidenceOrder
-	use := evidenceOrder{timestamp: at, file: file, ordinal: ordinal}
+	use := evidenceOrder{timestamp: at, file: file, ordinal: ordinal, globalSequence: globalSequence}
 	for _, point := range points {
-		pointOrder := evidenceOrder{timestamp: point.at, file: point.file, ordinal: point.ordinal}
+		pointOrder := evidenceOrder{timestamp: point.at, file: point.file, ordinal: point.ordinal, globalSequence: point.globalSequence}
 		if point.at > at || !evidenceAfter(use, pointOrder) {
 			continue
 		}
@@ -168,11 +169,13 @@ func hasNonzeroPerpPosition(history map[perpPositionKey][]posPoint, venue, symbo
 }
 
 // positionPointBeforeCutoff determines whether a position update can describe
-// exposure at a settlement boundary. Same-file sequence is authoritative. A
-// same-timestamp point from another file remains possible exposure because the
-// logger does not persist one global order; excluding it would turn ambiguity
-// into a false proof that no settlement was required.
+// exposure at a settlement boundary. Canonical binary frames carry a global
+// sequence; historical JSON falls back to the conservative cross-file rule
+// because its routed files have no shared physical order.
 func positionPointBeforeCutoff(point posPoint, cutoff evidenceOrder) bool {
+	if point.globalSequence != 0 && cutoff.globalSequence != 0 {
+		return point.globalSequence < cutoff.globalSequence
+	}
 	if point.at != cutoff.timestamp {
 		return point.at < cutoff.timestamp
 	}
@@ -215,7 +218,7 @@ func expectedFundingDeltaAt(history map[perpPositionKey][]posPoint, venue, symbo
 		if cutoffKnown {
 			size, sideKnown = sizeAtBeforeCutoff(points, timestamp, cutoff)
 		} else {
-			size, sideKnown = sizeAt(points, timestamp, "", 0)
+			size, sideKnown = sizeAt(points, timestamp, "", 0, 0)
 		}
 		if !sideKnown {
 			continue
@@ -257,7 +260,7 @@ func sizeAtBeforeCutoff(points []posPoint, timestamp int64, cutoff evidenceOrder
 		if point.at > timestamp || !positionPointBeforeCutoff(point, cutoff) {
 			continue
 		}
-		pointOrder := evidenceOrder{timestamp: point.at, file: point.file, ordinal: point.ordinal}
+		pointOrder := evidenceOrder{timestamp: point.at, file: point.file, ordinal: point.ordinal, globalSequence: point.globalSequence}
 		if !known || point.at > selected.timestamp || (point.at == selected.timestamp && evidenceBefore(selected, pointOrder)) {
 			size = point.size
 			selected = pointOrder
@@ -482,9 +485,10 @@ func (r *Run) MeasureDerivativeSemantics(opts DerivativeAuditOptions) (*Derivati
 	// the total, which is the same under any sign convention.
 	fundingDeltas := make(map[instantKey]map[uint64]int64)
 	type fundingCursor struct {
-		timestamp int64
-		file      string
-		ordinal   int64
+		timestamp      int64
+		file           string
+		ordinal        int64
+		globalSequence uint64
 	}
 	// The first balance record at a funding instant marks the event boundary.
 	// All affected accounts are settled by that operation before later records
@@ -605,7 +609,7 @@ func (r *Run) MeasureDerivativeSemantics(opts DerivativeAuditOptions) (*Derivati
 				return
 			}
 			key := instantKey{venue: event.VenueID, timestamp: payload.Timestamp, asset: payload.Symbol}
-			order := evidenceOrder{timestamp: event.SimTS, file: event.File, ordinal: event.Ordinal}
+			order := eventEvidenceOrder(event)
 			mu.Lock()
 			if previous, duplicate := fundingSettlements[key]; duplicate {
 				if opts.RequireExactReplay && previous.order != order {
@@ -618,8 +622,9 @@ func (r *Run) MeasureDerivativeSemantics(opts DerivativeAuditOptions) (*Derivati
 				funding[key] = &fundingBucket{}
 			}
 			cursor, seen := fundingCursors[key]
-			if !seen || (cursor.file == event.File && event.Ordinal < cursor.ordinal) {
-				fundingCursors[key] = fundingCursor{timestamp: event.SimTS, file: event.File, ordinal: event.Ordinal}
+			candidateIsEarlier := event.GlobalSequence != 0 && cursor.globalSequence != 0 && event.GlobalSequence < cursor.globalSequence
+			if !seen || candidateIsEarlier || (event.GlobalSequence == 0 && cursor.globalSequence == 0 && cursor.file == event.File && event.Ordinal < cursor.ordinal) {
+				fundingCursors[key] = fundingCursor{timestamp: event.SimTS, file: event.File, ordinal: event.Ordinal, globalSequence: event.GlobalSequence}
 			}
 			mu.Unlock()
 		case "funding_settlement_failed":
@@ -666,7 +671,7 @@ func (r *Run) MeasureDerivativeSemantics(opts DerivativeAuditOptions) (*Derivati
 			rateKey := markKey{event.VenueID, payload.Symbol}
 			rates[rateKey] = append(rates[rateKey], fundingRatePoint{
 				ratePayload: payload,
-				order:       evidenceOrder{timestamp: event.SimTS, file: event.File, ordinal: event.Ordinal},
+				order:       eventEvidenceOrder(event),
 			})
 			mu.Unlock()
 		case "position_update":
@@ -720,7 +725,7 @@ func (r *Run) MeasureDerivativeSemantics(opts DerivativeAuditOptions) (*Derivati
 				mu.Unlock()
 				return
 			}
-			perpHistory[key] = append(perpHistory[key], posPoint{at: at, size: payload.NewSize, file: event.File, ordinal: event.Ordinal})
+			perpHistory[key] = append(perpHistory[key], posPoint{at: at, size: payload.NewSize, file: event.File, ordinal: event.Ordinal, globalSequence: event.GlobalSequence})
 			mu.Unlock()
 		case "OrderFill":
 			var fill optionFill
@@ -866,8 +871,9 @@ func (r *Run) MeasureDerivativeSemantics(opts DerivativeAuditOptions) (*Derivati
 				}
 				key := instantKey{event.VenueID, instant, record.Symbol}
 				cursor, seen := fundingCursors[key]
-				if !seen || (cursor.file == event.File && event.Ordinal < cursor.ordinal) {
-					fundingCursors[key] = fundingCursor{timestamp: event.SimTS, file: event.File, ordinal: event.Ordinal}
+				candidateIsEarlier := event.GlobalSequence != 0 && cursor.globalSequence != 0 && event.GlobalSequence < cursor.globalSequence
+				if !seen || candidateIsEarlier || (event.GlobalSequence == 0 && cursor.globalSequence == 0 && cursor.file == event.File && event.Ordinal < cursor.ordinal) {
+					fundingCursors[key] = fundingCursor{timestamp: event.SimTS, file: event.File, ordinal: event.Ordinal, globalSequence: event.GlobalSequence}
 				}
 				bucket := funding[key]
 				if bucket == nil {
@@ -1044,7 +1050,7 @@ func (r *Run) MeasureDerivativeSemantics(opts DerivativeAuditOptions) (*Derivati
 				} else if cursor, cursorKnown := fundingCursors[settlementKey]; cursorKnown {
 					// Legacy/current balance evidence has no marker. The first
 					// posting is the best available boundary for that stream.
-					cutoff = evidenceOrder{timestamp: cursor.timestamp, file: cursor.file, ordinal: cursor.ordinal}
+					cutoff = evidenceOrder{timestamp: cursor.timestamp, file: cursor.file, ordinal: cursor.ordinal, globalSequence: cursor.globalSequence}
 					cutoffKnown = true
 				}
 				if !hasNonzeroPerpPosition(perpHistory, key.venue, key.symbol, deadline, cutoff, cutoffKnown) {
@@ -1114,7 +1120,7 @@ func (r *Run) MeasureDerivativeSemantics(opts DerivativeAuditOptions) (*Derivati
 				// operation that advances it. Require the exact deadline and physical
 				// precedence so an older published deadline cannot mask a missing rate.
 				if !cursorKnown || point.NextFunding != instant || point.Timestamp > instant ||
-					!evidenceAfter(evidenceOrder{timestamp: cursor.timestamp, file: cursor.file, ordinal: cursor.ordinal}, point.order) {
+					!evidenceAfter(evidenceOrder{timestamp: cursor.timestamp, file: cursor.file, ordinal: cursor.ordinal, globalSequence: cursor.globalSequence}, point.order) {
 					continue
 				}
 			} else if point.Timestamp > instant {
@@ -1167,7 +1173,7 @@ func (r *Run) MeasureDerivativeSemantics(opts DerivativeAuditOptions) (*Derivati
 				check.Undirected++
 				continue
 			}
-			size, known := perpSideAt(perpHistory, key.venue, holder, key.asset, key.timestamp, cursor.file, cursor.ordinal)
+			size, known := perpSideAt(perpHistory, key.venue, holder, key.asset, key.timestamp, cursor.file, cursor.ordinal, cursor.globalSequence)
 			if !known || size == 0 {
 				check.Undirected++
 				continue

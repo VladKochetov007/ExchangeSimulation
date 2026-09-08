@@ -802,7 +802,7 @@ func (r *Run) MeasureConservation(opts ConservationOptions) (*Conservation, erro
 			identity := marginInterestAccrualIdentity{venue: event.VenueID, clientID: payload.ClientID, asset: payload.Asset}
 			interestRemainder.BorrowEvents++
 			marginInterestDebtEvents[identity] = append(marginInterestDebtEvents[identity], collateralDebtEvent{
-				order: evidenceOrder{timestamp: event.SimTS, file: event.File, ordinal: event.Ordinal},
+				order: eventEvidenceOrder(event),
 				venue: event.VenueID, clientID: payload.ClientID, asset: payload.Asset,
 				kind: "borrow", amount: payload.Amount, interestRate: payload.InterestRate,
 				reason: payload.Reason,
@@ -829,7 +829,7 @@ func (r *Run) MeasureConservation(opts ConservationOptions) (*Conservation, erro
 			identity := marginInterestAccrualIdentity{venue: event.VenueID, clientID: payload.ClientID, asset: payload.Asset}
 			interestRemainder.RepayEvents++
 			marginInterestDebtEvents[identity] = append(marginInterestDebtEvents[identity], collateralDebtEvent{
-				order: evidenceOrder{timestamp: event.SimTS, file: event.File, ordinal: event.Ordinal},
+				order: eventEvidenceOrder(event),
 				venue: event.VenueID, clientID: payload.ClientID, asset: payload.Asset,
 				kind: "repay", amount: payload.Principal, remainingDebt: payload.RemainingDebt,
 				reason: payload.Reason,
@@ -917,7 +917,7 @@ func (r *Run) MeasureConservation(opts ConservationOptions) (*Conservation, erro
 				SpotInterest: payload.SpotInterest, PerpInterest: payload.PerpInterest,
 				RemainderBefore: payload.RemainderBefore, RemainderAfter: payload.RemainderAfter,
 				Denominator: payload.Denominator,
-				Order:       evidenceOrder{timestamp: event.SimTS, file: event.File, ordinal: event.Ordinal},
+				Order:       eventEvidenceOrder(event),
 			}
 			if decodeErr != nil || payload.Timestamp != event.SimTS || payload.ClientID != event.ClientID || payload.Asset == "" || remainderOutOfRange || !validCollateralInterestTransition(record) {
 				mu.Lock()
@@ -979,7 +979,7 @@ func (r *Run) MeasureConservation(opts ConservationOptions) (*Conservation, erro
 					Timestamp: payload.Timestamp, RemainderBefore: payload.RemainderBefore,
 					RemainderAfter: payload.RemainderAfter, Denominator: payload.Denominator, Reason: payload.Reason,
 					DebtBefore: payload.DebtBefore, DebtAfter: payload.DebtAfter, DebtStatePresent: debtStatePresent,
-					Order: evidenceOrder{timestamp: event.SimTS, file: event.File, ordinal: event.Ordinal},
+					Order: eventEvidenceOrder(event),
 				})
 			}
 			mu.Unlock()

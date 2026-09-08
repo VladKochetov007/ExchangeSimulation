@@ -1,17 +1,28 @@
 package analysis
 
 // evidenceOrder identifies a persisted record well enough to establish
-// causality. Within one file the persisted sequence is authoritative, and a
-// backdated record cannot be moved before an earlier sequence position. Across
-// files simulated time orders records; records at one timestamp are
-// intentionally ambiguous because the logger does not persist a global order.
+// causality. Reconstructed binary evidence carries an optional global frame
+// sequence, which is authoritative whenever both records have it. Historical
+// JSON logs retain the timestamp/file/ordinal fallback because they have no
+// global order field.
 type evidenceOrder struct {
-	timestamp int64
-	file      string
-	ordinal   int64
+	timestamp      int64
+	file           string
+	ordinal        int64
+	globalSequence uint64
+}
+
+func eventEvidenceOrder(event Event) evidenceOrder {
+	return evidenceOrder{
+		timestamp: event.SimTS, file: event.File, ordinal: event.Ordinal,
+		globalSequence: event.GlobalSequence,
+	}
 }
 
 func evidenceAfter(use, prerequisite evidenceOrder) bool {
+	if use.globalSequence != 0 && prerequisite.globalSequence != 0 {
+		return prerequisite.globalSequence < use.globalSequence
+	}
 	if prerequisite.timestamp > use.timestamp {
 		return false
 	}
@@ -22,6 +33,9 @@ func evidenceAfter(use, prerequisite evidenceOrder) bool {
 }
 
 func evidenceBefore(left, right evidenceOrder) bool {
+	if left.globalSequence != 0 && right.globalSequence != 0 {
+		return left.globalSequence < right.globalSequence
+	}
 	if left.timestamp != right.timestamp {
 		return left.timestamp < right.timestamp
 	}

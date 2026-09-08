@@ -132,14 +132,14 @@ func (r *Run) MeasureExpiryFills() (*ExpiryFillAudit, error) {
 			if contract.listing == 0 || event.SimTS < contract.listing {
 				contract.listing = event.SimTS
 			}
-			listingOrder := evidenceOrder{timestamp: event.SimTS, file: event.File, ordinal: event.Ordinal}
+			listingOrder := eventEvidenceOrder(event)
 			if contract.listingOrder.ordinal == 0 || evidenceBefore(listingOrder, contract.listingOrder) {
 				contract.listingOrder = listingOrder
 			}
 		} else {
 			contract.settled = true
 			contract.settlement = event.SimTS
-			contract.settlementOrder = evidenceOrder{timestamp: event.SimTS, file: event.File, ordinal: event.Ordinal}
+			contract.settlementOrder = eventEvidenceOrder(event)
 		}
 		contracts[key] = contract
 	}); err != nil {
@@ -196,9 +196,7 @@ func (r *Run) MeasureExpiryFills() (*ExpiryFillAudit, error) {
 		}
 		row := fillCounts[key]
 		row.fills++
-		if _, listed := latestCausalPrerequisite([]evidenceOrder{contract.listingOrder}, evidenceOrder{
-			timestamp: event.SimTS, file: event.File, ordinal: event.Ordinal,
-		}); !listed {
+		if _, listed := latestCausalPrerequisite([]evidenceOrder{contract.listingOrder}, eventEvidenceOrder(event)); !listed {
 			row.beforeListing++
 		}
 		if event.SimTS >= contract.expiry {
@@ -222,9 +220,7 @@ func (r *Run) MeasureExpiryFills() (*ExpiryFillAudit, error) {
 		if !exists {
 			return
 		}
-		if _, listed := latestCausalPrerequisite([]evidenceOrder{contract.listingOrder}, evidenceOrder{
-			timestamp: event.SimTS, file: event.File, ordinal: event.Ordinal,
-		}); !listed {
+		if _, listed := latestCausalPrerequisite([]evidenceOrder{contract.listingOrder}, eventEvidenceOrder(event)); !listed {
 			mu.Lock()
 			row := fillCounts[key]
 			row.snapshotsBeforeListing++
