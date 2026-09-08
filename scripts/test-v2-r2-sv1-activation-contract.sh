@@ -348,9 +348,10 @@ fi
 # must not be accepted as a seed-643, three-venue activation pair merely because
 # the surrounding attestation names seed 643.
 #
-# The reduced fixture above protects the comparison predicate. The
-# production-shaped fixture below protects the producer-to-provenance boundary
-# and exercises the exact registered activation population.
+# The reduced fixture above protects the economic comparison predicate. The
+# boundary fixture below is intentionally validator-shaped only; it must never
+# be accepted as producer evidence without complete arm artifacts and pinned
+# executable identities.
 serialized_comparison="$temp_root/serialized-cdf-comparison.json"
 EXSIM_CDF_COMPARISON_OUTPUT="$serialized_comparison" GOMAXPROCS=2 \
 	go test -count=1 ./analysis -run '^TestCDFLiquidityComparisonSerializesContractFixture$' >/dev/null || {
@@ -376,6 +377,9 @@ fi
 
 full_output_root="$temp_root/full-activation-output"
 mkdir -p -- "$full_output_root/treatment" "$full_output_root/control"
+# Deliberately incomplete arms are a regression fixture for the former false
+# positive: a pair-level attestation must not upgrade sparse hand-authored
+# files into producer evidence.
 cp -- "$v2_r2_sv1_activation_config" "$full_output_root/treatment/run-config.json"
 cp -- "$v2_r2_sv1_activation_control_config" "$full_output_root/control/run-config.json"
 for arm in treatment control; do
@@ -392,6 +396,10 @@ cp -- "$fixture_true_binary" "$temp_root/sv1b-analyzer"
 chmod 0755 -- "$temp_root/sv1b-simulator" "$temp_root/sv1b-analyzer"
 fixture_simulator_sha256=$(sha256sum -- "$temp_root/sv1b-simulator" | awk '{print $1}')
 fixture_analyzer_sha256=$(sha256sum -- "$temp_root/sv1b-analyzer" | awk '{print $1}')
+if v2_r2_sv1b_require_pinned_binary "$temp_root/sv1b-simulator" "$review_revision" "$fixture_simulator_sha256" "exchange_sim/cmd/multivenue"; then
+	echo "an arbitrary non-Go executable passed the direct activation binary identity check" >&2
+	exit 1
+fi
 fixture_treatment_config_sha256=$(sha256sum -- "$v2_r2_sv1_activation_config" | awk '{print $1}')
 fixture_control_config_sha256=$(sha256sum -- "$v2_r2_sv1_activation_control_config" | awk '{print $1}')
 fixture_treatment_status_sha256=$(sha256sum -- "$full_output_root/treatment/run-status.json" | awk '{print $1}')
@@ -415,9 +423,10 @@ fixture_activation_provenance="$temp_root/full-activation-provenance.json"
 activation_venue_ids=$(jq -ce '.venue_ids | select(type == "array" and length == 3)' "$v2_r2_sv1_activation_config")
 activation_supplier_count=$(jq -er '(.elastic_liquidity_suppliers | length) * (.venue_ids | length)' "$v2_r2_sv1_activation_config")
 activation_treatment_result="$temp_root/activation-treatment-result.json"
-jq --argjson expected_supplier_count "$activation_supplier_count" '
+jq --argjson expected_supplier_count "$activation_supplier_count" --argjson venue_ids "$activation_venue_ids" '
 	.result as $result |
 	$result.suppliers as $supplier_templates |
+	$result.venues as $venue_templates |
 	.result
 	| .supplier_count = $expected_supplier_count
 	| .decision_count = ($expected_supplier_count * 2)
@@ -430,13 +439,17 @@ jq --argjson expected_supplier_count "$activation_supplier_count" '
 	| .withdrawal_without_replacement_count = $expected_supplier_count
 	| .risk_state_decision_count = $expected_supplier_count
 	| .fresh_risk_state_decision_count = $expected_supplier_count
-	| .suppliers = [range(0; $expected_supplier_count) as $index
+	| .venues = [$venue_ids[] as $venue | ($venue_templates[0] | .venue_id = $venue)]
+	| .suppliers = [$venue_ids[] as $venue | range(0; 4) as $index
 		| ($supplier_templates[$index % ($supplier_templates | length)]
+			| .venue_id = $venue
 			| .role = ("cdf_elastic_supplier_" + (($index + 1) | tostring))
+			| .client_id = ($index + 1)
 			| .max_gross_base_balance = 1
 			| .configured_max_inventory = 2)]
 ' "$cdf_audit_fixture" >"$activation_treatment_result"
-jq '.result' "$temp_root/control-cdfliquidity.json" >"$temp_root/activation-control-result.json"
+jq --argjson venue_ids "$activation_venue_ids" '.result | .venues = [$venue_ids[] as $venue | .venues[0] | .venue_id = $venue]' \
+	"$temp_root/control-cdfliquidity.json" >"$temp_root/activation-control-result.json"
 
 write_activation_provenance() {
 	local output_path=$1 comparison_path=$2 comparison_sha256=$3
@@ -499,8 +512,8 @@ if v2_r2_require_sv1b_activation_provenance "$fixture_activation_provenance" "$r
 	exit 1
 fi
 
-# Build the positive comparison from a detailed audit fixture while binding it
-# to the exact registered 4-supplier x 3-venue activation population.
+# Build a validator-shaped comparison from a detailed audit fixture while
+# binding it to the exact registered 4-supplier x 3-venue activation population.
 jq -n \
 	--slurpfile treatment "$activation_treatment_result" \
 	--slurpfile control "$temp_root/activation-control-result.json" \
@@ -532,10 +545,27 @@ jq -n \
 	>"$full_output_root/cdf-liquidity-comparison.json"
 fixture_comparison_sha256=$(sha256sum -- "$full_output_root/cdf-liquidity-comparison.json" | awk '{print $1}')
 write_activation_provenance "$fixture_activation_provenance" "$full_output_root/cdf-liquidity-comparison.json" "$fixture_comparison_sha256"
-v2_r2_require_sv1b_activation_provenance "$fixture_activation_provenance" "$review_revision" "$fixture_simulator_sha256" || {
-	echo "full activation provenance rejected the production-shaped seed-643 comparison" >&2
+v2_r2_sv1b_require_activation_comparison_identity "$full_output_root/cdf-liquidity-comparison.json" "$fixture_activation_provenance" \
+	"$review_revision" "$fixture_simulator_sha256" "$fixture_analyzer_sha256" "$activation_supplier_count" || {
+	echo "exact registered supplier role and venue population was rejected" >&2
 	exit 1
 }
+if jq '.treatment.suppliers[0].role = "unregistered_role"' "$full_output_root/cdf-liquidity-comparison.json" >"$temp_root/comparison-wrong-role.json" &&
+	v2_r2_sv1b_require_activation_comparison_identity "$temp_root/comparison-wrong-role.json" "$fixture_activation_provenance" \
+		"$review_revision" "$fixture_simulator_sha256" "$fixture_analyzer_sha256" "$activation_supplier_count"; then
+	echo "comparison accepted a supplier role outside the registered roster" >&2
+	exit 1
+fi
+if jq '.treatment.suppliers[0].venue_id = "unregistered_venue"' "$full_output_root/cdf-liquidity-comparison.json" >"$temp_root/comparison-wrong-venue.json" &&
+	v2_r2_sv1b_require_activation_comparison_identity "$temp_root/comparison-wrong-venue.json" "$fixture_activation_provenance" \
+		"$review_revision" "$fixture_simulator_sha256" "$fixture_analyzer_sha256" "$activation_supplier_count"; then
+	echo "comparison accepted a supplier venue outside the registered roster" >&2
+	exit 1
+fi
+if v2_r2_require_sv1b_activation_provenance "$fixture_activation_provenance" "$review_revision" "$fixture_simulator_sha256"; then
+	echo "hand-authored activation fixture bypassed complete producer provenance" >&2
+	exit 1
+fi
 
 expect_comparison_mutation_rejected() {
 	local name=$1 filter=$2

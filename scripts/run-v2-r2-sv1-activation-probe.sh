@@ -118,6 +118,16 @@ audit_go_version=$(v2_r2_binary_go_version "$audit_binary")
 }
 v2_r2_is_go_127 "$binary_go_version" || { echo "multivenue binary is not Go 1.27: $binary_go_version" >&2; exit 1; }
 v2_r2_is_go_127 "$audit_go_version" || { echo "CDF analyzer is not Go 1.27: $audit_go_version" >&2; exit 1; }
+binary_sha256=$(sha256sum -- "$binary" | awk '{print $1}')
+analyzer_sha256=$(sha256sum -- "$audit_binary" | awk '{print $1}')
+v2_r2_sv1b_require_pinned_binary "$binary" "$head_revision" "$binary_sha256" "exchange_sim/cmd/multivenue" || {
+	echo "multivenue binary failed the direct pinned-build identity check" >&2
+	exit 1
+}
+v2_r2_sv1b_require_pinned_binary "$audit_binary" "$head_revision" "$analyzer_sha256" "exchange_sim/cmd/cdf-liquidity-audit" || {
+	echo "CDF analyzer failed the direct pinned-build identity check" >&2
+	exit 1
+}
 
 review_attestation=$(v2_r2_sv1b_review_attestation_path "$head_revision") || {
 	echo "could not resolve the exact-tree SV1B review attestation path" >&2
@@ -365,8 +375,8 @@ run_arm() {
 			resource_guard_reason="final activation free space is below the ${activation_minimum_free_bytes}-byte reserve: $simulator_final_free_bytes"
 		fi
 	fi
-	mv -- "$stdout_log" "$arm/simulator.stdout.log"
-	mv -- "$stderr_log" "$arm/simulator.stderr.log"
+	mv -- "$stdout_log" "$arm/simulator.stdout.log" || return 1
+	mv -- "$stderr_log" "$arm/simulator.stderr.log" || return 1
 	if [[ "$resource_guard_failed" == true ]]; then
 		echo "activation resource guard failed for $arm: $resource_guard_reason" >&2
 		return 1
@@ -449,7 +459,12 @@ run_arm() {
 			  peak_rss_bytes: $peak_rss_bytes, peak_rss_observed_at: $peak_rss_at,
 			  initial_available_free_bytes: $initial_free_bytes, final_available_free_bytes: $final_free_bytes,
 			  resource_guard_failed: $resource_guard_failed, resource_guard_reason: $resource_guard_reason}' >"$run_status_tmp" || return 1
-	mv -- "$run_status_tmp" "$arm/run-status.json"
+	mv -- "$run_status_tmp" "$arm/run-status.json" || return 1
+	v2_r2_sv1b_require_activation_arm_artifacts "$arm" "$(basename -- "$arm")" "$head_revision" \
+		"$(sha256sum -- "$arm/run-config.json" | awk '{print $1}')" "$binary_sha256" || {
+		echo "activation arm failed the complete producer-artifact contract: $arm" >&2
+		return 1
+	}
 }
 
 prepare_arm "$treatment_dir" "$treatment_config"
@@ -618,6 +633,10 @@ fi
 comparison_sha=$(sha256sum -- "$output_root/cdf-liquidity-comparison.json" | awk '{print $1}')
 if [[ "$activation_satisfied" == true ]]; then
 	write_pair_provenance "ACTIVATION_CONTRACT_SATISFIED" true "$comparison_sha"
+	if ! v2_r2_require_sv1b_activation_provenance "$output_root/activation-provenance.json" "$head_revision" "$binary_sha256"; then
+		echo "activation probe produced a package that failed its final provenance self-validation" >&2
+		exit 1
+	fi
 	echo "completed V2-R2-SV1 activation probe: $output_root"
 	exit 0
 fi
