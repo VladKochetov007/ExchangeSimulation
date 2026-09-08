@@ -2,6 +2,7 @@ package exchange
 
 import (
 	"cmp"
+	"errors"
 	"fmt"
 	"maps"
 	"math"
@@ -853,6 +854,9 @@ func (e *DefaultExchange) fundMarketRequirement(clientID uint64, client *Client,
 	}
 	if available() >= required {
 		return true, nil
+	}
+	if e.forbidBorrowing {
+		return false, errors.New("borrowing is forbidden by the exchange risk contract")
 	}
 	if e.BorrowingMgr == nil {
 		return false, nil
@@ -1819,6 +1823,9 @@ func (e *DefaultExchange) tryReserveOrBorrow(
 	}
 	if e.BorrowingMgr == nil {
 		return false, nil
+	}
+	if e.forbidBorrowing {
+		return false, errors.New("borrowing is forbidden by the exchange risk contract")
 	}
 	cfg := e.BorrowingMgr.Config
 	if isPerp && !cfg.AutoBorrowPerp {

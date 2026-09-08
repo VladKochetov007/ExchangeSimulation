@@ -164,6 +164,7 @@ type DefaultExchange struct {
 	Loggers               map[string]Logger
 	instrumentLogFallback Logger
 	BorrowingMgr          *BorrowingManager
+	forbidBorrowing       bool
 	// collateralInterestRemainders carries sub-quote-unit financing state
 	// per debt. It is exchange state, not client-visible cash, and is committed
 	// atomically with each collateral-interest sweep.
@@ -266,6 +267,12 @@ type ExchangeConfig struct {
 
 	// BalanceSnapshotInterval is how often to log balance snapshots (default: 0 = disabled)
 	BalanceSnapshotInterval time.Duration
+
+	// ForbidBorrowing is an immutable exchange-level safety boundary. It is
+	// used by strict scientific successors whose registered contract excludes
+	// debt; replacing the public compatibility manager cannot re-enable the
+	// internal borrow paths.
+	ForbidBorrowing bool
 }
 
 // NewExchange creates an exchange with default configuration
@@ -337,6 +344,7 @@ func NewExchangeWithConfig(config ExchangeConfig) *DefaultExchange {
 		snapshotPollInterval:             config.SnapshotPollInterval,
 		balanceSnapshotStopCh:            make(chan struct{}),
 		balanceSnapshotInterval:          config.BalanceSnapshotInterval,
+		forbidBorrowing:                  config.ForbidBorrowing,
 	}
 	if policy, ok := ex.Positions.(interface{ SetRequireExactLinearPositionAccounting(bool) }); ok {
 		policy.SetRequireExactLinearPositionAccounting(config.RequireExactLinearPositionAccounting)
@@ -629,6 +637,9 @@ func (e *DefaultExchange) getLogger(symbol string) Logger {
 }
 
 func (e *DefaultExchange) EnableBorrowing(config BorrowingConfig) error {
+	if e.forbidBorrowing && (config.Enabled || config.AutoBorrowSpot || config.AutoBorrowPerp) {
+		return errors.New("borrowing is forbidden by the exchange risk contract")
+	}
 	if config.Enabled && config.PriceSource == nil {
 		return errors.New("price source required")
 	}
@@ -2714,6 +2725,9 @@ func (e *DefaultExchange) reportFundingSettlementFailure(now int64, symbol strin
 
 // BorrowMargin borrows amount of asset for clientID. Acquires exchange lock.
 func (e *DefaultExchange) BorrowMargin(clientID uint64, asset string, amount int64, reason string) error {
+	if e.forbidBorrowing {
+		return errors.New("borrowing is forbidden by the exchange risk contract")
+	}
 	if e.BorrowingMgr == nil {
 		return errors.New("borrowing not enabled")
 	}
@@ -2745,4 +2759,37 @@ func (e *DefaultExchange) RepayMargin(clientID uint64, asset string, amount int6
 		e.closeCollateralInterestRemainderLocked(clientID, asset, ctx.Timestamp, "debt_repaid", debtBefore, client.Borrowed[asset])
 	}
 	return err
+}
+
+// ValidateNoBorrowingDebt checks the immutable no-debt boundary used by strict
+// scientific successors. It includes transient spot/perp attribution and
+// carried sub-unit interest so a borrow that is repaid before a balance
+// snapshot cannot disappear from the contract audit.
+func (e *DefaultExchange) ValidateNoBorrowingDebt() error {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	clientIDs := make([]uint64, 0, len(e.Clients))
+	for clientID := range e.Clients {
+		clientIDs = append(clientIDs, clientID)
+	}
+	slices.Sort(clientIDs)
+	for _, clientID := range clientIDs {
+		client := e.Clients[clientID]
+		for _, asset := range sortedAssetNames(client.Borrowed) {
+			if debt := client.Borrowed[asset]; debt != 0 {
+				return fmt.Errorf("client %d has forbidden %s debt %d", clientID, asset, debt)
+			}
+		}
+		for _, asset := range sortedAssetNames(client.BorrowedSpot) {
+			if debt := client.BorrowedSpot[asset]; debt != 0 {
+				return fmt.Errorf("client %d has forbidden %s spot debt attribution %d", clientID, asset, debt)
+			}
+		}
+		for _, asset := range sortedAssetNames(e.collateralInterestRemainders[clientID]) {
+			if remainder := e.collateralInterestRemainders[clientID][asset]; remainder != 0 {
+				return fmt.Errorf("client %d has forbidden %s interest remainder %d", clientID, asset, remainder)
+			}
+		}
+	}
+	return nil
 }

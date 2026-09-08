@@ -179,6 +179,14 @@ type Config struct {
 	// marked account for every connected participant. It is the required mode
 	// for FFA fitness experiments; legacy mechanism controls may leave it off.
 	StrictPopulationAccounting bool `json:"strict_population_accounting"`
+	// StrictRiskContract selects the successor's explicitly fail-closed debt
+	// boundary. It requires an explicit false AutoBorrowSpot value and disables
+	// venue borrowing until a reviewed account-risk policy is injected.
+	StrictRiskContract bool `json:"strict_risk_contract,omitempty"`
+	// AutoBorrowSpot is a pointer so legacy configurations retain their
+	// historical enabled default while a strict successor can register an
+	// explicit disabled policy.
+	AutoBorrowSpot *bool `json:"auto_borrow_spot,omitempty"`
 	// VenueRules selects the exact matching policy for each venue. Omitted
 	// entries preserve the established price-time control.
 	VenueRules map[string]VenueRule `json:"venue_rules"`
@@ -713,6 +721,17 @@ func (c *Config) normalize() error {
 	}
 	if c.CrossAssetCollateralMarks && !c.CrossAssetSpotGraph {
 		return errors.New("multivenue: cross-asset collateral marks require the cross-asset spot graph")
+	}
+	if c.StrictRiskContract {
+		if c.AutoBorrowSpot == nil || *c.AutoBorrowSpot {
+			return errors.New("multivenue: strict risk contract requires explicit auto_borrow_spot=false")
+		}
+		if c.CrossAssetCollateralMarks {
+			return errors.New("multivenue: strict risk contract cannot authorize static cross-asset collateral marks")
+		}
+		if c.PerpExposureHedger != nil && c.PerpExposureHedger.AutoBorrowPerp {
+			return errors.New("multivenue: strict risk contract cannot authorize perpetual auto-borrow without an account-risk policy")
+		}
 	}
 	if c.RecordDecisionFrontierVectors && !c.RecordMarketDataReceipts {
 		return errors.New("multivenue: decision frontier vectors require market-data receipt evidence")
@@ -2093,6 +2112,12 @@ func (s *Sim) Run(ctx context.Context) error {
 				riskErr = venue.riskErr
 				break
 			}
+			if s.Config.StrictRiskContract {
+				if err := venue.Exchange.ValidateNoBorrowingDebt(); err != nil {
+					riskErr = fmt.Errorf("multivenue: strict risk contract at %s: %w", venue.ID, err)
+					break
+				}
+			}
 			venue.TerminalRisk, riskErr = captureVenueRisk(venue, "terminal_post_mark")
 		}
 		if riskErr == nil && s.Config.StrictPopulationAccounting {
@@ -2117,6 +2142,11 @@ func (s *Sim) Run(ctx context.Context) error {
 	for _, venue := range s.Venues {
 		if venue.riskErr != nil {
 			return venue.riskErr
+		}
+		if s.Config.StrictRiskContract {
+			if err := venue.Exchange.ValidateNoBorrowingDebt(); err != nil {
+				return fmt.Errorf("multivenue: strict risk contract at %s: %w", venue.ID, err)
+			}
 		}
 	}
 	return riskErr
@@ -2708,6 +2738,7 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 		DeterministicIngress:                 true,
 		DeterministicPhases:                  true,
 		RequireExactLinearPositionAccounting: true,
+		ForbidBorrowing:                      s.Config.StrictRiskContract,
 		SnapshotInterval:                     s.Config.SnapshotInterval,
 		BalanceSnapshotInterval:              time.Minute,
 	})
@@ -2845,6 +2876,12 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 		},
 		PostDerivativeMarkHook: func() {
 			now := venue.Exchange.Clock.NowUnixNano()
+			if s.Config.StrictRiskContract {
+				if err := venue.Exchange.ValidateNoBorrowingDebt(); err != nil {
+					venue.riskErr = fmt.Errorf("multivenue: strict risk contract at %s: %w", venue.ID, err)
+					return
+				}
+			}
 			venue.recordTwoSidedMarks(valuedSpotSymbols(s.Config.CrossAssetSpotGraph), now)
 			for _, symbol := range []string{"ABC/USD", "ABC-PERP", "CDF/USD", "ABC/CDF"} {
 				if mid, ok := venue.Exchange.TwoSidedMidPrice(symbol); ok {
@@ -2868,6 +2905,10 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 		assetPrecisions["CDF"] = mvBasePrecision
 		collateralPrices["CDF"] = mvCDFBootstrap
 	}
+	autoBorrowSpot := true
+	if s.Config.AutoBorrowSpot != nil {
+		autoBorrowSpot = *s.Config.AutoBorrowSpot
+	}
 	autoBorrowPerp := false
 	if policy := s.Config.PerpExposureHedger; policy != nil {
 		// The fixed-directional P7d policy explicitly opts into the existing
@@ -2876,8 +2917,8 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 		autoBorrowPerp = policy.AutoBorrowPerp
 	}
 	if err := ex.EnableBorrowing(exchange.BorrowingConfig{
-		Enabled:           true,
-		AutoBorrowSpot:    true,
+		Enabled:           !s.Config.StrictRiskContract,
+		AutoBorrowSpot:    autoBorrowSpot,
 		AutoBorrowPerp:    autoBorrowPerp,
 		DefaultMarginMode: exchange.CrossMargin,
 		CollateralFactors: map[string]float64{"USD": 1},

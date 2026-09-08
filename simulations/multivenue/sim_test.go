@@ -627,6 +627,61 @@ func TestCrossAssetCollateralMarksAreExplicitAndFinite(t *testing.T) {
 	}
 }
 
+func TestStrictRiskContractDisablesDebtAndStaticCDFCollateral(t *testing.T) {
+	autoBorrowSpot := false
+	missingPolicy := Config{LogDir: t.TempDir(), LogMode: "none", StrictRiskContract: true, CrossAssetSpotGraph: true}
+	if _, err := NewSim(time.Second, missingPolicy); err == nil || !strings.Contains(err.Error(), "explicit auto_borrow_spot=false") {
+		t.Fatalf("strict config %#v validation error = %v, want explicit no-debt declaration", missingPolicy, err)
+	}
+
+	withStaticCDF := Config{
+		LogDir: t.TempDir(), LogMode: "none", StrictRiskContract: true,
+		CrossAssetSpotGraph: true, AutoBorrowSpot: ptr(autoBorrowSpot), CrossAssetCollateralMarks: true,
+	}
+	if _, err := NewSim(time.Second, withStaticCDF); err == nil || !strings.Contains(err.Error(), "cannot authorize static cross-asset collateral marks") {
+		t.Fatalf("strict static-CDF config error = %v, want explicit rejection", err)
+	}
+
+	sim, err := NewSim(time.Second, Config{
+		LogDir: t.TempDir(), LogMode: "none", StrictRiskContract: true,
+		CrossAssetSpotGraph: true, AutoBorrowSpot: ptr(autoBorrowSpot), Seed: 101,
+	})
+	if err != nil {
+		t.Fatalf("strict no-debt NewSim: %v", err)
+	}
+	defer sim.Close()
+	borrowing := sim.Venues[0].Exchange.BorrowingMgr
+	if borrowing == nil || borrowing.Config.Enabled || borrowing.Config.AutoBorrowSpot {
+		t.Fatalf("strict borrowing config = %#v, want disabled", borrowing)
+	}
+	if _, err := borrowing.Config.PriceSource.Price("CDF"); err == nil {
+		t.Fatal("strict borrowing oracle unexpectedly authorized static CDF collateral")
+	}
+	var clientID uint64
+	for _, participant := range sim.Venues[0].Participants {
+		if participant.Role == "cdf_spot_maker_1" {
+			clientID = participant.ClientID
+			break
+		}
+	}
+	if clientID == 0 {
+		t.Fatal("strict world has no CDF maker client")
+	}
+	client := sim.Venues[0].Exchange.Clients[clientID]
+	beforeBalance, beforeDebt := client.Balances["CDF"], client.Borrowed["CDF"]
+	if err := borrowingManagerBorrow(sim.Venues[0].Exchange, clientID, "CDF", mvBasePrecision); err == nil {
+		t.Fatal("strict direct borrow unexpectedly succeeded")
+	}
+	if client.Balances["CDF"] != beforeBalance || client.Borrowed["CDF"] != beforeDebt {
+		t.Fatalf("strict direct borrow mutated account: balance %d/%d debt %d/%d", client.Balances["CDF"], beforeBalance, client.Borrowed["CDF"], beforeDebt)
+	}
+	if err := sim.Venues[0].Exchange.ValidateNoBorrowingDebt(); err != nil {
+		t.Fatalf("strict no-debt validation: %v", err)
+	}
+}
+
+func ptr[T any](value T) *T { return &value }
+
 func borrowingManagerBorrow(ex *exchange.Exchange, clientID uint64, asset string, amount int64) error {
 	client := ex.Clients[clientID]
 	return ex.BorrowingMgr.BorrowMargin(exchange.BorrowContext{
