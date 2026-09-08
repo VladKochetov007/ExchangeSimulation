@@ -3,6 +3,15 @@
 # Shared fail-closed checks for the immutable R2 evidence namespace. This
 # namespace is deliberately distinct from r4: r4 remains historical evidence,
 # including its stale public-entry position/settlement derivations.
+if ! declare -F v2_r2_is_successor_candidate >/dev/null 2>&1; then
+	v2_r2_is_successor_candidate() {
+		case "${v2_r2_sv1_candidate_id:-}" in
+			V2-R2-SV1B-*|V2-R2-SV1C-*) return 0 ;;
+			*) return 1 ;;
+		esac
+	}
+fi
+
 v2_r2_output_root="/home/vlad/v2-integrated-longrun-r2-candidate-20260830-v1"
 v2_r2_attestation_root="/home/vlad/v2-integrated-longrun-r2-candidate-20260830-v1-attestations"
 v2_r2_namespace_lock_path="/home/vlad/v2-integrated-longrun-r2-candidate.lock"
