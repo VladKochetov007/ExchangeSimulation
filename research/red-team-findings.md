@@ -2551,3 +2551,64 @@ independent samples.
 **Owner decision.** `funding_max_rate_bps` and `Damping` are configurable. Whether
 a 75 bps cap with no damping is the intended model is not mine to decide; that it
 does not restrain a −2.88% basis is measurement.
+
+## RT-044 — The perp mark is pinned on its clamp while the book is 29% away
+
+**Classification.** REAL, and the most serious finding of the derivative
+sequence: it is a solvency question, not a pricing preference. Corrects RT-043's
+magnitude.
+
+**Base.** `a666d02faede3d40f046b11e60eb672c59386a94`, seed 607, 8 h, full logs.
+
+**Mechanism.** `exchange.go:1527` auto-installs `ClampedEMAMarkPrice` for every
+margin instrument with an index, and `exchange.go:1514` defaults the band to 600
+bps, which the config does not override. So
+
+    mark = index + clamp(EMA(perp_mid - index), +/- index * 3%)
+
+**Measured** (`research/tools/perpbasis`, from `BookSnapshot` evidence — an
+independent source from the funding evidence RT-043 used):
+
+| venue | samples | mean | worst | beyond ±3% clamp | final-quarter mean |
+|---|---:|---:|---:|---:|---:|
+| central | 28 539 | −4.902% | **−28.850%** | 9 264 (**32.5%**) | **−17.193%** |
+| north | 28 483 | −4.825% | −28.756% | 9 154 (32.1%) | −17.049% |
+| south | 28 549 | −4.921% | −28.898% | 9 280 (32.5%) | −17.230% |
+
+Three venues agree to a tenth of a percent: systematic, not one venue's accident.
+
+**The clamp binds exactly, not approximately.** At h=8 the settled mark is
+**4 781 619 850**; the spot mid at that instant is **4 929 505 000**, and 97% of
+that is **4 781 619 850** — identical to the unit. The mark is the clamp.
+
+**The book is far outside it.** Terminal snapshot: perp bid **3 507 080 000**,
+ask **3 507 380 000**, against a spot mid of **4 929 505 000** — a basis of
+**−28.85%** while the mark reports −3%.
+
+**Consequence.** Margin and liquidation consume the mark. At the terminal state a
+long is marked at 4 781 619 850 while the best bid is 3 507 080 000: the position
+is valued **26.7% above what it could realise**, and across the final quarter the
+gap averages about 14 points. **A liquidation engine reading this mark does not
+fire when it should**, and every margin figure in the campaign's perp accounting
+is optimistic by that amount.
+
+**Corrects RT-043.** That finding reported the perp basis as −2.88% and called it
+3.8x the funding cap. That was the **clamped mark's** basis — a configuration
+constant. The book's basis reaches −28.85%, **38x** the 0.75% cap. RT-043's
+saturation mechanism is unchanged and stands; its number described the limiter
+rather than the market.
+
+**Two nested limiters, neither of which reports saturation.** The mark clamp holds
+the reported price 3% from index while the book travels to 29%; the funding cap
+then acts on that already-clamped premium and latches at 0.75%. The only way to
+see either is to read the raw book.
+
+**Instrument note.** The first version of `perpbasis` reported "no timestamps with
+both books two-sided" for all three venues — a clean, confident, empty result.
+The cause was a schema assumption: per-book spot files write levels at the top of
+the payload and name the book **by file path**, while the shared
+`derivatives.jsonl` nests them under a symbol. Same trap recorded earlier for
+`Trade` payloads. The tool now handles both shapes explicitly.
+
+**Scope.** One seed, one configuration, 8 h. The three venues share an index and a
+population, so they are not independent replicates.

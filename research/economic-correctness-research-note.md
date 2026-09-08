@@ -4526,6 +4526,127 @@ samples but do share no order flow.
 Recorded as RT-043.
 
 
+**H-055 (PREREGISTERED) — the perp mark is pinned at its clamp boundary, so the
+reported basis is the band rather than the market, and positions are marked at a
+price the book has left.**
+
+**Mechanism, from inspection.** `exchange.go:1527` auto-installs
+`NewClampedEMAMarkPrice(symbol, index, window, band)` for every margin instrument
+that has an index, and `exchange.go:1514` defaults `band = 600` bps. The config
+overrides nothing, so the perp mark is
+
+    mark = index + clamp(EMA(perp_mid − index), ±index × 600/2/10000)
+
+a **hard ±3% clamp** around index. `price/calculators.go:227` also clamps
+`c.emaBasis` **in place**, so the clamp is applied to the filter's *state*, not
+only to its output.
+
+**Why this is the surprise in [[RT-043]].** I measured the perp basis at
+**−2.88%**, which is **96% of the 3% half-band**. I reported it as a market
+outcome. If the clamp is binding, it is not a market outcome at all — it is the
+band, and the number I published describes a configuration constant.
+
+**Two nested saturations.** The mark clamps at 3% from index; funding then clamps
+at 0.75% of that already-clamped premium ([[RT-043]]). The outer limiter hides
+how far the book has actually gone, and the inner one removes what little signal
+survives.
+
+**The risk consequence, which matters more than the economics.** Margin and
+liquidation consume the mark. If the book's true mid is well beyond ±3% of index,
+positions are marked at a price **better than the book** — a long is carried at a
+value it could not realise, and liquidation does not fire when it should. That is
+a solvency question, not a pricing preference.
+
+**Claims.**
+1. At late timestamps the clamp **binds**: `|EMA(mid − index)| / index` reaches
+   the 3% half-band rather than sitting strictly inside it.
+2. The perp book's **raw mid** diverges further from index than the clamp allows,
+   i.e. `|mid − index| / index > 3%` while the clamp is binding.
+
+**Falsifiers.**
+(a) `|mid − index| / index` never reaches 3% → the clamp never binds, claim 1
+falsified, and RT-043's −2.88% is a market outcome after all — which would be the
+better news;
+(b) raw mid stays inside the band while the mark sits at its edge → the mark is
+*stale* (EMA lag) rather than clamped, a different mechanism and a different
+finding;
+(c) the divergence is transient (binding for <10% of samples) → the clamp is
+doing its job as an outlier guard and no claim is made.
+
+**Instrument.** New tool `research/tools/perpbasis`: from `BookSnapshot`
+evidence, compute per venue and per timestamp the `ABC-PERP` mid, the index as
+the **median of the three venues' `ABC/USD` mids** (matching
+`spotIndexProvider`'s consensus mode), and the ratio. Reports the distribution of
+`(mid − index)/index` and the fraction of samples beyond the ±3% band. This is
+independent of the funding evidence used in RT-043.
+
+**Discriminating experiment E-060**, preregistered before the run: seed 607, 8 h,
+`-log-mode full`. Status: **SUPPORTED WITHIN TESTED SCOPE** on both claims; no
+falsifier fired, magnitude ~6x predicted.
+
+
+**E-060 — H-055 SUPPORTED on both claims, at roughly six times the predicted
+magnitude. The perp mark sits exactly on its clamp while the book is 17–29%
+away, so positions are marked far above what they could realise.**
+Base: `a666d02faede3d40f046b11e60eb672c59386a94`, seed 607, 8 h, `-log-mode full`.
+Reproduce: `go run research/tools/perpbasis/main.go -dir <logdir>`.
+
+`(perp mid − consensus index) / index`, from `BookSnapshot` evidence — an
+**independent source** from the funding evidence [[RT-043]] used:
+
+| venue | samples | mean | worst | beyond ±3% clamp | final-quarter mean |
+|---|---:|---:|---:|---:|---:|
+| central | 28 539 | −4.902% | **−28.850%** | 9 264 (**32.5%**) | **−17.193%** |
+| north | 28 483 | −4.825% | −28.756% | 9 154 (32.1%) | −17.049% |
+| south | 28 549 | −4.921% | −28.898% | 9 280 (32.5%) | −17.230% |
+
+All three venues agree to a tenth of a percent, so this is systematic rather than
+one venue's accident.
+
+**Claim 1 — the clamp binds, and exactly.** 32.5% of samples lie beyond the band,
+against falsifier (c)'s "transient, <10%". Better than a fraction, the mark lands
+**on the boundary to the unit**: at h=8 the settled mark is **4 781 619 850**, and
+the spot mid at that instant is **4 929 505 000**, whose 97% is
+**4 781 619 850** — identical. The mark is not near the clamp, it *is* the clamp.
+
+**Claim 2 — the book is far outside it.** The terminal snapshot has the perp at
+bid **3 507 080 000** / ask **3 507 380 000** against a spot mid of
+**4 929 505 000**: a basis of **−28.85%**, while the mark reports −3%.
+
+**The consequence is solvency, not pricing.** Margin and liquidation consume the
+mark. At the terminal state a long is marked at **4 781 619 850** while the best
+bid is **3 507 080 000** — the position is valued **26.7% above** what it could
+realise. For the final quarter of the run the gap averages ~14 points. **A
+liquidation engine reading this mark does not fire when it should**, and every
+margin figure in the campaign's perp accounting is optimistic by that amount.
+
+**This corrects [[RT-043]]'s magnitude.** I reported the perp basis as −2.88% and
+called it 3.8× the funding cap. That was the **clamped mark's** basis — a
+configuration constant, exactly as suspected. The **book's** basis reaches
+−28.85%, which is **38× the 0.75% funding cap**, not 3.8×. RT-043's mechanism is
+unchanged and its saturation finding stands; its number described the limiter
+rather than the market, which is precisely the error H-055 was written to catch.
+
+**Two nested limiters, now both measured.** The mark clamp holds the reported
+price 3% from index while the book goes to 29%; the funding cap then acts on that
+already-clamped premium and latches at 0.75%. Neither limiter reports that it is
+saturated. The only way to see it is to read the raw book, which is what this
+tool does.
+
+**Instrument note.** The first version of `perpbasis` returned "no timestamps with
+both books two-sided" for every venue. The cause was a schema assumption:
+per-book spot files write the levels at the top of the payload and identify the
+book **by file path**, while the shared `derivatives.jsonl` nests them under a
+symbol. A reader that assumes one shape silently finds nothing and reports a
+clean empty result. This is the same trap recorded earlier for `Trade` payloads;
+the tool now handles both shapes explicitly.
+
+**Scope.** One seed, one configuration, 8 h. Three venues agree, but they share
+the same index and the same population, so they are not independent replicates.
+
+Recorded as RT-044.
+
+
 ---
 
 ## F. Findings
@@ -4542,6 +4663,15 @@ See `research/red-team-findings.md` for the full records.
 - **RT-003** — bounded no-violation results (INV-2, INV-5, INV-6, identity).
 - **RT-006** — latency is delivered as configured across 225 link x channel
   rows; no unearned speed advantage. Transport only.
+- **RT-044** — the perp **mark is pinned exactly on its ±3% clamp while the book
+  is 17-29% away**. At h=8 the mark is 4 781 619 850 and the spot mid
+  4 929 505 000, whose 97% is 4 781 619 850 to the unit; **32.5% of samples lie
+  beyond the band** and the final-quarter mean basis is **−17.2%**, worst
+  **−28.85%**, on all three venues alike. Margin and liquidation consume that
+  mark, so a long is valued **26.7% above its best bid** at the terminal state and
+  **liquidation cannot fire when it should**. Corrects [[RT-043]]: the −2.88% I
+  published was the clamped mark's basis, a configuration constant; the book's is
+  −28.85%, **38x** the funding cap rather than 3.8x.
 - **RT-043** — the funding controller **saturates and latches**. With
   `Damping: 100` (a multiplier of 1.0, i.e. none) the rate is the raw premium
   hard-clamped at ±75 bps; **64% / 60% / 100%** of settlements sit at the cap, and
