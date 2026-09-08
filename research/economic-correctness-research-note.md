@@ -5821,6 +5821,155 @@ tenor axis is the dealer's own.
 Recorded as RT-054.
 
 
+**H-066 (PREREGISTERED) — the option dealer's missing bid is a spot-proportional
+half-spread, and [[RT-054]]'s unexplained regime is inventory skew.**
+
+**Reopening a lineage I closed, and why that is legitimate.** RT-054 stopped after
+three candidate mechanisms were eliminated *by measurement*. This does not add a
+fourth guess — it consults the **specification**, which I had never read for this
+actor. RT-031 was found the same way. Reading the source is evidence of a
+different kind, not speculation.
+
+**The mechanism, from `simulations/derivsim/optionmm.go:351`:**
+
+    theo := eprice.Black76Premium(...)
+    half := mm.spotMid * mm.cfg.SpreadBps / 10000
+    skew := mm.spotMid * mm.cfg.SkewPerLotBps / 10000 * q.inventory / mm.cfg.LotQty
+    bid := alignDown(theo-half-skew, tick)
+    ask := alignUp(theo+half-skew, tick)
+    ...
+    if bid > 0 {
+        mm.SubmitOrder(sym, exchange.Buy, ...)   // bid: conditional
+    }
+    mm.SubmitOrder(sym, exchange.Sell, ...)      // ask: unconditional
+
+**The ask is placed unconditionally; the bid only when it prices above zero.**
+And `half` is **30 bps of the underlying spot** (`SpreadBps: 30`, hardcoded at
+`sim.go:3195`) — *not* a fraction of the option's own premium. At a spot of
+49 295 USD that is a fixed **≈147.9 USD** half-width applied to every contract,
+whether it is worth 20 USD or 2 000.
+
+**So any option whose theoretical premium is below ≈148 USD is quoted with a
+negative bid and therefore has no bid at all** — which is exactly the partition
+[[RT-051]] measured, the 4.45:1 ask skew [[RT-052]] attributed to the dealer, and
+the monotone moneyness rule [[RT-053]] found.
+
+**And skew explains RT-054's regime.** `SkewPerLotBps: 5` with
+`LotQty = mvBasePrecision/20` makes each lot of inventory shift both quotes by
+`spot × 5/10000 / 20` ≈ **24.6 USD**. Skew enters with a **minus** sign, so a
+**short** dealer inventory raises the bid. Roughly **6 lots short (0.3 contracts)**
+lifts a zero-premium contract's bid above zero — after which *every* contract is
+quoted two-sided, at every moneyness and every tenor. That is precisely the Q3
+signature.
+
+**Claims.**
+1. **Arithmetic**: predicted half-width `spot × 0.003` reproduces the sampled
+   quote (bid 16 / ask 314, half-width 149) within **5%**.
+2. **Threshold**: OTM contracts with a premium below ≈148 USD are the ones
+   without a bid; the ask-only fraction tracks the fraction of contracts priced
+   under that level.
+3. **Regime**: the dealer's **net option inventory is short during Q3** and not
+   short in the quarters where the ask skew appears.
+
+**Falsifiers.**
+(a) predicted half-width misses the sampled quote by >5% → the formula is not what
+drives the observed quotes;
+(b) dealer inventory is **not** short in Q3, or is short in Q1/Q2/Q4 too → skew
+does not explain the regime and RT-054's anomaly returns to unexplained, with a
+fourth candidate eliminated;
+(c) ITM contracts also lose their bid at some point → the `bid > 0` gate is not
+the operative condition.
+
+**Discriminating experiment E-071**, preregistered before the run: seed 607, 8 h,
+`-log-mode full`; measure `option_dealer` net option inventory per quarter across
+all contracts.
+Status: **MIXED** — claim 1 supported at 0.7% error and the mechanism found;
+claim 3 falsified and mis-specified (aggregate measured, per-contract required).
+
+
+**E-071 — H-066 MIXED. The mechanism for the missing bid is FOUND and verified to
+0.7%, closing [[RT-051]]–[[RT-053]]. Claim 3 is falsified *and* was
+mis-specified; [[RT-054]]'s Q3 regime stays open.**
+Base: `a666d02faede3d40f046b11e60eb672c59386a94`, seed 607, 8 h, `-log-mode full`.
+
+**Claim 1 SUPPORTED — the arithmetic reproduces the observed quotes.** Predicted
+half-width `spot × 30 bps` = **147.9 USD** against the sampled quote's observed
+**149** (bid 16 / ask 314): **0.7% error**, against a 5% falsifier.
+
+**The mechanism, and it is a single conditional** (`optionmm.go:351`):
+
+    half := mm.spotMid * mm.cfg.SpreadBps / 10000   // 30 bps of SPOT
+    bid  := alignDown(theo-half-skew, tick)
+    ask  := alignUp(theo+half-skew, tick)
+    if bid > 0 {                                     // bid: conditional
+        mm.SubmitOrder(sym, exchange.Buy, ...)
+    }
+    mm.SubmitOrder(sym, exchange.Sell, ...)          // ask: unconditional
+
+**The half-spread is 30 bps of the underlying, not of the option's premium.** At
+a 49 295 USD spot that is a flat ≈148 USD applied to every contract, whether it is
+worth 20 USD or 2 000. The ask is always placed; the bid only when it prices
+above zero. So **every option worth less than ≈148 USD is quoted ask-only**.
+
+**This closes three prior findings quantitatively.**
+
+| option premium | half-spread as % of premium |
+|---:|---:|
+| 100 USD | 148% |
+| **148 USD** | **100%** (bid hits zero) |
+| **193 USD** | **76.7%** |
+| 600 USD | 24.7% |
+| 1 200 USD | 12.3% |
+
+[[RT-051]] measured a **76.8% median OTM half-spread** — implying a typical OTM
+premium of **≈193 USD**, exactly on this curve — against **10.0% for ITM**, which
+implies ≈1 480 USD. The partition, the 4.45:1 ask skew of [[RT-052]] and the
+monotone moneyness rule of [[RT-053]] are all one line of code.
+
+**Claim 3 FALSIFIED, and the test was mis-specified — both are recorded.**
+Measured `option_dealer` net option inventory by quarter, all three dealers on all
+three venues:
+
+| quarter | inventory (contracts) |
+|---|---|
+| Q1 | −6.3 to −8.5 |
+| Q2 | −14.1 to −17.8 |
+| Q3 | −39.3 to −44.2 |
+| Q4 | **−46.7 to −51.6** |
+
+The dealer is **short in every quarter**, monotonically, so falsifier (b) fires:
+skew does not distinguish Q3. Fourth candidate eliminated.
+
+**But the measurement was of the wrong quantity, which I state rather than
+bury.** `skew` uses `q.inventory` — `q` is the **per-contract** quote state, so
+the skew that matters is the dealer's position *in that contract*, not its
+aggregate book. I measured the aggregate. So the skew hypothesis is **not
+properly tested**: it is falsified only in the aggregate form I wrote, and the
+per-contract form remains untested. My preregistered arithmetic ("6 lots lifts a
+zero bid") was also built on the aggregate reading and does not survive it — an
+aggregate of −8 contracts would imply skew large enough to bid for everything in
+Q1, which the 14% Q1 ratio contradicts. **That contradiction is itself evidence
+the skew term is per-contract, as the source says.**
+
+**Net position of the lineage.** The headline question — why out-of-the-money
+options have no bid — is **answered and verified**. RT-054's separate question —
+why Q3 quotes everything in pairs — remains open, with four candidates now
+eliminated and one (per-contract skew) identified as untested because I measured
+the wrong aggregate.
+
+**Owner-facing statement.** A half-spread proportional to the **underlying**
+rather than to the option premium makes cheap options untradeable on one side by
+construction. `SpreadBps: 30` is hardcoded at `sim.go:3195`, not configurable.
+Whether that is intended is a design question; that it produces a 148 USD
+half-spread on a 165 USD option is arithmetic.
+
+**Scope.** One seed, one configuration. The 0.7% arithmetic check is against a
+single sampled quote; the premium-to-spread curve is derived, not fitted to the
+distribution.
+
+Recorded as RT-055.
+
+
 ---
 
 ## F. Findings
@@ -5837,6 +5986,16 @@ See `research/red-team-findings.md` for the full records.
 - **RT-003** — bounded no-violation results (INV-2, INV-5, INV-6, identity).
 - **RT-006** — latency is delivered as configured across 225 link x channel
   rows; no unearned speed advantage. Transport only.
+- **RT-055** — **the missing option bid is one conditional.** `optionmm.go:351`
+  places the ask unconditionally and the bid only `if bid > 0`, where
+  `half = spotMid × 30bps` is **30 bps of the underlying, not of the option
+  premium** — a flat ≈148 USD on every contract. Any option worth less than that
+  is quoted **ask-only**. Verified: predicted half-width 147.9 against 149
+  observed, **0.7% error**. This closes [[RT-051]] (76.8% median OTM half-spread ⇒
+  ≈193 USD premium, on the curve), [[RT-052]] and [[RT-053]] as one line of code.
+  Claim 3 falsified — dealer inventory is short in **all four** quarters — and the
+  test was **mis-specified**, since `skew` is per-contract and I measured the
+  aggregate. [[RT-054]]'s Q3 regime stays open.
 - **RT-054** — **tenor eliminated** as the explanation for [[RT-053]]'s anomaly,
   the third candidate to fall. The moneyness rule is robust to tenor (ITM exactly
   paired in **every** band; OTM never above 47%), but the anomaly is orthogonal:

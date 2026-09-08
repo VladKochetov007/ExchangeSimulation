@@ -3176,3 +3176,69 @@ measured.
 **Scope.** One seed, one configuration. Placements count accepted orders, not
 resting depth. Quarters are the observer's calendar bucketing; the tenor axis is
 the dealer's own.
+
+## RT-055 — The missing option bid is one conditional and a spot-proportional spread
+
+**Classification.** REAL, and it closes RT-051, RT-052 and RT-053 with a verified
+mechanism. RT-054's separate anomaly stays open.
+
+**Base.** `a666d02faede3d40f046b11e60eb672c59386a94`, seed 607, 8 h, full logs.
+
+**Mechanism** (`simulations/derivsim/optionmm.go:351`):
+
+```go
+half := mm.spotMid * mm.cfg.SpreadBps / 10000   // 30 bps of SPOT
+bid  := alignDown(theo-half-skew, tick)
+ask  := alignUp(theo+half-skew, tick)
+if bid > 0 {                                     // bid: conditional
+    mm.SubmitOrder(sym, exchange.Buy, ...)
+}
+mm.SubmitOrder(sym, exchange.Sell, ...)          // ask: unconditional
+```
+
+**The half-spread is 30 bps of the underlying, not of the option's premium.**
+`SpreadBps: 30` is hardcoded at `sim.go:3195`. At a 49 295 USD spot that is a flat
+**≈148 USD** applied to every contract, whether it is worth 20 USD or 2 000. The
+ask is always placed; the bid only when it prices above zero. **Every option worth
+less than ≈148 USD is quoted ask-only.**
+
+**Verified.** Predicted half-width `spot x 0.003` = **147.9 USD** against the
+sampled quote's **149** (bid 16 / ask 314): **0.7% error**.
+
+**It closes three findings quantitatively.**
+
+| option premium | half-spread as % of premium |
+|---:|---:|
+| 100 USD | 148% |
+| **148 USD** | **100%** (bid hits zero) |
+| **193 USD** | **76.7%** |
+| 1 200 USD | 12.3% |
+
+RT-051 measured a **76.8% median OTM half-spread**, implying a typical OTM premium
+of ≈193 USD — on this curve — against 10.0% for ITM, implying ≈1 480 USD. The
+ITM/OTM partition, RT-052's 4.45:1 ask skew and RT-053's monotone moneyness rule
+are all consequences of this one line.
+
+**The skew hypothesis is falsified as tested and mis-specified as written.**
+Measured dealer net option inventory by quarter (three dealers, three venues):
+Q1 −6.3 to −8.5, Q2 −14.1 to −17.8, Q3 −39.3 to −44.2, Q4 −46.7 to −51.6
+contracts. **Short in every quarter, monotonically**, so it does not distinguish
+Q3 — fourth candidate eliminated.
+
+But `skew` uses `q.inventory`, and `q` is the **per-contract** quote state, so the
+relevant position is the dealer's holding *in that contract*, not its aggregate
+book. **I measured the aggregate.** The skew explanation is therefore falsified
+only in the aggregate form and remains untested in the per-contract form. The
+preregistered arithmetic ("6 lots lifts a zero bid") was built on the same
+aggregate reading; an aggregate of −8 contracts would imply bids for everything in
+Q1, which the measured 14% Q1 ratio contradicts — and that contradiction is itself
+evidence the term is per-contract, as the source says.
+
+**Owner-facing.** A half-spread proportional to the underlying rather than to the
+option premium makes cheap options untradeable on one side by construction, and
+`SpreadBps: 30` is hardcoded rather than configured. Whether that is intended is a
+design question; that it puts a 148 USD half-spread on a 165 USD option is
+arithmetic.
+
+**Scope.** One seed, one configuration. The 0.7% check is against a single sampled
+quote; the premium-to-spread curve is derived from the formula, not fitted.

@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 )
@@ -76,6 +77,11 @@ type key struct {
 	client uint64
 }
 
+type sample struct {
+	ts       int64
+	position int64
+}
+
 type path struct {
 	role     string
 	position int64
@@ -84,6 +90,10 @@ type path struct {
 	firstHit int64
 	hasHit   bool
 	fills    int
+	// samples is the position after each fill, bucketed into quarters once the
+	// run span is known.
+	samples    []sample
+	quarterEnd [4]int64
 	// authoritative counts fills where the exchange reported a post-fill
 	// position; mismatch counts those where it disagreed with accumulation.
 	authoritative int
@@ -94,6 +104,7 @@ func main() {
 	logDir := flag.String("dir", "", "log directory of a full-log run")
 	greeksPath := flag.String("greeks", "", "greeks.json (default <dir>/greeks.json)")
 	symbol := flag.String("symbol", "ABC-PERP", "instrument whose position is tracked")
+	symbolRegex := flag.String("symbol-regex", "", "aggregate signed position across every book matching this pattern, instead of one symbol")
 	rolePrefix := flag.String("role-prefix", "carry_arb", "participant class to report")
 	limit := flag.Float64("limit", 500, "position limit in whole contracts")
 	basePrecision := flag.Float64("base-precision", 1e8, "base units per whole contract")
@@ -132,6 +143,15 @@ func main() {
 	files = append(files, nested...)
 	sort.Strings(files)
 
+	var matcher *regexp.Regexp
+	if *symbolRegex != "" {
+		compiled, err := regexp.Compile(*symbolRegex)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "bad -symbol-regex:", err)
+			os.Exit(2)
+		}
+		matcher = compiled
+	}
 	limitUnits := int64(*limit * *basePrecision)
 	marker := []byte(`"OrderFill"`)
 	var firstTS, lastTS int64
@@ -159,7 +179,11 @@ func main() {
 				lastTS = rec.SimTS
 			}
 			fill := rec.fill()
-			if fill.Symbol != *symbol {
+			if matcher != nil {
+				if !matcher.MatchString(fill.Symbol) {
+					continue
+				}
+			} else if fill.Symbol != *symbol {
 				continue
 			}
 			p := tracked[key{rec.Data.VenueID, rec.ClientID}]
@@ -182,13 +206,20 @@ func main() {
 			} else {
 				p.position -= fill.Qty
 			}
-			if fill.NewSize != 0 {
+			// The exchange's post-fill position is per contract, so it can only
+			// cross-check a single-symbol run. In aggregate mode the check is
+			// unavailable and the tool says so rather than implying one.
+			if matcher == nil && fill.NewSize != 0 {
 				p.authoritative++
 				if fill.NewSize != p.position {
 					p.mismatch++
 				}
 			}
 			p.fills++
+			// The run span is not known until this scan finishes, so the
+			// quarter a fill belongs to cannot be computed here. Keep the
+			// timestamped position and bucket it afterwards.
+			p.samples = append(p.samples, sample{ts: rec.SimTS, position: p.position})
 			if !p.hasHit && abs(p.position) >= limitUnits {
 				p.firstHit, p.hasHit = rec.SimTS, true
 			}
@@ -204,6 +235,22 @@ func main() {
 	}
 
 	span := lastTS - firstTS
+	if span <= 0 {
+		span = 1
+	}
+	for _, p := range tracked {
+		for _, sm := range p.samples {
+			q := int((sm.ts - firstTS) * 4 / span)
+			if q < 0 {
+				q = 0
+			}
+			if q > 3 {
+				q = 3
+			}
+			p.quarterEnd[q] = sm.position
+		}
+		p.samples = nil
+	}
 	names := make([]key, 0, len(tracked))
 	for k := range tracked {
 		names = append(names, k)
@@ -229,8 +276,10 @@ func main() {
 		if span > 0 {
 			share = float64(p.atLimit) / float64(span) * 100
 		}
-		fmt.Printf("%-9s %-16s %8d %14.2f %14s %11.1f%%\n",
-			k.venue, p.role, p.fills, float64(p.position)/(*basePrecision), hit, share)
+		fmt.Printf("%-9s %-16s %8d %14.2f %14s %11.1f%%  q-end %8.2f %8.2f %8.2f %8.2f\n",
+			k.venue, p.role, p.fills, float64(p.position)/(*basePrecision), hit, share,
+			float64(p.quarterEnd[0])/(*basePrecision), float64(p.quarterEnd[1])/(*basePrecision),
+			float64(p.quarterEnd[2])/(*basePrecision), float64(p.quarterEnd[3])/(*basePrecision))
 	}
 	totalAuth, totalMismatch := 0, 0
 	for _, p := range tracked {
