@@ -3015,3 +3015,54 @@ already collected.
 classified OTM may have been ITM earlier; that softens the partition at the 49 000
 strike and cannot explain it, since `49000-C` (ITM by 0.6%) is 99.9% two-sided
 while `49000-P` (OTM by 0.6%) is 22.1%.
+
+## RT-052 — The dealer quotes ITM books symmetrically and OTM books 4.45:1 to the ask
+
+**Classification.** REAL for the asymmetry; the *mechanism* remains open, with one
+candidate eliminated and a new anomaly identified.
+
+**Base.** `a666d02faede3d40f046b11e60eb672c59386a94`, seed 607, 8 h, full logs.
+
+**Method.** Attribution from `OrderAccepted` — what was **placed** — not from
+fills. Attributing quote provision from fills is circular: a book with no bid has
+no bid-side fills by construction.
+
+| group | bids | asks | bid/ask | by quarter |
+|---|---:|---:|---:|---|
+| **in the money** | 336 292 | 336 292 | **100.0%** | 100%, 100%, 100%, 100% |
+| **out of the money** | 122 127 | 543 513 | **22.5%** | 21%, 23%, **100%**, 14% |
+
+**On in-the-money books the dealer places exactly one bid per ask, in every
+quarter, to the unit**: 97 767/97 767, 103 384/103 384, 51 189/51 189,
+83 952/83 952. On out-of-the-money books the same dealer places **4.45 asks per
+bid**. It supplies **90.8%** of all OTM asks, so RT-051's missing bid is the
+dealer's own quoting rather than incidental flow.
+
+**Risk-limit withdrawal is excluded.** The registered discriminator was the time
+profile: a dealer squeezed out by inventory or margin starts healthy and declines.
+The ratio runs 21% to 14% first quarter to last — a factor of 0.66, where the
+falsifier required below 0.5 — and is already at 21% in the first quarter.
+
+**The registered claim was still missed.** I predicted a ratio below 20%; it is
+22.5%. Direction right, threshold wrong, and a threshold missed is missed.
+
+**Q3 breaks both candidates and is not noise.** In the third quarter the dealer
+placed **25 092 bids against 25 093 asks — 100%** — on the same books it otherwise
+skews 4:1. That is a 25 000-placement sample sitting between 23% and 14%. Neither
+a static quoting policy nor a monotone withdrawal predicts a symmetric quarter in
+the middle of an asymmetric run.
+
+**Named confound, untested.** Total placements also collapse in Q3 (OTM 50 185
+against 216 535 in Q1). Moneyness is classified against **terminal** spot, and
+options expire and relist through the run across five listing timestamps, so a
+book counted OTM at the end may have been at or in the money during Q3. That is a
+candidate explanation and it has not been tested.
+
+**Next experiment.** Recompute moneyness per listing epoch against contemporaneous
+spot and re-split the quarters. If Q3's symmetry disappears, it was a
+classification artifact and the quoting-policy reading stands; if it survives, the
+dealer changes behaviour mid-run and neither candidate is correct.
+
+**Scope.** One seed, one configuration. Placements count orders accepted, not
+resting depth or time-weighted presence, so a class placing many short-lived
+orders outweighs one resting a single quote.

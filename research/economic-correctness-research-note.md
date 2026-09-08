@@ -5468,6 +5468,124 @@ two-sided while `49000-P` (OTM by 0.6%) is 22.1%.
 Recorded as RT-051.
 
 
+**H-063 (PREREGISTERED) — the OTM options have no bid because nobody places one,
+by quoting policy rather than by risk-limit withdrawal.**
+
+[[RT-051]] measured the partition — every ITM book 99.9% two-sided, every OTM book
+losing its bid — and explicitly refused to name a mechanism after the obvious
+guess (tick rounding) was checked and refuted. This tests the two remaining
+candidates against each other.
+
+**Why fills cannot answer it and placements can.** Attributing quote provision
+from `OrderFill` is circular: a book with no bid has no bid-side fills by
+construction, so the absence would be its own evidence. `OrderAccepted`
+(33 892 events in a 20-minute probe) records **placements** — client, symbol,
+side, price — independent of whether anything traded.
+
+**The two candidates make opposite time predictions.**
+
+| candidate | signature |
+|---|---|
+| **quoting policy** — the dealer's model never bids for these contracts | bid placements ≈0 on OTM books **from the first minutes**, flat over the run |
+| **risk-limit withdrawal** — the dealer bids until inventory or margin stops it | bid placements start healthy and **decline** as the run proceeds |
+
+**Claims.**
+1. On OTM books, bid placements are a small fraction of ask placements —
+   **below 20%** of the ask count.
+2. That ratio is **already low in the first quarter** of the run and does not
+   fall by more than half between the first and last quarter, i.e. it is a policy,
+   not a withdrawal.
+3. `option_dealer` is the dominant ask provider on those books, so the asymmetry
+   is attributable to the dealer rather than to incidental flow.
+
+**Falsifiers.**
+(a) the bid/ask placement ratio **declines by more than half** first quarter to
+last → risk-limit withdrawal, claim 2 falsified and the finding changes character;
+(b) bid placements are **comparable to ask placements** (ratio >50%) on OTM books
+→ the missing bid is not a placement phenomenon at all; bids are being placed and
+then cancelled or consumed, and a third mechanism is required;
+(c) a class other than `option_dealer` dominates ask provision → the dealer is
+not the quoting party and claim 3 fails.
+
+**Instrument.** New Go tool `research/tools/quoteside`: tallies `OrderAccepted`
+by book, role class and side, split into run quarters, with books grouped
+in-the-money versus out-of-the-money against a supplied spot.
+
+**Note on provenance.** The 20-minute run used to discover the event schema is
+**not** the measurement; E-068 runs the full 8 h at seed 607 so the quarter-split
+is meaningful.
+
+**Discriminating experiment E-068**, preregistered before the measurement run:
+seed 607, 8 h, `-log-mode full`.
+Status: **MIXED** — claim 1 falsified at 22.5% against a <20% prediction,
+claim 3 supported, risk-limit withdrawal excluded, but a symmetric third quarter
+leaves the mechanism open.
+
+
+**E-068 — H-063 MIXED. The dealer quotes in-the-money books perfectly
+symmetrically and out-of-the-money books 4.45:1 to the ask. Risk-limit withdrawal
+is excluded, but a third-quarter reversal neither candidate predicts leaves the
+mechanism open.**
+Base: `a666d02faede3d40f046b11e60eb672c59386a94`, seed 607, 8 h, `-log-mode full`.
+Reproduce: `go run research/tools/quoteside/main.go -dir <logdir>`.
+
+`option_dealer` placements, from `OrderAccepted` — what was **placed**, not what
+traded, so the measurement is not circular:
+
+| group | bids | asks | bid/ask | by quarter (bids/asks) |
+|---|---:|---:|---:|---|
+| **in the money** | 336 292 | 336 292 | **100.0%** | 100% (97 767/97 767), 100% (103 384/103 384), 100% (51 189/51 189), 100% (83 952/83 952) |
+| **out of the money** | 122 127 | 543 513 | **22.5%** | 21%, 23%, **100%**, 14% |
+
+**On in-the-money books the dealer places exactly one bid for every ask — in
+every quarter, to the unit.** 97 767/97 767, 103 384/103 384, 51 189/51 189,
+83 952/83 952. It is a strictly two-sided quoting loop. On out-of-the-money books
+the same dealer places **4.45 asks for every bid**.
+
+**Claim 1 falsified, narrowly and it counts.** I predicted a bid/ask ratio below
+20%; the measurement is **22.5%**. The direction is right and the threshold was
+wrong, and a threshold missed by 2.5 points is still missed.
+
+**Claim 3 supported.** `option_dealer` places **90.8%** of all OTM asks, so the
+asymmetry belongs to the dealer, not to incidental flow.
+
+**Falsifier (a) does not fire, so risk-limit withdrawal is excluded.** The ratio
+runs 21% → 14% from first quarter to last, a factor of **0.66**, where the
+falsifier required a fall below 0.5. The dealer does not start healthy and get
+squeezed out; it is already at 21% in the first quarter.
+
+**But the third quarter breaks both candidates, and it is not noise.** In Q3 the
+dealer placed **25 092 bids against 25 093 asks — 100%** — on the very books it
+otherwise skews 4:1. That is a 25 000-placement sample, not a small-denominator
+artifact, and it sits between 23% and 14%. Within Q3, falsifier (b) would fire on
+its own terms. **Neither a static quoting policy nor a monotone withdrawal
+predicts a symmetric quarter in the middle of an asymmetric run.**
+
+**A visible confound I will not resolve by assumption.** Total placements also
+collapse in Q3 — OTM 50 185 against 216 535 in Q1, ITM 102 378 against 195 534 —
+and moneyness here is classified against **terminal** spot, a caveat already
+recorded in [[RT-051]]. Options expire and relist through the run (tenors 2 h and
+6 h, five listing timestamps), so a book counted OTM at the end may have been at
+or in the money during Q3. **That is a candidate explanation and it is untested.**
+
+**Status: the mechanism remains open**, now with one candidate eliminated and a
+specific new anomaly to explain. This is the seventh mechanism question in this
+campaign and the second time in two checkpoints that the honest answer is "not
+yet" — which is the point of measuring before writing.
+
+**Next experiment.** Recompute moneyness **per listing epoch against
+contemporaneous spot** rather than terminal spot, and re-split the quarters. If
+Q3's symmetry disappears once books are classified by what they were at the time,
+the anomaly was a classification artifact and the policy reading stands. If it
+survives, the dealer changes behaviour mid-run and neither candidate is right.
+
+**Scope.** One seed, one configuration. Placements count orders accepted, not
+resting depth or time-weighted presence, so a class that places many short-lived
+orders outweighs one that rests a single quote.
+
+Recorded as RT-052.
+
+
 ---
 
 ## F. Findings
@@ -5484,6 +5602,16 @@ See `research/red-team-findings.md` for the full records.
 - **RT-003** — bounded no-violation results (INV-2, INV-5, INV-6, identity).
 - **RT-006** — latency is delivered as configured across 225 link x channel
   rows; no unearned speed advantage. Transport only.
+- **RT-052** — the option dealer quotes **in-the-money books with exactly one bid
+  per ask, every quarter, to the unit** (97 767/97 767, 103 384/103 384,
+  51 189/51 189, 83 952/83 952) and out-of-the-money books at **4.45 asks per
+  bid**. It places **90.8%** of all OTM asks, so [[RT-051]]'s missing bid is the
+  dealer's own quoting. **Risk-limit withdrawal is excluded** — the ratio falls
+  only 21%→14% across the run, against a falsifier needing a halving. But **Q3 is
+  symmetric (25 092/25 093) on those same books**, which neither a static policy
+  nor a withdrawal predicts, so the mechanism stays open. Confound named and
+  untested: moneyness is classified against terminal spot while options relist
+  through the run.
 - **RT-051** — the option surface **splits perfectly on moneyness**: all 25
   in-the-money books are **99.9%** two-sided, all 25 out-of-the-money books drop
   to a median of **58.3%** and a minimum of **21.4%**, with median half-spreads of
