@@ -1423,3 +1423,35 @@ The prior `Faraday` rejection remains a rejection of its exact old tree; it is
 not rewritten as acceptance. A new exact-tree independent Sol-xhigh review is
 required after this repair. The performance feed remains unchanged after
 `b1847ac`; no performance implementation was imported.
+
+## Append-only operational update: Russell checkpoint-attestation rejection and repair — 2026-09-08
+
+Independent Sol-xhigh reviewer `Russell` reviewed exact clean tree
+`305a01c2924e3077e34b78687f9112b0fe79e373` and **REJECTED** promotion. The
+earlier Godel findings were confirmed closed, but the review found a new
+protocol gap in checkpoint-to-binary-evidence binding.
+
+The shared `v2_r2_require_checkpoint_stream` predicate enforced ordered rows
+and the repeated terminal shape but did not require integer `sim_time` or
+`event_count`, binary `representation: evstream_v3`, zero unencodable payloads,
+matching `rolling_hash`, or equality between the final checkpoint count/hash
+and `binary-evidence-attestation.json`. Russell independently supplied a
+three-row structurally valid stream with fractional count, `jsonl` representation,
+nonzero unencodable payloads, mismatched rolling hashes, and arbitrary final
+attestation values; the old predicate accepted it. Artifact hashes could all
+be recomputed consistently, so this was a real measurement-boundary blocker.
+
+Commit `7980619` adds an explicit strict binary mode while preserving the
+historical three-argument JSON checkpoint callers. SV1B completed and terminal
+arms now use strict mode and require the final row's event count and execution
+hash to equal the binary attestation. The binary attestation validator also
+requires integer frame counts and zero unencodable payloads. Commit `6016dc9`
+corrects the fractional-time regression fixture to use a small test horizon
+because jq cannot represent half a nanosecond at the production epoch exactly.
+
+The clean focused contracts and full `GOMAXPROCS=2 make test` pass at
+`6016dc9`; the bounded vet/race gate was launched from that exact revision.
+No SV1B activation, capacity, development, freeze, or holdout world has run,
+so no historical rerun is required and predecessor R2 remains untouched. The
+performance feed remains unchanged after `b1847ac`; no performance code was
+imported. Another exact-tree independent Sol-xhigh review is required.

@@ -1273,3 +1273,37 @@ fixture. The performance branch was fetched through unchanged marker
 `b1847ac`; no new performance commit or implementation was imported. The
 post-repair tree needs a fresh exact-tree independent review before any
 external acceptance attestation, pinned build, or activation probe.
+
+## Append-only checkpoint: Russell rejection and strict binary checkpoint repair — 2026-09-08
+
+Independent Sol-xhigh reviewer `Russell` rejected exact clean HEAD
+`305a01c2924e3077e34b78687f9112b0fe79e373` before attestation, pinned build,
+or seed-643 activation. Godel's two blockers were independently confirmed
+closed. Russell identified a separate high-severity protocol/provenance gap:
+the shared checkpoint predicate accepted a structurally ordered three-row
+stream with fractional counters, `representation: jsonl`, nonzero
+`unencodable_payloads`, mismatched rolling hashes, and final count/hash values
+not equal to the binary attestation.
+
+This was independently reproduced by exercising
+`v2_r2_require_checkpoint_stream`; the predicate returned success for the
+mutated shape. It affected both completed and terminal SV1B arm validation,
+but no SV1B activation/capacity/development/freeze/holdout run had occurred,
+so the activation condition was not historical and no rerun is required. The
+predecessor R2 result and retained evidence remain unchanged.
+
+Commit `7980619` adds optional strict `evstream_v3` validation: integer
+timestamps/counters, exact binary representation, zero unencodable payloads,
+well-formed matching rolling/execution hashes, and final checkpoint equality
+with the binary attestation. SV1B arm validation uses that strict mode and the
+new `v2_r2_sv1b_require_checkpoint_attestation_binding` predicate. Binary
+attestation frame counters are also required to be integers. Commit `6016dc9`
+makes the fractional-time negative fixture effective by remapping only its
+test horizon to small values; production timestamps are unchanged.
+
+Integrated legacy R2, SV1B terminal, and activation contracts plus clean full
+`make test` passed at `6016dc9`; vet and bounded race checks were launched from
+the same exact code revision. The expected parse diagnostic is produced only
+by the intentionally truncated negative fixture. The performance branch is
+unchanged after `b1847ac` and remains unmerged. A new exact-tree independent
+review is required before any external acceptance attestation or activation.

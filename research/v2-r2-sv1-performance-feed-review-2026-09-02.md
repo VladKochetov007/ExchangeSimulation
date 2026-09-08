@@ -262,3 +262,21 @@ supplier logic, or historical evidence. Clean focused contracts and full
 `make test` passed at `8953b51`; no simulator activation, capacity probe,
 development cell, freeze, or holdout was run. A new exact-tree independent
 review is required before promotion. No performance patch was merged.
+
+## Append-only feed checkpoint: Russell checkpoint-integrity rejection — 2026-09-08
+
+The performance branch was fetched through unchanged marker `b1847ac`; no new
+performance commit was found and no performance implementation was imported.
+
+Independent Sol-xhigh reviewer `Russell` rejected scientific HEAD `305a01c`
+for a new protocol issue: the checkpoint validator accepted non-integer
+counters, non-`evstream_v3` representation, nonzero unencodable payloads,
+mismatched rolling hashes, and terminal count/hash values inconsistent with
+the binary attestation. The finding was independently reproduced and does not
+alter R2 economics or historical evidence.
+
+Scientific commits `7980619` and `6016dc9` add strict SV1B binary checkpoint
+validation, final-row/attestation binding, integer binary frame validation,
+and effective mutation coverage while preserving legacy JSON callers. Clean
+focused/full gates passed; no activation, capacity, development, freeze, or
+holdout run occurred. Another exact-tree independent review remains required.
