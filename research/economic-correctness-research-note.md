@@ -6922,6 +6922,122 @@ anchor rather than of stability.
 Recorded as RT-063.
 
 
+**H-076 (PREREGISTERED) — reproducing [[RT-037]], the campaign's load-bearing
+single-seed fairness claim, now that [[RT-063]] has shown single-seed figures can
+be draws.**
+
+**Why this finding and not another.** RT-063 established that the perp basis
+ranges over **11.2 pp across seeds**, so single-run numbers describe a draw. Most
+of this audit's findings rest on seed 607 alone. [[RT-041]] found the governing
+pattern — **levels swing, structure holds** — so the ones at risk are *level*
+claims, while *structural* claims have reproduced where tested. RT-037 is the
+load-bearing structural claim that has **never** been reproduced, and it is a
+fairness claim: that construction order buys queue priority worth **5–11%** under
+price-time matching and **exactly nothing** under pro-rata.
+
+**What RT-037 measured, at seed 607 only.** Pairing participants sharing a book
+(`makerSymbol` round-robin puts index *i* and *i+4* on the same book): on `north`
+(price-time) every pair differed and the earlier-registered participant won **7 of
+8**, by +11.5%, +9.4%, +7.6% and +5.1% on the material books; across the sixteen
+`central`/`south` (pro-rata) pairs the difference was **exactly zero to the unit**,
+largest 0.10%.
+
+**Claims, tested on seeds 608, 609 and 610.**
+1. On `north`, the earlier-registered participant wins **≥70%** of same-symbol
+   pairs, pooled across the three seeds.
+2. On `central` and `south`, the median absolute pair difference stays **under
+   1%** of the pair's result — the pro-rata null holds.
+3. The price-time advantage on the material books is **≥3%** in at least one seed,
+   i.e. the effect size is not merely a sign.
+
+**Falsifiers.**
+(a) `north` early-wins fall to **≤55%** — indistinguishable from a coin flip →
+RT-037's ordering effect does not reproduce and the finding must be retracted;
+(b) pro-rata pairs show **material** differences (median >1%) → the exact-zero
+control was a seed-607 artifact and the mechanism's cleanest evidence is gone;
+(c) the sign reproduces but every effect size is **under 1%** → the effect is real
+and economically negligible, which would soften RT-037 from "5–11% of a maker's
+result" to a rounding effect.
+
+**Why the pro-rata control makes this a strong test.** The mechanism predicts an
+effect **only** where the matching rule pays for arrival. If the price-time
+advantage reproduces *and* pro-rata stays at zero across three fresh seeds, the
+finding is established on a within-run control that no path effect can manufacture.
+If price-time reproduces but pro-rata also moves, the contrast — not just the
+magnitude — was a draw.
+
+**Cheap by construction.** Terminal account snapshots suffice, so `-log-mode none`
+at three seeds; no fill-stream parsing.
+
+**Discriminating experiment E-080**, preregistered before the runs: seeds 608, 609,
+610, 8 h, `-log-mode none`; `classpnl -by-participant` for
+`fixed_distance_maker` and `imbalance_maker`, paired by shared symbol.
+Status: **SUPPORTED WITHIN TESTED SCOPE** — 79% early wins on price-time,
+12/12 on the material books, pro-rata median exactly 0.000%.
+
+
+**E-080 — H-076 SUPPORTED on all three claims. [[RT-037]] reproduces across three
+fresh seeds and is **stronger** than originally reported: on the books that carry
+value the earlier-registered maker wins **12 of 12** pairs.**
+Base: `a666d02faede3d40f046b11e60eb672c59386a94`, seeds 608/609/610, 8 h,
+`-log-mode none`.
+Reproduce: `go run research/tools/classpnl/main.go -file <logdir>/greeks.json -by-participant fixed_distance_maker`
+(and `imbalance_maker`), paired by shared symbol.
+
+**Price-time venue (`north`), 24 pairs across three seeds:**
+
+| book | pairs | early wins | mean advantage | range |
+|---|---:|---:|---:|---|
+| **ABC-PERP** | 6 | **6/6** | **+21.2%** | +10.2% … +36.3% |
+| **ABC/CDF** | 6 | **6/6** | **+6.6%** | +3.2% … +10.0% |
+| ABC/USD, CDF/USD | 12 | 7/12 | — | results are hundreds of units, at noise |
+| **all** | 24 | **19/24 = 79%** | median \|diff\| 7.73% | max 36.3% |
+
+**Pro-rata venues (`central`+`south`), 48 pairs: median difference 0.000%, max
+0.20%, and 37 of 48 pairs differ by exactly zero.** Early wins 12% — no
+directional advantage at all, as the mechanism requires.
+
+**All three claims met, no falsifier fires.** Claim 1 needed ≥70% early wins on
+price-time: **79%**. Claim 2 needed pro-rata median under 1%: **0.000%**. Claim 3
+needed an effect ≥3% in at least one seed: **up to 36.3%**. Falsifier (a) needed
+≤55% (coin flip), (b) needed material pro-rata differences, (c) needed all effects
+under 1% — none apply.
+
+**The reproduction sharpens the finding rather than merely confirming it.** RT-037
+reported "5–11%" from one seed and counted 7 of 8 pairs. Separating the books by
+materiality shows why the eighth pair lost: **the five reversals all sit on
+`ABC/USD` and `CDF/USD`, where a maker's whole result is a few hundred units and
+the comparison is noise.** On the two books carrying millions — `ABC-PERP` and
+`ABC/CDF` — the earlier-registered participant wins **every pair in every seed**,
+by a mean of **21.2%** and **6.6%** respectively. The `ABC-PERP` effect is roughly
+**double** what RT-037 reported.
+
+**The within-run control is what makes this conclusive.** The pro-rata venues sit
+in the same runs, with the same flow, the same participants and the same
+construction order, and show **exactly zero** difference in 37 of 48 pairs. No
+path effect can produce a 21% advantage on one venue and an exact zero on two
+others in the same run. This is the campaign's cleanest causal identification.
+
+**Status: `RT-037` is promoted from single-seed to reproduced**, and its effect
+size on the material books is revised **upward**.
+
+**Note on the campaign's other single-seed results.** [[RT-063]] showed level
+figures are draws. This experiment shows a **structural** claim reproducing
+cleanly, consistent with [[RT-041]]'s rule — *levels swing, structure holds*. The
+audit's structural claims (share-of-flow, ratios, orderings) are the ones that have
+reproduced whenever tested; the level claims are the ones that need seeds. That is
+now supported by three independent reproductions (RT-041, RT-057, this) and one
+refutation of a level claim (RT-063).
+
+**Scope.** Three seeds beyond the original, one configuration. Pairs share a book
+by the `makerSymbol` round-robin; participants differ only in construction order,
+which is the identification. Terminal snapshots only — the time-resolved
+queue-position mechanism itself is inferred from RT-036/RT-037, not re-measured
+here.
+
+Recorded as RT-064.
+
+
 ---
 
 ## F. Findings
@@ -6938,6 +7054,16 @@ See `research/red-team-findings.md` for the full records.
 - **RT-003** — bounded no-violation results (INV-2, INV-5, INV-6, identity).
 - **RT-006** — latency is delivered as configured across 225 link x channel
   rows; no unearned speed advantage. Transport only.
+- **RT-064** — **[[RT-037]] reproduces across three fresh seeds and is stronger
+  than reported.** On the price-time venue the earlier-registered maker wins
+  **19/24** pairs overall and **12 of 12** on the books that carry value —
+  `ABC-PERP` by a mean **+21.2%** (roughly double RT-037's figure) and `ABC/CDF`
+  by **+6.6%** — while the 48 pro-rata pairs in the *same runs* show a median
+  difference of **0.000%**, with 37 differing by exactly zero. The five reversals
+  all sit on books where a maker's entire result is a few hundred units. **No path
+  effect can produce a 21% advantage on one venue and an exact zero on two others
+  in the same run**: this is the campaign's cleanest causal identification, and it
+  confirms [[RT-041]]'s rule that structure reproduces where levels do not.
 - **RT-063** — **the maker's index anchor is self-referential for every symbol.**
   It blends 70% own mid with 30% an index that is the **median of the venues' own
   mids of the same instrument**, so it pulls the books toward each other and

@@ -2128,6 +2128,12 @@ carried by the exact-zero control.
 **Does not affect RT-031→RT-035.** Those are aggregates dominated by `ABC/CDF`,
 where the mispricing is 69% — orders of magnitude above a queue-position edge.
 
+**REPRODUCED AND STRENGTHENED BY RT-064.** Three fresh seeds: 19/24 early wins on
+price-time overall and **12 of 12** on the material books, with `ABC-PERP` at a
+mean **+21.2%** — about double the figure reported here — and 48 pro-rata pairs in
+the same runs at a median difference of **0.000%**. The reversals counted here all
+sit on books where a maker's whole result is a few hundred units.
+
 **Instrument note.** Preregistered falsifier (b) for H-047 said the result is
 inconclusive if the per-participant spread is below the closure noise. It is —
 19 600 USD per participant against a 240 USD spread — so by the letter of my own
@@ -3711,3 +3717,51 @@ not the system. The tools were right; the sample sizes were not.
 is measured across three venues inside a run, which share flow and are not
 independent replicates — which is why their tight agreement is evidence of a
 shared anchor rather than of stability.
+
+## RT-064 — RT-037 reproduces, and the effect is larger than first reported
+
+**Classification.** REPRODUCTION that strengthens the original. The campaign's
+cleanest causal identification, on a within-run control.
+
+**Base.** `a666d02faede3d40f046b11e60eb672c59386a94`, seeds 608/609/610 (three
+beyond the original), 8 h.
+
+**Price-time venue (`north`), 24 pairs across three seeds:**
+
+| book | pairs | early wins | mean advantage | range |
+|---|---:|---:|---:|---|
+| **ABC-PERP** | 6 | **6/6** | **+21.2%** | +10.2% … +36.3% |
+| **ABC/CDF** | 6 | **6/6** | **+6.6%** | +3.2% … +10.0% |
+| ABC/USD, CDF/USD | 12 | 7/12 | — | results are hundreds of units, at noise |
+| **all** | 24 | **19/24 = 79%** | median \|diff\| 7.73% | max 36.3% |
+
+**Pro-rata venues (`central`+`south`), 48 pairs: median difference 0.000%, max
+0.20%, 37 pairs differing by exactly zero**, early wins 12% — no directional
+advantage, as the mechanism requires.
+
+Registered thresholds: ≥70% early wins on price-time (**79%**), pro-rata median
+under 1% (**0.000%**), effect ≥3% somewhere (**up to 36.3%**). No falsifier fires.
+
+**It sharpens rather than merely confirms.** RT-037 reported 5–11% from one seed
+and 7 of 8 pairs. Splitting by materiality explains the eighth: **all five
+reversals sit on `ABC/USD` and `CDF/USD`, where a maker's entire result is a few
+hundred units**. On the two books carrying millions the earlier-registered
+participant wins **every pair in every seed**, and the `ABC-PERP` advantage is
+about **double** the original figure.
+
+**The within-run control is what makes it conclusive.** The pro-rata venues are in
+the same runs, with the same flow, participants and construction order, and differ
+by exactly zero in 37 of 48 pairs. **No path effect produces a 21% advantage on
+one venue and an exact zero on two others simultaneously.**
+
+**Bearing on the campaign's other single-seed results.** RT-063 showed level
+figures are draws; this shows a structural claim reproducing cleanly. That is
+consistent with RT-041's rule — levels swing, structure holds — now supported by
+three reproductions (RT-041, RT-057, this) against one refuted level claim
+(RT-063). The audit's ratios, shares and orderings are the durable part; its
+absolute levels need seeds.
+
+**Scope.** Three seeds, one configuration, terminal snapshots. Pairs share a book
+via the `makerSymbol` round-robin and differ only in construction order, which is
+the identification. The queue-position mechanism itself is inferred from RT-036,
+not re-measured here.
