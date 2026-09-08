@@ -2060,3 +2060,80 @@ zero net class value, 2.6× `triangle_arb`'s entire volume on the book. It nets 
 zero at class level so no result above is affected; whether it distorts
 per-participant rankings inside the class or the book's volume statistics is not
 exercised.
+
+## RT-036/RT-037 — The scheduler grants permanent construction-order privilege
+
+**Classification.** REAL, and a fairness defect rather than an accounting one. A
+new mechanism family, unrelated to the RT-031→RT-035 cross-book artifact.
+
+**Base.** `a666d02faede3d40f046b11e60eb672c59386a94`.
+`clock-control-5h-101.json`, seed 607, 8h.
+
+**Mechanism, from inspection.** `simulation/scheduler.go:163` breaks
+equal-timestamp ties by scheduler id, and the id is `es.nextID++` assigned at
+**registration**. A repeating event is re-pushed with its time advanced and its
+**id unchanged** (`scheduler.go:148-150`):
+
+```go
+} else if event.Repeating {
+    event.Time += event.Interval
+    heap.Push(&es.events, event)
+}
+```
+
+So among actors sharing a tick interval, firing order is fixed at construction
+and **never rotates for the whole run**. The tie-break is deliberate and correct
+for determinism — the comment says so. The question is whether it also confers an
+edge.
+
+**RT-036 — the ordering effect is certain; for a taker it is worth 0.28%.**
+`elastic_supplier` is the ideal test group: RT-032 established that all eight per
+venue sit on one book with byte-identical configuration and endowment, differing
+only in build order. Carry-adjusted PnL is **strictly monotone in registration
+order on all three venues, 24 of 24 rows** (central −84 444 → −84 204, north
+−84 777 → −84 509, south −84 464 → −84 220). A random permutation of eight sorts
+with probability 1/8!; three venues agreeing is ≈**1.5 × 10⁻¹⁴**.
+
+The **predicted direction was wrong**: acting first is *worse*, not better. These
+are takers buying into a decline, and the first to act each tick commits at the
+pre-trade mid while later participants recompute their target against a mid their
+predecessors already moved.
+
+**RT-037 — for a maker under price-time it is worth 5–11%, and under pro-rata
+exactly nothing.** Pairing participants that share a book (`makerSymbol`
+round-robin puts index *i* and *i+4* on the same book, controlling the confound):
+
+| venue rule | pairs | result |
+|---|---|---|
+| `north`, price-time | 8 | **every pair differs; earlier wins 7 of 8**; +11.5%, +9.4%, +7.6%, +5.1% on the four material books |
+| `central`/`south`, pro-rata | 16 | **typically zero to the unit**; largest 0.10% |
+
+A 50–100× separation with the mechanism's exact fingerprint: pro-rata allocates
+by size so arrival order buys nothing; price-time allocates by arrival so acting
+first is queue position at the touch. **The null control was not built for the
+occasion** — it is the campaign's own venue heterogeneity (RT-022) switching the
+mechanism off.
+
+**Consequence.** On a price-time venue a maker's result is **5–11% determined by
+the order a `for` loop in `sim.go` constructed it**, not by its strategy. Two
+byte-identical participants do not face a fair race, and the advantage never
+rotates. Any comparison of maker strategies on a price-time venue in this
+simulator carries this bias.
+
+**Scope.** Eight price-time and sixteen pro-rata pairs, one seed. Sign is
+consistent and the venue contrast is unambiguous; per-book effect sizes rest on
+single pairs and would need multiple seeds to tighten. The qualitative claim is
+carried by the exact-zero control.
+
+**Does not affect RT-031→RT-035.** Those are aggregates dominated by `ABC/CDF`,
+where the mispricing is 69% — orders of magnitude above a queue-position edge.
+
+**Instrument note.** Preregistered falsifier (b) for H-047 said the result is
+inconclusive if the per-participant spread is below the closure noise. It is —
+19 600 USD per participant against a 240 USD spread — so by the letter of my own
+falsifier RT-036 reads INCONCLUSIVE. That falsifier was the wrong statistic: the
+closure residual is a systematic unmodelled-transfer term, and an additive bias
+hitting all eight equally **cannot manufacture a strict monotone ordering**. The
+ordering claim is scale-free and stands; the magnitude claim is reported as a
+bound, not a value. Recorded because writing a level-uncertainty falsifier for an
+ordering hypothesis is a design error worth not repeating.

@@ -3495,6 +3495,216 @@ reported volume statistics. Flagged, not claimed.
 Recorded as RT-035.
 
 
+**H-047 (PREREGISTERED) — the scheduler grants permanent construction-order
+privilege, so identical actors do not face a fair race.**
+
+New mechanism family: **scheduler tie-breaking**, unrelated to every finding so
+far (RT-031→RT-035 are all one cross-book artifact).
+
+**Mechanism, from inspection.** `simulation/scheduler.go:163`:
+
+    // Less orders by time, then by schedule sequence so equal-timestamp events
+    // fire in FIFO order — heap sift order is not deterministic across runs.
+    func (h eventHeap) Less(i, j int) bool {
+        if h[i].Time != h[j].Time { return h[i].Time < h[j].Time }
+        return h[i].id < h[j].id
+    }
+
+`id` is `es.nextID++` at **registration**. A repeating event is re-pushed with
+its **Time advanced but its id unchanged** (`scheduler.go:150`). So among actors
+sharing a tick interval, the firing order is fixed at construction and **never
+rotates for the entire run**. Participant 1 of a class acts before participant 2
+at every single shared tick, for eight simulated hours.
+
+The tie-break itself is correct and deliberate — it buys determinism, which the
+comment states. The question is whether it also buys a systematic edge.
+
+**The natural experiment already exists in the campaign.** [[RT-032]] established
+that all 8 `elastic_supplier` participants per venue are placed on **the same
+book** with **identical configuration** — same reference, same elasticity, same
+lot, same interval. They differ in exactly one respect: registration order. Any
+systematic performance difference among them is ordering privilege and nothing
+else.
+
+**Prediction.** Per-participant carry-adjusted PnL within
+`elastic_supplier` on a venue is **monotone decreasing in participant index**,
+consistently signed across all three venues.
+
+**Falsifiers.** (a) no consistent sign of the index/PnL relationship across the
+three venues → H-047 falsified, the tie-break is deterministic but not
+advantageous; (b) the spread across the eight participants is smaller than the
+per-participant closure noise → INCONCLUSIVE at this instrument's resolution,
+and a larger or repeated-seed design is required.
+
+**Named confound, controlled by design.** For classes spread over several books
+by `makerSymbol` round-robin, participant index also selects the *book*, so index
+would correlate with result for a reason that has nothing to do with priority.
+`elastic_supplier` is immune because `elastic_supplier_symbols` is null and all
+eight sit on `ABC/USD` — which is why it is the chosen test group rather than the
+larger maker classes.
+
+**Discriminating experiment E-051**, preregistered before the run: re-run
+`clock-control-5h-101.json` seed 607, extend `classpnl` with a per-participant
+mode, and read carry-adjusted PnL by participant index within
+`elastic_supplier` on each venue.
+Status: **MIXED** by E-051 — the ordering effect is real and certain (24/24
+monotone, p ≈ 1e−14) but its predicted *direction* is falsified (acting first is
+worse) and its magnitude is 0.28%, below this instrument's resolution.
+
+
+**E-051 — H-047's mechanism SUPPORTED, its predicted direction FALSIFIED.
+Construction order determines outcome with certainty, and acting first is
+*worse*.**
+Base: `a666d02faede3d40f046b11e60eb672c59386a94`.
+Run: `clock-control-5h-101.json`, seed 607, 8h, `-log-mode none`.
+Reproduce: `go run research/tools/classpnl/main.go -file <logdir>/greeks.json -by-participant elastic_supplier`.
+
+Carry-adjusted PnL of the eight identically-configured suppliers, in
+registration order, on each venue:
+
+| index | central | north | south |
+|---:|---:|---:|---:|
+| 1 | −84 444 | −84 777 | −84 464 |
+| 2 | −84 393 | −84 733 | −84 432 |
+| 3 | −84 346 | −84 686 | −84 400 |
+| 4 | −84 316 | −84 649 | −84 358 |
+| 5 | −84 282 | −84 608 | −84 339 |
+| 6 | −84 262 | −84 576 | −84 295 |
+| 7 | −84 237 | −84 522 | −84 261 |
+| 8 | −84 204 | −84 509 | −84 220 |
+| spread | 240 | 268 | 244 |
+
+**Strictly monotone in registration order on all three venues — 24 of 24 rows,
+no exception.** A random permutation of eight is sorted with probability
+1/8! = 1/40 320; three independent venues agreeing gives ≈**1.5 × 10⁻¹⁴**. These
+participants differ in *nothing* but the order they were constructed in: same
+book, same reference, same elasticity, same lot, same interval, same endowment
+([[RT-032]]). The ordering is not noise.
+
+**The predicted direction is wrong.** I predicted PnL decreasing in index —
+acting first is better. It is the reverse: **participant 1 is the worst on every
+venue and participant 8 the best.** Acting first at a shared tick is a
+*disadvantage* here. The suppliers are buying into a decline, and the first to
+act each tick commits at the pre-trade mid while later participants recompute
+their target against a mid their predecessors have already moved. I did not
+predict this and am not going to dress it up as though I had.
+
+**Magnitude: negligible for this class.** The spread is 240–268 USD on a
+−84 400 USD result, **0.28%**. Construction order decides the ranking with
+certainty and decides almost nothing about the money — for *these* actors.
+
+**A mis-specified falsifier, recorded rather than quietly dropped.**
+Preregistered falsifier (b) said the result is INCONCLUSIVE if the spread across
+the eight is smaller than the per-participant closure noise. It is: the closure
+residual is −4.95 M over 252 participants, ≈19 600 USD each, eighty times the
+spread. **By the letter of my own falsifier this reads INCONCLUSIVE.** But (b)
+was the wrong statistic for the claim: the closure residual is a systematic
+unmodelled-transfer term, and an additive bias — per population or per venue —
+**cannot manufacture a strict monotone ordering within a venue**. The ordering
+test is scale-free and survives any bias that hits the eight equally. So: the
+*ordering* claim is supported at p ≈ 1e−14; the *magnitude* claim is below this
+instrument's resolution and is reported as a bound, not a value. The lesson is
+that I wrote a level-uncertainty falsifier for an ordering hypothesis.
+
+**Scope limit.** This experiment measures the *effect* of construction order.
+The scheduler tie-break at `scheduler.go:163` is the mechanism identified by
+inspection, and repeating events keep their id across firings
+(`scheduler.go:148-150`), so the order is permanent. But this run does not
+exclude some *other* construction-order-dependent iteration producing the same
+signature. The two are not separated here.
+
+**Why this matters more than 240 USD.** The privilege is permanent and applies to
+**every class sharing a tick interval**. For a price-elastic buyer it is worth
+0.28%. For a market maker under **price-time** matching — the `north` venue's
+rule (RT-022) — acting first at a shared quote interval is **queue position at
+the touch**, which is exactly what price-time priority pays for. That is where
+this should be worth real money, and it is not measured here.
+
+Recorded as RT-036.
+
+**Next experiment, highest information gain.** Same per-participant measure on a
+maker class, restricted to one book and the `north` (price-time) venue, comparing
+against `central`/`south` (pro-rata, where queue position is worth nothing by
+construction). If the index effect is large on price-time and absent on pro-rata,
+construction order is buying queue priority and the makers' ranking is partly an
+artifact of build order. The named confound applies — `makerSymbol` round-robin
+makes index select the book — so the comparison must be within a single symbol.
+
+
+**E-052 — the named follow-up, run immediately. Construction order buys queue
+priority under price-time matching and **exactly nothing** under pro-rata. The
+pro-rata venues are a built-in null control and they return zero.**
+Same run and snapshot as E-051.
+Reproduce: `go run research/tools/classpnl/main.go -file <logdir>/greeks.json -by-participant imbalance_maker`
+(and `fixed_distance_maker`), then pair participants sharing a symbol —
+`makerSymbol` round-robin over 4 books means index *i* and *i+4* sit on the same
+book, which controls the confound named in H-047.
+
+Each row is the same class, same book, same venue: two participants differing
+only in construction order.
+
+**`north` — price-time matching:**
+
+| class | book | early | late | early edge |
+|---|---|---:|---:|---:|
+| fixed_distance_maker | ABC-PERP | 904 553 | 811 491 | **+11.5%** |
+| fixed_distance_maker | ABC/CDF | 1 149 522 | 1 051 230 | **+9.4%** |
+| imbalance_maker | ABC/CDF | 4 929 070 | 4 578 736 | **+7.6%** |
+| imbalance_maker | ABC-PERP | 347 114 | 330 136 | **+5.1%** |
+| fixed_distance_maker | ABC/USD | 521 | 372 | +40.1% |
+| fixed_distance_maker | CDF/USD | −44 115 | −44 120 | + |
+| imbalance_maker | ABC/USD | −1 331 | −1 749 | + |
+| imbalance_maker | CDF/USD | −8 669 | −6 683 | − |
+
+**Every pair differs, and the earlier-registered participant wins 7 of 8.**
+
+**`central` and `south` — pro-rata matching:**
+
+| class | book | early | late | difference |
+|---|---|---:|---:|---:|
+| fixed_distance_maker | ABC-PERP (central) | 723 941 | 723 941 | **exactly 0** |
+| fixed_distance_maker | ABC/USD (central) | 741 | 741 | **exactly 0** |
+| fixed_distance_maker | CDF/USD (central) | −43 383 | −43 383 | **exactly 0** |
+| imbalance_maker | ABC-PERP (central) | 274 847 | 274 847 | **exactly 0** |
+| imbalance_maker | ABC/USD (central) | −891 | −891 | **exactly 0** |
+| imbalance_maker | CDF/USD (central) | −6 768 | −6 768 | **exactly 0** |
+| fixed_distance_maker | ABC-PERP (south) | 658 336 | 658 336 | **exactly 0** |
+| fixed_distance_maker | ABC/CDF (south) | 1 233 631 | 1 234 875 | 0.10% |
+| imbalance_maker | ABC/CDF (central) | 4 076 369 | 4 076 368 | 0.00002% |
+
+Across the sixteen pro-rata pairs the typical difference is **exactly zero to the
+unit**, and the largest is **0.10%**. Across the eight price-time pairs the
+effect is **5.1% to 11.5%** on the four economically material books. That is a
+50–100× separation with the mechanism's exact fingerprint: **pro-rata allocates
+by size, so acting first buys nothing; price-time allocates by arrival, so acting
+first is queue position at the touch.**
+
+This is the strongest form of the result because the null control was not
+constructed for the occasion — the venue heterogeneity is the campaign's own
+(RT-022), and it happens to switch the mechanism off.
+
+**Conclusion, and it is a fairness defect rather than an accounting one.** On the
+price-time venue, a maker's result is **5–11% determined by the order it was
+constructed in** — a property of a `for` loop in `sim.go`, not of its strategy.
+Two participants with byte-identical configuration do not face a fair race, and
+the advantage never rotates because a repeating event keeps its scheduler id for
+the entire run (`scheduler.go:148-150`). Any comparison of maker strategies on a
+price-time venue in this simulator carries this bias.
+
+**Scope.** Eight price-time pairs and sixteen pro-rata pairs from one seed. The
+sign is consistent (7/8) and the venue contrast is unambiguous, but the effect
+size per book rests on single pairs. Multiple seeds would tighten the magnitude;
+they are not needed for the qualitative claim, which the exact-zero control
+carries.
+
+**This does not affect [[RT-031]]–[[RT-035]].** Those results are cross-venue
+aggregates dominated by `ABC/CDF`, where `triangle_arb` takes 92.3% of its value
+from a maker whose quoting is mispriced by 69% — an effect three orders of
+magnitude larger than a queue-position edge.
+
+Recorded as RT-037.
+
+
 ---
 
 ## F. Findings
@@ -3511,6 +3721,24 @@ See `research/red-team-findings.md` for the full records.
 - **RT-003** — bounded no-violation results (INV-2, INV-5, INV-6, identity).
 - **RT-006** — latency is delivered as configured across 225 link x channel
   rows; no unearned speed advantage. Transport only.
+- **RT-037** — construction order **buys queue priority under price-time matching
+  and exactly nothing under pro-rata**. Same class, same book, same venue, two
+  participants differing only in build order: on `north` (price-time) every pair
+  differs and the earlier one wins 7 of 8, by **5.1%–11.5%** on the material
+  books; across the sixteen `central`/`south` (pro-rata) pairs the difference is
+  **exactly zero to the unit**, largest 0.10%. The campaign's own venue
+  heterogeneity supplies the null control. **On a price-time venue a maker's
+  result is 5–11% decided by a `for` loop in `sim.go`**, and the advantage never
+  rotates. See [[RT-036]].
+- **RT-036** — the scheduler grants **permanent construction-order privilege**:
+  `eventHeap.Less` breaks equal-timestamp ties by registration id, and repeating
+  events keep that id forever, so same-interval actors fire in build order for
+  the whole run. Measured on eight identically-configured suppliers per venue,
+  carry-adjusted PnL is **strictly monotone in registration order on all three
+  venues, 24/24 rows, p ≈ 1e−14** — but acting first is *worse*, not better, and
+  the spread is only 0.28%. Negligible for a price-elastic buyer; **unmeasured,
+  and expected to matter, for makers under price-time matching, where acting
+  first is queue position at the touch**.
 - **RT-035** — the chain closes: **noise_flow −188.6 M → abc_cdf_spot_maker
   −157.7 M → triangle_arb**, five counterparty rows summing to the maker's total
   to the unit. The maker charges uninformed flow **1.08% of notional** and pays

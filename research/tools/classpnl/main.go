@@ -110,6 +110,7 @@ func main() {
 	reportAsset := flag.String("asset", "USD", "reporting asset of the equity figures")
 	precision := flag.Float64("precision", 100000, "report-asset units per whole unit")
 	tolerance := flag.Float64("closure-tolerance", 0.01, "maximum |closure| as a fraction of gross flow before the ranking is refused")
+	perParticipant := flag.String("by-participant", "", "instead of the class ranking, list this class's participants by registration order within each venue")
 	flag.Parse()
 	if *path == "" {
 		fmt.Fprintln(os.Stderr, "-file is required")
@@ -140,6 +141,7 @@ func main() {
 	}
 
 	byClass := map[string]*classTotals{}
+	var participants []participantRow
 	endMarks := map[string]int64{}
 	var totalCarry, totalGross int64
 	unmatched := 0
@@ -175,6 +177,12 @@ func main() {
 		totals.heads++
 		totalCarry += delta - revaluation
 		totalGross += abs(delta - revaluation)
+		if *perParticipant != "" && name == *perParticipant {
+			participants = append(participants, participantRow{
+				venue: row.VenueID, role: row.Role,
+				index: participantIndex(row.Role), carry: delta - revaluation,
+			})
+		}
 	}
 
 	take := int64(0)
@@ -203,6 +211,27 @@ func main() {
 		os.Exit(3)
 	}
 
+	if *perParticipant != "" {
+		// Participants of one class are constructed in a loop, so the numeric
+		// suffix of the role is the registration order the scheduler breaks
+		// equal-timestamp ties on. Ordering it by that index is the whole point:
+		// any monotone pattern is priority, not strategy, when the class shares
+		// one book and one configuration.
+		sort.Slice(participants, func(i, j int) bool {
+			if participants[i].venue != participants[j].venue {
+				return participants[i].venue < participants[j].venue
+			}
+			return participants[i].index < participants[j].index
+		})
+		fmt.Printf("\n%s by registration order\n", *perParticipant)
+		fmt.Printf("%-10s %-24s %6s %18s\n", "venue", "role", "index", "carry-adjusted")
+		for _, row := range participants {
+			fmt.Printf("%-10s %-24s %6d %18.0f\n", row.venue, row.role, row.index,
+				float64(row.carry)/(*precision))
+		}
+		return
+	}
+
 	names := make([]string, 0, len(byClass))
 	for name := range byClass {
 		names = append(names, name)
@@ -229,6 +258,30 @@ func assetPrecision(asset string) float64 {
 	default:
 		return 1e8
 	}
+}
+
+type participantRow struct {
+	venue, role string
+	index       int
+	carry       int64
+}
+
+// participantIndex is the numeric suffix of a role, which is the order the
+// participant was constructed and therefore the order the scheduler fires it in
+// among actors sharing a tick interval.
+func participantIndex(role string) int {
+	cut := strings.LastIndex(role, "_")
+	if cut <= 0 || cut+1 == len(role) {
+		return 0
+	}
+	index := 0
+	for _, r := range role[cut+1:] {
+		if r < '0' || r > '9' {
+			return 0
+		}
+		index = index*10 + int(r-'0')
+	}
+	return index
 }
 
 func abs(v int64) int64 {
