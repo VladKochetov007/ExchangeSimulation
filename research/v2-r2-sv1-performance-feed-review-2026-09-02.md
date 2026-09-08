@@ -348,3 +348,18 @@ NONBLOCKING NOTES**, with no verified blocker and no experiment rerun required.
 The review ran no simulator or holdout. The scientific successor is now at the
 pinned-build boundary; the next permitted world is the paired seed-643
 activation probe, subject to its own evidence review.
+
+## Append-only feed checkpoint: no new performance commits; activation config identity repair — 2026-09-08
+
+The performance branch was fetched through unchanged marker `b1847ac`; no new
+commit or report was found and no performance implementation was imported.
+
+The first valid SV1B seed-643 preflight on scientific tree `07b394b` rejected
+the hand-authored activation config before simulation because the pinned
+simulator's effective JSON was not byte-identical. The retained external
+diagnostic root contains no world result. Scientific commits `658412e` and
+`b11f21a` added the regression, canonicalized both treatment/control configs,
+and updated the registered hashes; the final config checker and clean
+mechanical gates pass at `b11f21a`. This is a scientific protocol/provenance
+repair only. The prior review/build artifacts are not reused; fresh exact-tree
+review and pinned rebuild remain required.

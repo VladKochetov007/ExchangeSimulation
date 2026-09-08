@@ -1547,3 +1547,26 @@ The next allowed action is a clean provenance-pinned Go 1.27 build followed by
 the authorized seed-643 paired activation probe only; capacity and registered
 development cells remain gated on that activation result. Holdouts `619`,
 `631`, and `641` remain untouched.
+
+## Append-only operational update: activation preflight caught noncanonical configs — 2026-09-08
+
+The first correctly parameterized seed-643 activation attempt on exact tree
+`07b394b` failed before either simulator arm launched. The registered
+activation treatment config was not byte-identical to the pinned simulator's
+`-write-effective-config` output. The retained diagnostic root
+`/home/vlad/external-scratch/v2-r2-sv1b-activation-643-07b394b010c9973b53f487354cd0665fd6c080f6`
+contains only the generated treatment `run-config.json`; no economic world,
+activation evidence, or historical result was produced. It is retained as
+fail-closed preflight evidence.
+
+The raw comparison showed the registered pair omitted simulator-materialized
+defaults and used a different canonical key order; common economic values were
+unchanged. Commit `658412e` first made the defaults explicit and added a
+normalization regression, and commit `b11f21a` replaced both activation
+configs with the exact simulator-effective representation and updated their
+manifest hashes. The final pinned normalizer comparison passes for treatment
+and control. Clean terminal contract, config checker, full `make test`, vet,
+and targeted race/evidence gates pass at `b11f21a`. The earlier `07b394b`
+review/build artifacts are not reused; a fresh exact-tree review is required.
+The performance feed remains unchanged after `b1847ac`; no performance code
+was imported and holdouts remain untouched.

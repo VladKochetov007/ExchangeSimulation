@@ -1088,6 +1088,26 @@ freeze, or holdout execution is authorized. Next are `go vet`, bounded targeted
 race/evidence/determinism checks, and one fresh independent Sol-xhigh review.
 Holdouts `619`, `631`, and `641` remain untouched.
 
+## Append-only operational update: activation preflight caught noncanonical configs — 2026-09-08
+
+On exact tree `07b394b`, the correctly parameterized activation runner stopped
+before simulation because the treatment source config was not byte-identical
+to the pinned simulator's effective config. The retained external root
+`/home/vlad/external-scratch/v2-r2-sv1b-activation-643-07b394b010c9973b53f487354cd0665fd6c080f6`
+contains the preflight-generated config only; no arm executed and no scientific
+activation result exists.
+
+The discrepancy was serialization/default materialization, not an economic
+parameter change: shared explicit values matched, while omitted defaults and
+canonical ordering did not. `658412e` added an effective-config regression;
+`b11f21a` canonicalized both registered activation configs and bound the new
+roster/control hashes in the provenance manifest. The pinned normalizer now
+compares byte-identically for both arms. Clean terminal/config/full-test,
+vet, and targeted race/evidence checks pass at `b11f21a`. This is a successor
+protocol correction, so the prior exact-tree review and binaries are stale;
+fresh review and rebuild are required before activation. No historical rerun,
+capacity probe, development cell, freeze, or holdout was triggered.
+
 The asynchronous performance feed was inspected through `b1847ac`. The new
 `f153e12` reaction fix is classified as an analyzer bug candidate (symbolless
 spot records were keyed without their file-derived instrument and could pool
