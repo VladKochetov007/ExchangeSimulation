@@ -258,6 +258,35 @@ candidate: the review rejection blocks the pinned rebuild and activation until
 the concrete economic invariants above are preregistered, regression-tested,
 implemented where required, and accepted by a new exact-tree review.
 
+## RT-002 repair checkpoint — option expiry book-level rounding — 2026-09-08
+
+RT-002 is confirmed as a reachable fixed-point accounting defect for a closed
+option book with unequal position slicing. The existing per-position payout
+rule is retained: each holder receives the integer result of its own contract
+cash-flow calculation. The economic book invariant is that the sum of those
+integer postings must differ from the integer cash flow of the net position by
+rounding only. A nonzero net option position is not rounding and remains
+unmatched.
+
+The successor repair computes the aggregate signed position and posted cash
+for each expiring European option. It routes only
+`posted_cash - cash_flow(net_position)` with the opposite sign through the
+existing `VenueFeeRevenue` ledger under reason `option_expiry_rounding`.
+That reason is included in the audited venue stream and does not add a new
+binary payload schema. The analyzer now reports both participant-only
+`option_expiry_instants` and `option_expiry_system_instants`, the latter
+including the explicit venue correction. A regression forces +1, +1, -2
+positions at an intrinsic value whose per-position payouts leave a one-unit
+residual; a companion regression proves an unmatched net position is not
+relabelled as rounding.
+
+This repair changes the venue ledger and conservation rendering, not holder
+payouts, orders, marks, positions, or lifecycle decisions. Retained historical
+raw evidence is sufficient for rescore of option expiry/conservation metrics;
+no trajectory rerun is justified solely by this repair. The exact successor
+tree still requires the remaining risk/borrow repairs and a new independent
+review.
+
 ## Independent review record
 
 Sol-xhigh reviewer Zeno independently rejected the exact pre-repair tree

@@ -1107,6 +1107,17 @@ state update; it does not invalidate or rewrite historical results and does
 not authorize any development or holdout execution. The R2 calendar/lifecycle
 and finite CDF supplier design remain preserved.
 
+## Append-only operational update: RT-002 option expiry repair — 2026-09-08
+
+The successor source tree now explicitly accounts for option expiry truncation:
+per-position cash flows remain unchanged, while the aggregate rounding residual
+is posted with opposite sign to the venue ledger as
+`option_expiry_rounding`. The analyzer separately exposes account-only and
+system-level option expiry residuals. Regressions prove both closed-book
+unequal slicing and the non-reclassification of unmatched net supply. This
+does not authorize a build or run; RT-011 and RT-014/015/016/018 remain at the
+semantic promotion boundary.
+
 ## Append-only operational update: activation preflight caught noncanonical configs — 2026-09-08
 
 On exact tree `07b394b`, the correctly parameterized activation runner stopped

@@ -537,6 +537,36 @@ func TestConservationAuditsPositionRoundingLinksAndRemainder(t *testing.T) {
 	}
 }
 
+func TestConservationClosesOptionExpiryRoundingWithVenueMovement(t *testing.T) {
+	finalSequence := uint64(1)
+	run, err := Open(writeRun(t, Report{VenueLedgers: []VenueLedger{{
+		VenueID: "north", FeeRevenue: map[string]int64{"USD": 1}, FinalSequence: &finalSequence,
+	}}}, map[string][]string{
+		"north/derivatives.jsonl": {
+			changeLine(1, "north", 1, "ABC-ROUND-C", "expiry_settlement", [][3]any{{"USD", int64(10), int64(0)}}),
+			changeLine(1, "north", 2, "ABC-ROUND-C", "expiry_settlement", [][3]any{{"USD", int64(10), int64(0)}}),
+			changeLine(1, "north", 3, "ABC-ROUND-C", "expiry_settlement", [][3]any{{"USD", int64(10), int64(-1)}}),
+			`{"sim_ts":1,"client_id":0,"event":"venue_balance_change","data":{"venue_id":"north","payload":{"timestamp":1,"sequence":1,"bucket":"fee_revenue","asset":"USD","symbol":"ABC-ROUND-C","reason":"option_expiry_rounding","old_balance":0,"new_balance":1,"delta":1}}}`,
+		},
+	}))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	conservation, err := run.MeasureConservation(ConservationOptions{})
+	if err != nil {
+		t.Fatalf("MeasureConservation: %v", err)
+	}
+	if conservation.Deltas.UnsupportedRevenueRecords != 0 {
+		t.Fatalf("option rounding movement was unsupported: %+v", conservation.Deltas)
+	}
+	if len(conservation.OptionExpiryInstants) != 1 || conservation.OptionExpiryInstants[0].Net != -1 {
+		t.Fatalf("participant option expiry residual = %+v, want -1", conservation.OptionExpiryInstants)
+	}
+	if len(conservation.OptionExpirySystemInstants) != 1 || conservation.OptionExpirySystemInstants[0].Net != 0 {
+		t.Fatalf("system option expiry residual = %+v, want zero", conservation.OptionExpirySystemInstants)
+	}
+}
+
 func TestConservationRejectsUnboundedPositionRoundingRemainder(t *testing.T) {
 	dir := writeRun(t, Report{}, map[string][]string{
 		"north/derivatives.jsonl": {

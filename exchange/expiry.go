@@ -568,6 +568,9 @@ func (e *DefaultExchange) settleExpiredInstrument(symbol string, now int64) {
 
 	ledger, hasLedger := e.Positions.(etypes.MarginLedger)
 	log := e.getLogger(symbol)
+	_, isCashSettledOption := inst.(*einstrument.EuropeanOption)
+	var optionNetSize int64
+	var optionCashFlowTotal int64
 
 	var feeTotal int64
 	for _, ep := range positions {
@@ -620,6 +623,17 @@ func (e *DefaultExchange) settleExpiredInstrument(symbol string, now int64) {
 		newBal := etypes.AddAmount(oldBal, netCash)
 		client.PerpBalances[quote] = newBal
 		feeTotal = etypes.AddAmount(feeTotal, fee)
+		if isCashSettledOption {
+			var ok bool
+			optionNetSize, ok = etypes.TryAdd(optionNetSize, pos.Size)
+			if !ok {
+				panic("exchange: option expiry position size overflows aggregate")
+			}
+			optionCashFlowTotal, ok = etypes.TryAdd(optionCashFlowTotal, cash)
+			if !ok {
+				panic("exchange: option expiry cash flow overflows aggregate")
+			}
+		}
 
 		closeSide := Sell
 		if pos.Size < 0 {
@@ -645,6 +659,30 @@ func (e *DefaultExchange) settleExpiredInstrument(symbol string, now int64) {
 				PositionSide: pos.PositionSide.String(), Reason: "expiry_settlement",
 				Changes: settlementChanges,
 			})
+		}
+	}
+
+	if isCashSettledOption {
+		// Each position's cash flow is intentionally truncated to quote units,
+		// but the economic contract is one option book. Route only the
+		// difference between the sum of those posted integers and the integer
+		// cash flow for the net position. A nonzero net position therefore
+		// remains visible as an unmatched contract instead of being relabelled
+		// as rounding.
+		expectedCashFlow := exp.ExpiryCashFlow(optionNetSize, 0, settlementPrice, precision)
+		roundingResidual, ok := etypes.TrySub(optionCashFlowTotal, expectedCashFlow)
+		if !ok {
+			panic("exchange: option expiry rounding residual overflows")
+		}
+		if roundingResidual != 0 {
+			venueDelta, ok := etypes.TrySub(0, roundingResidual)
+			if !ok {
+				panic("exchange: option expiry rounding ledger delta overflows")
+			}
+			if _, ok := etypes.TryAdd(e.ExchangeBalance.FeeRevenue[quote], venueDelta); !ok {
+				panic("exchange: option expiry rounding ledger overflows venue balance")
+			}
+			e.moveVenueBalance(VenueFeeRevenue, quote, venueDelta, now, symbol, "option_expiry_rounding")
 		}
 	}
 

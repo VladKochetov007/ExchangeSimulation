@@ -1639,6 +1639,19 @@ supplier semantics remain unchanged; historical evidence remains immutable.
 No pinned build, activation, capacity, development, freeze, or holdout world
 has run after this review. Holdouts `619`, `631`, and `641` remain untouched.
 
+## Append-only operational update: RT-002 option expiry accounting repair — 2026-09-08
+
+RT-002 is now repaired on the successor source tree. European-option expiry
+retains the existing per-position integer payouts, computes the residual
+against the integer cash flow of the net position, and routes only that
+rounding residual through the venue ledger with reason
+`option_expiry_rounding`. Nonzero net option supply is not classified as
+rounding. The conservation analyzer exposes participant-only and system-level
+option expiry residuals, and focused exchange/analyzer regressions cover both
+the unequal-slice rounding case and the unmatched-net case. This is a ledger
+and measurement correction only; historical raw evidence remains immutable and
+can be rescored without a trajectory rerun.
+
 ## Append-only operational update: nonactivation provenance self-validation repair — 2026-09-08
 
 Fresh independent Sol-xhigh reviewer `Euler` inspected exact clean tree

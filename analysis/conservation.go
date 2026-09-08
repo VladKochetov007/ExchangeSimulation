@@ -149,10 +149,12 @@ type Conservation struct {
 	// value creation is a mistake this comment exists to prevent; the identity
 	// that does bind is Identities below.
 	ExpiryInstants []InstantResidual `json:"expiry_instants"`
-	// OptionExpiryInstants are held to the stricter standard: an option pays
-	// intrinsic value times position, which is independent of what the holder
-	// paid, so each instant must net to zero up to one unit per account.
-	OptionExpiryInstants []InstantResidual `json:"option_expiry_instants"`
+	// OptionExpiryInstants are participant-only flows. Position-level integer
+	// payout truncation can leave a bounded residual even when the option book
+	// is closed; OptionExpirySystemInstants adds the explicitly recorded venue
+	// rounding movement and is the system-level conservation check.
+	OptionExpiryInstants       []InstantResidual `json:"option_expiry_instants"`
+	OptionExpirySystemInstants []InstantResidual `json:"option_expiry_system_instants"`
 
 	// VenueRecorded is the venue's own balance rebuilt from its movement
 	// stream, which is what makes the exchange side of the identity
@@ -252,7 +254,7 @@ type marginInterestKey struct {
 
 func isAuditedFeeRevenueReason(reason string) bool {
 	switch reason {
-	case "taker_fee", "maker_fee", "margin_interest", "funding_remainder", "position_rounding":
+	case "taker_fee", "maker_fee", "margin_interest", "funding_remainder", "position_rounding", "option_expiry_rounding":
 		return true
 	default:
 		return false
@@ -440,6 +442,7 @@ func (r *Run) MeasureConservation(opts ConservationOptions) (*Conservation, erro
 	roundingBalances := make(map[positionRoundingKey]int64)
 	roundingVenueFlows := make(map[venueRoundingKey]int64)
 	var rounding PositionRoundingAudit
+	optionExpiryVenue := make(map[instantKey]int64)
 	scan := ScanOptions{Events: []string{"balance_change", "fee_revenue", "margin_interest", "margin_interest_failed", "venue_balance_change", "position_rounding"}, Files: opts.Files, FilesSelected: opts.FilesSelected}
 	type feePayload struct {
 		Timestamp int64  `json:"timestamp"`
@@ -637,6 +640,14 @@ func (r *Run) MeasureConservation(opts ConservationOptions) (*Conservation, erro
 				}
 				if movement.Bucket != "fee_revenue" {
 					rounding.VenueBucketFailures++
+				}
+			}
+			if movement.Reason == "option_expiry_rounding" {
+				if movement.Bucket != "fee_revenue" {
+					deltas.UnsupportedRevenueRecords++
+				} else {
+					key := instantKey{venue: event.VenueID, timestamp: movementTimestamp, asset: movement.Asset}
+					addConservationValue(optionExpiryVenue, key, movement.Delta, &deltas.ArithmeticFailures)
 				}
 			}
 			mu.Unlock()
@@ -1045,6 +1056,20 @@ func (r *Run) MeasureConservation(opts ConservationOptions) (*Conservation, erro
 	result.FundingInstants = sortedFundingResiduals(funding)
 	result.ExpiryInstants = sortedResiduals(expiry)
 	result.OptionExpiryInstants = sortedResiduals(optionExpiry)
+	systemOptionExpiry := make(map[instantKey]*InstantResidual, len(optionExpiry)+len(optionExpiryVenue))
+	for key, residual := range optionExpiry {
+		copy := *residual
+		systemOptionExpiry[key] = &copy
+	}
+	for key, delta := range optionExpiryVenue {
+		residual := systemOptionExpiry[key]
+		if residual == nil {
+			residual = &InstantResidual{VenueID: key.venue, Timestamp: key.timestamp, Asset: key.asset}
+			systemOptionExpiry[key] = residual
+		}
+		addConservationField(&residual.Net, delta, &result.Deltas.ArithmeticFailures)
+	}
+	result.OptionExpirySystemInstants = sortedResiduals(systemOptionExpiry)
 	return result, nil
 }
 
