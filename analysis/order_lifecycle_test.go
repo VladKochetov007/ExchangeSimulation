@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -38,13 +39,47 @@ func lifecycleForcedFillWithSymbolLine(ts int64, venue string, clientID, orderID
 }
 
 func lifecycleStrictForcedFillLine(ts int64, venue string, clientID, orderID uint64, symbol, side, positionSide string, quantity, filled, remaining int64, full bool, liquidationID uint64) string {
-	return fmt.Sprintf(`{"sim_ts":%d,"client_id":%d,"event":"OrderFill","data":{"venue_id":%q,"payload":{"symbol":%q,"order_id":%d,"qty":%d,"filled_qty":%d,"remaining_qty":%d,"is_full":%t,"side":%q,"position_side":%q,"forced":true,"liquidation_id":%d}}}`,
-		ts, clientID, venue, symbol, orderID, quantity, filled, remaining, full, side, positionSide, liquidationID)
+	return lifecycleStrictFillLine(ts, venue, clientID, orderID, symbol, side, positionSide, quantity, filled, remaining, full, 1, "taker", true, liquidationID)
+}
+
+func lifecycleStrictFillLine(ts int64, venue string, clientID, orderID uint64, symbol, side, positionSide string, quantity, filled, remaining int64, full bool, tradeID uint64, role string, forced bool, liquidationID uint64) string {
+	return fmt.Sprintf(`{"sim_ts":%d,"client_id":%d,"event":"OrderFill","data":{"venue_id":%q,"payload":{"symbol":%q,"order_id":%d,"qty":%d,"price":100,"filled_qty":%d,"remaining_qty":%d,"is_full":%t,"side":%q,"role":%q,"position_side":%q,"trade_id":%d,"forced":%t,"liquidation_id":%d}}}`,
+		ts, clientID, venue, symbol, orderID, quantity, filled, remaining, full, side, role, positionSide, tradeID, forced, liquidationID)
+}
+
+func lifecycleTradeLine(ts int64, venue string, tradeID uint64, price, quantity int64, side string, takerOrderID, makerOrderID uint64) string {
+	return fmt.Sprintf(`{"sim_ts":%d,"client_id":0,"event":"Trade","data":{"venue_id":%q,"payload":{"trade_id":%d,"price":%d,"qty":%d,"side":%q,"taker_order_id":%d,"maker_order_id":%d}}}`,
+		ts, venue, tradeID, price, quantity, side, takerOrderID, makerOrderID)
 }
 
 func lifecycleStrictLiquidationLine(ts int64, venue string, clientID uint64, symbol, positionSide string, liquidationID, forcedOrderID uint64, positionSize, attemptedQty, filledQty, remainingQty int64) string {
-	return fmt.Sprintf(`{"sim_ts":%d,"client_id":%d,"event":"liquidation","data":{"venue_id":%q,"payload":{"symbol":%q,"position_side":%q,"liquidation_id":%d,"forced_order_id":%d,"position_size":%d,"attempted_qty":%d,"filled_qty":%d,"remaining_qty":%d}}}`,
-		ts, clientID, venue, symbol, positionSide, liquidationID, forcedOrderID, positionSize, attemptedQty, filledQty, remainingQty)
+	return fmt.Sprintf(`{"sim_ts":%d,"client_id":%d,"event":"liquidation","data":{"venue_id":%q,"payload":{"symbol":%q,"position_side":%q,"liquidation_id":%d,"forced_order_id":%d,"position_size":%d,"attempted_qty":%d,"filled_qty":%d,"remaining_qty":%d,"filled_notional":%d,"vwap_price":100,"fill_price":100,"base_precision":1,"remaining_debt":0}}}`,
+		ts, clientID, venue, symbol, positionSide, liquidationID, forcedOrderID, positionSize, attemptedQty, filledQty, remainingQty, filledQty*100)
+}
+
+func openStrictLifecycleRun(t *testing.T, lines []string) *Run {
+	t.Helper()
+	dir := writeRun(t, Report{}, map[string][]string{
+		"north/derivatives/ABC-PERP.jsonl": lines,
+	})
+	if err := os.WriteFile(filepath.Join(dir, "run-config.json"), []byte(`{"evidence_format":"evstream_v3"}`), 0o644); err != nil {
+		t.Fatalf("write strict descriptor: %v", err)
+	}
+	run, err := Open(dir)
+	if err != nil {
+		t.Fatalf("open strict run: %v", err)
+	}
+	return run
+}
+
+func strictTradeLifecycleLines(tradeTimestamp int64) []string {
+	return []string{
+		lifecycleAcceptedLine(1, "north", 1, 99, "MARKET", "GTC", 10),
+		lifecycleAcceptedLine(1, "north", 2, 100, "LIMIT", "GTC", 10),
+		lifecycleTradeLine(tradeTimestamp, "north", 7, 100, 10, "BUY", 99, 100),
+		lifecycleStrictFillLine(4, "north", 1, 99, "ABC-PERP", "BUY", "BOTH", 10, 10, 0, true, 7, "taker", false, 0),
+		lifecycleStrictFillLine(4, "north", 2, 100, "ABC-PERP", "SELL", "BOTH", 10, 10, 0, true, 7, "maker", false, 0),
+	}
 }
 
 func lifecycleExplicitOrdinaryFillWithSymbolLine(ts int64, venue string, clientID, orderID uint64, symbol string, quantity, filled, remaining int64, full bool) string {
@@ -209,10 +244,11 @@ func TestOrderLifecycleLinksForcedCloseFills(t *testing.T) {
 
 func TestOrderLifecycleSuccessorRequiresExplicitForcedMarker(t *testing.T) {
 	const instant = int64(1_000_000_000)
+	strictReceipt := lifecycleStrictLiquidationLine(instant, "north", 7, "ABC-PERP", "BOTH", 1, 99, -10, 10, 10, 0)
 	makeRun := func(t *testing.T, fill string) *Run {
 		t.Helper()
 		dir := writeRun(t, Report{}, map[string][]string{
-			"north/derivatives/ABC-PERP.jsonl": {fill, lifecycleLiquidationLine(instant, "north", 7, "ABC-PERP")},
+			"north/derivatives/ABC-PERP.jsonl": {fill, strictReceipt},
 		})
 		if err := os.WriteFile(filepath.Join(dir, "run-config.json"), []byte(`{"evidence_format":"evstream_v3"}`), 0o644); err != nil {
 			t.Fatalf("write successor descriptor: %v", err)
@@ -224,10 +260,15 @@ func TestOrderLifecycleSuccessorRequiresExplicitForcedMarker(t *testing.T) {
 		return run
 	}
 
-	strictReceipt := lifecycleStrictLiquidationLine(instant, "north", 7, "ABC-PERP", "BOTH", 1, 99, -10, 10, 10, 0)
 	strictFill := lifecycleStrictForcedFillLine(instant, "north", 7, 99, "ABC-PERP", "BUY", "BOTH", 10, 10, 0, true, 1)
 	strictDir := writeRun(t, Report{}, map[string][]string{
-		"north/derivatives/ABC-PERP.jsonl": {strictFill, strictReceipt},
+		"north/derivatives/ABC-PERP.jsonl": {
+			lifecycleTradeLine(instant-2, "north", 1, 100, 10, "BUY", 99, 100),
+			lifecycleAcceptedLine(instant-1, "north", 8, 100, "LIMIT", "GTC", 10),
+			strictFill,
+			lifecycleStrictFillLine(instant, "north", 8, 100, "ABC-PERP", "SELL", "BOTH", 10, 10, 0, true, 1, "maker", false, 0),
+			strictReceipt,
+		},
 	})
 	if err := os.WriteFile(filepath.Join(strictDir, "run-config.json"), []byte(`{"evidence_format":"evstream_v3"}`), 0o644); err != nil {
 		t.Fatalf("write strict descriptor: %v", err)
@@ -256,8 +297,11 @@ func TestOrderLifecycleRejectsForcedIdentityOnAcceptedOrder(t *testing.T) {
 	const instant = int64(1_000_000_000)
 	dir := writeRun(t, Report{}, map[string][]string{
 		"north/derivatives/ABC-PERP.jsonl": {
+			lifecycleTradeLine(instant-2, "north", 1, 100, 10, "BUY", 99, 100),
 			lifecycleAcceptedLine(instant-1, "north", 7, 99, "LIMIT", "GTC", 10),
-			lifecycleStrictForcedFillLine(instant, "north", 7, 99, "ABC-PERP", "SELL", "BOTH", 10, 10, 0, true, 1),
+			lifecycleAcceptedLine(instant-1, "north", 8, 100, "LIMIT", "GTC", 10),
+			lifecycleStrictForcedFillLine(instant, "north", 7, 99, "ABC-PERP", "BUY", "BOTH", 10, 10, 0, true, 1),
+			lifecycleStrictFillLine(instant, "north", 8, 100, "ABC-PERP", "SELL", "BOTH", 10, 10, 0, true, 1, "maker", false, 0),
 		},
 	})
 	if err := os.WriteFile(filepath.Join(dir, "run-config.json"), []byte(`{"evidence_format":"evstream_v3"}`), 0o644); err != nil {
@@ -296,6 +340,147 @@ func TestOrderLifecycleCountsMissingForcedReceiptFill(t *testing.T) {
 	}
 	if result.MissingForcedFills != 1 || result.LiquidationFills != 0 {
 		t.Fatalf("missing forced fill was not counted: %+v", result)
+	}
+}
+
+func TestOrderLifecycleStrictTradeMutationsFailClosed(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func([]string) []string
+		check  func(*testing.T, *OrderLifecycleAudit)
+	}{
+		{
+			name:   "valid_pair",
+			mutate: func(lines []string) []string { return lines },
+			check: func(t *testing.T, result *OrderLifecycleAudit) {
+				if result.TradeRecords != 1 || result.TradeIdentityFailures != 0 || result.TradeFieldMismatches != 0 || result.TradeCausalityFailures != 0 || result.TradeCompletenessFailures != 0 || len(result.Checks) != 0 {
+					t.Fatalf("valid strict trade was rejected: %+v", result)
+				}
+			},
+		},
+		{
+			name: "missing_trade",
+			mutate: func(lines []string) []string {
+				return []string{lines[0], lines[1], lines[3], lines[4]}
+			},
+			check: func(t *testing.T, result *OrderLifecycleAudit) {
+				if result.TradeIdentityFailures != 2 || len(result.Checks) != 2 {
+					t.Fatalf("missing trade was not rejected per fill: %+v", result)
+				}
+			},
+		},
+		{
+			name: "price_mismatch",
+			mutate: func(lines []string) []string {
+				mutated := append([]string{}, lines...)
+				mutated[3] = strings.Replace(mutated[3], `"price":100`, `"price":101`, 1)
+				return mutated
+			},
+			check: func(t *testing.T, result *OrderLifecycleAudit) {
+				if result.TradeFieldMismatches != 1 || result.TradeCompletenessFailures != 1 {
+					t.Fatalf("price mutation was not rejected: %+v", result)
+				}
+			},
+		},
+		{
+			name: "fill_before_trade",
+			mutate: func(lines []string) []string {
+				mutated := append([]string{}, lines...)
+				mutated[2] = lifecycleTradeLine(5, "north", 7, 100, 10, "BUY", 99, 100)
+				return mutated
+			},
+			check: func(t *testing.T, result *OrderLifecycleAudit) {
+				if result.TradeCausalityFailures != 2 || result.TradeCompletenessFailures != 1 {
+					t.Fatalf("causal mutation was not rejected: %+v", result)
+				}
+			},
+		},
+		{
+			name: "role_order_mismatch",
+			mutate: func(lines []string) []string {
+				mutated := append([]string{}, lines...)
+				mutated[3] = strings.Replace(mutated[3], `"role":"taker"`, `"role":"maker"`, 1)
+				return mutated
+			},
+			check: func(t *testing.T, result *OrderLifecycleAudit) {
+				if result.TradeIdentityFailures == 0 || result.TradeCompletenessFailures != 1 {
+					t.Fatalf("role mutation was not rejected: %+v", result)
+				}
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			run := openStrictLifecycleRun(t, test.mutate(strictTradeLifecycleLines(3)))
+			result, err := run.MeasureOrderLifecycle()
+			if err != nil {
+				t.Fatalf("measure strict lifecycle: %v", err)
+			}
+			test.check(t, result)
+		})
+	}
+}
+
+func TestOrderLifecycleStrictForcedReceiptMutationsFailClosed(t *testing.T) {
+	validLines := []string{
+		lifecycleTradeLine(1, "north", 1, 100, 10, "BUY", 99, 100),
+		lifecycleAcceptedLine(2, "north", 8, 100, "LIMIT", "GTC", 10),
+		lifecycleStrictForcedFillLine(3, "north", 7, 99, "ABC-PERP", "BUY", "BOTH", 10, 10, 0, true, 1),
+		lifecycleStrictFillLine(3, "north", 8, 100, "ABC-PERP", "SELL", "BOTH", 10, 10, 0, true, 1, "maker", false, 0),
+		lifecycleStrictLiquidationLine(3, "north", 7, "ABC-PERP", "BOTH", 1, 99, -10, 10, 10, 0),
+	}
+	tests := []struct {
+		name   string
+		mutate func([]string) []string
+		check  func(*testing.T, *OrderLifecycleAudit)
+	}{
+		{
+			name:   "valid_receipt",
+			mutate: func(lines []string) []string { return lines },
+			check: func(t *testing.T, result *OrderLifecycleAudit) {
+				if result.LiquidationFills != 1 || result.UnlinkedFills != 0 || result.ForcedNotionalMismatches != 0 || result.ForcedReceiptOrderFailures != 0 {
+					t.Fatalf("valid forced receipt was rejected: %+v", result)
+				}
+			},
+		},
+		{
+			name: "notional_mismatch",
+			mutate: func(lines []string) []string {
+				mutated := append([]string{}, lines...)
+				mutated[4] = strings.Replace(mutated[4], `"filled_notional":1000`, `"filled_notional":999`, 1)
+				return mutated
+			},
+			check: func(t *testing.T, result *OrderLifecycleAudit) {
+				if result.ForcedNotionalMismatches == 0 || result.LiquidationFills != 0 {
+					t.Fatalf("notional mutation was not rejected: %+v", result)
+				}
+			},
+		},
+		{
+			name: "receipt_before_fill",
+			mutate: func(lines []string) []string {
+				mutated := append([]string{}, lines...)
+				mutated[2], mutated[4] = mutated[4], mutated[2]
+				return mutated
+			},
+			check: func(t *testing.T, result *OrderLifecycleAudit) {
+				if result.ForcedReceiptOrderFailures != 1 || result.LiquidationFills != 0 {
+					t.Fatalf("receipt ordering mutation was not rejected: %+v", result)
+				}
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			run := openStrictLifecycleRun(t, test.mutate(validLines))
+			result, err := run.MeasureOrderLifecycle()
+			if err != nil {
+				t.Fatalf("measure strict forced lifecycle: %v", err)
+			}
+			test.check(t, result)
+		})
 	}
 }
 
