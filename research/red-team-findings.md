@@ -3242,3 +3242,59 @@ arithmetic.
 
 **Scope.** One seed, one configuration. The 0.7% check is against a single sampled
 quote; the premium-to-spread curve is derived from the formula, not fitted.
+
+## RT-056 — Per-contract inventory is the bid gate; the option lineage closes
+
+**Classification.** REAL, and it closes RT-054's open anomaly. Two of three
+registered claims falsified on a confound of my own design; the mechanism stands.
+
+**Base.** `a666d02faede3d40f046b11e60eb672c59386a94`, seed 607, 8 h, full logs.
+
+**Measured** (`research/tools/dealerskew`; inventory is the exchange's own
+post-fill position in that contract, so it needs no accumulation cross-check):
+
+| inventory (lots) | bids | asks | bid/ask | share of Q3 |
+|---|---:|---:|---:|---:|
+| **≤ −20** | 42 653 | 42 653 | **100.0%** | **52.4%** |
+| −20…−6 | 295 117 | 342 684 | 86.1% | 32.3% |
+| −6…−2 | 70 522 | 397 107 | **17.8%** | **0.0%** |
+| −2…0 | 23 669 | 61 261 | 38.6% | 0.0% |
+| 0…+2 | 7 741 | 15 134 | 51.1% | 0.0% |
+| > +2 | 18 717 | 20 966 | 89.3% | 15.3% |
+
+**The formula's one unconfoundable prediction is confirmed to the unit.** Skew is
+**24.65 USD per lot** against a **147.9 USD** half-spread, so **6.0 lots short
+exactly cancels it**, and beyond that `bid = theo + (skew − half) > 0` **whatever
+the contract is worth**. At ≤ −20 lots the margin is +345 USD, so a bid must
+always be placed — measured **42 653 bids against 42 653 asks, exactly 100%**.
+
+**RT-054's anomaly is explained.** Q3's placements are **84.7% beyond the 6-lot
+short threshold** (52.4% at ≤ −20, 32.3% at −20…−6) and **0.0%** in the two middle
+buckets. In that quarter the dealer's per-contract shorts are large enough that
+skew lifts every bid above zero, which is why every moneyness and tenor cell read
+100%. It fits RT-054's own observation that Q3 quotes a restricted short-dated
+set: the same aggregate short spread over fewer contracts gives larger
+per-contract positions.
+
+**Two claims falsified, on a confound I built in.** The relation is U-shaped, not
+monotone — 100%, 86%, 17.8%, 38.6%, 51.1%, 89.3% — and long inventory shows a
+*high* ratio where the formula predicts a low one. The cause is that this table
+**does not control for moneyness**: in-the-money contracts carry premiums far
+above 148 USD and are quoted two-sided at any inventory, inflating whichever
+bucket holds them. I conflated two variables I had already shown to matter
+separately. The threshold claim also misses on its own terms — short beyond 6 lots
+gives 87.7% against 90% predicted.
+
+**No falsifier fires**: the ratio is not flat (5.6x range), Q3 does sit at high
+short inventory, and high short inventory does not show a low ratio.
+
+**The lineage closes.** RT-055 explained the missing bid; this explains the one
+behaviour it left open. RT-051 through RT-056 reduce the entire option surface to
+two lines of `optionmm.go` and their interaction with per-contract inventory.
+
+**If reopened**, the cheap next step is to cross inventory with quote-time
+moneyness in one table, separating the variables this experiment conflated and
+turning the U-shape into the two monotone slices it almost certainly is.
+
+**Scope.** One seed, one configuration. Placements count accepted orders, not
+resting depth.
