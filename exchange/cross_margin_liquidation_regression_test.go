@@ -94,6 +94,27 @@ func TestCrossMarginLiquidationIsInvariantToTriggerSymbol(t *testing.T) {
 	}
 }
 
+func TestCrossMarginRiskUsesImmutableCommittedMarkSnapshot(t *testing.T) {
+	ex, a, b := seedCrossMarginLiquidationCase(t)
+	defer ex.Shutdown()
+	ex.AddPerpBalance(1, "USD", 100)
+	committedEpoch := ex.markEpoch
+	if err := b.UpdateFundingRate(50, 50); err != nil {
+		t.Fatalf("mutate live sibling mark: %v", err)
+	}
+
+	ex.checkLiquidationsAtEpoch(a.Symbol(), a, 50, committedEpoch)
+	for _, symbol := range []string{a.Symbol(), b.Symbol()} {
+		position := ex.Positions.GetPosition(1, symbol)
+		if position == nil || position.Size != 10 {
+			t.Fatalf("live sibling mutation changed %s position under committed snapshot: %#v", symbol, position)
+		}
+	}
+	if got := ex.ExchangeBalance.InsuranceFund["USD"]; got != 0 {
+		t.Fatalf("live sibling mutation changed insurance under committed snapshot: %d", got)
+	}
+}
+
 func TestCrossMarginLiquidationDefersDeficitDuringPartialPortfolioClose(t *testing.T) {
 	ex, a, b := seedCrossMarginLiquidationCase(t)
 	defer ex.Shutdown()
