@@ -48,7 +48,7 @@
   },
   "contract_definition": {
     "path": "scripts/v2-r2-sv1c-24h-contract.sh",
-    "sha256": "31f2851a9f7cfcc6d4615ee6f517d36157ea18877bf1b5bced850bfb740b6d6a"
+    "sha256": "5c8ae14121171efa29d8a38d86d0a3626f03f7b9c391caf3e4674c02886dafd0"
   },
   "contract_loader": {
     "path": "scripts/v2-r2-sv1-contract-loader.sh",
@@ -70,12 +70,12 @@
   ],
   "normalizer_registration": {
     "path": "research/v2-r2-sv1c-24h-config-normalizer-registration.json",
-    "sha256": "89601246181058c3fec5dd70bbe56d4e580fc9c97c2f9636e6b1b2371f42f6a4"
+    "sha256": "d34f58effeb957f379f61d83279d5e8536700e518c97840013c3783a4809b6b6"
   },
   "normalizer": {
     "path": "bin/multivenue",
-    "sha256": "0a77f7a1e0d68c6e8e1c6152195f2d9e77c90f9300fd0a20a7e2665ec507b0d4",
-    "revision": "40929831eb023d2c991417a726d5b42adc672fe5",
+    "sha256": "8d9ec94b2174bf94c0bc32babfa3bcccf37ad54192d6fb7f2e12a9ef26694cb5",
+    "revision": "e792d0e2a2b1bb4adf0074a1149c6856a75706e0",
     "go_version": "go1.27.0",
     "package": "exchange_sim/cmd/multivenue"
   },
