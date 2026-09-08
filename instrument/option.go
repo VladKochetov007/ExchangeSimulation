@@ -156,6 +156,19 @@ func (o *EuropeanOption) MaintenanceForPosition(size, precision int64) int64 {
 	return mm + etypes.MulDiv(short, m.premium, precision)
 }
 
+// MaintenanceForPositionAtMark evaluates the option maintenance formula from
+// the values captured by one exchange risk snapshot. It deliberately does not
+// read o.marks or o.Margin.MMBps, so a later mark/configuration mutation cannot
+// change a decision that was already committed to the snapshot.
+func (o *EuropeanOption) MaintenanceForPositionAtMark(size, precision, underlyingMark, positionMark, maintenanceBps int64) int64 {
+	if size >= 0 {
+		return 0
+	}
+	short := -size
+	mm := etypes.MulDiv(short, underlyingMark, precision) * maintenanceBps / 10000
+	return mm + etypes.MulDiv(short, positionMark, precision)
+}
+
 // --- Expirable ---
 
 func (o *EuropeanOption) ExpiryNano() int64        { return o.expiryNano }

@@ -238,6 +238,17 @@ type PositionMarginer interface {
 	MaintenanceForPosition(size, precision int64) int64
 }
 
+// PositionMarginSnapshotter supplies the maintenance calculation for an
+// exchange-owned immutable risk snapshot. Instruments whose maintenance
+// depends on more than the position mark may use underlyingMark; the
+// maintenanceBps argument is the policy value captured with that snapshot.
+// A strict cross-margin risk contract fails closed for a PositionMarginer
+// that does not implement this optional interface rather than reading mutable
+// instrument state after the mark batch was committed.
+type PositionMarginSnapshotter interface {
+	MaintenanceForPositionAtMark(size, precision, underlyingMark, positionMark, maintenanceBps int64) int64
+}
+
 // Expirable is implemented by instruments with a finite life (dated futures,
 // options). The exchange's automation observes settlement inputs while the
 // instrument trades and cash-settles all positions at expiry.

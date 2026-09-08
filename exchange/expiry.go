@@ -474,6 +474,7 @@ func (e *DefaultExchange) UpdateDerivativeMarks() uint64 {
 					opt.ClearMarks()
 				}
 				delete(e.markEpochBySymbol, data.symbol)
+				delete(e.riskMarkSnapshots, data.symbol)
 			}
 			e.mu.Unlock()
 			e.reportPriceUnavailable(now, inst.Symbol(), "derivative_mark", err)
@@ -507,10 +508,24 @@ func (e *DefaultExchange) UpdateDerivativeMarks() uint64 {
 		e.markEpoch = completedMarkEpoch
 		for _, symbol := range markedOptionSymbols {
 			if _, pending := e.settlementPending[symbol]; pending {
+				delete(e.riskMarkSnapshots, symbol)
 				continue
 			}
 			if _, live := e.Books[symbol]; live {
 				e.markEpochBySymbol[symbol] = completedMarkEpoch
+				option, ok := e.Instruments[symbol].(*einstrument.EuropeanOption)
+				if !ok {
+					continue
+				}
+				mark, err := option.PositionMark()
+				if err != nil {
+					delete(e.markEpochBySymbol, symbol)
+					continue
+				}
+				e.riskMarkSnapshots[symbol] = riskMarkSnapshot{
+					book: e.Books[symbol], mark: mark,
+					epoch: completedMarkEpoch, timestamp: now,
+				}
 			}
 		}
 		e.mu.Unlock()
@@ -885,6 +900,7 @@ func (e *DefaultExchange) settleExpiredInstrument(symbol string, now int64) {
 	delete(e.Books, symbol)
 	delete(e.Instruments, symbol)
 	delete(e.markEpochBySymbol, symbol)
+	delete(e.riskMarkSnapshots, symbol)
 	delete(e.instrumentListedAt, symbol)
 	delete(e.settlementPending, symbol)
 	// The AUTO-anchored mark calculator dies with the instrument: the map is

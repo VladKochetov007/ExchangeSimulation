@@ -81,3 +81,38 @@ func TestUpdatePerpPricesClearsStaleOptionMarkWhenUnderlyingUnavailable(t *testi
 		t.Fatalf("stale option risk mark error = %v, want ErrNoPrice", err)
 	}
 }
+
+func TestCrossMarginOptionRiskUsesImmutableSnapshotInputs(t *testing.T) {
+	clock := &expiryManualClock{now: 100}
+	ex := NewExchange(2, clock)
+	defer ex.Shutdown()
+	option := NewEuropeanOption("ABC-C-100", "ABC", "USD", "ABC/USD", 1, 1, 1, 1, 100, clock.now+int64(time.Hour), true)
+	option.SetMarks(100, 10)
+	ex.AddInstrument(option)
+	ex.ConnectNewClient(1, nil, &FixedFee{})
+	ex.ConnectNewClient(2, nil, &FixedFee{})
+	ex.AddPerpBalance(1, "USD", 100)
+	ex.AddPerpBalance(2, "USD", 10_000)
+	if delta := ex.Positions.UpdatePosition(1, option.Symbol(), 1, 10, Sell, PositionBoth); delta.NewSize != -1 {
+		t.Fatalf("option position delta = %#v", delta)
+	}
+	response := ex.PlaceOrder(2, &OrderRequest{
+		RequestID: 1, Symbol: option.Symbol(), Side: Sell, Type: LimitOrder,
+		Price: 1_000, Qty: 1, TimeInForce: GTC, PositionSide: PositionBoth,
+	})
+	if !response.Success {
+		t.Fatalf("option covering ask rejected: %s", response.Error)
+	}
+	epoch, err := ex.CommitMarkEpoch([]string{option.Symbol()})
+	if err != nil {
+		t.Fatalf("commit option risk snapshot: %v", err)
+	}
+	option.SetMarks(1_000, 1_000)
+	option.Margin.MMBps = 10_000
+
+	ex.checkPositionMarginerLiquidationsAtEpoch(epoch)
+	position := ex.Positions.GetPosition(1, option.Symbol())
+	if position == nil || position.Size != -1 {
+		t.Fatalf("live option mark/configuration mutation changed snapshot risk: %#v", position)
+	}
+}

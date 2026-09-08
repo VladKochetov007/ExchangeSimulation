@@ -179,6 +179,7 @@ type DefaultExchange struct {
 	// caller-supplied trigger mark with an unrelated stale sibling mark.
 	markEpoch                    uint64
 	markEpochBySymbol            map[string]uint64
+	riskMarkSnapshots            map[string]riskMarkSnapshot
 	CollateralRate               int64
 	LiquidationFeeBps            int64
 	requireExactLinearAccounting bool
@@ -332,6 +333,7 @@ func NewExchangeWithConfig(config ExchangeConfig) *DefaultExchange {
 		collateralInterestRemainders:     make(map[uint64]map[string]int64),
 		collateralInterestLastTimestamps: make(map[uint64]map[string]int64),
 		markEpochBySymbol:                make(map[string]uint64),
+		riskMarkSnapshots:                make(map[string]riskMarkSnapshot),
 		settlementPending:                make(map[string]expirySettlementPending),
 		tickerFactory:                    config.TickerFactory,
 		deterministicIngress:             config.DeterministicIngress,
@@ -704,6 +706,7 @@ func (e *DefaultExchange) AddInstrument(instrument Instrument) {
 	}
 	e.Instruments[symbol] = instrument
 	delete(e.markEpochBySymbol, symbol)
+	delete(e.riskMarkSnapshots, symbol)
 	if isLinear {
 		if registrar, ok := e.Positions.(etypes.PositionPrecisionRegistrar); ok {
 			registrar.SetPositionPrecision(symbol, instrument.BasePrecision())
@@ -1594,10 +1597,12 @@ func (e *DefaultExchange) CommitMarkEpoch(symbols []string) (uint64, error) {
 	if len(symbols) == 0 {
 		return 0, errors.New("mark epoch requires at least one symbol")
 	}
+	timestamp := e.Clock.NowUnixNano()
 
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	seenSymbols := make(map[string]struct{}, len(symbols))
+	marks := make(map[string]riskMarkSnapshot, len(symbols))
 	for _, symbol := range symbols {
 		if _, duplicate := seenSymbols[symbol]; duplicate {
 			return 0, fmt.Errorf("mark epoch duplicate symbol %s", symbol)
@@ -1610,16 +1615,36 @@ func (e *DefaultExchange) CommitMarkEpoch(symbols []string) (uint64, error) {
 		if _, pending := e.settlementPending[symbol]; pending {
 			return 0, fmt.Errorf("mark epoch symbol %s is settlement-pending", symbol)
 		}
+		if exp, ok := book.Instrument.(Expirable); ok && timestamp >= exp.ExpiryNano() {
+			return 0, fmt.Errorf("mark epoch symbol %s is expired", symbol)
+		}
 		if perp := marginCore(book.Instrument); perp != nil {
 			if !perp.GetFundingRate().MarkAvailable {
 				return 0, fmt.Errorf("mark epoch symbol %s is unavailable", symbol)
 			}
+			fundingRate := perp.GetFundingRate()
+			marks[symbol] = riskMarkSnapshot{
+				book: book, mark: fundingRate.MarkPrice,
+				maintenanceBps: perp.MaintenanceMarginRate,
+				warningBps:     perp.WarningMarginRate, timestamp: timestamp,
+			}
 			continue
 		}
 		if _, ok := book.Instrument.(PositionMarginer); ok {
-			if _, err := riskMark(book.Instrument, book); err != nil {
+			mark, err := riskMark(book.Instrument, book)
+			if err != nil {
 				return 0, fmt.Errorf("mark epoch symbol %s: %w", symbol, err)
 			}
+			snapshot := riskMarkSnapshot{book: book, mark: mark, timestamp: timestamp}
+			if option, ok := book.Instrument.(*einstrument.EuropeanOption); ok {
+				underlying, err := option.UnderlyingMark()
+				if err != nil {
+					return 0, fmt.Errorf("mark epoch symbol %s underlying: %w", symbol, err)
+				}
+				snapshot.underlying = underlying
+				snapshot.maintenanceBps = option.Margin.MMBps
+			}
+			marks[symbol] = snapshot
 			continue
 		}
 		return 0, fmt.Errorf("mark epoch symbol %s is not margined", symbol)
@@ -1628,6 +1653,9 @@ func (e *DefaultExchange) CommitMarkEpoch(symbols []string) (uint64, error) {
 	e.markEpoch++
 	for symbol := range seenSymbols {
 		e.markEpochBySymbol[symbol] = e.markEpoch
+		mark := marks[symbol]
+		mark.epoch = e.markEpoch
+		e.riskMarkSnapshots[symbol] = mark
 	}
 	return e.markEpoch, nil
 }
@@ -1755,6 +1783,7 @@ func (e *DefaultExchange) updateAllPerpPrices() {
 
 	type perpUpdate struct {
 		symbol          string
+		book            *OrderBook
 		perp            *PerpFutures
 		markPrice       int64
 		indexPrice      int64
@@ -1774,7 +1803,7 @@ func (e *DefaultExchange) updateAllPerpPrices() {
 			indexPrice = c.markPrice
 		}
 		updates = append(updates, perpUpdate{
-			symbol:     c.symbol,
+			symbol: c.symbol, book: c.book,
 			perp:       c.perp,
 			markPrice:  c.markPrice,
 			indexPrice: indexPrice,
@@ -1792,6 +1821,7 @@ func (e *DefaultExchange) updateAllPerpPrices() {
 		// when it is false.
 		d.perp.ClearMarkReferences()
 		delete(e.markEpochBySymbol, d.symbol)
+		delete(e.riskMarkSnapshots, d.symbol)
 		d.fundingSnapshot = *d.perp.GetFundingRate()
 	}
 	for i := range updates {
@@ -1802,6 +1832,7 @@ func (e *DefaultExchange) updateAllPerpPrices() {
 			// commit. Do not resurrect a halted contract's mark in that race.
 			u.skippedPending = true
 			delete(e.markEpochBySymbol, u.symbol)
+			delete(e.riskMarkSnapshots, u.symbol)
 			u.fundingSnapshot = *u.perp.GetFundingRate()
 			continue
 		}
@@ -1814,6 +1845,7 @@ func (e *DefaultExchange) updateAllPerpPrices() {
 		u.ready = u.updateErr == nil
 		if !u.ready {
 			delete(e.markEpochBySymbol, u.symbol)
+			delete(e.riskMarkSnapshots, u.symbol)
 		}
 	}
 	for index := range optionCandidates {
@@ -1827,6 +1859,7 @@ func (e *DefaultExchange) updateAllPerpPrices() {
 				candidate.option.ClearMarks()
 			}
 			delete(e.markEpochBySymbol, candidate.symbol)
+			delete(e.riskMarkSnapshots, candidate.symbol)
 			continue
 		}
 		liveBook := e.Books[candidate.symbol]
@@ -1836,6 +1869,7 @@ func (e *DefaultExchange) updateAllPerpPrices() {
 			timestamp >= candidate.option.ExpiryNano() {
 			candidate.skippedLifecycle = true
 			delete(e.markEpochBySymbol, candidate.symbol)
+			delete(e.riskMarkSnapshots, candidate.symbol)
 			continue
 		}
 		candidate.option.SetMarks(candidate.underlyingPrice, candidate.premium)
@@ -1860,11 +1894,23 @@ func (e *DefaultExchange) updateAllPerpPrices() {
 		for _, update := range updates {
 			if update.ready {
 				e.markEpochBySymbol[update.symbol] = completedMarkEpoch
+				e.riskMarkSnapshots[update.symbol] = riskMarkSnapshot{
+					book: update.book, mark: update.markPrice,
+					maintenanceBps: update.perp.MaintenanceMarginRate,
+					warningBps:     update.perp.WarningMarginRate,
+					epoch:          completedMarkEpoch, timestamp: timestamp,
+				}
 			}
 		}
 		for _, candidate := range optionCandidates {
 			if candidate.ready {
 				e.markEpochBySymbol[candidate.symbol] = completedMarkEpoch
+				e.riskMarkSnapshots[candidate.symbol] = riskMarkSnapshot{
+					book: candidate.book, mark: candidate.premium,
+					underlying:     candidate.underlyingPrice,
+					maintenanceBps: candidate.option.Margin.MMBps,
+					epoch:          completedMarkEpoch, timestamp: timestamp,
+				}
 			}
 		}
 	}
@@ -1982,6 +2028,24 @@ type accountMarginProfile struct {
 	Warning            int64
 }
 
+type riskMarkSnapshot struct {
+	book           *OrderBook
+	mark           int64
+	underlying     int64
+	maintenanceBps int64
+	warningBps     int64
+	epoch          uint64
+	timestamp      int64
+}
+
+func (e *DefaultExchange) committedRiskSnapshotLocked(symbol string, book *OrderBook, markEpoch uint64) (riskMarkSnapshot, error) {
+	snapshot, ok := e.riskMarkSnapshots[symbol]
+	if !ok || snapshot.epoch != markEpoch || snapshot.book != book {
+		return riskMarkSnapshot{}, fmt.Errorf("cross-margin mark snapshot for %s is unavailable", symbol)
+	}
+	return snapshot, nil
+}
+
 func (e *DefaultExchange) clientHasOpenPositionOnSymbolLocked(clientID uint64, symbol string) bool {
 	for _, side := range []PositionSide{PositionBoth, PositionLong, PositionShort} {
 		position := e.Positions.GetPositionBySide(clientID, symbol, side)
@@ -2043,7 +2107,7 @@ func (e *DefaultExchange) buildAccountMarginProfileAtEpoch(clientID uint64, quot
 				if markEpoch != 0 && e.clientHasOpenPositionOnSymbolLocked(clientID, symbol) && e.markEpochBySymbol[symbol] != markEpoch {
 					return accountMarginProfile{}, fmt.Errorf("cross-margin mark epoch for %s is unavailable", symbol)
 				}
-				if err := e.addPositionMarginerExposure(&p, clientID, symbol, book.Instrument, pm, book); err != nil {
+				if err := e.addPositionMarginerExposure(&p, clientID, symbol, book.Instrument, pm, book, markEpoch); err != nil {
 					return accountMarginProfile{}, err
 				}
 			}
@@ -2062,17 +2126,21 @@ func (e *DefaultExchange) buildAccountMarginProfileAtEpoch(clientID uint64, quot
 		if len(positions) == 0 {
 			continue
 		}
+		var snapshot riskMarkSnapshot
 		if markEpoch != 0 {
 			if e.markEpochBySymbol[symbol] != markEpoch {
 				return accountMarginProfile{}, fmt.Errorf("cross-margin mark epoch for %s is unavailable", symbol)
 			}
-			fundingRate := perp.GetFundingRate()
-			if !fundingRate.MarkAvailable {
-				return accountMarginProfile{}, fmt.Errorf("cross-margin mark for %s is unavailable", symbol)
+			var err error
+			snapshot, err = e.committedRiskSnapshotLocked(symbol, book, markEpoch)
+			if err != nil {
+				return accountMarginProfile{}, err
 			}
 		}
 		mark := triggerMark
-		if markEpoch != 0 || symbol != triggerSymbol {
+		if markEpoch != 0 {
+			mark = snapshot.mark
+		} else if symbol != triggerSymbol {
 			fundingRate := perp.GetFundingRate()
 			mark = fundingRate.MarkPrice
 			if !fundingRate.MarkAvailable {
@@ -2088,8 +2156,12 @@ func (e *DefaultExchange) buildAccountMarginProfileAtEpoch(clientID uint64, quot
 			p.EquityContribution += e.positionUPnL(pos, mark, precision)
 			notional := etypes.AbsMulDiv(pos.Size, mark, precision)
 			p.Notional += notional
-			p.Maintenance += notional * perp.MaintenanceMarginRate / 10000
-			p.Warning += notional * perp.WarningMarginRate / 10000
+			maintenanceBps, warningBps := perp.MaintenanceMarginRate, perp.WarningMarginRate
+			if markEpoch != 0 {
+				maintenanceBps, warningBps = snapshot.maintenanceBps, snapshot.warningBps
+			}
+			p.Maintenance += notional * maintenanceBps / 10000
+			p.Warning += notional * warningBps / 10000
 		}
 	}
 	return p, nil
@@ -2202,16 +2274,30 @@ func (e *DefaultExchange) checkPositionMarginerLiquidationsAtEpoch(markEpoch uin
 // positions into the cross-margin profile: marked at the instrument's own
 // mark, maintenance per its own formula. Warning reuses maintenance — these
 // instruments carry no separate warning tier.
-func (e *DefaultExchange) addPositionMarginerExposure(p *accountMarginProfile, clientID uint64, symbol string, inst Instrument, pm PositionMarginer, book *OrderBook) error {
+func (e *DefaultExchange) addPositionMarginerExposure(p *accountMarginProfile, clientID uint64, symbol string, inst Instrument, pm PositionMarginer, book *OrderBook, markEpoch uint64) error {
 	precision := inst.BasePrecision()
+	var snapshot riskMarkSnapshot
+	snapshotReady := false
 	for _, side := range []PositionSide{PositionBoth, PositionLong, PositionShort} {
 		pos := e.Positions.GetPositionBySide(clientID, symbol, side)
 		if pos == nil || pos.Size == 0 {
 			continue
 		}
-		m, err := riskMark(inst, book)
-		if err != nil {
-			return fmt.Errorf("position margin mark for %s: %w", symbol, err)
+		if markEpoch != 0 && !snapshotReady {
+			var err error
+			snapshot, err = e.committedRiskSnapshotLocked(symbol, book, markEpoch)
+			if err != nil {
+				return err
+			}
+			snapshotReady = true
+		}
+		m := snapshot.mark
+		if markEpoch == 0 {
+			var err error
+			m, err = riskMark(inst, book)
+			if err != nil {
+				return fmt.Errorf("position margin mark for %s: %w", symbol, err)
+			}
 		}
 		// Option premiums have already moved through the perp wallet at each
 		// fill. Their contribution to equity is therefore the signed current
@@ -2219,6 +2305,15 @@ func (e *DefaultExchange) addPositionMarginerExposure(p *accountMarginProfile, c
 		p.EquityContribution += MulDiv(pos.Size, m, precision)
 		p.Notional += etypes.AbsMulDiv(pos.Size, m, precision)
 		maintenance := pm.MaintenanceForPosition(pos.Size, precision)
+		if markEpoch != 0 {
+			snapshotMarginer, ok := inst.(etypes.PositionMarginSnapshotter)
+			if !ok {
+				return fmt.Errorf("position margin snapshot for %s is unavailable", symbol)
+			}
+			maintenance = snapshotMarginer.MaintenanceForPositionAtMark(
+				pos.Size, precision, snapshot.underlying, snapshot.mark, snapshot.maintenanceBps,
+			)
+		}
 		// A short with zero maintenance means the instrument has no marks yet
 		// (the underlying hasn't printed): the exposure is unknown, not zero.
 		// Floor at the buy-back cost at the marked (or entry) premium so the
@@ -2458,19 +2553,9 @@ func (e *DefaultExchange) accountMarkEpochReadyLocked(clientID uint64, quote str
 		if book == nil {
 			return false
 		}
-		if perp := marginCore(book.Instrument); perp != nil {
-			if !perp.GetFundingRate().MarkAvailable {
-				return false
-			}
-			continue
+		if _, err := e.committedRiskSnapshotLocked(position.symbol, book, markEpoch); err != nil {
+			return false
 		}
-		if _, ok := book.Instrument.(PositionMarginer); ok {
-			if _, err := riskMark(book.Instrument, book); err != nil {
-				return false
-			}
-			continue
-		}
-		return false
 	}
 	return len(seenSymbols) > 0
 }
