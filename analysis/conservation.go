@@ -137,10 +137,11 @@ type Conservation struct {
 	// PerVenueNet is the net movement of each asset at each venue across every
 	// reason, which is the run's external funding: deposits and borrowing in,
 	// nothing else.
-	PerVenueNet       map[string]map[string]int64 `json:"per_venue_net"`
-	Deltas            DeltaConsistency            `json:"delta_consistency"`
-	PositionRounding  PositionRoundingAudit       `json:"position_rounding"`
-	InterestRemainder InterestRemainderAudit      `json:"interest_remainder"`
+	PerVenueNet            map[string]map[string]int64 `json:"per_venue_net"`
+	Deltas                 DeltaConsistency            `json:"delta_consistency"`
+	PositionRounding       PositionRoundingAudit       `json:"position_rounding"`
+	InterestRemainder      InterestRemainderAudit      `json:"interest_remainder"`
+	OptionExpiryAccounting OptionExpiryAccountingAudit `json:"option_expiry_accounting"`
 	// FundingInstants reports the net funding transfer at each settlement
 	// instant. Funding is a transfer between longs and shorts, so each instant
 	// must net to zero at a venue.
@@ -235,6 +236,24 @@ type InstantResidual struct {
 	Symbol    string `json:"symbol,omitempty"`
 	Net       int64  `json:"net"`
 	Accounts  int    `json:"accounts"`
+}
+
+// OptionExpiryAccountingAudit validates the aggregate contract emitted after
+// an option book settles. It is separate from OptionExpiryInstants because a
+// participant-only residual can be legitimate integer truncation only when
+// the same residual and its venue-side closure are explicitly recorded.
+type OptionExpiryAccountingAudit struct {
+	Events                   int  `json:"events"`
+	Invalid                  int  `json:"invalid"`
+	DuplicateKeys            int  `json:"duplicate_keys"`
+	MissingAccountingEvents  int  `json:"missing_accounting_events"`
+	MissingParticipantEvents int  `json:"missing_participant_events"`
+	ParticipantMismatches    int  `json:"participant_mismatches"`
+	BalanceMismatches        int  `json:"balance_mismatches"`
+	VenueMismatches          int  `json:"venue_mismatches"`
+	DeliveryFeeMismatches    int  `json:"delivery_fee_mismatches"`
+	Applicable               bool `json:"applicable"`
+	Valid                    bool `json:"valid"`
 }
 
 type flowKey struct {
@@ -366,6 +385,40 @@ type venueRoundingKey struct {
 	symbol    string
 	timestamp int64
 	asset     string
+}
+
+type optionExpiryAccountingKey struct {
+	venue      string
+	symbol     string
+	timestamp  int64
+	quoteAsset string
+}
+
+type optionExpiryAccountingRecord struct {
+	Timestamp          int64
+	Symbol             string
+	QuoteAsset         string
+	BasePrecision      int64
+	SettlementPrice    int64
+	PositionCount      int
+	NetPositionSize    int64
+	GrossCashFlow      int64
+	ExpectedCashFlow   int64
+	RoundingResidual   int64
+	VenueRoundingDelta int64
+	DeliveryFeeTotal   int64
+}
+
+type optionExpirySettlementAggregate struct {
+	Records          int
+	NetPositionSize  int64
+	GrossCashFlow    int64
+	DeliveryFeeTotal int64
+}
+
+type optionExpiryBalanceAggregate struct {
+	Records int
+	NetCash int64
 }
 
 func findVenueLedger(ledgers []VenueLedger, venue string) (VenueLedger, bool) {
@@ -543,8 +596,13 @@ func (r *Run) MeasureConservation(opts ConservationOptions) (*Conservation, erro
 	roundingVenueFlows := make(map[venueRoundingKey]int64)
 	var rounding PositionRoundingAudit
 	optionExpiryVenue := make(map[instantKey]int64)
+	optionExpiryVenueByContract := make(map[optionExpiryAccountingKey]int64)
+	optionExpirySettlements := make(map[optionExpiryAccountingKey]optionExpirySettlementAggregate)
+	optionExpiryBalances := make(map[optionExpiryAccountingKey]optionExpiryBalanceAggregate)
+	optionExpiryAccountingRecords := make(map[optionExpiryAccountingKey]optionExpiryAccountingRecord)
+	var optionExpiryAccounting OptionExpiryAccountingAudit
 	var interestRemainder InterestRemainderAudit
-	scan := ScanOptions{Events: []string{"balance_change", "fee_revenue", "margin_interest", "margin_interest_accrual", "margin_interest_remainder_closed", "margin_interest_failed", "venue_balance_change", "position_rounding"}, Files: opts.Files, FilesSelected: opts.FilesSelected}
+	scan := ScanOptions{Events: []string{"balance_change", "expiry_settlement", "fee_revenue", "margin_interest", "margin_interest_accrual", "margin_interest_remainder_closed", "margin_interest_failed", "option_expiry_accounting", "venue_balance_change", "position_rounding"}, Files: opts.Files, FilesSelected: opts.FilesSelected}
 	type feePayload struct {
 		Timestamp int64  `json:"timestamp"`
 		Symbol    string `json:"symbol"`
@@ -586,6 +644,29 @@ func (r *Run) MeasureConservation(opts ConservationOptions) (*Conservation, erro
 	type marginInterestFailurePayload struct {
 		Timestamp int64  `json:"timestamp"`
 		Reason    string `json:"reason"`
+	}
+	type expirySettlementPayload struct {
+		Timestamp   int64  `json:"timestamp"`
+		ClientID    uint64 `json:"client_id"`
+		Symbol      string `json:"symbol"`
+		QuoteAsset  string `json:"quote_asset"`
+		Size        int64  `json:"size"`
+		CashFlow    int64  `json:"cash_flow"`
+		DeliveryFee int64  `json:"delivery_fee"`
+	}
+	type optionExpiryAccountingPayload struct {
+		Timestamp          int64  `json:"timestamp"`
+		Symbol             string `json:"symbol"`
+		QuoteAsset         string `json:"quote_asset"`
+		BasePrecision      int64  `json:"base_precision"`
+		SettlementPrice    int64  `json:"settlement_price"`
+		PositionCount      int    `json:"position_count"`
+		NetPositionSize    int64  `json:"net_position_size"`
+		GrossCashFlow      int64  `json:"gross_cash_flow"`
+		ExpectedCashFlow   int64  `json:"expected_cash_flow"`
+		RoundingResidual   int64  `json:"rounding_residual"`
+		VenueRoundingDelta int64  `json:"venue_rounding_delta"`
+		DeliveryFeeTotal   int64  `json:"delivery_fee_total"`
 	}
 	type venueMovement struct {
 		Timestamp  int64  `json:"timestamp"`
@@ -641,6 +722,71 @@ func (r *Run) MeasureConservation(opts ConservationOptions) (*Conservation, erro
 			} else {
 				rounding.DuplicateTerminalKeys++
 			}
+			return
+		}
+		if event.Name == "expiry_settlement" {
+			var payload expirySettlementPayload
+			decodeErr := decodeRequiredJSON(event.Raw(), &payload, "timestamp", "client_id", "symbol", "quote_asset", "size", "cash_flow", "delivery_fee")
+			valid := decodeErr == nil && payload.Timestamp > 0 && payload.Timestamp == event.SimTS && payload.ClientID == event.ClientID && payload.Symbol != "" && isOptionSymbol(payload.Symbol) && payload.QuoteAsset != "" && payload.Size != 0 && payload.DeliveryFee >= 0 && (event.Symbol == "" || event.Symbol == payload.Symbol)
+			if !valid {
+				// Historical expiry records predate quote_asset and remain outside
+				// this successor-only aggregate contract. Once the field is
+				// present, malformed option evidence is an applicable failure.
+				if payload.QuoteAsset != "" || isOptionSymbol(payload.Symbol) {
+					mu.Lock()
+					optionExpiryAccounting.Applicable = true
+					optionExpiryAccounting.Invalid++
+					mu.Unlock()
+				}
+				return
+			}
+			key := optionExpiryAccountingKey{venue: event.VenueID, symbol: payload.Symbol, timestamp: payload.Timestamp, quoteAsset: payload.QuoteAsset}
+			mu.Lock()
+			optionExpiryAccounting.Applicable = true
+			aggregate := optionExpirySettlements[key]
+			aggregate.Records++
+			var ok bool
+			if aggregate.NetPositionSize, ok = addAuditInt64(aggregate.NetPositionSize, payload.Size); !ok {
+				optionExpiryAccounting.Invalid++
+			}
+			if aggregate.GrossCashFlow, ok = addAuditInt64(aggregate.GrossCashFlow, payload.CashFlow); !ok {
+				optionExpiryAccounting.Invalid++
+			}
+			if aggregate.DeliveryFeeTotal, ok = addAuditInt64(aggregate.DeliveryFeeTotal, payload.DeliveryFee); !ok {
+				optionExpiryAccounting.Invalid++
+			}
+			optionExpirySettlements[key] = aggregate
+			mu.Unlock()
+			return
+		}
+		if event.Name == "option_expiry_accounting" {
+			var payload optionExpiryAccountingPayload
+			decodeErr := decodeRequiredJSON(event.Raw(), &payload, "timestamp", "symbol", "quote_asset", "base_precision", "settlement_price", "position_count", "net_position_size", "gross_cash_flow", "expected_cash_flow", "rounding_residual", "venue_rounding_delta", "delivery_fee_total")
+			residual, residualOK := subAuditInt64(payload.GrossCashFlow, payload.ExpectedCashFlow)
+			venueDelta, venueDeltaOK := negateAuditInt64(payload.RoundingResidual)
+			valid := decodeErr == nil && payload.Timestamp > 0 && payload.Timestamp == event.SimTS && event.ClientID == 0 && payload.Symbol != "" && isOptionSymbol(payload.Symbol) && payload.QuoteAsset != "" && payload.BasePrecision > 0 && payload.SettlementPrice > 0 && payload.PositionCount >= 0 && payload.NetPositionSize == 0 && payload.ExpectedCashFlow == 0 && payload.DeliveryFeeTotal >= 0 && residualOK && residual == payload.RoundingResidual && venueDeltaOK && venueDelta == payload.VenueRoundingDelta && (event.Symbol == "" || event.Symbol == payload.Symbol)
+			mu.Lock()
+			optionExpiryAccounting.Applicable = true
+			if !valid {
+				optionExpiryAccounting.Invalid++
+				mu.Unlock()
+				return
+			}
+			key := optionExpiryAccountingKey{venue: event.VenueID, symbol: payload.Symbol, timestamp: payload.Timestamp, quoteAsset: payload.QuoteAsset}
+			if _, duplicate := optionExpiryAccountingRecords[key]; duplicate {
+				optionExpiryAccounting.DuplicateKeys++
+			} else {
+				optionExpiryAccounting.Events++
+				optionExpiryAccountingRecords[key] = optionExpiryAccountingRecord{
+					Timestamp: payload.Timestamp, Symbol: payload.Symbol, QuoteAsset: payload.QuoteAsset,
+					BasePrecision: payload.BasePrecision, SettlementPrice: payload.SettlementPrice,
+					PositionCount: payload.PositionCount, NetPositionSize: payload.NetPositionSize,
+					GrossCashFlow: payload.GrossCashFlow, ExpectedCashFlow: payload.ExpectedCashFlow,
+					RoundingResidual: payload.RoundingResidual, VenueRoundingDelta: payload.VenueRoundingDelta,
+					DeliveryFeeTotal: payload.DeliveryFeeTotal,
+				}
+			}
+			mu.Unlock()
 			return
 		}
 		if event.Name == "margin_interest_accrual" {
@@ -855,6 +1001,10 @@ func (r *Run) MeasureConservation(opts ConservationOptions) (*Conservation, erro
 				} else {
 					key := instantKey{venue: event.VenueID, timestamp: movementTimestamp, asset: movement.Asset}
 					addConservationValue(optionExpiryVenue, key, movement.Delta, &deltas.ArithmeticFailures)
+					if movement.Symbol != "" {
+						contractKey := optionExpiryAccountingKey{venue: event.VenueID, symbol: movement.Symbol, timestamp: movementTimestamp, quoteAsset: movement.Asset}
+						addConservationValue(optionExpiryVenueByContract, contractKey, movement.Delta, &deltas.ArithmeticFailures)
+					}
 				}
 			}
 			mu.Unlock()
@@ -979,6 +1129,17 @@ func (r *Run) MeasureConservation(opts ConservationOptions) (*Conservation, erro
 			chain[chainKey] = append(chain[chainKey], chainPoint{
 				at: instant, before: change.OldBalance, after: change.NewBalance, delta: change.Delta,
 			})
+			if record.Reason == "expiry_settlement" && isOptionSymbol(record.Symbol) && change.Wallet == "perp" {
+				key := optionExpiryAccountingKey{venue: event.VenueID, symbol: record.Symbol, timestamp: instant, quoteAsset: change.Asset}
+				aggregate := optionExpiryBalances[key]
+				aggregate.Records++
+				if next, ok := addAuditInt64(aggregate.NetCash, change.Delta); ok {
+					aggregate.NetCash = next
+				} else {
+					optionExpiryAccounting.Invalid++
+				}
+				optionExpiryBalances[key] = aggregate
+			}
 
 			// A borrowed-wallet entry is a liability, not a holding. A borrow
 			// logs the cash it credits and the debt it creates as two positive
@@ -1248,6 +1409,47 @@ func (r *Run) MeasureConservation(opts ConservationOptions) (*Conservation, erro
 			}
 		}
 	}
+	if optionExpiryAccounting.Applicable {
+		for key, record := range optionExpiryAccountingRecords {
+			settlement, hasSettlement := optionExpirySettlements[key]
+			if !hasSettlement {
+				if record.PositionCount != 0 || record.NetPositionSize != 0 || record.GrossCashFlow != 0 || record.DeliveryFeeTotal != 0 {
+					optionExpiryAccounting.MissingParticipantEvents++
+				}
+			} else {
+				if settlement.Records != record.PositionCount || settlement.NetPositionSize != record.NetPositionSize || settlement.GrossCashFlow != record.GrossCashFlow {
+					optionExpiryAccounting.ParticipantMismatches++
+				}
+				if settlement.DeliveryFeeTotal != record.DeliveryFeeTotal {
+					optionExpiryAccounting.DeliveryFeeMismatches++
+				}
+			}
+			balance, hasBalance := optionExpiryBalances[key]
+			expectedNetCash, netCashOK := subAuditInt64(record.GrossCashFlow, record.DeliveryFeeTotal)
+			if !netCashOK || !hasBalance || balance.NetCash != expectedNetCash || (record.PositionCount != 0 && balance.Records != record.PositionCount) {
+				optionExpiryAccounting.BalanceMismatches++
+			}
+			if optionExpiryVenueByContract[key] != record.VenueRoundingDelta {
+				optionExpiryAccounting.VenueMismatches++
+			}
+		}
+		for key := range optionExpirySettlements {
+			if _, hasRecord := optionExpiryAccountingRecords[key]; !hasRecord {
+				optionExpiryAccounting.MissingAccountingEvents++
+			}
+		}
+		for key := range optionExpiryBalances {
+			if _, hasRecord := optionExpiryAccountingRecords[key]; !hasRecord {
+				optionExpiryAccounting.MissingAccountingEvents++
+			}
+		}
+		for key, delta := range optionExpiryVenueByContract {
+			if record, hasRecord := optionExpiryAccountingRecords[key]; !hasRecord || record.VenueRoundingDelta != delta {
+				optionExpiryAccounting.MissingAccountingEvents++
+			}
+		}
+	}
+	optionExpiryAccounting.Valid = !optionExpiryAccounting.Applicable || (optionExpiryAccounting.Invalid == 0 && optionExpiryAccounting.DuplicateKeys == 0 && optionExpiryAccounting.MissingAccountingEvents == 0 && optionExpiryAccounting.MissingParticipantEvents == 0 && optionExpiryAccounting.ParticipantMismatches == 0 && optionExpiryAccounting.BalanceMismatches == 0 && optionExpiryAccounting.VenueMismatches == 0 && optionExpiryAccounting.DeliveryFeeMismatches == 0)
 	interestRemainder.Valid = interestRemainder.Invalid == 0 && interestRemainder.DuplicateKeys == 0 && interestRemainder.RemainderOutOfRange == 0 && interestRemainder.TransitionFailures == 0 && interestRemainder.PeriodOrderFailures == 0 && interestRemainder.PostedMismatches == 0 && interestRemainder.WalletPostedMismatches == 0 && interestRemainder.BalanceMismatches == 0 && interestRemainder.InvalidClosures == 0 && interestRemainder.ClosureStateFailures == 0 && interestRemainder.TerminalMismatches == 0
 	expectedFundingRemainders := make(map[fundingInstantKey]int64)
 	for key, residual := range funding {
@@ -1360,7 +1562,7 @@ func (r *Run) MeasureConservation(opts ConservationOptions) (*Conservation, erro
 	identities, identityArithmeticFailures := r.conservationIdentities(flows)
 	venueIdentities, venueIdentityArithmeticFailures := r.venueIdentities(venueFlows)
 	deltas.ArithmeticFailures += identityArithmeticFailures + venueIdentityArithmeticFailures
-	result := &Conservation{PerVenueNet: perVenue, Deltas: deltas, PositionRounding: rounding, InterestRemainder: interestRemainder, FeesLogged: fees, VenueRecorded: venueRecorded, ClassNet: classNet, ClassRecords: classRecords, Identities: identities, VenueIdentities: venueIdentities}
+	result := &Conservation{PerVenueNet: perVenue, Deltas: deltas, PositionRounding: rounding, InterestRemainder: interestRemainder, OptionExpiryAccounting: optionExpiryAccounting, FeesLogged: fees, VenueRecorded: venueRecorded, ClassNet: classNet, ClassRecords: classRecords, Identities: identities, VenueIdentities: venueIdentities}
 	for _, flow := range flows {
 		result.Flows = append(result.Flows, *flow)
 	}

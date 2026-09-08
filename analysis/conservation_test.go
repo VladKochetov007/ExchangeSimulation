@@ -567,6 +567,92 @@ func TestConservationClosesOptionExpiryRoundingWithVenueMovement(t *testing.T) {
 	}
 }
 
+func TestConservationAuditsOptionExpiryAccountingContract(t *testing.T) {
+	finalSequence := uint64(1)
+	settlements := []string{
+		logLine(1, 1, "expiry_settlement", map[string]any{
+			"timestamp": int64(1), "client_id": uint64(1), "symbol": "ABC-ROUND-C", "quote_asset": "USD",
+			"size": int64(1), "cash_flow": int64(0), "delivery_fee": int64(0),
+		}),
+		logLine(1, 2, "expiry_settlement", map[string]any{
+			"timestamp": int64(1), "client_id": uint64(2), "symbol": "ABC-ROUND-C", "quote_asset": "USD",
+			"size": int64(1), "cash_flow": int64(0), "delivery_fee": int64(0),
+		}),
+		logLine(1, 3, "expiry_settlement", map[string]any{
+			"timestamp": int64(1), "client_id": uint64(3), "symbol": "ABC-ROUND-C", "quote_asset": "USD",
+			"size": int64(-2), "cash_flow": int64(-1), "delivery_fee": int64(0),
+		}),
+		changeLine(1, "north", 1, "ABC-ROUND-C", "expiry_settlement", [][3]any{{"USD", int64(10), int64(0)}}),
+		changeLine(1, "north", 2, "ABC-ROUND-C", "expiry_settlement", [][3]any{{"USD", int64(10), int64(0)}}),
+		changeLine(1, "north", 3, "ABC-ROUND-C", "expiry_settlement", [][3]any{{"USD", int64(10), int64(-1)}}),
+		logLine(1, 0, "venue_balance_change", map[string]any{
+			"timestamp": int64(1), "sequence": uint64(1), "bucket": "fee_revenue", "asset": "USD",
+			"symbol": "ABC-ROUND-C", "reason": "option_expiry_rounding", "old_balance": int64(0),
+			"new_balance": int64(1), "delta": int64(1),
+		}),
+		logLine(1, 0, "option_expiry_accounting", map[string]any{
+			"timestamp": int64(1), "symbol": "ABC-ROUND-C", "quote_asset": "USD",
+			"base_precision": int64(100), "settlement_price": int64(100), "position_count": 3,
+			"net_position_size": int64(0), "gross_cash_flow": int64(-1), "expected_cash_flow": int64(0),
+			"rounding_residual": int64(-1), "venue_rounding_delta": int64(1), "delivery_fee_total": int64(0),
+		}),
+	}
+	run, err := Open(writeRun(t, Report{VenueLedgers: []VenueLedger{{
+		VenueID: "north", FeeRevenue: map[string]int64{"USD": 1}, FinalSequence: &finalSequence,
+	}}}, map[string][]string{"north/derivatives.jsonl": settlements}))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	conservation, err := run.MeasureConservation(ConservationOptions{})
+	if err != nil {
+		t.Fatalf("MeasureConservation: %v", err)
+	}
+	audit := conservation.OptionExpiryAccounting
+	if !audit.Applicable || !audit.Valid || audit.Events != 1 || audit.Invalid != 0 || audit.MissingAccountingEvents != 0 || audit.MissingParticipantEvents != 0 || audit.ParticipantMismatches != 0 || audit.BalanceMismatches != 0 || audit.VenueMismatches != 0 || audit.DeliveryFeeMismatches != 0 {
+		t.Fatalf("valid option expiry accounting audit = %+v", audit)
+	}
+}
+
+func TestConservationRejectsOptionExpiryAccountingOmissionAndCorruption(t *testing.T) {
+	participantLines := []string{
+		logLine(1, 1, "expiry_settlement", map[string]any{
+			"timestamp": int64(1), "client_id": uint64(1), "symbol": "ABC-ROUND-C", "quote_asset": "USD",
+			"size": int64(1), "cash_flow": int64(2), "delivery_fee": int64(0),
+		}),
+		changeLine(1, "north", 1, "ABC-ROUND-C", "expiry_settlement", [][3]any{{"USD", int64(10), int64(2)}}),
+	}
+	measure := func(t *testing.T, accounting map[string]any) OptionExpiryAccountingAudit {
+		t.Helper()
+		lines := append([]string{}, participantLines...)
+		if accounting != nil {
+			lines = append(lines, logLine(1, 0, "option_expiry_accounting", accounting))
+		}
+		run, err := Open(writeRun(t, Report{}, map[string][]string{"north/derivatives.jsonl": lines}))
+		if err != nil {
+			t.Fatalf("Open: %v", err)
+		}
+		conservation, err := run.MeasureConservation(ConservationOptions{})
+		if err != nil {
+			t.Fatalf("MeasureConservation: %v", err)
+		}
+		return conservation.OptionExpiryAccounting
+	}
+
+	omitted := measure(t, nil)
+	if omitted.Valid || omitted.MissingAccountingEvents == 0 {
+		t.Fatalf("omitted option accounting audit = %+v", omitted)
+	}
+	corrupt := measure(t, map[string]any{
+		"timestamp": int64(1), "symbol": "ABC-ROUND-C", "quote_asset": "USD",
+		"base_precision": int64(100), "settlement_price": int64(100), "position_count": 1,
+		"net_position_size": int64(0), "gross_cash_flow": int64(2), "expected_cash_flow": int64(0),
+		"rounding_residual": int64(0), "venue_rounding_delta": int64(0), "delivery_fee_total": int64(0),
+	})
+	if corrupt.Valid || corrupt.Invalid == 0 {
+		t.Fatalf("corrupt option accounting audit = %+v", corrupt)
+	}
+}
+
 func TestConservationRejectsUnboundedPositionRoundingRemainder(t *testing.T) {
 	dir := writeRun(t, Report{}, map[string][]string{
 		"north/derivatives.jsonl": {

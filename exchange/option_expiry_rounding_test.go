@@ -23,6 +23,8 @@ func TestOptionExpiryRoutesAggregateRoundingResidual(t *testing.T) {
 	option.SetMarks(100, 0)
 	option.ObserveSettlement(100, clock.NowUnixNano())
 	ex.AddInstrument(option)
+	log := &recordingLogger{}
+	ex.SetLogger(option.Symbol(), log)
 
 	for _, clientID := range []uint64{1, 2, 3} {
 		ex.ConnectNewClient(clientID, nil, &FixedFee{})
@@ -45,6 +47,20 @@ func TestOptionExpiryRoutesAggregateRoundingResidual(t *testing.T) {
 	}
 	if violations := ex.VerifyConservation(); len(violations) != 0 {
 		t.Fatalf("option expiry rounding was not conserved: %+v", violations)
+	}
+	var accounting OptionExpiryAccountingEvent
+	foundAccounting := false
+	for _, record := range log.records {
+		if record.event == "option_expiry_accounting" {
+			accounting, foundAccounting = record.data.(OptionExpiryAccountingEvent)
+			break
+		}
+	}
+	if !foundAccounting {
+		t.Fatalf("option expiry accounting event missing: %+v", log.records)
+	}
+	if accounting.PositionCount != 3 || accounting.NetPositionSize != 0 || accounting.GrossCashFlow != -1 || accounting.ExpectedCashFlow != 0 || accounting.RoundingResidual != -1 || accounting.VenueRoundingDelta != 1 || accounting.DeliveryFeeTotal != 0 {
+		t.Fatalf("option expiry accounting = %+v", accounting)
 	}
 }
 

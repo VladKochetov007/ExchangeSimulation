@@ -552,6 +552,7 @@ type ExpirySettlementEvent struct {
 	Timestamp       int64  `json:"timestamp"`
 	ClientID        uint64 `json:"client_id"`
 	Symbol          string `json:"symbol"`
+	QuoteAsset      string `json:"quote_asset"`
 	PositionSide    string `json:"position_side,omitempty"`
 	BasePrecision   int64  `json:"base_precision,omitempty"`
 	Size            int64  `json:"size"`
@@ -766,6 +767,7 @@ func (e *DefaultExchange) settleExpiredInstrument(symbol string, now int64) {
 		if log != nil {
 			log.LogEvent(now, ep.clientID, "expiry_settlement", ExpirySettlementEvent{
 				Timestamp: now, ClientID: ep.clientID, Symbol: symbol,
+				QuoteAsset:    quote,
 				PositionSide:  pos.PositionSide.String(),
 				BasePrecision: precision,
 				Size:          pos.Size, EntryPrice: pos.EntryPrice,
@@ -835,6 +837,16 @@ func (e *DefaultExchange) settleExpiredInstrument(symbol string, now int64) {
 
 	if feeTotal > 0 {
 		e.recordFeeRevenue(quote, Fee{Amount: feeTotal, Asset: quote}, Fee{}, book, now)
+	}
+	if optionPlan != nil && log != nil {
+		log.LogEvent(now, 0, "option_expiry_accounting", OptionExpiryAccountingEvent{
+			Timestamp: now, Symbol: symbol, QuoteAsset: quote,
+			BasePrecision: precision, SettlementPrice: settlementPrice,
+			PositionCount: len(optionPlan.positions), NetPositionSize: optionPlan.netSize,
+			GrossCashFlow: optionPlan.grossCashFlow, ExpectedCashFlow: optionPlan.expectedCashFlow,
+			RoundingResidual: optionPlan.roundingResidual, VenueRoundingDelta: optionPlan.venueRoundingDelta,
+			DeliveryFeeTotal: optionPlan.deliveryFeeTotal,
+		})
 	}
 	if isMargined {
 		if releaser, ok := e.Positions.(etypes.PositionPrecisionReleaser); ok {

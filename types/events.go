@@ -189,6 +189,25 @@ type ExpirySettlementPendingEvent struct {
 	Reason          string `json:"reason"`
 }
 
+// OptionExpiryAccountingEvent records the aggregate cash contract for one
+// successfully settled option book. Position-level payouts are integer
+// rounded, so an independent audit needs the net book, gross payout, explicit
+// residual, delivery fees, and the venue movement that closes that residual.
+type OptionExpiryAccountingEvent struct {
+	Timestamp          int64  `json:"timestamp"`
+	Symbol             string `json:"symbol"`
+	QuoteAsset         string `json:"quote_asset"`
+	BasePrecision      int64  `json:"base_precision"`
+	SettlementPrice    int64  `json:"settlement_price"`
+	PositionCount      int    `json:"position_count"`
+	NetPositionSize    int64  `json:"net_position_size"`
+	GrossCashFlow      int64  `json:"gross_cash_flow"`
+	ExpectedCashFlow   int64  `json:"expected_cash_flow"`
+	RoundingResidual   int64  `json:"rounding_residual"`
+	VenueRoundingDelta int64  `json:"venue_rounding_delta"`
+	DeliveryFeeTotal   int64  `json:"delivery_fee_total"`
+}
+
 // FundingRateUpdateEvent logs funding rate changes for perpetual futures
 type FundingRateUpdateEvent struct {
 	Timestamp   int64  `json:"timestamp"`

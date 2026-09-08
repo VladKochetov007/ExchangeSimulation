@@ -59,6 +59,7 @@ type RealizedPnLEvent = etypes.RealizedPnLEvent
 type MarkPriceUpdateEvent = etypes.MarkPriceUpdateEvent
 type PriceUnavailableEvent = etypes.PriceUnavailableEvent
 type ExpirySettlementPendingEvent = etypes.ExpirySettlementPendingEvent
+type OptionExpiryAccountingEvent = etypes.OptionExpiryAccountingEvent
 type FundingRateUpdateEvent = etypes.FundingRateUpdateEvent
 type FundingSettlementEvent = etypes.FundingSettlementEvent
 type OpenInterestEvent = etypes.OpenInterestEvent
