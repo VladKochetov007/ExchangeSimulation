@@ -44,6 +44,33 @@ rg -F 'v2_r2_require_sv1b_activation_nonactivation_provenance "$activation_prove
 	echo "nonactivation provenance is not staged and self-validated" >&2
 	exit 1
 }
+status_writer="$root_dir/scripts/v2-r2-sv1-activation-status.sh"
+rg -F -- '--arg arm_status_contract "$arm_status_contract"' "$status_writer" >/dev/null || {
+	echo "activation arm status contract is not expanded from the selected contract" >&2
+	exit 1
+}
+if rg -F -- '\\${v2_r2_sv1_activation_arm_status_contract' "$status_writer" >/dev/null; then
+	echo "activation arm status contract still serializes a literal shell expansion" >&2
+	exit 1
+fi
+(
+	source "$root_dir/scripts/v2-r2-sv1b-24h-contract.sh"
+	source "$root_dir/scripts/v2-r2-sv1-activation-status.sh"
+	write_status_fixture() {
+		local name=$1 expected_contract=$2 arm="$temp_root/status-$1"
+		mkdir -- "$arm"
+		for required_file in terminal-outcome.json evidence-manifest.json manifest.json greeks.json latency.json checkpoints.jsonl binary-evidence-attestation.json; do
+			printf '{}\n' >"$arm/$required_file"
+		done
+		v2_r2_write_activation_arm_status "$arm" 0 completed false metadata 1 now 2 3 false ""
+		jq -e --arg expected_contract "$expected_contract" \
+			'.schema_version == 2 and .contract == $expected_contract and .exit_status == 0 and .completion_verified == true' \
+			"$arm/run-status.json" >/dev/null
+	}
+	write_status_fixture sv1b "$v2_r2_sv1_activation_arm_status_contract"
+	source "$root_dir/scripts/v2-r2-sv1c-24h-contract.sh"
+	write_status_fixture sv1c "$v2_r2_sv1_activation_arm_status_contract"
+)
 for required_binding in \
 	'--argjson activation_gomaxprocs "$activation_gomaxprocs"' \
 	'--argjson activation_memory_limit_bytes "$activation_memory_limit_bytes"' \

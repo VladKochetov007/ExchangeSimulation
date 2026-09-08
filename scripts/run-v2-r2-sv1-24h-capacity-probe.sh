@@ -18,6 +18,10 @@ contract_script=$(v2_r2_select_sv1_contract "$root_dir") || {
 }
 source "$contract_script"
 export V2_R2_SV1_CONTRACT_SCRIPT="$contract_script"
+v2_r2_require_known_candidate || {
+	echo "SV1 capacity probe received an unknown candidate identity" >&2
+	exit 1
+}
 head_revision=$(git -C "$root_dir" rev-parse HEAD)
 scientific_root=$(realpath -e -- "$root_dir")
 

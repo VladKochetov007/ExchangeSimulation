@@ -17,6 +17,10 @@ contract_script=$(v2_r2_select_sv1_contract "$root_dir") || {
 }
 source "$contract_script"
 export V2_R2_SV1_CONTRACT_SCRIPT="$contract_script"
+v2_r2_require_known_candidate || {
+	printf 'SV1 development scorer failure: unknown candidate identity\n' >&2
+	exit 1
+}
 output_root=${1:-"$v2_r2_output_root"}
 score="$output_root/development-score.json"
 parity="$output_root/parity-attestation.json"

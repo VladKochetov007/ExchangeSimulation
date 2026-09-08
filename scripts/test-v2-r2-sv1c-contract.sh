@@ -37,11 +37,23 @@ jq -e --arg contract_path "$v2_r2_sv1_contract_path" --arg loader_path "$v2_r2_s
 	(.contract_definition.path == $contract_path and
 	 (.contract_definition.sha256 | test("^[0-9a-f]{64}$"))) and
 	(.contract_loader.path == $loader_path and
-	 (.contract_loader.sha256 | test("^[0-9a-f]{64}$")))
+	 (.contract_loader.sha256 | test("^[0-9a-f]{64}$"))) and
+	(.contract_dependencies | map(.path) == ["scripts/v2-r2-sv1-24h-contract.sh", "scripts/v2-integrated-longrun-r2-contract.sh"]) and
+	(.contract_dependencies | all(.sha256 | test("^[0-9a-f]{64}$")))
 ' "$v2_r2_sv1_config_provenance_manifest" >/dev/null || {
-	echo "SV1C provenance does not bind its contract definition and loader" >&2
+	echo "SV1C provenance does not bind its complete contract graph" >&2
 	exit 1
 }
+
+registered_candidate="$v2_r2_sv1_candidate_id"
+for unknown_candidate in "" "V2-R2-SV1C-UNREGISTERED" "V2-R2-SV1B-24H-CDF-LIQUIDITY-UNREGISTERED"; do
+	v2_r2_sv1_candidate_id="$unknown_candidate"
+	if v2_r2_require_known_candidate; then
+		echo "SV1C accepted unknown candidate identity: $unknown_candidate" >&2
+		exit 1
+	fi
+done
+v2_r2_sv1_candidate_id="$registered_candidate"
 
 "$checker"
 

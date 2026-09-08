@@ -6,7 +6,7 @@
 if ! declare -F v2_r2_is_successor_candidate >/dev/null 2>&1; then
 	v2_r2_is_successor_candidate() {
 		case "${v2_r2_sv1_candidate_id:-}" in
-			V2-R2-SV1B-*|V2-R2-SV1C-*) return 0 ;;
+			V2-R2-SV1B-24H-CDF-LIQUIDITY|V2-R2-SV1C-24H-CDF-LIQUIDITY-STRICT-RISK) return 0 ;;
 			*) return 1 ;;
 		esac
 	}

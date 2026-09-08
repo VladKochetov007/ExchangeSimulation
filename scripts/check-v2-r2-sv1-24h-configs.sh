@@ -11,6 +11,10 @@ contract_script=$(v2_r2_select_sv1_contract "$root_dir") || {
 }
 source "$contract_script"
 export V2_R2_SV1_CONTRACT_SCRIPT="$contract_script"
+v2_r2_require_known_candidate || {
+	echo "SV1 config checker received an unknown candidate identity" >&2
+	exit 1
+}
 config_dir="$v2_r2_sv1_config_dir"
 activation_config="$v2_r2_sv1_activation_config"
 provenance_manifest="$v2_r2_sv1_config_provenance_manifest"
@@ -69,6 +73,38 @@ fi
 if [[ "$v2_r2_sv1_candidate_id" == V2-R2-SV1C-* ]]; then
 	verify_bound_manifest_file contract_definition "$v2_r2_sv1_contract_path" "SV1C contract definition"
 	verify_bound_manifest_file contract_loader "$v2_r2_sv1_contract_loader_path" "SV1 contract loader"
+	dependency_paths_json=$(printf '%s\n' "${v2_r2_sv1_contract_dependency_paths[@]}" | jq -Rsc 'split("\n") | map(select(length > 0))') || fail "could not construct SV1C contract dependency identity"
+	jq -e --argjson expected_paths "$dependency_paths_json" '
+		.contract_dependencies as $dependencies |
+		($dependencies | type == "array" and length == ($expected_paths | length)) and
+		all(range(0; ($expected_paths | length)); . as $index |
+			($dependencies[$index] | type == "object" and
+			 .path == $expected_paths[$index] and
+			 (.sha256 | type == "string" and test("^[0-9a-f]{64}$"))))
+	' "$provenance_manifest" >/dev/null || fail "SV1C provenance does not bind the complete contract dependency graph"
+	for dependency_index in "${!v2_r2_sv1_contract_dependency_paths[@]}"; do
+		expected_dependency_path="${v2_r2_sv1_contract_dependency_paths[$dependency_index]}"
+		[[ "$expected_dependency_path" != /* && "$expected_dependency_path" != *$'\n'* && "$expected_dependency_path" != *$'\t'* ]] ||
+			fail "SV1C contract dependency path is unsafe: $expected_dependency_path"
+		actual_dependency_path=$(jq -er --argjson index "$dependency_index" '.contract_dependencies[$index].path | select(type == "string")' "$provenance_manifest") ||
+			fail "SV1C contract dependency path is missing: $expected_dependency_path"
+		[[ "$actual_dependency_path" == "$expected_dependency_path" ]] || fail "SV1C contract dependency path mismatch: $actual_dependency_path"
+		dependency_file="$root_dir/$expected_dependency_path"
+		[[ -s "$dependency_file" && ! -L "$dependency_file" ]] || fail "SV1C contract dependency is missing or symlinked: $dependency_file"
+		actual_dependency_sha=$(sha256sum "$dependency_file" | awk '{print $1}')
+		expected_dependency_sha=$(jq -er --argjson index "$dependency_index" '.contract_dependencies[$index].sha256 | select(type == "string" and test("^[0-9a-f]{64}$"))' "$provenance_manifest") ||
+			fail "SV1C contract dependency hash is missing: $expected_dependency_path"
+		[[ "$actual_dependency_sha" == "$expected_dependency_sha" ]] || fail "SV1C contract dependency hash mismatch: $expected_dependency_path"
+	done
+	normalizer_path=$(jq -er '.normalizer.path | select(type == "string")' "$provenance_manifest") || fail "SV1C provenance omits config normalizer path"
+	[[ "$normalizer_path" == "$v2_r2_sv1_config_normalizer_path" ]] || fail "SV1C provenance names an unexpected config normalizer"
+	normalizer_file="$root_dir/$normalizer_path"
+	[[ -x "$normalizer_file" && ! -L "$normalizer_file" && "$(realpath -e -- "$normalizer_file")" == "$normalizer_file" ]] || fail "SV1C config normalizer is missing or symlinked"
+	normalizer_revision=$(jq -er '.normalizer.revision | select(type == "string" and test("^[0-9a-f]{40}$"))' "$provenance_manifest") || fail "SV1C provenance omits config normalizer revision"
+	[[ "$normalizer_revision" == "$(git -C "$root_dir" rev-parse HEAD)" ]] || fail "SV1C config normalizer revision is not current HEAD"
+	normalizer_sha256=$(jq -er '.normalizer.sha256 | select(type == "string" and test("^[0-9a-f]{64}$"))' "$provenance_manifest") || fail "SV1C provenance omits config normalizer hash"
+	v2_r2_sv1c_require_pinned_binary "$normalizer_file" "$normalizer_revision" "$normalizer_sha256" "$v2_r2_sv1_config_normalizer_package" ||
+		fail "SV1C config normalizer is not the registered pinned Go 1.27 build"
 fi
 if v2_r2_is_successor_candidate; then
 	withdrawal_measurement_path=$(jq -er '.withdrawal_measurement.path' "$provenance_manifest") || fail "SV1B provenance omits withdrawal measurement amendment"

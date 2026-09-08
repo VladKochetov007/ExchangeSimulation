@@ -32,6 +32,10 @@ esac
 source "$contract_script"
 if [[ "$extractor_variant" == sv1 ]]; then
 	export V2_R2_SV1_CONTRACT_SCRIPT="$contract_script"
+	v2_r2_require_known_candidate || {
+		printf 'integrated long-run extraction failure: unknown SV1 candidate identity\n' >&2
+		exit 1
+	}
 fi
 if [[ "$extractor_variant" == sv1 ]]; then
 	contract_version="$v2_r2_sv1_candidate_contract_version"

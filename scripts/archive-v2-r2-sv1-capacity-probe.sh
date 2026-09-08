@@ -10,6 +10,10 @@ fi
 
 root_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 source "$root_dir/scripts/v2-r2-sv1-24h-contract.sh"
+v2_r2_require_known_candidate || {
+	echo "SV1 capacity archive received an unknown candidate identity" >&2
+	exit 1
+}
 
 attestation=$1
 binary=$2

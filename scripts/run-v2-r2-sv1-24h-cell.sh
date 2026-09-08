@@ -17,6 +17,10 @@ contract_script=$(v2_r2_select_sv1_contract "$root_dir") || {
 }
 source "$contract_script"
 export V2_R2_SV1_CONTRACT_SCRIPT="$contract_script"
+v2_r2_require_known_candidate || {
+	echo "SV1 runner received an unknown candidate identity" >&2
+	exit 1
+}
 case "$cell" in
 	treatment-*-g8)
 		[[ "$cell" == "treatment-${v2_r2_sv1_parity_seed}-g8" ]] || {

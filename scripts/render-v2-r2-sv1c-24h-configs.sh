@@ -10,7 +10,25 @@ source_dir="$root_dir/research/configs/v2-integrated-longrun-r2"
 activation_config="$root_dir/research/configs/v2-r2-sv1c/activation-643.json"
 activation_control_config="$root_dir/research/configs/v2-r2-sv1c/activation-643-control.json"
 source "$root_dir/scripts/v2-r2-sv1c-24h-contract.sh"
-normalizer=${V2_R2_SV1C_CONFIG_NORMALIZER_BIN:-"$root_dir/bin/multivenue"}
+normalizer_input=${V2_R2_SV1C_CONFIG_NORMALIZER_BIN:-"$root_dir/$v2_r2_sv1_config_normalizer_path"}
+normalizer=$(realpath -e -- "$normalizer_input") || {
+	echo "could not resolve config normalizer: $normalizer_input" >&2
+	exit 1
+}
+[[ "$normalizer" == "$root_dir/$v2_r2_sv1_config_normalizer_path" ]] || {
+	echo "config normalizer must be the registered path: $root_dir/$v2_r2_sv1_config_normalizer_path" >&2
+	exit 1
+}
+normalizer_sha256=$(sha256sum -- "$normalizer" | awk '{print $1}')
+normalizer_revision=$(git -C "$root_dir" rev-parse HEAD) || {
+	echo "could not resolve the config normalizer source revision" >&2
+	exit 1
+}
+v2_r2_sv1c_require_pinned_binary "$normalizer" "$normalizer_revision" "$normalizer_sha256" "$v2_r2_sv1_config_normalizer_package" || {
+	echo "config normalizer is not a pinned Go 1.27 build of the current tree" >&2
+	exit 1
+}
+normalizer_go_version=$(go version -m -- "$normalizer" | sed -n '1s/.*: //p')
 candidate="V2-R2-SV1C-24H-CDF-LIQUIDITY-STRICT-RISK"
 control_hypothesis="V2-R2-SV1C-24H-CDF-LIQUIDITY-STRICT-RISK-CONTROL"
 date="2026-09-08"
@@ -134,6 +152,17 @@ contract_loader_file="$root_dir/$contract_loader_path"
 	exit 1
 }
 contract_loader_hash=$(sha256sum "$contract_loader_file" | awk '{print $1}')
+contract_dependencies='[]'
+for dependency_path in "${v2_r2_sv1_contract_dependency_paths[@]}"; do
+	dependency_file="$root_dir/$dependency_path"
+	[[ -s "$dependency_file" && ! -L "$dependency_file" ]] || {
+		echo "missing SV1C contract dependency: $dependency_file" >&2
+		exit 1
+	}
+	dependency_hash=$(sha256sum "$dependency_file" | awk '{print $1}')
+	contract_dependencies=$(jq -cn --argjson dependencies "$contract_dependencies" --arg path "$dependency_path" --arg sha256 "$dependency_hash" \
+		'$dependencies + [{path: $path, sha256: $sha256}]')
+done
 withdrawal_measurement_hash=$(sha256sum "$withdrawal_measurement_file" | awk '{print $1}')
 preregistration_path="$v2_r2_sv1_preregistration_path"
 preregistration_file="$root_dir/$preregistration_path"
@@ -191,6 +220,12 @@ jq -n \
 	--arg contract_definition_hash "$contract_definition_hash" \
 	--arg contract_loader_path "$contract_loader_path" \
 	--arg contract_loader_hash "$contract_loader_hash" \
+	--argjson contract_dependencies "$contract_dependencies" \
+	--arg normalizer_path "$v2_r2_sv1_config_normalizer_path" \
+	--arg normalizer_sha256 "$normalizer_sha256" \
+	--arg normalizer_revision "$normalizer_revision" \
+	--arg normalizer_go_version "$normalizer_go_version" \
+	--arg normalizer_package "$v2_r2_sv1_config_normalizer_package" \
 	--arg withdrawal_measurement_path "$withdrawal_measurement_path" \
 	--arg withdrawal_measurement_hash "$withdrawal_measurement_hash" \
 	--arg activation_diagnostics_path "$activation_diagnostics_path" \
@@ -203,7 +238,7 @@ jq -n \
 	--argjson capacity_cases "$capacity_cases" \
 	--argjson authorized_launch_config_hashes "$authorized_launch_config_hashes" \
 	'{schema_version: 1,
-		 contract: "v2-r2-sv1c-24h-config-provenance-v1",
+		 contract: "v2-r2-sv1c-24h-config-provenance-v2",
 	 candidate: $candidate,
 	 predecessor: "V2-R2-SV1B-24H-CDF-LIQUIDITY",
 	 source_configs: {"dev-607.json": $source_hash, "dev-607-none.json": $no_log_source_hash},
@@ -223,6 +258,8 @@ jq -n \
 		 generator: {path: $generator_path, sha256: $generator_hash},
 		 contract_definition: {path: $contract_definition_path, sha256: $contract_definition_hash},
 		 contract_loader: {path: $contract_loader_path, sha256: $contract_loader_hash},
+		 contract_dependencies: $contract_dependencies,
+		 normalizer: {path: $normalizer_path, sha256: $normalizer_sha256, revision: $normalizer_revision, go_version: $normalizer_go_version, package: $normalizer_package},
 	 withdrawal_measurement: {path: $withdrawal_measurement_path, sha256: $withdrawal_measurement_hash},
 	 activation_diagnostics: {path: $activation_diagnostics_path, sha256: $activation_diagnostics_hash},
 	 preregistration: {path: $preregistration_path, sha256: $preregistration_hash},

@@ -15,6 +15,12 @@ v2_r2_sv1_candidate_contract_version="v2-r2-sv1c-24h-candidate-v1"
 v2_r2_sv1_generator_path="scripts/render-v2-r2-sv1c-24h-configs.sh"
 v2_r2_sv1_contract_path="scripts/v2-r2-sv1c-24h-contract.sh"
 v2_r2_sv1_contract_loader_path="scripts/v2-r2-sv1-contract-loader.sh"
+v2_r2_sv1_config_normalizer_path="bin/multivenue"
+v2_r2_sv1_config_normalizer_package="exchange_sim/cmd/multivenue"
+v2_r2_sv1_contract_dependency_paths=(
+	scripts/v2-r2-sv1-24h-contract.sh
+	scripts/v2-integrated-longrun-r2-contract.sh
+)
 v2_r2_sv1_withdrawal_measurement_path="research/v2-r2-sv1c-withdrawal-measurement-amendment-2026-09-08.md"
 v2_r2_sv1_activation_diagnostics_path="research/v2-r2-sv1c-activation-diagnostics-amendment-2026-09-08.md"
 v2_r2_sv1_preregistration_path="research/v2-r2-sv1c-strict-risk-amendment-2026-09-08.md"
@@ -30,7 +36,7 @@ v2_r2_sv1_completion_sentinels='["greeks.json", "latency.json", "terminal-outcom
 v2_r2_sv1_require_positive_loss_budget=true
 v2_r2_sv1_require_no_replacement_withdrawal=true
 v2_r2_sv1_experiment_prefix="v2-r2-sv1c-24h"
-v2_r2_sv1_config_provenance_contract="v2-r2-sv1c-24h-config-provenance-v1"
+v2_r2_sv1_config_provenance_contract="v2-r2-sv1c-24h-config-provenance-v2"
 v2_r2_sv1_config_dir="$root_dir/research/configs/v2-r2-sv1c-24h"
 v2_r2_sv1_config_provenance_manifest="$root_dir/research/v2-r2-sv1c-24h-config-provenance.json"
 v2_r2_sv1_seeds=(643 647 653)

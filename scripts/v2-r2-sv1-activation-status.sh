@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+
+# Write the atomic per-arm completion status shared by the activation runner
+# and its contract fixtures. The selected contract supplies the status-contract
+# identity; the writer never embeds a namespace-specific literal.
+v2_r2_write_activation_arm_status() {
+	[[ $# -eq 11 ]] || return 1
+	local arm=$1 status=$2 outcome_status=$3 terminal_failure=$4 run_metadata_sha256=$5
+	local peak_rss_bytes=$6 peak_rss_at=$7 initial_free_bytes=$8 final_free_bytes=$9
+	local resource_guard_failed=${10} resource_guard_reason=${11}
+	local run_status_tmp="$arm/run-status.json.tmp-$$"
+	local terminal_outcome_sha256 evidence_manifest_sha256 arm_status_contract
+	arm_status_contract=${v2_r2_sv1_activation_arm_status_contract:-v2-r2-sv1b-activation-arm-status-v1}
+	[[ -d "$arm" && ! -L "$arm" && -s "$arm/terminal-outcome.json" && -s "$arm/evidence-manifest.json" ]] || return 1
+	[[ "$status" =~ ^[0-9]+$ && "$peak_rss_bytes" =~ ^[0-9]+$ && "$initial_free_bytes" =~ ^[0-9]+$ && "$final_free_bytes" =~ ^[0-9]+$ ]] || return 1
+	[[ "$terminal_failure" == true || "$terminal_failure" == false ]] || return 1
+	[[ "$resource_guard_failed" == true || "$resource_guard_failed" == false ]] || return 1
+	terminal_outcome_sha256=$(sha256sum -- "$arm/terminal-outcome.json" | awk '{print $1}') || return 1
+	evidence_manifest_sha256=$(sha256sum -- "$arm/evidence-manifest.json" | awk '{print $1}') || return 1
+	jq -n --arg arm "$(basename "$arm")" --argjson exit_status "$status" \
+		--arg outcome_status "$outcome_status" --argjson terminal_failure "$terminal_failure" \
+		--arg terminal_outcome_sha256 "$terminal_outcome_sha256" \
+		--arg run_metadata_sha256 "$run_metadata_sha256" \
+		--arg manifest_sha256 "$(sha256sum -- "$arm/manifest.json" | awk '{print $1}')" \
+		--arg greeks_sha256 "$(sha256sum -- "$arm/greeks.json" | awk '{print $1}')" \
+		--arg latency_sha256 "$(sha256sum -- "$arm/latency.json" | awk '{print $1}')" \
+		--arg checkpoints_sha256 "$(sha256sum -- "$arm/checkpoints.jsonl" | awk '{print $1}')" \
+		--arg binary_attestation_sha256 "$(sha256sum -- "$arm/binary-evidence-attestation.json" | awk '{print $1}')" \
+		--arg evidence_manifest_sha256 "$evidence_manifest_sha256" \
+		--argjson peak_rss_bytes "$peak_rss_bytes" --arg peak_rss_at "$peak_rss_at" \
+		--argjson initial_free_bytes "$initial_free_bytes" --argjson final_free_bytes "$final_free_bytes" \
+		--argjson resource_guard_failed "$resource_guard_failed" --arg resource_guard_reason "$resource_guard_reason" \
+		--arg arm_status_contract "$arm_status_contract" \
+		'{schema_version: 2, contract: $arm_status_contract, arm: $arm,
+		 exit_status: $exit_status, completion_verified: ($terminal_failure | not),
+		 terminal_failure_verified: $terminal_failure, terminal_outcome_status: $outcome_status,
+		 terminal_outcome_sha256: $terminal_outcome_sha256, run_metadata_sha256: $run_metadata_sha256,
+		 manifest_sha256: $manifest_sha256, greeks_sha256: $greeks_sha256,
+		 latency_sha256: $latency_sha256, checkpoints_sha256: $checkpoints_sha256,
+		 binary_attestation_sha256: $binary_attestation_sha256,
+		 evidence_manifest_sha256: $evidence_manifest_sha256,
+		 peak_rss_bytes: $peak_rss_bytes, peak_rss_observed_at: $peak_rss_at,
+		 initial_available_free_bytes: $initial_free_bytes, final_available_free_bytes: $final_free_bytes,
+		 resource_guard_failed: $resource_guard_failed, resource_guard_reason: $resource_guard_reason}' >"$run_status_tmp" || return 1
+	mv -- "$run_status_tmp" "$arm/run-status.json"
+}

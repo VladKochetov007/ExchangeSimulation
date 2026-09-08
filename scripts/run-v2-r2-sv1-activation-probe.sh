@@ -22,6 +22,11 @@ contract_script=$(v2_r2_select_sv1_contract "$root_dir") || {
 }
 source "$contract_script"
 export V2_R2_SV1_CONTRACT_SCRIPT="$contract_script"
+v2_r2_require_known_candidate || {
+	echo "activation probe received an unknown SV1 candidate identity" >&2
+	exit 1
+}
+source "$root_dir/scripts/v2-r2-sv1-activation-status.sh"
 
 go_bin_dir=/usr/local/go/bin
 [[ -x "$go_bin_dir/go" ]] || go_bin_dir=$(dirname -- "$(command -v go)")
@@ -462,36 +467,10 @@ run_arm() {
 	}
 	v2_r2_write_evidence_manifest "$arm" || return 1
 	v2_r2_verify_evidence_manifest "$arm" || return 1
-	local run_status_tmp="$arm/run-status.json.tmp-$$"
-	local terminal_outcome_sha256 evidence_manifest_sha256
-	terminal_outcome_sha256=$(sha256sum -- "$arm/terminal-outcome.json" | awk '{print $1}')
-	evidence_manifest_sha256=$(sha256sum -- "$arm/evidence-manifest.json" | awk '{print $1}')
-	jq -n --arg arm "$(basename "$arm")" --argjson exit_status "$status" \
-		--arg outcome_status "$outcome_status" --argjson terminal_failure "$terminal_failure" \
-		--arg terminal_outcome_sha256 "$terminal_outcome_sha256" \
-		--arg run_metadata_sha256 "$metadata_sha_before" \
-		--arg manifest_sha256 "$(sha256sum -- "$arm/manifest.json" | awk '{print $1}')" \
-		--arg greeks_sha256 "$(sha256sum -- "$arm/greeks.json" | awk '{print $1}')" \
-		--arg latency_sha256 "$(sha256sum -- "$arm/latency.json" | awk '{print $1}')" \
-		--arg checkpoints_sha256 "$(sha256sum -- "$arm/checkpoints.jsonl" | awk '{print $1}')" \
-				--arg binary_attestation_sha256 "$(sha256sum -- "$arm/binary-evidence-attestation.json" | awk '{print $1}')" \
-			--arg evidence_manifest_sha256 "$evidence_manifest_sha256" \
-			--argjson peak_rss_bytes "$simulator_peak_rss_bytes" --arg peak_rss_at "$simulator_peak_rss_at" \
-			--argjson initial_free_bytes "$simulator_initial_free_bytes" --argjson final_free_bytes "$simulator_final_free_bytes" \
-		--argjson resource_guard_failed "$resource_guard_failed" --arg resource_guard_reason "$resource_guard_reason" \
-		--arg arm_status_contract "\${v2_r2_sv1_activation_arm_status_contract:-v2-r2-sv1b-activation-arm-status-v1}" \
-		'{schema_version: 2, contract: $arm_status_contract, arm: $arm,
-		 exit_status: $exit_status, completion_verified: ($terminal_failure | not),
-		 terminal_failure_verified: $terminal_failure, terminal_outcome_status: $outcome_status,
-		 terminal_outcome_sha256: $terminal_outcome_sha256, run_metadata_sha256: $run_metadata_sha256,
-		 manifest_sha256: $manifest_sha256, greeks_sha256: $greeks_sha256,
-		 latency_sha256: $latency_sha256, checkpoints_sha256: $checkpoints_sha256,
-			  binary_attestation_sha256: $binary_attestation_sha256,
-			  evidence_manifest_sha256: $evidence_manifest_sha256,
-			  peak_rss_bytes: $peak_rss_bytes, peak_rss_observed_at: $peak_rss_at,
-			  initial_available_free_bytes: $initial_free_bytes, final_available_free_bytes: $final_free_bytes,
-			  resource_guard_failed: $resource_guard_failed, resource_guard_reason: $resource_guard_reason}' >"$run_status_tmp" || return 1
-	mv -- "$run_status_tmp" "$arm/run-status.json" || return 1
+	v2_r2_write_activation_arm_status "$arm" "$status" "$outcome_status" "$terminal_failure" \
+		"$metadata_sha_before" "$simulator_peak_rss_bytes" "$simulator_peak_rss_at" \
+		"$simulator_initial_free_bytes" "$simulator_final_free_bytes" \
+		"$resource_guard_failed" "$resource_guard_reason" || return 1
 	local expected_arm_outcome=completed
 	if [[ "$terminal_failure" == true ]]; then
 		expected_arm_outcome=terminal_failure

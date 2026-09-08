@@ -7,7 +7,15 @@ set -euo pipefail
 if ! declare -F v2_r2_is_successor_candidate >/dev/null 2>&1; then
 	v2_r2_is_successor_candidate() {
 		case "${v2_r2_sv1_candidate_id:-}" in
-			V2-R2-SV1B-*|V2-R2-SV1C-*) return 0 ;;
+			V2-R2-SV1B-24H-CDF-LIQUIDITY|V2-R2-SV1C-24H-CDF-LIQUIDITY-STRICT-RISK) return 0 ;;
+			*) return 1 ;;
+		esac
+	}
+fi
+if ! declare -F v2_r2_require_known_candidate >/dev/null 2>&1; then
+	v2_r2_require_known_candidate() {
+		case "${v2_r2_sv1_candidate_id:-}" in
+			V2-R2-SV1|V2-R2-SV1B-24H-CDF-LIQUIDITY|V2-R2-SV1C-24H-CDF-LIQUIDITY-STRICT-RISK) return 0 ;;
 			*) return 1 ;;
 		esac
 	}
@@ -109,6 +117,7 @@ v2_r2_require_attestation_path() {
 # a raw-event grep so activation and accounting use the same evidence path.
 v2_r2_require_cdf_supplier_activation() {
 	local audit_path=$1 expected_supplier_count=$2
+	v2_r2_require_known_candidate || return 1
 	v2_r2_require_single_json_object "$audit_path" || return 1
 	[[ "$expected_supplier_count" =~ ^[1-9][0-9]*$ ]] || return 1
 	if ! jq -e --argjson expected_supplier_count "$expected_supplier_count" --argjson require_no_replacement "$v2_r2_sv1_require_no_replacement_withdrawal" --argjson require_positive_loss_budget "$v2_r2_sv1_require_positive_loss_budget" '
@@ -236,6 +245,7 @@ v2_r2_require_cdf_supplier_control() {
 
 v2_r2_require_cdf_supplier_comparison() {
 	local comparison_path=$1 expected_supplier_count=$2
+	v2_r2_require_known_candidate || return 1
 	v2_r2_require_single_json_object "$comparison_path" || return 1
 	[[ "$expected_supplier_count" =~ ^[1-9][0-9]*$ ]] || return 1
 	if ! jq -e --argjson expected_supplier_count "$expected_supplier_count" --argjson require_no_replacement "$v2_r2_sv1_require_no_replacement_withdrawal" --argjson require_positive_loss_budget "$v2_r2_sv1_require_positive_loss_budget" '
@@ -352,6 +362,7 @@ v2_r2_require_cdf_supplier_comparison() {
 
 v2_r2_require_cdf_supplier_comparison_measurement() {
 	local comparison_path=$1 expected_supplier_count=$2
+	v2_r2_require_known_candidate || return 1
 	v2_r2_require_single_json_object "$comparison_path" || return 1
 	[[ "$expected_supplier_count" =~ ^[1-9][0-9]*$ ]] || return 1
 	if ! jq -e --argjson expected_supplier_count "$expected_supplier_count" '
