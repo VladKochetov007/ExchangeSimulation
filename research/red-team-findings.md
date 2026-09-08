@@ -1917,3 +1917,72 @@ the participant is *"seeded at the opening price and revised toward what it
 observes, so the participant holds a private belief rather than a standing
 instruction about the correct level."* With this config's half-life of zero, it
 is not revised. The comment describes a configuration the campaign does not run.
+
+## RT-033 — The competitive outcome is one class of six taking 75% of all gains
+
+**Classification.** REAL. It is the answer to "is this a fair battle of actors",
+and the answer is no.
+
+**Base.** `a666d02faede3d40f046b11e60eb672c59386a94`.
+`clock-control-5h-101.json`, seed 607, 8h, `-log-mode none`.
+
+**Instrument.** Raw terminal-minus-initial equity cannot rank this population:
+every participant is net long ABC, so one mark move hits all of them at once and
+the biggest endowment shows the biggest "result". `research/tools/classpnl`
+removes the shared tide exactly —
+`carry_adjusted_pnl = Δequity − Σ_asset initial_balance × Δmark` — and refuses to
+print a ranking unless `Σ carry_adjusted_pnl + exchange_take` closes to within 1%
+of gross flow. Measured closure: **0.8866%**, admissible but narrow.
+
+**Result.**
+
+| class | n | carry-adjusted | raw Δequity | per head |
+|---|---:|---:|---:|---:|
+| noise_flow | 18 | **−220 204 919** | −254 954 519 | −12 233 607 |
+| spot_maker | 12 | −6 817 441 | −64 733 441 | −568 120 |
+| future_flow | 9 | −5 993 965 | −23 368 765 | −665 996 |
+| elastic_supplier | 24 | −2 026 313 | **−335 454 313** | −84 430 |
+| latent_liquidity | 18 | −1 029 326 | **−632 232 326** | −57 185 |
+| fixed_distance_maker | 24 | +11 483 857 | +84 725 457 | +478 494 |
+| imbalance_maker | 24 | +27 556 949 | +100 798 549 | +1 148 206 |
+| triangle_arb | 6 | **+174 217 981** | +192 528 381 | **+29 036 330** |
+
+Total positive carry-adjusted result across all twenty classes is ≈+231 M.
+**`triangle_arb` takes +174.2 M of it — 75.4% — with 6 participants out of 252**,
+at 25× the per-head result of the best market-making class. The funder is
+`noise_flow` at −220 M.
+
+**Mechanism, joint with RT-031.** The cross book is self-referential and ends
+−69% from its bootstrap. `triangle_arb` is the only class that trades the
+triangle. `noise_target_qty_by_symbol` routes uninformed flow onto `CDF/USD` and
+`ABC/CDF`. So the dominant competitive result in the campaign is one small class
+harvesting a standing modelling dislocation from flow configured into it — not a
+strategy outperforming a counterparty.
+
+**Second result: two apparent findings that the instrument destroyed.** Ranked on
+raw Δequity, this population's great losers are `latent_liquidity` (−632 M) and
+`elastic_supplier` (−335 M). Carry-adjusted they are 22nd and 18th of the flow.
+**99.4% of the suppliers' apparent loss is revaluation of an endowment they were
+given**, not the cost of being RT-032's forced buyer. Anyone ranking these actors
+on equity change is ranking endowments. RT-024 recorded this trap; this is the
+first time it has been measured away rather than only warned about.
+
+**Falsified en route.** H-045 predicted `elastic_supplier` would be the largest
+donor, on the reasoning that RT-032's peg makes it a forced buyer. It is fifth,
+by two orders of magnitude. Being a configured peg turns out to cost revaluation,
+not trading result.
+
+**Scope limit.** The closure residual is −4.95 M, so classes with |result| below
+about ±5 M are not distinguishable from it: `carry_arb`, `elastic_supplier`,
+`latent_liquidity`, `option_flow`, `metaorder_trader`, `round_trip`,
+`dated_carry_arb`, `parity_arb`, `option_value_taker`, `cdf_spot_maker`,
+`option_dealer`, `vanna_volga_desk`. Their ordering among themselves is not
+exercised. The concentration result and the falsification both rest on classes
+far outside that band.
+
+**Instrument note.** The preregistration for H-045 was committed in the session
+before the run but the edit writing it into the research note silently changed
+nothing — the script used `'\\n'` where it needed `'\n'`, matched no anchor, and
+reported success anyway. The hypothesis is therefore labelled POST-HOC in the
+artifact rather than back-dated. Note edits now assert that the anchor matched
+and that the file grew.

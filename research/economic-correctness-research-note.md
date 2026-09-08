@@ -3191,6 +3191,127 @@ records is wrong and should read 8h unless a record explicitly passed
 what its name says.**
 
 
+**H-045 (LABELLED POST-HOC — see the process failure below) — the population's
+profit is sourced from a configured donor.**
+
+From [[RT-032]]: the elastic suppliers are forced buyers as the price falls, and
+bought +1 695 ABC per venue on a −1.41% move because their reference never moves.
+A participant that must buy into every decline is a donor by construction.
+
+**Instrument, defined before the measurement.** Raw terminal-minus-initial equity
+cannot answer this — every participant is net long ABC, so one mark move hits all
+of them and a class endowed with more inventory shows a larger "result" without
+trading. RT-024 records that trap. Carry-adjusted PnL removes it exactly:
+
+    carry_adjusted_pnl = Δequity − Σ_asset initial_balance_asset × Δmark_asset
+
+Everyone starts flat in derivatives, so initial wallet balances carry the whole
+revaluation term.
+
+**Self-test that gates the result.** Summed over all participants the
+decomposition must close against what the venues took:
+`Σ carry_adjusted_pnl + exchange_take ≈ 0`. A residual above **1% of gross flow**
+makes the ranking inadmissible; `classpnl` then prints no ranking and exits
+non-zero, so a failed decomposition cannot be quoted.
+
+**Prediction:** `elastic_supplier` is the largest net donor class.
+**Falsifiers:** (a) closure fails → INCONCLUSIVE; (b) `elastic_supplier` is not
+the largest donor → falsified; (c) its result is positive → falsified in the
+opposite direction.
+
+**PROCESS FAILURE, recorded rather than repaired.** The above was committed in
+the session transcript before the run, but the edit that was supposed to write it
+into this note **silently did nothing**: the script used `'\\n'` where it needed
+`'\n'`, so `str.replace` matched no anchor, changed no bytes, and **printed a
+success message it had not earned**. The experiment therefore ran while I
+believed it was preregistered here and it was not. I am not back-dating it. The
+record stands as POST-HOC in the artifact, which is the weaker and correct label,
+and the numbers below are unaffected because the prediction and falsifiers were
+fixed before the data existed — just not durably.
+
+*Lesson, of the same family as the twelve instrument errors already logged: a
+script that reports success must verify the success, not assume it. Every note
+edit from here asserts that the anchor matched and that the file changed.* A
+claim that exists only in chat is not a completed research deliverable — that
+rule applied to a preregistration this time, not a finding.
+
+**E-048 — H-045 FALSIFIED WITHIN TESTED SCOPE. The suppliers are not the donor.
+The battle is decided by one class of six taking three quarters of all gains.**
+Base: `a666d02faede3d40f046b11e60eb672c59386a94`.
+Run: `clock-control-5h-101.json`, seed 607, 8h (the `-duration` default),
+`-log-mode none`.
+Reproduce: `go run research/tools/classpnl/main.go -file <logdir>/greeks.json`.
+
+**Closure self-test, run before the ranking was read:**
+
+    Σ carry-adjusted pnl   −9 890 673 USD
+    exchange take          +4 944 035 USD
+    residual               −4 946 638 USD  (0.8866% of gross)
+
+Inside the 1% tolerance, so the ranking is admissible — **but only just**, and
+the resolution limit that implies is stated below rather than buried.
+
+| class | n | carry-adjusted | raw Δequity | per head |
+|---|---:|---:|---:|---:|
+| noise_flow | 18 | **−220 204 919** | −254 954 519 | −12 233 607 |
+| spot_maker | 12 | −6 817 441 | −64 733 441 | −568 120 |
+| future_flow | 9 | −5 993 965 | −23 368 765 | −665 996 |
+| carry_arb | 6 | −2 423 266 | −9 553 866 | −403 878 |
+| elastic_supplier | 24 | **−2 026 313** | **−335 454 313** | −84 430 |
+| latent_liquidity | 18 | −1 029 326 | **−632 232 326** | −57 185 |
+| fixed_distance_maker | 24 | +11 483 857 | +84 725 457 | +478 494 |
+| imbalance_maker | 24 | +27 556 949 | +100 798 549 | +1 148 206 |
+| triangle_arb | 6 | **+174 217 981** | +192 528 381 | **+29 036 330** |
+
+**H-045 is falsified, and cleanly.** `elastic_supplier` is the **fifth** donor,
+not the first, at −2.0 M against `noise_flow`'s −220 M — two orders of magnitude,
+far outside any resolution concern. The peg costs the suppliers **revaluation,
+not trading**: raw Δequity −335 M, carry-adjusted −2.0 M, so **99.4% of their
+apparent loss is the mark move on an endowment they were given** rather than the
+price of being a forced buyer. Falsifier (c) also fails: they are slightly
+negative, not positive.
+
+**The instrument earned its keep on the exact trap it was built for.** Ranked on
+raw Δequity this population's great losers are `latent_liquidity` (−632 M) and
+`elastic_supplier` (−335 M). Carry-adjusted they are 22nd and 18th. **Both
+"findings" would have been endowment size wearing a result's clothes** — RT-024's
+error caught before publication instead of after.
+
+**What the run actually shows: the battle is not close.** Total positive
+carry-adjusted result across all classes is ≈+231 M. `triangle_arb` alone takes
+**+174.2 M, 75.4% of every gain in the population, with 6 participants of 252**.
+Its per-head result is **25× the best market-making class** (`imbalance_maker`)
+and 61× `fixed_distance_maker`. The funder is `noise_flow` at −220 M, −12.2 M
+per head.
+
+**Read with [[RT-031]] this is not a competitive outcome.** The cross book is
+self-referential and ends −69% from its bootstrap; `triangle_arb` is the only
+class trading the triangle; and `noise_flow` is configured onto `CDF/USD` and
+`ABC/CDF` by `noise_target_qty_by_symbol`. The campaign's dominant result is one
+small class harvesting a standing modelling dislocation from uninformed flow
+routed into it. E-044 ranked `triangle_arb` first on a coarser instrument; that
+is reproduced here and now explained rather than celebrated.
+
+**Resolution limit, stated because the closure passed narrowly.** The residual is
+−4.95 M, so **no class whose carry-adjusted result is smaller than about ±5 M is
+distinguishable from it**. That covers `carry_arb`, `elastic_supplier`,
+`latent_liquidity`, `option_flow`, `metaorder_trader`, `round_trip`,
+`dated_carry_arb`, `parity_arb`, `option_value_taker`, `cdf_spot_maker`,
+`option_dealer` and `vanna_volga_desk` — twelve of twenty classes, whose ordering
+among themselves is **NOT EXERCISED** here. Only `noise_flow`, `triangle_arb`,
+`imbalance_maker`, `fixed_distance_maker`, `spot_maker`, `future_flow`,
+`futures_maker` and `abc_cdf_spot_maker` clear it. Both the falsification and the
+concentration result rest on classes far outside the band.
+
+Recorded as RT-033.
+
+**Next experiment, highest information gain, not yet run.** Attribute
+`triangle_arb`'s +174.2 M to books by summing its signed fills per symbol from a
+full-log run. Majority on `ABC/CDF` ⇒ the concentration and RT-031 are one
+mechanism and the campaign has a single dominant artifact. Spread across
+`ABC/USD` and `CDF/USD` ⇒ two separate problems.
+
+
 ---
 
 ## F. Findings
@@ -3207,6 +3328,16 @@ See `research/red-team-findings.md` for the full records.
 - **RT-003** — bounded no-violation results (INV-2, INV-5, INV-6, identity).
 - **RT-006** — latency is delivered as configured across 225 link x channel
   rows; no unearned speed advantage. Transport only.
+- **RT-033** — the campaign's competitive outcome is **not close and not
+  competitive**. With the shared revaluation tide removed, `triangle_arb` takes
+  **+174.2 M, 75.4% of every gain in the population, with 6 participants of
+  252** — 25x the best market-making class per head — funded by `noise_flow` at
+  −220 M. With [[RT-031]] the mechanism is one class harvesting a
+  self-referential book's 69% dislocation from uninformed flow configured into
+  it. Separately, ranking this population on raw Δequity would have named
+  `latent_liquidity` and `elastic_supplier` its great losers; carry-adjusted they
+  are 22nd and 18th, because **99.4% of the suppliers' apparent loss is
+  revaluation of a given endowment**, not trading.
 - **RT-032** — the campaign's ABC/USD price level is a **configured peg**, not a
   market outcome. All 8 elastic suppliers per venue run with
   `elastic_supplier_reference_half_life: 0`, which `supplier.go` documents as an
