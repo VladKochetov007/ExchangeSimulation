@@ -1,65 +1,65 @@
 #!/usr/bin/env bash
-# SV1B namespace contract. It reuses the accepted SV1 evidence primitives
+# SV1C namespace contract. It reuses the accepted SV1 evidence primitives
 # while giving the fresh CDF successor its own identities and storage roots.
 set -euo pipefail
 
 source "$root_dir/scripts/v2-r2-sv1-24h-contract.sh"
 
-v2_r2_output_root="/home/vlad/v2-r2-sv1b-24h-development-20260902-v1"
-v2_r2_attestation_root="/home/vlad/v2-r2-sv1b-24h-development-20260902-v1-attestations"
-v2_r2_namespace_lock_path="/home/vlad/v2-r2-sv1b-24h-development.lock"
-v2_r2_sv1_candidate_id="V2-R2-SV1B-24H-CDF-LIQUIDITY"
+v2_r2_output_root="/home/vlad/v2-r2-sv1c-24h-development-20260908-v1"
+v2_r2_attestation_root="/home/vlad/v2-r2-sv1c-24h-development-20260908-v1-attestations"
+v2_r2_namespace_lock_path="/home/vlad/v2-r2-sv1c-24h-development-20260908.lock"
+v2_r2_sv1_candidate_id="V2-R2-SV1C-24H-CDF-LIQUIDITY"
 v2_r2_sv1_require_candidate_metadata=true
 v2_r2_sv1_require_generator_metadata=true
-v2_r2_sv1_candidate_contract_version="v2-r2-sv1b-24h-candidate-v3"
-v2_r2_sv1_generator_path="scripts/render-v2-r2-sv1b-24h-configs.sh"
-v2_r2_sv1_withdrawal_measurement_path="research/v2-r2-sv1b-withdrawal-measurement-amendment-2026-09-02.md"
-v2_r2_sv1_activation_diagnostics_path="research/v2-r2-sv1b-activation-diagnostics-amendment-2026-09-02.md"
-v2_r2_sv1_preregistration_path="research/v2-r2-sv1b-cdf-successor-preregistration-2026-09-02.md"
-v2_r2_sv1_capacity_order_path="research/v2-r2-sv1b-activation-capacity-order-amendment-2026-09-03.md"
-v2_r2_sv1_scorer_contract="v2-r2-sv1b-24h-development-scorer-v3"
-v2_r2_sv1_survival_contract="v2-r2-sv1b-24h-survival-side-availability-v2"
-v2_r2_sv1_paired_effect_contract="v2-r2-sv1b-24h-paired-survival-effect-v1"
-v2_r2_sv1_parity_contract="v2-r2-sv1b-24h-parity-v1"
-v2_r2_sv1_predecessor_id="V2-R2-SV1"
-v2_r2_sv1_runner_contract="v2-r2-sv1b-24h-runner-v4"
+v2_r2_sv1_candidate_contract_version="v2-r2-sv1c-24h-candidate-v1"
+v2_r2_sv1_generator_path="scripts/render-v2-r2-sv1c-24h-configs.sh"
+v2_r2_sv1_withdrawal_measurement_path="research/v2-r2-sv1c-withdrawal-measurement-amendment-2026-09-08.md"
+v2_r2_sv1_activation_diagnostics_path="research/v2-r2-sv1c-activation-diagnostics-amendment-2026-09-08.md"
+v2_r2_sv1_preregistration_path="research/v2-r2-sv1c-strict-risk-amendment-2026-09-08.md"
+v2_r2_sv1_capacity_order_path="research/v2-r2-sv1c-activation-capacity-order-amendment-2026-09-08.md"
+v2_r2_sv1_scorer_contract="v2-r2-sv1c-24h-development-scorer-v1"
+v2_r2_sv1_survival_contract="v2-r2-sv1c-24h-survival-side-availability-v1"
+v2_r2_sv1_paired_effect_contract="v2-r2-sv1c-24h-paired-survival-effect-v1"
+v2_r2_sv1_parity_contract="v2-r2-sv1c-24h-parity-v1"
+v2_r2_sv1_predecessor_id="V2-R2-SV1B-24H-CDF-LIQUIDITY"
+v2_r2_sv1_runner_contract="v2-r2-sv1c-24h-runner-v1"
 v2_r2_sv1_require_terminal_outcome=true
 v2_r2_sv1_completion_sentinels='["greeks.json", "latency.json", "terminal-outcome.json"]'
 v2_r2_sv1_require_positive_loss_budget=true
 v2_r2_sv1_require_no_replacement_withdrawal=true
-v2_r2_sv1_experiment_prefix="v2-r2-sv1b-24h"
-v2_r2_sv1_config_provenance_contract="v2-r2-sv1b-24h-config-provenance-v4"
-v2_r2_sv1_config_dir="$root_dir/research/configs/v2-r2-sv1b-24h"
-v2_r2_sv1_config_provenance_manifest="$root_dir/research/v2-r2-sv1b-24h-config-provenance.json"
+v2_r2_sv1_experiment_prefix="v2-r2-sv1c-24h"
+v2_r2_sv1_config_provenance_contract="v2-r2-sv1c-24h-config-provenance-v1"
+v2_r2_sv1_config_dir="$root_dir/research/configs/v2-r2-sv1c-24h"
+v2_r2_sv1_config_provenance_manifest="$root_dir/research/v2-r2-sv1c-24h-config-provenance.json"
 v2_r2_sv1_seeds=(643 647 653)
 v2_r2_sv1_parity_seed=643
 v2_r2_sv1_source_config_names=(dev-607.json dev-607-none.json)
-v2_r2_sv1_activation_config="$root_dir/research/configs/v2-r2-sv1b/activation-643.json"
-v2_r2_sv1_activation_control_config="$root_dir/research/configs/v2-r2-sv1b/activation-643-control.json"
+v2_r2_sv1_activation_config="$root_dir/research/configs/v2-r2-sv1c/activation-643.json"
+v2_r2_sv1_activation_control_config="$root_dir/research/configs/v2-r2-sv1c/activation-643-control.json"
 v2_r2_sv1_activation_seed=643
-v2_r2_sv1_run_hypothesis_id="V2-R2-SV1B-24H-CDF-LIQUIDITY"
-v2_r2_sv1_activation_hypothesis_prefix="V2-R2-SV1B-CDF-LIQUIDITY"
-v2_r2_sv1_activation_contract="v2-r2-sv1b-activation-provenance-v2"
-v2_r2_sv1_activation_pair_contract="v2-r2-sv1b-activation-pair-v6"
-v2_r2_sv1_activation_arm_status_contract="v2-r2-sv1b-activation-arm-status-v1"
+v2_r2_sv1_run_hypothesis_id="V2-R2-SV1C-24H-CDF-LIQUIDITY"
+v2_r2_sv1_activation_hypothesis_prefix="V2-R2-SV1C-CDF-LIQUIDITY"
+v2_r2_sv1_activation_contract="v2-r2-sv1c-activation-provenance-v1"
+v2_r2_sv1_activation_pair_contract="v2-r2-sv1c-activation-pair-v1"
+v2_r2_sv1_activation_arm_status_contract="v2-r2-sv1c-activation-arm-status-v1"
 v2_r2_sv1_activation_horizon="5m"
 v2_r2_sv1_activation_simulation_start_nano=1735689600000000000
 v2_r2_sv1_activation_simulation_end_nano=1735689900000000000
 v2_r2_sv1_activation_evidence_format="evstream_v3"
 v2_r2_sv1_activation_log_mode="full"
-v2_r2_sv1_activation_output_prefix="v2-r2-sv1b-activation"
-v2_r2_sv1_review_contract="v2-r2-sv1b-independent-review-v2"
-v2_r2_sv1_activation_review_contract="v2-r2-sv1b-activation-review-v1"
+v2_r2_sv1_activation_output_prefix="v2-r2-sv1c-activation"
+v2_r2_sv1_review_contract="v2-r2-sv1c-independent-review-v1"
+v2_r2_sv1_activation_review_contract="v2-r2-sv1c-activation-review-v1"
 v2_r2_sv1_cpu_limit_percent=90
-v2_r2_sv1_review_scope='["r2_calendar", "correctness_hardening", "binary_evidence", "cdf_supplier", "activation_protocol", "capacity_protocol", "parity_controls", "historical_boundary"]'
-v2_r2_sv1_activation_review_scope='["activation_evidence", "cdf_activation", "binary_evidence", "resource_guards", "provenance_binding", "historical_boundary"]'
-v2_r2_sv1_capacity_attestation="/home/vlad/v2-r2-sv1b-24h-binary-capacity-20260903-v4-capacity-seed-659-treatment-g4.json"
-v2_r2_sv1_capacity_probe_prefix="v2-r2-sv1b-24h-capacity"
-v2_r2_sv1_capacity_attestation_contract="v2-r2-sv1b-24h-binary-capacity-v5"
-v2_r2_sv1_capacity_probe_contract="v2-r2-sv1b-24h-capacity-probe-v5"
-v2_r2_sv1_capacity_measurement_config="$root_dir/research/configs/v2-r2-sv1b-24h/treatment-643.json"
+v2_r2_sv1_review_scope='["r2_calendar", "correctness_hardening", "binary_evidence", "cdf_supplier", "strict_risk_contract", "account_scoped_liquidation", "activation_protocol", "capacity_protocol", "parity_controls", "historical_boundary"]'
+v2_r2_sv1_activation_review_scope='["activation_evidence", "cdf_activation", "strict_risk_contract", "account_scoped_liquidation", "binary_evidence", "resource_guards", "provenance_binding", "historical_boundary"]'
+v2_r2_sv1_capacity_attestation="/home/vlad/v2-r2-sv1c-24h-binary-capacity-20260908-v1-capacity-seed-659-treatment-g4.json"
+v2_r2_sv1_capacity_probe_prefix="v2-r2-sv1c-24h-capacity"
+v2_r2_sv1_capacity_attestation_contract="v2-r2-sv1c-24h-binary-capacity-v1"
+v2_r2_sv1_capacity_probe_contract="v2-r2-sv1c-24h-capacity-probe-v1"
+v2_r2_sv1_capacity_measurement_config="$root_dir/research/configs/v2-r2-sv1c-24h/treatment-643.json"
 v2_r2_sv1_capacity_measurement_seed=659
-v2_r2_sv1_capacity_launch_config="$root_dir/research/configs/v2-r2-sv1b-24h/treatment-643.json"
+v2_r2_sv1_capacity_launch_config="$root_dir/research/configs/v2-r2-sv1c-24h/treatment-643.json"
 v2_r2_sv1_capacity_memory_limit_bytes=$((20 * 1024 * 1024 * 1024))
 v2_r2_sv1_activation_gomaxprocs=2
 v2_r2_sv1_activation_memory_limit_bytes=$((20 * 1024 * 1024 * 1024))
@@ -74,22 +74,22 @@ v2_r2_sv1_capacity_authorized_launch_config_names=(
 v2_r2_sv1_activation_provenance_path() {
 	local head_revision=${1:-$(git -C "$root_dir" rev-parse HEAD)}
 	[[ "$head_revision" =~ ^[0-9a-f]{40}$ ]] || return 1
-	printf '%s\n' "${V2_R2_SV1B_ACTIVATION_PROVENANCE:-/home/vlad/external-scratch/v2-r2-sv1b-activation-${v2_r2_sv1_activation_seed}-${head_revision}/activation-provenance.json}"
+	printf '%s\n' "${V2_R2_SV1C_ACTIVATION_PROVENANCE:-/home/vlad/external-scratch/v2-r2-sv1c-activation-${v2_r2_sv1_activation_seed}-${head_revision}/activation-provenance.json}"
 }
 
-v2_r2_sv1b_review_attestation_path() {
+v2_r2_sv1c_review_attestation_path() {
 	local head_revision=${1:-$(git -C "$root_dir" rev-parse HEAD)}
 	[[ "$head_revision" =~ ^[0-9a-f]{40}$ ]] || return 1
-	printf '%s\n' "${V2_R2_SV1B_REVIEW_ATTESTATION:-/home/vlad/external-scratch/v2-r2-sv1b-review-${head_revision}/review-attestation.json}"
+	printf '%s\n' "${V2_R2_SV1C_REVIEW_ATTESTATION:-/home/vlad/external-scratch/v2-r2-sv1c-review-${head_revision}/review-attestation.json}"
 }
 
-v2_r2_sv1b_activation_review_attestation_path() {
+v2_r2_sv1c_activation_review_attestation_path() {
 	local head_revision=${1:-$(git -C "$root_dir" rev-parse HEAD)}
 	[[ "$head_revision" =~ ^[0-9a-f]{40}$ ]] || return 1
-	printf '%s\n' "${V2_R2_SV1B_ACTIVATION_REVIEW_ATTESTATION:-/home/vlad/external-scratch/v2-r2-sv1b-activation-review-${v2_r2_sv1_activation_seed}-${head_revision}/review-attestation.json}"
+	printf '%s\n' "${V2_R2_SV1C_ACTIVATION_REVIEW_ATTESTATION:-/home/vlad/external-scratch/v2-r2-sv1c-activation-review-${v2_r2_sv1_activation_seed}-${head_revision}/review-attestation.json}"
 }
 
-v2_r2_sv1b_cpu_policy() {
+v2_r2_sv1c_cpu_policy() {
 	local host_cpu_count allowed_cpu_count
 	command -v nproc >/dev/null 2>&1 || return 1
 	host_cpu_count=$(nproc --all) || return 1
@@ -103,7 +103,7 @@ v2_r2_sv1b_cpu_policy() {
 # while the attestation may authorize a finite set of contract variants. The
 # selected cell must be a member of that attested set; it is not the measured
 # representative configuration unless the hashes happen to be identical.
-v2_r2_sv1b_require_authorized_capacity_config() {
+v2_r2_sv1c_require_authorized_capacity_config() {
 	[[ $# -eq 2 ]] || return 1
 	local attestation_path=$1 selected_config_sha256=$2
 	[[ "$attestation_path" == /* && "$attestation_path" != */ && "$attestation_path" != *$'\n'* && "$attestation_path" != *$'\t'* ]] || return 1
@@ -119,7 +119,7 @@ v2_r2_sv1b_require_authorized_capacity_config() {
 		"$attestation_path" >/dev/null
 }
 
-v2_r2_sv1b_binary_metadata_value() {
+v2_r2_sv1c_binary_metadata_value() {
 	[[ $# -eq 2 ]] || return 1
 	local metadata=$1 key=$2
 	awk -v key="$key" '
@@ -136,7 +136,7 @@ v2_r2_sv1b_binary_metadata_value() {
 		}' <<<"$metadata"
 }
 
-v2_r2_sv1b_require_pinned_binary() {
+v2_r2_sv1c_require_pinned_binary() {
 	[[ $# -eq 4 ]] || return 1
 	local binary=$1 expected_revision=$2 expected_sha256=$3 expected_package=$4
 	local metadata go_version package_path module_path
@@ -148,16 +148,16 @@ v2_r2_sv1b_require_pinned_binary() {
 	go_version=$(sed -n '1s/.*: //p' <<<"$metadata") || return 1
 	package_path=$(awk '$1 == "path" {count++; value=$2} END {if (count != 1 || value == "") exit 1; print value}' <<<"$metadata") || return 1
 	module_path=$(awk '$1 == "mod" {count++; value=$2} END {if (count != 1 || value == "") exit 1; print value}' <<<"$metadata") || return 1
-	buildmode=$(v2_r2_sv1b_binary_metadata_value "$metadata" "-buildmode") || return 1
-	compiler=$(v2_r2_sv1b_binary_metadata_value "$metadata" "-compiler") || return 1
-	trimpath=$(v2_r2_sv1b_binary_metadata_value "$metadata" "-trimpath") || return 1
-	cgo_enabled=$(v2_r2_sv1b_binary_metadata_value "$metadata" "CGO_ENABLED") || return 1
-	goos=$(v2_r2_sv1b_binary_metadata_value "$metadata" "GOOS") || return 1
-	goarch=$(v2_r2_sv1b_binary_metadata_value "$metadata" "GOARCH") || return 1
-	goamd64=$(v2_r2_sv1b_binary_metadata_value "$metadata" "GOAMD64") || return 1
-	vcs=$(v2_r2_sv1b_binary_metadata_value "$metadata" "vcs") || return 1
-	vcs_revision=$(v2_r2_sv1b_binary_metadata_value "$metadata" "vcs.revision") || return 1
-	vcs_modified=$(v2_r2_sv1b_binary_metadata_value "$metadata" "vcs.modified") || return 1
+	buildmode=$(v2_r2_sv1c_binary_metadata_value "$metadata" "-buildmode") || return 1
+	compiler=$(v2_r2_sv1c_binary_metadata_value "$metadata" "-compiler") || return 1
+	trimpath=$(v2_r2_sv1c_binary_metadata_value "$metadata" "-trimpath") || return 1
+	cgo_enabled=$(v2_r2_sv1c_binary_metadata_value "$metadata" "CGO_ENABLED") || return 1
+	goos=$(v2_r2_sv1c_binary_metadata_value "$metadata" "GOOS") || return 1
+	goarch=$(v2_r2_sv1c_binary_metadata_value "$metadata" "GOARCH") || return 1
+	goamd64=$(v2_r2_sv1c_binary_metadata_value "$metadata" "GOAMD64") || return 1
+	vcs=$(v2_r2_sv1c_binary_metadata_value "$metadata" "vcs") || return 1
+	vcs_revision=$(v2_r2_sv1c_binary_metadata_value "$metadata" "vcs.revision") || return 1
+	vcs_modified=$(v2_r2_sv1c_binary_metadata_value "$metadata" "vcs.modified") || return 1
 	[[ "$go_version" == "go1.27.0" && "$package_path" == "$expected_package" && "$module_path" == "exchange_sim" &&
 		"$buildmode" == "exe" && "$compiler" == "gc" && "$trimpath" == "true" && "$cgo_enabled" == "0" &&
 		"$goos" == "linux" && "$goarch" == "amd64" && "$goamd64" == "v1" && "$vcs" == "git" &&
@@ -165,7 +165,7 @@ v2_r2_sv1b_require_pinned_binary() {
 	[[ "$(sha256sum -- "$binary" | awk '{print $1}')" == "$expected_sha256" ]]
 }
 
-v2_r2_sv1b_require_checkpoint_validator_attestation_binding() {
+v2_r2_sv1c_require_checkpoint_validator_attestation_binding() {
 	[[ $# -eq 1 ]] || return 1
 	local attestation=$1
 	[[ -s "$attestation" && ! -L "$attestation" ]] || return 1
@@ -180,21 +180,21 @@ v2_r2_sv1b_require_checkpoint_validator_attestation_binding() {
 		"$attestation" >/dev/null
 }
 
-v2_r2_sv1b_git_tree_sha256() {
+v2_r2_sv1c_git_tree_sha256() {
 	[[ $# -eq 1 ]] || return 1
 	local revision=$1
 	[[ "$revision" =~ ^[0-9a-f]{40}$ ]] || return 1
 	git -C "$root_dir" ls-tree -r --full-tree "$revision" | sha256sum | awk '{print $1}'
 }
 
-v2_r2_require_sv1b_review_attestation() {
+v2_r2_require_sv1c_review_attestation() {
 	[[ $# -eq 2 ]] || return 1
 	local review_path=$1 expected_revision=$2 report_path report_sha256 actual_report_sha256 reviewed_tree_sha256 expected_tree_sha256
 	[[ "$review_path" == /* && "$review_path" != */ && "$review_path" != *$'\n'* && "$review_path" != *$'\t'* ]] || return 1
 	[[ "$expected_revision" =~ ^[0-9a-f]{40}$ ]] || return 1
 	[[ -f "$review_path" && ! -L "$review_path" ]] || return 1
 	[[ "$(realpath -e -- "$review_path")" == "$review_path" ]] || return 1
-	expected_tree_sha256=$(v2_r2_sv1b_git_tree_sha256 "$expected_revision") || return 1
+	expected_tree_sha256=$(v2_r2_sv1c_git_tree_sha256 "$expected_revision") || return 1
 	reviewed_tree_sha256=$(jq -er '.reviewed_tree_sha256 | select(type == "string" and test("^[0-9a-f]{64}$"))' "$review_path") || return 1
 	[[ "$reviewed_tree_sha256" == "$expected_tree_sha256" ]] || return 1
 	report_path=$(jq -er '.review_report_path | select(type == "string")' "$review_path") || return 1
@@ -215,7 +215,7 @@ v2_r2_require_sv1b_review_attestation() {
 		.review_report_sha256 == $report_sha256' "$review_path" >/dev/null
 }
 
-v2_r2_require_sv1b_activation_review_attestation() {
+v2_r2_require_sv1c_activation_review_attestation() {
 	[[ $# -eq 3 ]] || return 1
 	local review_path=$1 expected_revision=$2 activation_provenance_path=$3
 	local report_path report_sha256 actual_report_sha256 expected_tree_sha256 reviewed_tree_sha256 activation_provenance_sha256
@@ -224,7 +224,7 @@ v2_r2_require_sv1b_activation_review_attestation() {
 	[[ "$expected_revision" =~ ^[0-9a-f]{40}$ ]] || return 1
 	[[ -f "$review_path" && ! -L "$review_path" && "$(realpath -e -- "$review_path")" == "$review_path" ]] || return 1
 	[[ -f "$activation_provenance_path" && ! -L "$activation_provenance_path" && "$(realpath -e -- "$activation_provenance_path")" == "$activation_provenance_path" ]] || return 1
-	expected_tree_sha256=$(v2_r2_sv1b_git_tree_sha256 "$expected_revision") || return 1
+	expected_tree_sha256=$(v2_r2_sv1c_git_tree_sha256 "$expected_revision") || return 1
 	activation_provenance_sha256=$(sha256sum -- "$activation_provenance_path" | awk '{print $1}') || return 1
 	jq -e '
 		type == "object" and .schema_version == 3 and
@@ -257,7 +257,7 @@ v2_r2_require_sv1b_activation_review_attestation() {
 		.review_report_sha256 == $report_sha256' "$review_path" >/dev/null
 }
 
-v2_r2_sv1b_artifact_records() {
+v2_r2_sv1c_artifact_records() {
 	[[ $# -eq 1 ]] || return 1
 	local artifact_root=$1 relative bytes digest records='[]'
 	[[ -d "$artifact_root" && ! -L "$artifact_root" ]] || return 1
@@ -274,7 +274,7 @@ v2_r2_sv1b_artifact_records() {
 	printf '%s\n' "$records"
 }
 
-v2_r2_sv1b_verify_artifact_records() {
+v2_r2_sv1c_verify_artifact_records() {
 	[[ $# -eq 2 ]] || return 1
 	local artifact_root=$1 records=$2 relative expected_bytes expected_digest actual_bytes actual_digest listed actual
 	[[ -d "$artifact_root" && ! -L "$artifact_root" ]] || return 1
@@ -293,7 +293,7 @@ v2_r2_sv1b_verify_artifact_records() {
 	done < <(jq -r '.[] | [.path, (.bytes | tostring), .sha256] | @tsv' <<<"$records")
 }
 
-v2_r2_sv1b_require_activation_arm_artifacts() {
+v2_r2_sv1c_require_activation_arm_artifacts() {
 	[[ $# -eq 5 || $# -eq 6 ]] || return 1
 	local arm_dir=$1 arm_name=$2 expected_revision=$3 expected_config_sha256=$4 expected_binary_sha256=$5
 	local expected_outcome=${6:-completed}
@@ -403,7 +403,7 @@ v2_r2_sv1b_require_activation_arm_artifacts() {
 	fi
 	v2_r2_require_checkpoint_stream "$arm_dir/checkpoints.jsonl" \
 		"$v2_r2_sv1_activation_simulation_start_nano" "$v2_r2_sv1_activation_simulation_end_nano" evstream_v3 || return 1
-	v2_r2_sv1b_require_checkpoint_attestation_binding "$arm_dir/checkpoints.jsonl" "$arm_dir/binary-evidence-attestation.json" || return 1
+	v2_r2_sv1c_require_checkpoint_attestation_binding "$arm_dir/checkpoints.jsonl" "$arm_dir/binary-evidence-attestation.json" || return 1
 	jq -e '
 		type == "object" and .domain == "canonical_binary_execution_frames" and .ordering == "ordered_stream" and
 		.hashing == "route_sequence_neutral_v1" and (.event_frames | type) == "number" and (.event_frames | floor) == .event_frames and .event_frames > 0 and
@@ -414,7 +414,7 @@ v2_r2_sv1b_require_activation_arm_artifacts() {
 		"$arm_dir/binary-evidence-attestation.json" >/dev/null || return 1
 }
 
-v2_r2_sv1b_require_checkpoint_attestation_binding() {
+v2_r2_sv1c_require_checkpoint_attestation_binding() {
 	[[ $# -eq 2 ]] || return 1
 	local checkpoints=$1 attestation=$2
 	[[ -s "$checkpoints" && ! -L "$checkpoints" && -s "$attestation" && ! -L "$attestation" ]] || return 1
@@ -423,7 +423,7 @@ v2_r2_sv1b_require_checkpoint_attestation_binding() {
 		"$v2_r2_sv1_activation_simulation_end_nano" "$attestation"
 }
 
-v2_r2_sv1b_require_terminal_arm_reconstruction() {
+v2_r2_sv1c_require_terminal_arm_reconstruction() {
 	[[ $# -eq 2 ]] || return 1
 	local renderer_path=$1 arm_dir=$2 render_root render_dir report_path renderer_status
 	[[ "$renderer_path" == /* && "$renderer_path" != */ && "$renderer_path" != *$'\n'* && "$renderer_path" != *$'\t'* ]] || return 1
@@ -460,7 +460,7 @@ v2_r2_sv1b_require_terminal_arm_reconstruction() {
 	rm -rf -- "$render_root"
 }
 
-v2_r2_sv1b_require_terminal_failure_pair_provenance() {
+v2_r2_sv1c_require_terminal_failure_pair_provenance() {
 	[[ $# -eq 3 ]] || return 1
 	local provenance_path=$1 expected_revision=$2 expected_binary_sha256=$3
 	local output_root treatment_dir control_dir comparison_path review_path simulator_path analyzer_path renderer_path checkpoint_validator_path path
@@ -473,8 +473,8 @@ v2_r2_sv1b_require_terminal_failure_pair_provenance() {
 	[[ "$provenance_path" == /* && "$provenance_path" != */ && "$provenance_path" != *$'\n'* && "$provenance_path" != *$'\t'* ]] || return 1
 	[[ "$expected_revision" =~ ^[0-9a-f]{40}$ && "$expected_binary_sha256" =~ ^[0-9a-f]{64}$ ]] || return 1
 	[[ -f "$provenance_path" && ! -L "$provenance_path" && "$(realpath -e -- "$provenance_path")" == "$provenance_path" ]] || return 1
-	expected_tree_sha256=$(v2_r2_sv1b_git_tree_sha256 "$expected_revision") || return 1
-	IFS=$'\t' read -r expected_host_cpu_count expected_allowed_cpu_count expected_cpu_affinity < <(v2_r2_sv1b_cpu_policy) || return 1
+	expected_tree_sha256=$(v2_r2_sv1c_git_tree_sha256 "$expected_revision") || return 1
+	IFS=$'\t' read -r expected_host_cpu_count expected_allowed_cpu_count expected_cpu_affinity < <(v2_r2_sv1c_cpu_policy) || return 1
 	output_root=$(jq -er '.output_root | select(type == "string")' "$provenance_path") || return 1
 	treatment_dir=$(jq -er '.treatment_dir | select(type == "string")' "$provenance_path") || return 1
 	control_dir=$(jq -er '.control_dir | select(type == "string")' "$provenance_path") || return 1
@@ -517,14 +517,14 @@ v2_r2_sv1b_require_terminal_failure_pair_provenance() {
 		'.seed == $seed and .evidence_format == $evidence_format and .log_mode == $log_mode' "$control_config_path" >/dev/null || return 1
 	analyzer_sha256=$(jq -er '.analyzer_binary_sha256 | select(type == "string" and test("^[0-9a-f]{64}$"))' "$provenance_path") || return 1
 	renderer_sha256=$(jq -er '.renderer_binary_sha256 | select(type == "string" and test("^[0-9a-f]{64}$"))' "$provenance_path") || return 1
-	v2_r2_sv1b_require_pinned_binary "$simulator_path" "$expected_revision" "$expected_binary_sha256" "exchange_sim/cmd/multivenue" || return 1
-	v2_r2_sv1b_require_pinned_binary "$analyzer_path" "$expected_revision" "$analyzer_sha256" "exchange_sim/cmd/cdf-liquidity-audit" || return 1
-	v2_r2_sv1b_require_pinned_binary "$renderer_path" "$expected_revision" "$renderer_sha256" "exchange_sim/cmd/evsrender" || return 1
+	v2_r2_sv1c_require_pinned_binary "$simulator_path" "$expected_revision" "$expected_binary_sha256" "exchange_sim/cmd/multivenue" || return 1
+	v2_r2_sv1c_require_pinned_binary "$analyzer_path" "$expected_revision" "$analyzer_sha256" "exchange_sim/cmd/cdf-liquidity-audit" || return 1
+	v2_r2_sv1c_require_pinned_binary "$renderer_path" "$expected_revision" "$renderer_sha256" "exchange_sim/cmd/evsrender" || return 1
 	[[ "$checkpoint_validator_path" == "$v2_r2_checkpoint_validator_path" &&
 		"$checkpoint_validator_revision" == "$expected_revision" &&
 		"$checkpoint_validator_sha256" == "$v2_r2_checkpoint_validator_sha256" ]] || return 1
 	v2_r2_require_registered_checkpoint_validator || return 1
-	v2_r2_require_sv1b_review_attestation "$review_path" "$expected_revision" || return 1
+	v2_r2_require_sv1c_review_attestation "$review_path" "$expected_revision" || return 1
 	actual_sha256=$(sha256sum -- "$review_path" | awk '{print $1}') || return 1
 	[[ "$actual_sha256" == "$(jq -er '.review_attestation_sha256 | select(type == "string" and test("^[0-9a-f]{64}$"))' "$provenance_path")" ]] || return 1
 	jq -e --arg contract "$v2_r2_sv1_activation_pair_contract" --arg revision "$expected_revision" \
@@ -592,7 +592,7 @@ v2_r2_sv1b_require_terminal_failure_pair_provenance() {
 		if [[ "$arm_status" == terminal_failure ]]; then
 			expected_outcome=terminal_failure
 		fi
-		v2_r2_sv1b_require_activation_arm_artifacts "$arm_dir" "$arm" "$expected_revision" "$arm_config_sha256" "$expected_binary_sha256" "$expected_outcome" || return 1
+		v2_r2_sv1c_require_activation_arm_artifacts "$arm_dir" "$arm" "$expected_revision" "$arm_config_sha256" "$expected_binary_sha256" "$expected_outcome" || return 1
 		actual_sha256=$(sha256sum -- "$arm_dir/run-status.json" | awk '{print $1}') || return 1
 		expected_sha256=$(jq -er --arg arm "$arm" '.[$arm + "_run_status_sha256"] | select(type == "string" and test("^[0-9a-f]{64}$"))' "$provenance_path") || return 1
 		[[ "$actual_sha256" == "$expected_sha256" ]] || return 1
@@ -600,12 +600,12 @@ v2_r2_sv1b_require_terminal_failure_pair_provenance() {
 		expected_sha256=$(jq -er --arg arm "$arm" '.[$arm + "_terminal_outcome_sha256"] | select(type == "string" and test("^[0-9a-f]{64}$"))' "$provenance_path") || return 1
 		[[ "$actual_sha256" == "$expected_sha256" ]] || return 1
 		artifacts=$(jq -c --arg arm "$arm" '.[$arm + "_artifacts"]' "$provenance_path") || return 1
-		v2_r2_sv1b_verify_artifact_records "$arm_dir" "$artifacts" || return 1
-		v2_r2_sv1b_require_terminal_arm_reconstruction "$renderer_path" "$arm_dir" || return 1
+		v2_r2_sv1c_verify_artifact_records "$arm_dir" "$artifacts" || return 1
+		v2_r2_sv1c_require_terminal_arm_reconstruction "$renderer_path" "$arm_dir" || return 1
 	done
 }
 
-v2_r2_sv1b_require_invalid_audit_diagnostic() {
+v2_r2_sv1c_require_invalid_audit_diagnostic() {
 	[[ $# -eq 4 ]] || return 1
 	local provenance_path=$1 expected_output_root=$2 expected_audit_status=$3 expected_object_valid=$4 comparison_path actual_object_valid=false actual_sha256 expected_sha256
 	[[ "$provenance_path" == /* && "$provenance_path" != */ && "$provenance_path" != *$'\n'* && "$provenance_path" != *$'\t'* ]] || return 1
@@ -631,7 +631,7 @@ v2_r2_sv1b_require_invalid_audit_diagnostic() {
 	[[ "$actual_sha256" == "$expected_sha256" ]]
 }
 
-v2_r2_sv1b_require_invalid_audit_pair_provenance() {
+v2_r2_sv1c_require_invalid_audit_pair_provenance() {
 	[[ $# -eq 5 ]] || return 1
 	local provenance_path=$1 expected_revision=$2 expected_binary_sha256=$3 expected_audit_status=$4 expected_object_valid=$5
 	local output_root treatment_dir control_dir comparison_path review_path simulator_path analyzer_path renderer_path checkpoint_validator_path path
@@ -645,13 +645,13 @@ v2_r2_sv1b_require_invalid_audit_pair_provenance() {
 	[[ "$provenance_path" == /* && "$provenance_path" != */ && "$provenance_path" != *$'\n'* && "$provenance_path" != *$'\t'* ]] || return 1
 	[[ "$expected_revision" =~ ^[0-9a-f]{40}$ && "$expected_binary_sha256" =~ ^[0-9a-f]{64}$ ]] || return 1
 	[[ -f "$provenance_path" && ! -L "$provenance_path" && "$(realpath -e -- "$provenance_path")" == "$provenance_path" ]] || return 1
-	expected_tree_sha256=$(v2_r2_sv1b_git_tree_sha256 "$expected_revision") || return 1
-	IFS=$'\t' read -r expected_host_cpu_count expected_allowed_cpu_count expected_cpu_affinity < <(v2_r2_sv1b_cpu_policy) || return 1
+	expected_tree_sha256=$(v2_r2_sv1c_git_tree_sha256 "$expected_revision") || return 1
+	IFS=$'\t' read -r expected_host_cpu_count expected_allowed_cpu_count expected_cpu_affinity < <(v2_r2_sv1c_cpu_policy) || return 1
 	output_root=$(jq -er '.output_root | select(type == "string")' "$provenance_path") || return 1
 	treatment_dir=$(jq -er '.treatment_dir | select(type == "string")' "$provenance_path") || return 1
 	control_dir=$(jq -er '.control_dir | select(type == "string")' "$provenance_path") || return 1
 	comparison_path=$(jq -er '.comparison_path | select(type == "string")' "$provenance_path") || return 1
-	v2_r2_sv1b_require_invalid_audit_diagnostic "$provenance_path" "$output_root" "$expected_audit_status" "$expected_object_valid" || return 1
+	v2_r2_sv1c_require_invalid_audit_diagnostic "$provenance_path" "$output_root" "$expected_audit_status" "$expected_object_valid" || return 1
 	review_path=$(jq -er '.review_attestation_path | select(type == "string")' "$provenance_path") || return 1
 	simulator_path=$(jq -er '.simulator_binary_path | select(type == "string")' "$provenance_path") || return 1
 	analyzer_path=$(jq -er '.analyzer_binary_path | select(type == "string")' "$provenance_path") || return 1
@@ -688,14 +688,14 @@ v2_r2_sv1b_require_invalid_audit_pair_provenance() {
 		'.seed == $seed and .evidence_format == $evidence_format and .log_mode == $log_mode' "$control_config_path" >/dev/null || return 1
 	analyzer_sha256=$(jq -er '.analyzer_binary_sha256 | select(type == "string" and test("^[0-9a-f]{64}$"))' "$provenance_path") || return 1
 	renderer_sha256=$(jq -er '.renderer_binary_sha256 | select(type == "string" and test("^[0-9a-f]{64}$"))' "$provenance_path") || return 1
-	v2_r2_sv1b_require_pinned_binary "$simulator_path" "$expected_revision" "$expected_binary_sha256" "exchange_sim/cmd/multivenue" || return 1
-	v2_r2_sv1b_require_pinned_binary "$analyzer_path" "$expected_revision" "$analyzer_sha256" "exchange_sim/cmd/cdf-liquidity-audit" || return 1
-	v2_r2_sv1b_require_pinned_binary "$renderer_path" "$expected_revision" "$renderer_sha256" "exchange_sim/cmd/evsrender" || return 1
+	v2_r2_sv1c_require_pinned_binary "$simulator_path" "$expected_revision" "$expected_binary_sha256" "exchange_sim/cmd/multivenue" || return 1
+	v2_r2_sv1c_require_pinned_binary "$analyzer_path" "$expected_revision" "$analyzer_sha256" "exchange_sim/cmd/cdf-liquidity-audit" || return 1
+	v2_r2_sv1c_require_pinned_binary "$renderer_path" "$expected_revision" "$renderer_sha256" "exchange_sim/cmd/evsrender" || return 1
 	[[ "$checkpoint_validator_path" == "$v2_r2_checkpoint_validator_path" &&
 		"$checkpoint_validator_revision" == "$expected_revision" &&
 		"$checkpoint_validator_sha256" == "$v2_r2_checkpoint_validator_sha256" ]] || return 1
 	v2_r2_require_registered_checkpoint_validator || return 1
-	v2_r2_require_sv1b_review_attestation "$review_path" "$expected_revision" || return 1
+	v2_r2_require_sv1c_review_attestation "$review_path" "$expected_revision" || return 1
 	[[ "$review_path" != "$output_root"/* && "$review_path" != "$root_dir"/* ]] || return 1
 	actual_sha256=$(sha256sum -- "$review_path" | awk '{print $1}') || return 1
 	[[ "$actual_sha256" == "$(jq -er '.review_attestation_sha256 | select(type == "string" and test("^[0-9a-f]{64}$"))' "$provenance_path")" ]] || return 1
@@ -749,7 +749,7 @@ v2_r2_sv1b_require_invalid_audit_pair_provenance() {
 	for arm in treatment control; do
 		arm_dir=$([[ "$arm" == treatment ]] && printf '%s' "$treatment_dir" || printf '%s' "$control_dir")
 		arm_config_sha256=$([[ "$arm" == treatment ]] && printf '%s' "$treatment_source_config_sha256" || printf '%s' "$control_source_config_sha256")
-		v2_r2_sv1b_require_activation_arm_artifacts "$arm_dir" "$arm" "$expected_revision" "$arm_config_sha256" "$expected_binary_sha256" completed || return 1
+		v2_r2_sv1c_require_activation_arm_artifacts "$arm_dir" "$arm" "$expected_revision" "$arm_config_sha256" "$expected_binary_sha256" completed || return 1
 		actual_sha256=$(sha256sum -- "$arm_dir/run-status.json" | awk '{print $1}') || return 1
 		expected_sha256=$(jq -er --arg arm "$arm" '.[$arm + "_run_status_sha256"] | select(type == "string" and test("^[0-9a-f]{64}$"))' "$provenance_path") || return 1
 		[[ "$actual_sha256" == "$expected_sha256" ]] || return 1
@@ -757,7 +757,7 @@ v2_r2_sv1b_require_invalid_audit_pair_provenance() {
 		expected_sha256=$(jq -er --arg arm "$arm" '.[$arm + "_terminal_outcome_sha256"] | select(type == "string" and test("^[0-9a-f]{64}$"))' "$provenance_path") || return 1
 		[[ "$actual_sha256" == "$expected_sha256" ]] || return 1
 		artifacts=$(jq -c --arg arm "$arm" '.[$arm + "_artifacts"]' "$provenance_path") || return 1
-		v2_r2_sv1b_verify_artifact_records "$arm_dir" "$artifacts" || return 1
+		v2_r2_sv1c_verify_artifact_records "$arm_dir" "$artifacts" || return 1
 	done
 	# Re-run the exact analyzer and require the retained invalid diagnostic to be
 	# byte-identical. A nonzero analyzer result is expected here; it is still
@@ -776,7 +776,7 @@ v2_r2_sv1b_require_invalid_audit_pair_provenance() {
 	rm -rf -- "$replay_dir"
 }
 
-v2_r2_sv1b_require_produced_activation_comparison() {
+v2_r2_sv1c_require_produced_activation_comparison() {
 	[[ $# -eq 4 ]] || return 1
 	local analyzer_path=$1 treatment_dir=$2 control_dir=$3 comparison_path=$4 replay_dir replay_path
 	[[ "$analyzer_path" == /* && "$treatment_dir" == /* && "$control_dir" == /* && "$comparison_path" == /* ]] || return 1
@@ -793,7 +793,7 @@ v2_r2_sv1b_require_produced_activation_comparison() {
 	rm -rf -- "$replay_dir"
 }
 
-v2_r2_sv1b_require_activation_comparison_identity() {
+v2_r2_sv1c_require_activation_comparison_identity() {
 	[[ $# -eq 6 || $# -eq 7 ]] || return 1
 	local comparison_path=$1 provenance_path=$2 expected_revision=$3 expected_binary_sha256=$4 expected_analyzer_sha256=$5 expected_supplier_count=$6
 	local expected_activation=true
@@ -908,7 +908,7 @@ v2_r2_sv1b_require_activation_comparison_identity() {
 	fi
 }
 
-v2_r2_require_sv1b_activation_provenance_mode() {
+v2_r2_require_sv1c_activation_provenance_mode() {
 	[[ $# -eq 5 ]] || return 1
 	local provenance_path=$1 expected_revision=$2 expected_binary_sha256=$3 expected_status=$4 expected_activation=$5
 	local output_root treatment_dir control_dir comparison_path review_path analyzer_path simulator_path renderer_path checkpoint_validator_path
@@ -924,8 +924,8 @@ v2_r2_require_sv1b_activation_provenance_mode() {
 	[[ -f "$provenance_path" && ! -L "$provenance_path" ]] || return 1
 	[[ "$(realpath -e -- "$provenance_path")" == "$provenance_path" ]] || return 1
 	v2_r2_require_single_json_object "$provenance_path" || return 1
-	expected_tree_sha256=$(v2_r2_sv1b_git_tree_sha256 "$expected_revision") || return 1
-	IFS=$'\t' read -r expected_host_cpu_count expected_allowed_cpu_count expected_cpu_affinity < <(v2_r2_sv1b_cpu_policy) || return 1
+	expected_tree_sha256=$(v2_r2_sv1c_git_tree_sha256 "$expected_revision") || return 1
+	IFS=$'\t' read -r expected_host_cpu_count expected_allowed_cpu_count expected_cpu_affinity < <(v2_r2_sv1c_cpu_policy) || return 1
 	output_root=$(jq -er '.output_root | select(type == "string")' "$provenance_path") || return 1
 	treatment_dir=$(jq -er '.treatment_dir | select(type == "string")' "$provenance_path") || return 1
 	control_dir=$(jq -er '.control_dir | select(type == "string")' "$provenance_path") || return 1
@@ -949,14 +949,14 @@ v2_r2_require_sv1b_activation_provenance_mode() {
 	[[ -f "$comparison_path" && ! -L "$comparison_path" && "$(realpath -e -- "$comparison_path")" == "$comparison_path" ]] || return 1
 	analyzer_sha256=$(jq -er '.analyzer_binary_sha256 | select(type == "string" and test("^[0-9a-f]{64}$"))' "$provenance_path") || return 1
 	renderer_sha256=$(jq -er '.renderer_binary_sha256 | select(type == "string" and test("^[0-9a-f]{64}$"))' "$provenance_path") || return 1
-	v2_r2_sv1b_require_pinned_binary "$simulator_path" "$expected_revision" "$expected_binary_sha256" "exchange_sim/cmd/multivenue" || return 1
-	v2_r2_sv1b_require_pinned_binary "$analyzer_path" "$expected_revision" "$analyzer_sha256" "exchange_sim/cmd/cdf-liquidity-audit" || return 1
-	v2_r2_sv1b_require_pinned_binary "$renderer_path" "$expected_revision" "$renderer_sha256" "exchange_sim/cmd/evsrender" || return 1
+	v2_r2_sv1c_require_pinned_binary "$simulator_path" "$expected_revision" "$expected_binary_sha256" "exchange_sim/cmd/multivenue" || return 1
+	v2_r2_sv1c_require_pinned_binary "$analyzer_path" "$expected_revision" "$analyzer_sha256" "exchange_sim/cmd/cdf-liquidity-audit" || return 1
+	v2_r2_sv1c_require_pinned_binary "$renderer_path" "$expected_revision" "$renderer_sha256" "exchange_sim/cmd/evsrender" || return 1
 	[[ "$checkpoint_validator_path" == "$v2_r2_checkpoint_validator_path" &&
 		"$checkpoint_validator_revision" == "$expected_revision" &&
 		"$checkpoint_validator_sha256" == "$v2_r2_checkpoint_validator_sha256" ]] || return 1
 	v2_r2_require_registered_checkpoint_validator || return 1
-	v2_r2_require_sv1b_review_attestation "$review_path" "$expected_revision" || return 1
+	v2_r2_require_sv1c_review_attestation "$review_path" "$expected_revision" || return 1
 	[[ "$review_path" != "$output_root"/* && "$review_path" != "$root_dir"/* ]] || return 1
 	actual_sha256=$(sha256sum -- "$review_path" | awk '{print $1}') || return 1
 	[[ "$actual_sha256" == "$(jq -er '.review_attestation_sha256' "$provenance_path")" ]] || return 1
@@ -1031,17 +1031,17 @@ v2_r2_require_sv1b_activation_provenance_mode() {
 		'.treatment_source_config_sha256 == $treatment_config_sha256 and .control_source_config_sha256 == $control_config_sha256' \
 		"$provenance_path" >/dev/null || return 1
 	expected_supplier_count=$(jq -er 'select((.elastic_liquidity_suppliers | type) == "array" and (.elastic_liquidity_suppliers | length) > 0 and (.venue_ids | type) == "array" and (.venue_ids | length) > 0) | (.elastic_liquidity_suppliers | length) * (.venue_ids | length)' "$treatment_config_path") || return 1
-	v2_r2_sv1b_require_activation_comparison_identity "$comparison_path" "$provenance_path" "$expected_revision" "$expected_binary_sha256" "$analyzer_sha256" "$expected_supplier_count" "$expected_activation" || return 1
+	v2_r2_sv1c_require_activation_comparison_identity "$comparison_path" "$provenance_path" "$expected_revision" "$expected_binary_sha256" "$analyzer_sha256" "$expected_supplier_count" "$expected_activation" || return 1
 	for arm in treatment control; do
 		arm_dir=$([[ "$arm" == treatment ]] && printf '%s' "$treatment_dir" || printf '%s' "$control_dir")
 		arm_config_sha256=$([[ "$arm" == treatment ]] && printf '%s' "$treatment_source_config_sha256" || printf '%s' "$control_source_config_sha256")
-		v2_r2_sv1b_require_activation_arm_artifacts "$arm_dir" "$arm" "$expected_revision" "$arm_config_sha256" "$expected_binary_sha256" || return 1
+		v2_r2_sv1c_require_activation_arm_artifacts "$arm_dir" "$arm" "$expected_revision" "$arm_config_sha256" "$expected_binary_sha256" || return 1
 	done
-	v2_r2_sv1b_require_produced_activation_comparison "$analyzer_path" "$treatment_dir" "$control_dir" "$comparison_path" || return 1
+	v2_r2_sv1c_require_produced_activation_comparison "$analyzer_path" "$treatment_dir" "$control_dir" "$comparison_path" || return 1
 	treatment_artifacts=$(jq -c '.treatment_artifacts' "$provenance_path") || return 1
 	control_artifacts=$(jq -c '.control_artifacts' "$provenance_path") || return 1
-	v2_r2_sv1b_verify_artifact_records "$treatment_dir" "$treatment_artifacts" || return 1
-	v2_r2_sv1b_verify_artifact_records "$control_dir" "$control_artifacts" || return 1
+	v2_r2_sv1c_verify_artifact_records "$treatment_dir" "$treatment_artifacts" || return 1
+	v2_r2_sv1c_verify_artifact_records "$control_dir" "$control_artifacts" || return 1
 	[[ "$(sha256sum -- "$treatment_dir/run-config.json" | awk '{print $1}')" == "$treatment_source_config_sha256" ]] || return 1
 	[[ "$(sha256sum -- "$control_dir/run-config.json" | awk '{print $1}')" == "$control_source_config_sha256" ]] || return 1
 	[[ "$(sha256sum -- "$treatment_dir/run-config.json" | awk '{print $1}')" == "$(jq -er '.treatment_config_sha256' "$provenance_path")" ]] || return 1
@@ -1052,14 +1052,14 @@ v2_r2_require_sv1b_activation_provenance_mode() {
 	[[ "$(sha256sum -- "$control_dir/terminal-outcome.json" | awk '{print $1}')" == "$(jq -er '.control_terminal_outcome_sha256' "$provenance_path")" ]] || return 1
 }
 
-v2_r2_require_sv1b_activation_provenance() {
+v2_r2_require_sv1c_activation_provenance() {
 	[[ $# -eq 3 ]] || return 1
-	v2_r2_require_sv1b_activation_provenance_mode "$1" "$2" "$3" "ACTIVATION_CONTRACT_SATISFIED" true
+	v2_r2_require_sv1c_activation_provenance_mode "$1" "$2" "$3" "ACTIVATION_CONTRACT_SATISFIED" true
 }
 
-v2_r2_require_sv1b_activation_nonactivation_provenance() {
+v2_r2_require_sv1c_activation_nonactivation_provenance() {
 	[[ $# -eq 3 ]] || return 1
-	v2_r2_require_sv1b_activation_provenance_mode "$1" "$2" "$3" "ACTIVATION_CONTRACT_NOT_SATISFIED" false
+	v2_r2_require_sv1c_activation_provenance_mode "$1" "$2" "$3" "ACTIVATION_CONTRACT_NOT_SATISFIED" false
 }
 
 v2_r2_sv1_capacity_registered_config_name() {
@@ -1089,13 +1089,13 @@ v2_r2_capacity_attestation_path_for_config() {
 	[[ "$resolved_config_path" == "$v2_r2_sv1_config_dir/$config_name" ]] || return 1
 	case "$gomaxprocs:$config_name" in
 		4:control-643-none.json|4:control-643.json|4:control-647.json|4:control-653.json)
-			printf '/home/vlad/v2-r2-sv1b-24h-binary-capacity-20260903-v4-capacity-seed-659-control-g4.json\n'
+			printf '/home/vlad/v2-r2-sv1c-24h-binary-capacity-20260903-v4-capacity-seed-659-control-g4.json\n'
 			;;
 		4:treatment-643.json|4:treatment-647.json|4:treatment-653.json)
-			printf '/home/vlad/v2-r2-sv1b-24h-binary-capacity-20260903-v4-capacity-seed-659-treatment-g4.json\n'
+			printf '/home/vlad/v2-r2-sv1c-24h-binary-capacity-20260903-v4-capacity-seed-659-treatment-g4.json\n'
 			;;
 		8:treatment-643.json)
-			printf '/home/vlad/v2-r2-sv1b-24h-binary-capacity-20260903-v4-capacity-seed-659-treatment-g8.json\n'
+			printf '/home/vlad/v2-r2-sv1c-24h-binary-capacity-20260903-v4-capacity-seed-659-treatment-g8.json\n'
 			;;
 		*) return 1 ;;
 	esac
@@ -1124,5 +1124,31 @@ v2_r2_capacity_probe_cell_for_config() {
 	esac
 }
 
-# Keep SV1B's exact Go toolchain requirement and all fail-closed activity
+# Keep SV1C's exact Go toolchain requirement and all fail-closed activity
 # predicates from the accepted SV1 contract.
+
+# The shared SV1 runners still call the historical successor helper names.
+# These adapters retain the runner interface while every identity, path, and
+# validation implementation remains bound to the SV1C namespace above.
+v2_r2_sv1b_cpu_policy() { v2_r2_sv1c_cpu_policy "$@"; }
+v2_r2_sv1b_require_authorized_capacity_config() { v2_r2_sv1c_require_authorized_capacity_config "$@"; }
+v2_r2_sv1b_require_pinned_binary() { v2_r2_sv1c_require_pinned_binary "$@"; }
+v2_r2_sv1b_require_checkpoint_validator_attestation_binding() { v2_r2_sv1c_require_checkpoint_validator_attestation_binding "$@"; }
+v2_r2_sv1b_git_tree_sha256() { v2_r2_sv1c_git_tree_sha256 "$@"; }
+v2_r2_sv1b_review_attestation_path() { v2_r2_sv1c_review_attestation_path "$@"; }
+v2_r2_require_sv1b_review_attestation() { v2_r2_require_sv1c_review_attestation "$@"; }
+v2_r2_require_sv1b_activation_review_attestation() { v2_r2_require_sv1c_activation_review_attestation "$@"; }
+v2_r2_require_sv1b_activation_provenance_mode() { v2_r2_require_sv1c_activation_provenance_mode "$@"; }
+v2_r2_sv1b_activation_review_attestation_path() { v2_r2_sv1c_activation_review_attestation_path "$@"; }
+v2_r2_sv1b_artifact_records() { v2_r2_sv1c_artifact_records "$@"; }
+v2_r2_sv1b_verify_artifact_records() { v2_r2_sv1c_verify_artifact_records "$@"; }
+v2_r2_sv1b_require_activation_arm_artifacts() { v2_r2_sv1c_require_activation_arm_artifacts "$@"; }
+v2_r2_sv1b_require_activation_comparison_identity() { v2_r2_sv1c_require_activation_comparison_identity "$@"; }
+v2_r2_sv1b_require_checkpoint_attestation_binding() { v2_r2_sv1c_require_checkpoint_attestation_binding "$@"; }
+v2_r2_sv1b_require_invalid_audit_diagnostic() { v2_r2_sv1c_require_invalid_audit_diagnostic "$@"; }
+v2_r2_sv1b_require_invalid_audit_pair_provenance() { v2_r2_sv1c_require_invalid_audit_pair_provenance "$@"; }
+v2_r2_sv1b_require_terminal_failure_pair_provenance() { v2_r2_sv1c_require_terminal_failure_pair_provenance "$@"; }
+v2_r2_sv1b_require_produced_activation_comparison() { v2_r2_sv1c_require_produced_activation_comparison "$@"; }
+v2_r2_sv1b_require_terminal_arm_reconstruction() { v2_r2_sv1c_require_terminal_arm_reconstruction "$@"; }
+v2_r2_require_sv1b_activation_provenance() { v2_r2_require_sv1c_activation_provenance "$@"; }
+v2_r2_require_sv1b_activation_nonactivation_provenance() { v2_r2_require_sv1c_activation_nonactivation_provenance "$@"; }

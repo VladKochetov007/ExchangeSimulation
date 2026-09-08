@@ -4,6 +4,15 @@
 # registered cell identities differ from historical R2.
 set -euo pipefail
 
+if ! declare -F v2_r2_is_successor_candidate >/dev/null 2>&1; then
+	v2_r2_is_successor_candidate() {
+		case "${v2_r2_sv1_candidate_id:-}" in
+			V2-R2-SV1B-*|V2-R2-SV1C-*) return 0 ;;
+			*) return 1 ;;
+		esac
+	}
+fi
+
 source "$root_dir/scripts/v2-integrated-longrun-r2-contract.sh"
 
 # jq normally emits one result per top-level JSON document. Contract consumers
@@ -161,7 +170,7 @@ v2_r2_require_cdf_supplier_activation() {
 			.max_quote_qty <= .configured_max_quote_qty)' "$audit_path" >/dev/null; then
 		return 1
 	fi
-	if [[ "${v2_r2_sv1_candidate_id:-}" == V2-R2-SV1B-* ]]; then
+	if v2_r2_is_successor_candidate; then
 		if ! jq -e '
 			.result.supplier_removal_counterfactual_valid == true and
 			.result.supplier_removal_time_weighted_counterfactual_valid == true and
@@ -292,7 +301,7 @@ v2_r2_require_cdf_supplier_comparison() {
 			.max_quote_qty <= .configured_max_quote_qty)' "$comparison_path" >/dev/null; then
 		return 1
 	fi
-	if [[ "${v2_r2_sv1_candidate_id:-}" == V2-R2-SV1B-* ]] &&
+	if v2_r2_is_successor_candidate &&
 		! jq -e '
 			type == "object" and
 			(.evidence_valid | type) == "boolean" and .evidence_valid == true and
@@ -301,7 +310,7 @@ v2_r2_require_cdf_supplier_comparison() {
 		' "$comparison_path" >/dev/null; then
 		return 1
 	fi
-	if [[ "${v2_r2_sv1_candidate_id:-}" == V2-R2-SV1B-* ]]; then
+	if v2_r2_is_successor_candidate; then
 		if ! jq -e '
 			.treatment.supplier_removal_counterfactual_valid == true and
 			.treatment.supplier_removal_time_weighted_counterfactual_valid == true and
@@ -382,7 +391,7 @@ v2_r2_require_cdf_supplier_comparison_measurement() {
 	' "$comparison_path" >/dev/null; then
 		return 1
 	fi
-	if [[ "${v2_r2_sv1_candidate_id:-}" == V2-R2-SV1B-* ]] &&
+	if v2_r2_is_successor_candidate &&
 		! jq -e '
 			.treatment.supplier_removal_counterfactual_valid == true and
 			.treatment.supplier_removal_time_weighted_counterfactual_valid == true and

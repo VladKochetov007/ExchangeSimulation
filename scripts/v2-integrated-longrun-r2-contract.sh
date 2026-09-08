@@ -237,7 +237,7 @@ v2_r2_require_binary_capacity_attestation() {
 				 (.peak_output_bytes | type) == "number" and (.safety_margin_bytes | type) == "number" and
 				 (.required_free_bytes | type) == "number" and .required_free_bytes == (.peak_output_bytes + .safety_margin_bytes)' \
 			"$attestation" >/dev/null || return 1
-	if [[ "${v2_r2_sv1_candidate_id:-}" == V2-R2-SV1B-* ]]; then
+	if v2_r2_is_successor_candidate; then
 		declare -F v2_r2_sv1b_require_checkpoint_validator_attestation_binding >/dev/null 2>&1 || return 1
 		v2_r2_sv1b_require_checkpoint_validator_attestation_binding "$attestation" || return 1
 		jq -e --argjson capacity_seed "${v2_r2_sv1_capacity_measurement_seed:-0}" \
@@ -260,7 +260,7 @@ v2_r2_require_binary_capacity_attestation() {
 		if [[ -n "$expected_activation_provenance_sha256" ]]; then
 			[[ "$expected_activation_provenance_sha256" =~ ^[0-9a-f]{64}$ ]] || return 1
 		fi
-		if [[ "${v2_r2_sv1_candidate_id:-}" == V2-R2-SV1B-* ]]; then
+		if v2_r2_is_successor_candidate; then
 			[[ -n "$expected_activation_provenance_sha256" && "$expected_activation_provenance_sha256" =~ ^[0-9a-f]{64}$ ]] || return 1
 			[[ -n "$expected_activation_review_attestation_sha256" && "$expected_activation_review_attestation_sha256" =~ ^[0-9a-f]{64}$ ]] || return 1
 			local authorized_name authorized_path
@@ -337,7 +337,7 @@ v2_r2_require_binary_capacity_attestation() {
 		probe_cell="$probe_root/$probe_cell_name"
 		[[ -d "$probe_cell" && ! -L "$probe_cell" ]] || return 1
 		[[ "$(realpath -e -- "$probe_cell")" == "$probe_cell" ]] || return 1
-		if [[ "${v2_r2_sv1_candidate_id:-}" == V2-R2-SV1B-* ]]; then
+		if v2_r2_is_successor_candidate; then
 			[[ "$measurement_config_path" != /* && "$measurement_config_path" != */ && "$measurement_config_path" != *$'\n'* && "$measurement_config_path" != *$'\t'* ]] || return 1
 			measurement_config_abs="$root_dir/$measurement_config_path"
 			[[ -f "$measurement_config_abs" && ! -L "$measurement_config_abs" ]] || return 1
@@ -383,7 +383,7 @@ v2_r2_require_binary_capacity_attestation() {
 		for retained in "${retained_files[@]}"; do
 			[[ -s "$probe_cell/$retained" && ! -L "$probe_cell/$retained" ]] || return 1
 		done
-		if [[ "${v2_r2_sv1_candidate_id:-}" == V2-R2-SV1B-* ]]; then
+		if v2_r2_is_successor_candidate; then
 			measured_seed=$(jq -er '.measurement_seed | select(type == "number")' "$attestation") || return 1
 			measured_start_nano=$(jq -er '.simulation_start_nano | select(type == "number")' "$attestation") || return 1
 			measured_end_nano=$(jq -er '.simulation_end_nano | select(type == "number")' "$attestation") || return 1
@@ -407,7 +407,7 @@ v2_r2_require_binary_capacity_attestation() {
 					-f "$root_dir/scripts/v2-r2-sv1-terminal-outcome.jq" "$probe_cell/terminal-outcome.json" >/dev/null || return 1
 				[[ "$(jq -er '.status' "$probe_cell/terminal-outcome.json")" == completed ]] || return 1
 			fi
-			if [[ "${v2_r2_sv1_candidate_id:-}" == V2-R2-SV1B-* ]]; then
+			if v2_r2_is_successor_candidate; then
 				v2_r2_require_checkpoint_stream "$probe_cell/checkpoints.jsonl" "$measured_start_nano" "$measured_end_nano" evstream_v3 || return 1
 				v2_r2_require_binary_checkpoint_stream_exact "$probe_cell/checkpoints.jsonl" \
 					"$measured_start_nano" "$measured_end_nano" "$probe_cell/binary-evidence-attestation.json" || return 1

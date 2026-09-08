@@ -26,7 +26,7 @@ checkpoint_validator=${2:-"$root_dir/bin/checkpointvalidate"}
 checkpoint_validator_path=""
 checkpoint_validator_revision=""
 checkpoint_validator_sha256=""
-if [[ "${v2_r2_sv1_candidate_id:-}" == V2-R2-SV1B-* ]]; then
+if v2_r2_is_successor_candidate; then
 	checkpoint_validator_path=$(realpath -e -- "$checkpoint_validator") || {
 		echo "could not resolve the checkpoint validator binary" >&2
 		exit 1
@@ -41,7 +41,7 @@ fi
 primary_seed="${v2_r2_sv1_seeds[0]}"
 config="${V2_R2_SV1_CAPACITY_CONFIG:-${v2_r2_sv1_capacity_measurement_config:-$v2_r2_sv1_config_dir/treatment-$primary_seed.json}}"
 launch_config="${V2_R2_SV1_CAPACITY_LAUNCH_CONFIG:-${v2_r2_sv1_capacity_launch_config:-$config}}"
-if [[ "${v2_r2_sv1_candidate_id:-}" == V2-R2-SV1B-* && -z "${V2_R2_SV1_CAPACITY_LAUNCH_CONFIG:-}" ]]; then
+if v2_r2_is_successor_candidate && [[ -z "${V2_R2_SV1_CAPACITY_LAUNCH_CONFIG:-}" ]]; then
 	case "$(basename -- "$config")" in
 		control-*) launch_config="$v2_r2_sv1_config_dir/control-643.json" ;;
 		treatment-*) launch_config="$v2_r2_sv1_config_dir/treatment-643.json" ;;
@@ -133,7 +133,7 @@ trap 'exit 143' TERM
 v2_r2_acquire_namespace_lock || fail "could not acquire the SV1 capacity namespace lock"
 
 [[ -x "$binary" && -s "$config" && -s "$launch_config" ]] || fail "missing binary or capacity configuration"
-if [[ "${v2_r2_sv1_candidate_id:-}" == V2-R2-SV1B-* ]]; then
+if v2_r2_is_successor_candidate; then
 	v2_r2_register_checkpoint_validator "$checkpoint_validator" "$head_revision" "$checkpoint_validator_sha256" ||
 		fail "checkpoint validator is not a pinned Go 1.27 build of current HEAD"
 	[[ "$(realpath -e -- "$config")" == "$v2_r2_sv1_config_dir/$(basename -- "$config")" ]] ||
@@ -145,7 +145,7 @@ fi
 [[ -z "$(git -C "$root_dir" status --porcelain --untracked-files=all)" ]] || fail "scientific worktree is dirty"
 [[ "${GOMAXPROCS:-}" == "$expected_gomaxprocs" ]] || fail "capacity probe requires GOMAXPROCS=$expected_gomaxprocs"
 [[ "$expected_gomaxprocs" =~ ^[1-9][0-9]*$ ]] || fail "capacity probe process width is not integral"
-if [[ "${v2_r2_sv1_candidate_id:-}" == V2-R2-SV1B-* ]]; then
+if v2_r2_is_successor_candidate; then
 	[[ "$expected_gomaxprocs" == 4 || "$expected_gomaxprocs" == 8 ]] || fail "SV1B capacity probe width must be 4 or 8"
 	IFS=$'\t' read -r host_cpu_count allowed_cpu_count cpu_affinity < <(v2_r2_sv1b_cpu_policy) ||
 		fail "could not establish the registered CPU affinity policy"
@@ -180,7 +180,7 @@ done
 initial_available_free_bytes=$(capacity_free_bytes "$capacity_mount_path") || fail "could not measure initial free space"
 (( initial_available_free_bytes >= minimum_free_bytes )) ||
 	fail "initial free space is below the ${minimum_free_bytes}-byte reserve: $initial_available_free_bytes"
-if [[ "${v2_r2_sv1_candidate_id:-}" == V2-R2-SV1B-* ]]; then
+if v2_r2_is_successor_candidate; then
 	log_mode=full
 	evidence_format=evstream_v3
 else
@@ -191,7 +191,7 @@ fi
 source_config_seed=$(jq -er '.seed' "$config") || fail "registered capacity config has no seed"
 measurement_seed="$source_config_seed"
 capacity_only=false
-if [[ "${v2_r2_sv1_candidate_id:-}" == V2-R2-SV1B-* ]]; then
+if v2_r2_is_successor_candidate; then
 	measurement_seed="${V2_R2_SV1_CAPACITY_SEED:-$configured_measurement_seed}"
 	[[ "$measurement_seed" == "$configured_measurement_seed" ]] || fail "capacity-only measurement seed does not match the registered capacity contract"
 	[[ "$source_config_seed" == 643 && "$measurement_seed" == 659 && "$measurement_seed" != "$source_config_seed" ]] ||
@@ -226,7 +226,9 @@ launch_config_sha256=$(sha256sum "$launch_config" | awk '{print $1}')
 measurement_config_path=${config#"$root_dir/"}
 launch_config_path=${launch_config#"$root_dir/"}
 calibration_only=false
-[[ "${v2_r2_sv1_candidate_id:-}" == V2-R2-SV1B-* ]] && calibration_only=true
+if v2_r2_is_successor_candidate; then
+	calibration_only=true
+fi
 authorized_launch_config_sha256='[]'
 activation_provenance_path=""
 activation_review_attestation_path=""
@@ -381,7 +383,7 @@ jq -e --arg revision "$head_revision" --argjson seed "$measurement_seed" \
 	"$probe_dir/manifest.json" >/dev/null || fail "probe manifest provenance mismatch"
 jq -e --argjson start "$simulation_start_nano" --argjson end "$simulation_end_nano" \
 	'(.initial_accounts | type == "array" and length > 0 and all(.[]; .account.timestamp == $start)) and (.terminal_accounts | type == "array" and length > 0 and all(.[]; .account.timestamp == $end))' "$probe_dir/greeks.json" >/dev/null || fail "probe greeks do not attest the 24-hour horizon"
-if [[ "${v2_r2_sv1_candidate_id:-}" == V2-R2-SV1B-* ]]; then
+if v2_r2_is_successor_candidate; then
 	v2_r2_require_checkpoint_stream "$probe_dir/checkpoints.jsonl" "$simulation_start_nano" "$simulation_end_nano" evstream_v3 || fail "probe checkpoints do not attest the 24-hour horizon"
 	v2_r2_require_binary_checkpoint_stream_exact "$probe_dir/checkpoints.jsonl" \
 		"$simulation_start_nano" "$simulation_end_nano" "$probe_dir/binary-evidence-attestation.json" ||

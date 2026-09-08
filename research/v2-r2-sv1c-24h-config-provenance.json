@@ -1,0 +1,122 @@
+{
+  "schema_version": 1,
+  "contract": "v2-r2-sv1c-24h-config-provenance-v1",
+  "candidate": "V2-R2-SV1C-24H-CDF-LIQUIDITY",
+  "predecessor": "V2-R2-SV1B-24H-CDF-LIQUIDITY",
+  "source_configs": {
+    "dev-607.json": "3fef36431a1a62d5a9b59aeda96798bff033cba8dac88fdebe2c30a73183e7bd",
+    "dev-607-none.json": "6bddbcdec865ef26e23f169c8f7981a01e026220193986eed553a5637427f6be"
+  },
+  "activation_roster": {
+    "path": "research/configs/v2-r2-sv1c/activation-643.json",
+    "sha256": "2d3348bafc34dc7cc89024a5ad21acd3448b816591e4e86024d9ef6b52631155"
+  },
+  "activation_control": {
+    "path": "research/configs/v2-r2-sv1c/activation-643-control.json",
+    "sha256": "a5fa7f2e47251dbc89bb0160decaa60d1271e6e95770e3787635e05929178257"
+  },
+  "registered_configs": {
+    "control-643-none.json": "a99861ef4be8b7519ddbdf965f1ab654856120e05c4a383c10c5dfe8ef5ec76d",
+    "control-643.json": "d347bdd1ef4af7bcfbaf600991e2f84e133f42b4c1e7685d5b6cc5347755c0e3",
+    "control-647.json": "18e72a4e6cf90695b8dd1e1732858d213424eb8aa267f3c1af724531177b9c6c",
+    "control-653.json": "5bf25f08877ae06c90667b157906ea01957d08541e0af4740457c5703c7dc9b4",
+    "treatment-643.json": "f2d43a8e30882d070f2c1cc75dca342af45e84e0dd65cc254f8d8c4c9c85e56a",
+    "treatment-647.json": "8a2edfa528b93f363fd64cc896041df6e4df0c564090c4bd4ec06340ce7b1032",
+    "treatment-653.json": "69fcb711ec003fb7158700a516e451120f1751e61e7b5e09352bbd76ba8f08b7"
+  },
+  "fresh_development_seeds": [
+    643,
+    647,
+    653
+  ],
+  "activation_seed": 643,
+  "reserved_holdout_seeds": [
+    619,
+    631,
+    641
+  ],
+  "transform": {
+    "full_log_source": "research/configs/v2-integrated-longrun-r2/dev-607.json",
+    "no_log_source": "research/configs/v2-integrated-longrun-r2/dev-607-none.json",
+    "seed_rule": "set source seed to the first three unused odd primes greater than reserved holdout maximum 641",
+    "treatment": "inject the immutable SV1C activation roster and persist supplier decisions/receipts",
+    "control": "remove only the SV1C roster and supplier-decision recording; preserve the paired base configuration"
+  },
+  "generator": {
+    "path": "scripts/render-v2-r2-sv1c-24h-configs.sh",
+    "sha256": "50ee455bc059bee4d4ce3af3e597d7494c03dbe55e6e25449fca7b113accf7ab"
+  },
+  "withdrawal_measurement": {
+    "path": "research/v2-r2-sv1c-withdrawal-measurement-amendment-2026-09-08.md",
+    "sha256": "4f12fd11e7ab5c767e84cd3abb1d79e03bcc5789e58ceec791b38a11782d99f8"
+  },
+  "activation_diagnostics": {
+    "path": "research/v2-r2-sv1c-activation-diagnostics-amendment-2026-09-08.md",
+    "sha256": "bd45a28f602048ffcd41f061f935ee3b6c1c00cb423a8d2e05d3309e097bf488"
+  },
+  "preregistration": {
+    "path": "research/v2-r2-sv1c-strict-risk-amendment-2026-09-08.md",
+    "sha256": "988e224aa1e2d0ae8459b81eff47b0635350fc511ed4088a130bd70e1d715869"
+  },
+  "capacity_ordering": {
+    "path": "research/v2-r2-sv1c-activation-capacity-order-amendment-2026-09-08.md",
+    "sha256": "244faa31239440b9f3baf0ae87a298acc9e2ba63e69a3d072c6be1317bccc1ee"
+  },
+  "capacity_calibration": {
+    "contract": "v2-r2-sv1c-24h-binary-capacity-v1",
+    "mode": "production_capacity_measurement",
+    "calibration_only": true,
+    "cpu_limit_percent": 90,
+    "cpu_affinity_policy": "first_floor(0.9*host_cpus)",
+    "capacity_only_seed": 659,
+    "source_config_seed": 643,
+    "minimum_free_bytes": 4294967296,
+    "safety_margin_bytes": 4294967296,
+    "memory_limit_bytes": 21474836480,
+    "gomemlimit_bytes": 19327352832,
+    "measurement_config_path": "research/configs/v2-r2-sv1c-24h/treatment-643.json",
+    "launch_config_path": "research/configs/v2-r2-sv1c-24h/treatment-643.json",
+    "authorized_launch_config_sha256": [
+      "a99861ef4be8b7519ddbdf965f1ab654856120e05c4a383c10c5dfe8ef5ec76d",
+      "d347bdd1ef4af7bcfbaf600991e2f84e133f42b4c1e7685d5b6cc5347755c0e3",
+      "18e72a4e6cf90695b8dd1e1732858d213424eb8aa267f3c1af724531177b9c6c",
+      "5bf25f08877ae06c90667b157906ea01957d08541e0af4740457c5703c7dc9b4",
+      "f2d43a8e30882d070f2c1cc75dca342af45e84e0dd65cc254f8d8c4c9c85e56a",
+      "8a2edfa528b93f363fd64cc896041df6e4df0c564090c4bd4ec06340ce7b1032",
+      "69fcb711ec003fb7158700a516e451120f1751e61e7b5e09352bbd76ba8f08b7"
+    ],
+    "measurement_cases": [
+      {
+        "config_path": "research/configs/v2-r2-sv1c-24h/treatment-643.json",
+        "measurement_config_sha256": "f2d43a8e30882d070f2c1cc75dca342af45e84e0dd65cc254f8d8c4c9c85e56a",
+        "measurement_seed": 659,
+        "source_seed": 643,
+        "gomaxprocs": 4,
+        "attestation_path": "/home/vlad/v2-r2-sv1c-24h-binary-capacity-20260903-v4-capacity-seed-659-treatment-g4.json",
+        "probe_cell": "capacity-seed-659-treatment-g4",
+        "role": "capacity_only_seed_659_treatment_g4"
+      },
+      {
+        "config_path": "research/configs/v2-r2-sv1c-24h/control-643.json",
+        "measurement_config_sha256": "d347bdd1ef4af7bcfbaf600991e2f84e133f42b4c1e7685d5b6cc5347755c0e3",
+        "measurement_seed": 659,
+        "source_seed": 643,
+        "gomaxprocs": 4,
+        "attestation_path": "/home/vlad/v2-r2-sv1c-24h-binary-capacity-20260903-v4-capacity-seed-659-control-g4.json",
+        "probe_cell": "capacity-seed-659-control-g4",
+        "role": "capacity_only_seed_659_control_g4"
+      },
+      {
+        "config_path": "research/configs/v2-r2-sv1c-24h/treatment-643.json",
+        "measurement_config_sha256": "f2d43a8e30882d070f2c1cc75dca342af45e84e0dd65cc254f8d8c4c9c85e56a",
+        "measurement_seed": 659,
+        "source_seed": 643,
+        "gomaxprocs": 8,
+        "attestation_path": "/home/vlad/v2-r2-sv1c-24h-binary-capacity-20260903-v4-capacity-seed-659-treatment-g8.json",
+        "probe_cell": "capacity-seed-659-treatment-g8",
+        "role": "capacity_only_seed_659_treatment_g8"
+      }
+    ]
+  },
+  "holdout_policy": "development generator and checker never read or create holdout 619/631/641"
+}

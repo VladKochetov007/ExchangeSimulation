@@ -166,7 +166,7 @@ host_cpu_count=0
 allowed_cpu_count=0
 cpu_affinity=""
 cpu_launch_prefix=()
-if [[ "${v2_r2_sv1_candidate_id:-}" == V2-R2-SV1B-* ]]; then
+if v2_r2_is_successor_candidate; then
 	checkpoint_validator_path=$(realpath -e -- "$checkpoint_validator") || {
 		echo "could not resolve the checkpoint validator binary" >&2
 		exit 1
@@ -228,7 +228,7 @@ capacity_probe_cell=$(v2_r2_capacity_probe_cell_for_config "$config" "$expected_
 	exit 1
 }
 capacity_launch_config_sha256="$config_sha256"
-if [[ "${v2_r2_sv1_candidate_id:-}" == V2-R2-SV1B-* ]]; then
+if v2_r2_is_successor_candidate; then
 	capacity_measurement_config_path=$(jq -er '.measurement_config_path | select(type == "string" and length > 0)' "$capacity_attestation") || {
 		echo "capacity attestation omits its measured configuration path" >&2
 		exit 1
@@ -261,7 +261,7 @@ v2_r2_require_binary_capacity_attestation "$binary" "$sim_revision" "$capacity_a
 	exit 1
 }
 capacity_attestation_sha256=$(sha256sum -- "$capacity_attestation" | awk '{print $1}')
-if [[ "${v2_r2_sv1_candidate_id:-}" == V2-R2-SV1B-* ]]; then
+if v2_r2_is_successor_candidate; then
 	gomemlimit_bytes=${v2_r2_sv1_activation_gomemlimit_bytes:-$((v2_r2_sv1_capacity_memory_limit_bytes - 2 * 1024 * 1024 * 1024))}
 	minimum_free_bytes=${v2_r2_sv1_activation_minimum_free_bytes:-$((4 * 1024 * 1024 * 1024))}
 fi
@@ -419,7 +419,7 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 
 run_simulator_with_memory_guard() {
-	if [[ "${v2_r2_sv1_candidate_id:-}" != V2-R2-SV1B-* ]]; then
+	if ! v2_r2_is_successor_candidate; then
 		"$binary" -config "$output/run-config.json" -duration "$horizon" -logdir "$output" -log-mode "$log_mode" -evidence-format "$evidence_format" \
 			>"$stdout_log" 2>"$stderr_log"
 		return $?
@@ -602,7 +602,7 @@ if [[ "$terminal_failure" != true ]]; then
 		exit 1
 	}
 fi
-if [[ "${v2_r2_sv1_candidate_id:-}" == V2-R2-SV1B-* ]]; then
+if v2_r2_is_successor_candidate; then
 	v2_r2_require_checkpoint_stream "$output/checkpoints.jsonl" "$simulation_start_nano" "$simulation_end_nano" evstream_v3 || {
 		echo "exact evstream_v3 checkpoint stream does not attest the registered 24-hour horizon: $output" >&2
 		exit 1

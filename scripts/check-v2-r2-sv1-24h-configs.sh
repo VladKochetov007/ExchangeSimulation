@@ -46,33 +46,33 @@ jq -e --argjson expected_configs "$expected_files_json" \
 		 ($require_generator == false or ((.generator.path | type) == "string" and (.generator.sha256 | test("^[0-9a-f]{64}$"))))' "$provenance_manifest" >/dev/null || fail "invalid config provenance manifest"
 if [[ "$v2_r2_sv1_require_generator_metadata" == true ]]; then
 	generator_path=$(jq -er '.generator.path | select(type == "string")' "$provenance_manifest") || fail "config provenance omits generator path"
-	[[ "$generator_path" == "scripts/render-v2-r2-sv1b-24h-configs.sh" ]] || fail "config provenance names an unexpected generator"
+	[[ "$generator_path" == "$v2_r2_sv1_generator_path" ]] || fail "config provenance names an unexpected generator"
 	generator_file="$root_dir/$generator_path"
 	[[ -f "$generator_file" && ! -L "$generator_file" ]] || fail "config generator is missing or symlinked"
 	generator_sha=$(sha256sum "$generator_file" | awk '{print $1}')
 	[[ "$generator_sha" == "$(jq -er '.generator.sha256' "$provenance_manifest")" ]] || fail "config generator hash mismatch"
 fi
-if [[ "$v2_r2_sv1_candidate_id" == V2-R2-SV1B-* ]]; then
+if v2_r2_is_successor_candidate; then
 	withdrawal_measurement_path=$(jq -er '.withdrawal_measurement.path' "$provenance_manifest") || fail "SV1B provenance omits withdrawal measurement amendment"
-	[[ "$withdrawal_measurement_path" == "research/v2-r2-sv1b-withdrawal-measurement-amendment-2026-09-02.md" ]] || fail "SV1B provenance names an unexpected withdrawal measurement amendment"
+	[[ "$withdrawal_measurement_path" == "$v2_r2_sv1_withdrawal_measurement_path" ]] || fail "successor provenance names an unexpected withdrawal measurement amendment"
 	withdrawal_measurement_file="$root_dir/$withdrawal_measurement_path"
 	[[ -s "$withdrawal_measurement_file" && ! -L "$withdrawal_measurement_file" ]] || fail "missing withdrawal measurement amendment"
 	withdrawal_measurement_sha=$(sha256sum "$withdrawal_measurement_file" | awk '{print $1}')
 	[[ "$withdrawal_measurement_sha" == "$(jq -er '.withdrawal_measurement.sha256' "$provenance_manifest")" ]] || fail "withdrawal measurement amendment hash mismatch"
 	diagnostics_path=$(jq -er '.activation_diagnostics.path' "$provenance_manifest") || fail "SV1B provenance omits activation diagnostic amendment"
-	[[ "$diagnostics_path" == "research/v2-r2-sv1b-activation-diagnostics-amendment-2026-09-02.md" ]] || fail "SV1B provenance names an unexpected activation diagnostic amendment"
+	[[ "$diagnostics_path" == "$v2_r2_sv1_activation_diagnostics_path" ]] || fail "successor provenance names an unexpected activation diagnostic amendment"
 	diagnostics_file="$root_dir/$diagnostics_path"
 	[[ -s "$diagnostics_file" && ! -L "$diagnostics_file" ]] || fail "missing activation diagnostic amendment"
 	diagnostics_sha=$(sha256sum "$diagnostics_file" | awk '{print $1}')
 	[[ "$diagnostics_sha" == "$(jq -er '.activation_diagnostics.sha256' "$provenance_manifest")" ]] || fail "activation diagnostic amendment hash mismatch"
 	preregistration_path=$(jq -er '.preregistration.path | select(type == "string")' "$provenance_manifest") || fail "SV1B provenance omits preregistration"
-	[[ "$preregistration_path" == "research/v2-r2-sv1b-cdf-successor-preregistration-2026-09-02.md" ]] || fail "SV1B provenance names an unexpected preregistration"
+	[[ "$preregistration_path" == "$v2_r2_sv1_preregistration_path" ]] || fail "successor provenance names an unexpected preregistration"
 	preregistration_file="$root_dir/$preregistration_path"
 	[[ -s "$preregistration_file" && ! -L "$preregistration_file" ]] || fail "missing SV1B preregistration"
 	preregistration_sha=$(sha256sum "$preregistration_file" | awk '{print $1}')
 	[[ "$preregistration_sha" == "$(jq -er '.preregistration.sha256' "$provenance_manifest")" ]] || fail "SV1B preregistration hash mismatch"
 	capacity_order_path=$(jq -er '.capacity_ordering.path | select(type == "string")' "$provenance_manifest") || fail "SV1B provenance omits capacity-order amendment"
-	[[ "$capacity_order_path" == "research/v2-r2-sv1b-activation-capacity-order-amendment-2026-09-03.md" ]] || fail "SV1B provenance names an unexpected capacity-order amendment"
+	[[ "$capacity_order_path" == "$v2_r2_sv1_capacity_order_path" ]] || fail "successor provenance names an unexpected capacity-order amendment"
 	capacity_order_file="$root_dir/$capacity_order_path"
 	[[ -s "$capacity_order_file" && ! -L "$capacity_order_file" ]] || fail "missing capacity-order amendment"
 	capacity_order_sha=$(sha256sum "$capacity_order_file" | awk '{print $1}')
@@ -111,7 +111,7 @@ if [[ "$v2_r2_sv1_candidate_id" == V2-R2-SV1B-* ]]; then
 		 .capacity_calibration.launch_config_path == $launch_config_path and
 		 .capacity_calibration.authorized_launch_config_sha256 == $authorized and
 		 .capacity_calibration.measurement_cases == $cases' "$provenance_manifest" >/dev/null ||
-		fail "SV1B capacity provenance does not bind activation calibration to the registered launch set"
+		fail "successor capacity provenance does not bind activation calibration to the registered launch set"
 fi
 source_dir="$root_dir/research/configs/v2-integrated-longrun-r2"
 while IFS=$'\t' read -r relative expected_sha; do
@@ -121,8 +121,9 @@ while IFS=$'\t' read -r relative expected_sha; do
 done < <(jq -r '.source_configs | to_entries[] | [.key,.value] | @tsv' "$provenance_manifest")
 activation_sha=$(sha256sum "$activation_config" | awk '{print $1}')
 [[ "$activation_sha" == "$(jq -er '.activation_roster.sha256' "$provenance_manifest")" ]] || fail "activation roster hash mismatch"
-activation_control_path=$(jq -er '.activation_control.path | select(type == "string")' "$provenance_manifest") || fail "SV1B provenance omits activation control"
-[[ "$activation_control_path" == "research/configs/v2-r2-sv1b/activation-643-control.json" ]] || fail "SV1B provenance names an unexpected activation control"
+activation_control_path=$(jq -er '.activation_control.path | select(type == "string")' "$provenance_manifest") || fail "successor provenance omits activation control"
+expected_activation_control_path="${v2_r2_sv1_activation_control_config#"$root_dir/"}"
+[[ "$activation_control_path" == "$expected_activation_control_path" ]] || fail "successor provenance names an unexpected activation control"
 activation_control_file="$root_dir/$activation_control_path"
 [[ -s "$activation_control_file" && ! -L "$activation_control_file" ]] || fail "missing activation control"
 activation_control_sha=$(sha256sum "$activation_control_file" | awk '{print $1}')
@@ -133,13 +134,25 @@ while IFS=$'\t' read -r relative expected_sha; do
 	[[ -s "$path" && "$(sha256sum "$path" | awk '{print $1}')" == "$expected_sha" ]] || fail "registered config hash mismatch: $relative"
 done < <(jq -r '.registered_configs | to_entries[] | [.key,.value] | @tsv' "$provenance_manifest")
 
+if [[ "$v2_r2_sv1_candidate_id" == V2-R2-SV1C-* ]]; then
+	for strict_config in "$activation_config" "$activation_control_file" "$config_dir"/*.json; do
+		jq -e '
+			.strict_risk_contract == true and
+			.auto_borrow_spot == false and
+			.cross_asset_spot_graph == true and
+			.cross_asset_collateral_marks == false and
+			(.perp_exposure_hedger == null or .perp_exposure_hedger.auto_borrow_perp != true)
+		' "$strict_config" >/dev/null || fail "SV1C strict-risk contract is not explicit in $strict_config"
+	done
+fi
+
 calendar='[{"name":"short","listing_interval_nano":3600000000000,"time_to_expiry_nano":7200000000000},{"name":"medium","listing_interval_nano":10800000000000,"time_to_expiry_nano":21600000000000},{"name":"long","listing_interval_nano":21600000000000,"time_to_expiry_nano":43200000000000}]'
 jq -e '.elastic_liquidity_suppliers | type == "array" and length == 4' "$activation_config" >/dev/null || fail "activation roster must contain four suppliers"
 for activation_pair_config in "$activation_config" "$activation_control_file"; do
 	jq -e '.seed == 643 and .log_mode == "full" and .evidence_format == "evstream_v3" and .record_market_data_receipts == true' "$activation_pair_config" >/dev/null ||
 		fail "activation pair config is not explicit full-log evstream evidence: $activation_pair_config"
 done
-if [[ "$v2_r2_sv1_candidate_id" == V2-R2-SV1B-* ]]; then
+if v2_r2_is_successor_candidate; then
 	jq -e '
 		all(.elastic_liquidity_suppliers[];
 			(.max_loss_quote | type) == "number" and .max_loss_quote > 0 and
@@ -148,7 +161,7 @@ if [[ "$v2_r2_sv1_candidate_id" == V2-R2-SV1B-* ]]; then
 			(.minimum_executable_qty | type) == "number" and
 			.minimum_executable_qty == (.base_precision / 1000) and
 			.minimum_executable_qty <= .max_quote_qty)
-	' "$activation_config" >/dev/null || fail "SV1B roster must register a 10 percent marked-equity loss budget and venue minimum executable depth"
+	' "$activation_config" >/dev/null || fail "successor roster must register a 10 percent marked-equity loss budget and venue minimum executable depth"
 fi
 roster=$(jq -c '.elastic_liquidity_suppliers' "$activation_config")
 

@@ -161,7 +161,7 @@ funding_interval_seconds=$(jq -er '.funding_interval_seconds' "$cell/run-config.
 simulation_start_nano=$(jq -er '.simulation_start_nano' "$cell/run-metadata.json")
 simulation_end_nano=$(jq -er '.simulation_end_nano' "$cell/run-metadata.json")
 [[ "$seed" == "$config_seed" ]] || fail "metadata/config seed mismatch"
-	if [[ "${v2_r2_sv1_candidate_id:-}" == V2-R2-SV1B-* ]]; then
+	if v2_r2_is_successor_candidate; then
 		checkpoint_validator_path=$(jq -er '.checkpoint_validator_path | select(type == "string")' "$cell/run-metadata.json") ||
 			fail "SV1B run metadata omits the checkpoint validator path"
 		checkpoint_validator_revision=$(jq -er '.checkpoint_validator_revision | select(type == "string")' "$cell/run-metadata.json") ||
@@ -390,7 +390,7 @@ if [[ "$terminal_failure" != true ]]; then
 		 all(.[]; .account.timestamp == $simulation_end_nano))' \
 		"$cell/greeks.json" >/dev/null || fail "greeks report does not attest the registered 24-hour horizon"
 fi
-if [[ "${v2_r2_sv1_candidate_id:-}" == V2-R2-SV1B-* ]]; then
+if v2_r2_is_successor_candidate; then
 	v2_r2_require_checkpoint_stream "$cell/checkpoints.jsonl" "$simulation_start_nano" "$simulation_end_nano" evstream_v3 ||
 		fail "exact evstream_v3 checkpoint stream does not attest the registered 24-hour horizon"
 	v2_r2_require_binary_checkpoint_stream_exact "$cell/checkpoints.jsonl" \

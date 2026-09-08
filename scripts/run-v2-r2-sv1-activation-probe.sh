@@ -464,8 +464,9 @@ run_arm() {
 			--arg evidence_manifest_sha256 "$evidence_manifest_sha256" \
 			--argjson peak_rss_bytes "$simulator_peak_rss_bytes" --arg peak_rss_at "$simulator_peak_rss_at" \
 			--argjson initial_free_bytes "$simulator_initial_free_bytes" --argjson final_free_bytes "$simulator_final_free_bytes" \
-			--argjson resource_guard_failed "$resource_guard_failed" --arg resource_guard_reason "$resource_guard_reason" \
-			'{schema_version: 2, contract: "v2-r2-sv1b-activation-arm-status-v1", arm: $arm,
+		--argjson resource_guard_failed "$resource_guard_failed" --arg resource_guard_reason "$resource_guard_reason" \
+		--arg arm_status_contract "\${v2_r2_sv1_activation_arm_status_contract:-v2-r2-sv1b-activation-arm-status-v1}" \
+		'{schema_version: 2, contract: $arm_status_contract, arm: $arm,
 		 exit_status: $exit_status, completion_verified: ($terminal_failure | not),
 		 terminal_failure_verified: $terminal_failure, terminal_outcome_status: $outcome_status,
 		 terminal_outcome_sha256: $terminal_outcome_sha256, run_metadata_sha256: $run_metadata_sha256,
