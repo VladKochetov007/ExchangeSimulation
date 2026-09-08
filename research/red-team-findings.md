@@ -3298,3 +3298,55 @@ turning the U-shape into the two monotone slices it almost certainly is.
 
 **Scope.** One seed, one configuration. Placements count accepted orders, not
 resting depth.
+
+## RT-057 — The liquidation subsystem is never exercised
+
+**Classification.** COVERAGE GAP, not a defect. An unexercised path is untested,
+not broken — and this one is untested by a factor of 335.
+
+**Base.** `a666d02faede3d40f046b11e60eb672c59386a94`, 8 h, seeds 607/608/609.
+
+**Measured** (`research/tools/marginheadroom`; headroom is equity over
+maintenance margin, so liquidation is due at 1.0x):
+
+| seed | accounts | zero maintenance | **min headroom** | median | closest account |
+|---|---:|---:|---:|---:|---|
+| 607 | 258 | 140 | **335.6x** | 16 651x | `carry_arb_1` |
+| 608 | 258 | 138 | **335.0x** | 16 089x | `carry_arb_2` |
+| 609 | 258 | 140 | **335.7x** | 16 993x | `carry_arb_1` |
+
+The nearest approach to liquidation anywhere in the population is **335x the
+threshold**, against a registered prediction of 10x and a falsifier at 2x. **138
+to 140 of 258 accounts (54%) carry zero maintenance margin** — they hold no
+position the risk engine can act on.
+
+**The stability is the interesting part.** The minimum is 335.6, 335.0, 335.7
+across three independent seeds — a **0.2% spread** on runs whose PnL levels swing
+five-fold (RT-041). The closest account is always a **carry arbitrageur**, and
+RT-046 showed every carry arbitrageur pinned at its configured 500-contract cap.
+The cap fixes the position, which fixes the maintenance margin, which fixes the
+headroom. **The population's closest approach to insolvency is a configuration
+constant.**
+
+**Corroborated independently.** The **insurance fund is empty in all three seeds**
+— no venue, no asset, no entry. Never drawn on because never needed.
+
+**What this campaign therefore does not test**: the liquidation trigger,
+liquidation ordering across a book, partial versus full unwind, the insurance
+fund, bankruptcy accounting, and any auto-deleveraging path. RT-045 recorded zero
+liquidation events; this shows it was not a near miss.
+
+**The honest framing.** Nothing here says the liquidation engine is wrong. It says
+every conclusion this campaign supports about fairness under stress comes from a
+population that never experienced any, and that the risk parameters — absent from
+every config key, so engine defaults nobody chose for this scenario — have never
+had to hold.
+
+**Correction to a published denominator.** RT-033 and RT-041 describe
+`triangle_arb` as "6 participants out of 252". The population is **258**; 252 was
+the total excluding `triangle_arb` itself. The 75.4% share-of-gains figure is a
+ratio of values, not headcounts, and is unaffected.
+
+**Scope.** Three seeds, one configuration, terminal snapshots. A transient mid-run
+approach would not appear, though a 335x terminal margin makes one implausible; a
+time-resolved check is the obvious extension.

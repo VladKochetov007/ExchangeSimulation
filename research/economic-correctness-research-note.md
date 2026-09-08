@@ -6090,6 +6090,123 @@ Placements count accepted orders, not resting depth.
 Recorded as RT-056.
 
 
+**H-068 (PREREGISTERED) — the liquidation and bankruptcy paths are NOT EXERCISED
+by this campaign: nobody comes near the threshold, so an entire risk subsystem is
+untested.**
+
+**New family, from a loose thread.** [[RT-045]] observed **0 liquidation events**
+in the whole 8 h run and used it to retract a claim, but never asked the obvious
+follow-up: *how close did anyone get?* A simulation whose participants never
+approach insolvency is not testing its margin engine, its liquidation ordering,
+its insurance fund, or its bankruptcy accounting — and those are exactly the paths
+where an exchange's fairness guarantees are hardest.
+
+**Why it is likely.** Participants are endowed enormously: makers carry
+**100 M USD** of perpetual collateral against positions of a few hundred
+contracts, and [[RT-046]] found the carry arbitrageurs capped at 500 contracts
+against the same 100 M. The effective config contains **no margin, leverage or
+liquidation keys at all**, so every risk parameter is an engine default nobody
+chose for this campaign.
+
+**Metric.** Margin headroom = `Equity / Maintenance` from the terminal account
+snapshots. Liquidation is due when equity falls below maintenance, i.e. at a ratio
+of **1.0**. A participant with no derivative position has `Maintenance == 0` and
+carries no liquidation risk at all; those are counted separately rather than
+folded in as infinitely safe.
+
+**Claims.**
+1. **Zero** liquidation events (verified for seed 607 in RT-045; treated here as
+   the observation to be explained, not re-derived).
+2. Across participants that actually carry maintenance margin, the **minimum**
+   headroom ratio is **≥10×** — an order of magnitude from the threshold.
+3. A substantial share of the population has `Maintenance == 0`, i.e. holds no
+   position the risk engine can act on.
+
+**Falsifiers.**
+(a) minimum headroom **< 2×** → someone is genuinely close, the margin system is
+being exercised, and this is not a gap;
+(b) `Maintenance == 0` for **almost everyone** (>90%) → the ratio is vacuous and
+the finding must be restated as "almost nobody holds risk", which is a different
+and simpler claim;
+(c) headroom varies wildly across seeds → the terminal snapshot is not
+representative and a time-resolved measure is needed.
+
+**What this can and cannot establish.** It can show the campaign never visits the
+liquidation path. It **cannot** show the liquidation code is wrong — an
+unexercised path is untested, not broken. The finding would be about **coverage**,
+which is the honest category.
+
+**Instrument.** New Go tool `research/tools/marginheadroom`: reads terminal
+account snapshots, reports the headroom distribution among participants with
+non-zero maintenance, the count with zero maintenance, and the closest approach.
+
+**Discriminating experiment E-073**, preregistered before the runs: seeds 607,
+608, 609 at 8 h, `-log-mode none` (the snapshots suffice).
+Status: **SUPPORTED WITHIN TESTED SCOPE** — minimum headroom 335x against a 10x
+prediction; no falsifier fired.
+
+
+**E-073 — H-068 SUPPORTED on every claim. The closest any account comes to
+liquidation is **335× the threshold**, and it is the same actor at the same value
+across three independent seeds. The entire risk-unwind subsystem is NOT
+EXERCISED.**
+Base: `a666d02faede3d40f046b11e60eb672c59386a94`, 8 h, seeds 607/608/609.
+Reproduce: `go run research/tools/marginheadroom/main.go -files <s607>/greeks.json,<s608>/greeks.json,<s609>/greeks.json`.
+
+| seed | accounts | zero maintenance | **min headroom** | median headroom | closest account |
+|---|---:|---:|---:|---:|---|
+| 607 | 258 | 140 | **335.6×** | 16 651× | `carry_arb_1` |
+| 608 | 258 | 138 | **335.0×** | 16 089× | `carry_arb_2` |
+| 609 | 258 | 140 | **335.7×** | 16 993× | `carry_arb_1` |
+
+Liquidation is due at **1.0×**. The nearest approach in the entire population is
+**335×**, against a preregistered threshold of 10× — a factor of **33 beyond**
+what would already have counted as "nowhere near". Claim 2 supported; falsifier
+(a), which needed under 2×, misses by more than two orders of magnitude.
+
+**Claim 3 supported**: **138–140 of 258 accounts (54%)** carry *zero* maintenance
+margin — they hold no position the risk engine can act on at all. Falsifier (b)
+needed above 90% for the metric to be vacuous; at 54% the ratio is meaningful for
+the other half.
+
+**Falsifier (c) does not fire, and its absence is itself informative.** The
+minimum headroom is **335.6, 335.0, 335.7** across three independent seeds — a
+**0.2% spread** on runs whose PnL levels swing 5× ([[RT-041]]). That stability has
+a cause already in the record: the closest account is always a **carry
+arbitrageur**, and [[RT-046]] showed every carry arbitrageur pinned at its
+configured 500-contract cap. **The cap fixes the position, which fixes the
+maintenance margin, which fixes the headroom.** The population's closest approach
+to insolvency is a configuration constant.
+
+**Corroboration from a second, independent quantity.** The **insurance fund is
+empty in all three seeds** — no asset, no venue, no entry. It is never drawn on
+because it is never needed.
+
+**What is therefore untested by this campaign**: the liquidation trigger, the
+liquidation ordering across a book, partial versus full unwind, the insurance
+fund, bankruptcy accounting, and any auto-deleveraging path. [[RT-045]] recorded
+**0 liquidation events**; this explains why, and shows it is not a near miss.
+
+**The honest category is coverage, not correctness.** An unexercised path is
+**untested, not broken**. Nothing here says the liquidation engine is wrong. It
+says that every conclusion this campaign supports about fairness under stress is
+drawn from a population that never experienced any, and that the risk parameters —
+which appear in **no** config key, so they are engine defaults nobody chose for
+this scenario — have never had to hold.
+
+**Minor correction to a published denominator.** [[RT-033]] and [[RT-041]] describe
+`triangle_arb` as "6 participants out of 252". The population is **258**; 252 was
+the total excluding `triangle_arb` itself. The share-of-gains figure (75.4%) is a
+ratio of values, not headcounts, and is unaffected.
+
+**Scope.** Three seeds, one configuration, terminal snapshots. Headroom is measured
+at the end of the run, so a transient mid-run approach would not appear — though a
+335× terminal margin makes one implausible, and a time-resolved check is the
+obvious extension if anyone doubts it.
+
+Recorded as RT-057.
+
+
 ---
 
 ## F. Findings
@@ -6106,6 +6223,17 @@ See `research/red-team-findings.md` for the full records.
 - **RT-003** — bounded no-violation results (INV-2, INV-5, INV-6, identity).
 - **RT-006** — latency is delivered as configured across 225 link x channel
   rows; no unearned speed advantage. Transport only.
+- **RT-057** — **the liquidation subsystem is NOT EXERCISED.** Across three seeds
+  the closest any of 258 accounts comes to liquidation is **335x the threshold**
+  (median 16 000x+), **54% carry zero maintenance margin at all**, and the
+  **insurance fund is empty in every seed**. The minimum is **335.6 / 335.0 /
+  335.7** — a 0.2% spread on runs whose PnL swings 5x — because the closest
+  account is always a carry arbitrageur pinned at its [[RT-046]] position cap, so
+  **the population's nearest approach to insolvency is a configuration constant**.
+  Liquidation triggers, unwind ordering, the insurance fund, bankruptcy accounting
+  and auto-deleveraging are all untested. **Coverage, not correctness** — an
+  unexercised path is untested, not broken. Also corrects RT-033/RT-041's
+  denominator: the population is 258, not 252.
 - **RT-056** — **[[RT-054]]'s Q3 regime is explained, and the option lineage
   closes.** The dealer's bid gate is per-contract inventory acting through skew:
   at 24.65 USD per lot against a 147.9 USD half-spread, **6.0 lots short exactly
