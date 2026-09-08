@@ -209,6 +209,7 @@ capacity_probe_cell=$(v2_r2_capacity_probe_cell_for_config "$config" "$expected_
 	echo "registered cell $cell has no exact production capacity probe identity" >&2
 	exit 1
 }
+capacity_launch_config_sha256="$config_sha256"
 if [[ "${v2_r2_sv1_candidate_id:-}" == V2-R2-SV1B-* ]]; then
 	capacity_measurement_config_path=$(jq -er '.measurement_config_path | select(type == "string" and length > 0)' "$capacity_attestation") || {
 		echo "capacity attestation omits its measured configuration path" >&2
@@ -224,12 +225,20 @@ if [[ "${v2_r2_sv1_candidate_id:-}" == V2-R2-SV1B-* ]]; then
 		exit 1
 	}
 	measurement_config_sha256=$(sha256sum -- "$capacity_measurement_config" | awk '{print $1}')
+	capacity_launch_config_sha256=$(jq -er '.launch_config_sha256 | select(type == "string" and test("^[0-9a-f]{64}$"))' "$capacity_attestation") || {
+		echo "capacity attestation omits its measured launch configuration hash" >&2
+		exit 1
+	}
+	v2_r2_sv1b_require_authorized_capacity_config "$capacity_attestation" "$config_sha256" || {
+		echo "registered cell $cell is not authorized by the representative capacity attestation" >&2
+		exit 1
+	}
 fi
 [[ "$evidence_format" == "evstream_v3" ]] || {
 	echo "registered successor cell requires evstream_v3 evidence (got $evidence_format)" >&2
 	exit 1
 }
-v2_r2_require_binary_capacity_attestation "$binary" "$sim_revision" "$capacity_attestation" "" "$expected_gomaxprocs" $((4 * 1024 * 1024 * 1024)) true "$config_sha256" "${v2_r2_sv1_capacity_memory_limit_bytes:-}" "$measurement_config_sha256" "$activation_provenance_sha256" "$activation_review_attestation_sha256" || {
+v2_r2_require_binary_capacity_attestation "$binary" "$sim_revision" "$capacity_attestation" "" "$expected_gomaxprocs" $((4 * 1024 * 1024 * 1024)) true "$capacity_launch_config_sha256" "${v2_r2_sv1_capacity_memory_limit_bytes:-}" "$measurement_config_sha256" "$activation_provenance_sha256" "$activation_review_attestation_sha256" || {
 	echo "refusing long-run launch without a matching measured binary-evidence capacity attestation" >&2
 	exit 1
 }
@@ -282,8 +291,9 @@ jq -n \
 	--arg output_dir "$output" \
 	--arg evidence_manifest_path "$output/evidence-manifest.json" \
 	--arg external_attestation_path "$v2_r2_attestation_root/$cell.json" \
-		--arg capacity_attestation_path "$capacity_attestation" \
+	--arg capacity_attestation_path "$capacity_attestation" \
 		--arg capacity_attestation_sha256 "$capacity_attestation_sha256" \
+		--arg capacity_launch_config_sha256 "$capacity_launch_config_sha256" \
 			--arg capacity_probe_cell "$capacity_probe_cell" \
 			--arg activation_provenance_sha256 "$activation_provenance_sha256" \
 			--arg review_attestation_path "$review_attestation_path" --arg review_attestation_sha256 "$review_attestation_sha256" \
@@ -324,6 +334,7 @@ jq -n \
 			  allowed_cpu_count: $allowed_cpu_count, cpu_limit_percent: $cpu_limit_percent,
 			  cpu_affinity: $cpu_affinity, minimum_free_bytes: $minimum_free_bytes, output_dir: $output_dir,
 			  capacity_attestation_path: $capacity_attestation_path, capacity_attestation_sha256: $capacity_attestation_sha256,
+			  capacity_launch_config_sha256: $capacity_launch_config_sha256,
 			  capacity_probe_cell: $capacity_probe_cell,
 			  activation_provenance_sha256: (if $activation_provenance_sha256 == "" then null else $activation_provenance_sha256 end),
 			  review_attestation_path: (if $review_attestation_path == "" then null else $review_attestation_path end),

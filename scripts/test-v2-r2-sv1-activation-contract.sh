@@ -158,6 +158,28 @@ if jq '.result.risk_state_decision_count = 0' "$temp_root/marked-risk.json" >"$t
 fi
 
 source "$root_dir/scripts/v2-r2-sv1b-24h-contract.sh"
+
+capacity_selector_fixture="$temp_root/capacity-selector.json"
+authorized_capacity_hashes=$(jq -c '[.registered_configs[]]' "$root_dir/research/v2-r2-sv1b-24h-config-provenance.json")
+jq -n --argjson authorized "$authorized_capacity_hashes" \
+	'{authorized_launch_config_sha256: $authorized}' >"$capacity_selector_fixture"
+authorized_capacity_hash=$(jq -er '.registered_configs["treatment-647.json"]' "$root_dir/research/v2-r2-sv1b-24h-config-provenance.json")
+v2_r2_sv1b_require_authorized_capacity_config "$capacity_selector_fixture" "$authorized_capacity_hash" || {
+	echo "an authorized non-representative capacity configuration was rejected" >&2
+	exit 1
+}
+if v2_r2_sv1b_require_authorized_capacity_config "$capacity_selector_fixture" "$(printf '0%.0s' {1..64})"; then
+	echo "an unregistered capacity configuration was accepted" >&2
+	exit 1
+fi
+rg -F 'v2_r2_sv1b_require_authorized_capacity_config "$capacity_attestation" "$config_sha256"' "$cell_runner" >/dev/null || {
+	echo "SV1B cell runner does not bind the selected config to the capacity authorization set" >&2
+	exit 1
+}
+rg -F '"$capacity_launch_config_sha256"' "$cell_runner" >/dev/null || {
+	echo "SV1B cell runner does not pass the measured capacity launch identity" >&2
+	exit 1
+}
 for required_guard in 'terminate_simulator()' 'kill -KILL' 'final free-space measurement failed after the simulator exited'; do
 	rg -F "$required_guard" "$cell_runner" >/dev/null || {
 		echo "SV1 cell runner is missing required resource guard: $required_guard" >&2

@@ -93,6 +93,26 @@ v2_r2_sv1b_cpu_policy() {
 	printf '%s\t%s\t0-%s\n' "$host_cpu_count" "$allowed_cpu_count" "$((allowed_cpu_count - 1))"
 }
 
+# A representative capacity run measures one immutable launch configuration,
+# while the attestation may authorize a finite set of contract variants. The
+# selected cell must be a member of that attested set; it is not the measured
+# representative configuration unless the hashes happen to be identical.
+v2_r2_sv1b_require_authorized_capacity_config() {
+	[[ $# -eq 2 ]] || return 1
+	local attestation_path=$1 selected_config_sha256=$2
+	[[ "$attestation_path" == /* && "$attestation_path" != */ && "$attestation_path" != *$'\n'* && "$attestation_path" != *$'\t'* ]] || return 1
+	[[ "$selected_config_sha256" =~ ^[0-9a-f]{64}$ ]] || return 1
+	[[ -f "$attestation_path" && ! -L "$attestation_path" ]] || return 1
+	[[ "$(realpath -e -- "$attestation_path")" == "$attestation_path" ]] || return 1
+	jq -e --arg selected_config_sha256 "$selected_config_sha256" '
+		type == "object" and
+		(.authorized_launch_config_sha256 | type) == "array" and
+		(.authorized_launch_config_sha256 | length) > 0 and
+		all(.authorized_launch_config_sha256[]; type == "string" and test("^[0-9a-f]{64}$")) and
+		(.authorized_launch_config_sha256 | index($selected_config_sha256)) != null' \
+		"$attestation_path" >/dev/null
+}
+
 v2_r2_sv1b_git_tree_sha256() {
 	[[ $# -eq 1 ]] || return 1
 	local revision=$1
