@@ -629,6 +629,9 @@ func (e *DefaultExchange) settleExpiredInstrument(symbol string, now int64) {
 			e.Positions.UpdatePosition(ep.clientID, symbol, absSize, settlementPrice, closeSide, pos.PositionSide)
 		}
 
+		settlementChanges := []BalanceDelta{{Asset: quote, Wallet: "perp", OldBalance: oldBal, NewBalance: newBal, Delta: netCash}}
+		e.conservation.record(settlementChanges)
+
 		if log != nil {
 			log.LogEvent(now, ep.clientID, "expiry_settlement", ExpirySettlementEvent{
 				Timestamp: now, ClientID: ep.clientID, Symbol: symbol,
@@ -640,7 +643,7 @@ func (e *DefaultExchange) settleExpiredInstrument(symbol string, now int64) {
 			log.LogEvent(now, ep.clientID, "balance_change", BalanceChangeEvent{
 				Timestamp: now, ClientID: ep.clientID, Symbol: symbol,
 				PositionSide: pos.PositionSide.String(), Reason: "expiry_settlement",
-				Changes: []BalanceDelta{{Asset: quote, Wallet: "perp", OldBalance: oldBal, NewBalance: newBal, Delta: netCash}},
+				Changes: settlementChanges,
 			})
 		}
 	}
