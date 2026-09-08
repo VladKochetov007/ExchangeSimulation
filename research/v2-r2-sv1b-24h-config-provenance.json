@@ -9,11 +9,11 @@
   },
   "activation_roster": {
     "path": "research/configs/v2-r2-sv1b/activation-643.json",
-    "sha256": "d3b2765c1cc3ed6b888489d089b53967e349087acfe19dab9520981c866c5407"
+    "sha256": "7f80b935c38fdcb1b14b90c8ba216c6f6f82c97a24448a1459c028f3f087e9da"
   },
   "activation_control": {
     "path": "research/configs/v2-r2-sv1b/activation-643-control.json",
-    "sha256": "6db124f3ea10df2eea3ba5d6f9735d36dc845faf0b41912c5eb1acbe4ce06765"
+    "sha256": "b255bd3377d780ddc9ea31656aa4c7c55bf49090530b2e0dd94cb3889ee54b1f"
   },
   "registered_configs": {
     "control-643-none.json": "1bb69ef8ccbf8b627e469c626dbd8298de88ce58962fa87a9b38ef5169ce5580",
