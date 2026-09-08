@@ -5699,6 +5699,128 @@ at or before each placement, inheriting the 1 s snapshot cadence.
 Recorded as RT-053.
 
 
+**H-065 (PREREGISTERED) — [[RT-053]]'s third-quarter symmetry is a
+**time-to-expiry** effect, not a calendar one.**
+
+**The clue that reframes it.** The timestamp embedded in an option symbol is its
+**expiry**, not its listing. Decoded against the run start, the five expiries fall
+at exactly **+2 h, +4 h, +6 h, +8 h and +12 h**. The anomalous third quarter spans
+**+4 h to +6 h** — it is bounded by two expiries. A "quarter" is a calendar
+artifact of my own bucketing; the dealer has no notion of it. Time to expiry is a
+quantity the dealer actually sees.
+
+**Representation change.** Stop bucketing by run quarter and bucket by **hours
+remaining to expiry at the moment of the quote**, cross-cut with the quote-time
+moneyness already established in RT-053. If the anomaly is really about tenor,
+the calendar pattern should dissolve into a tenor pattern.
+
+**Claims.**
+1. The bid/ask placement ratio rises toward **~100% at short time to expiry**,
+   across moneyness buckets — i.e. the dealer quotes both sides for contracts near
+   expiry regardless of whether they are in the money.
+2. Controlling for tenor, RT-053's moneyness rule **persists**: within a
+   comparable tenor band, in-the-money placements still show a far higher bid/ask
+   ratio than out-of-the-money ones.
+3. Q3's placements are concentrated at **short tenor**, which is what made the
+   calendar quarter look anomalous.
+
+**Falsifiers.**
+(a) the ratio is **flat across tenor** (varies less than 2× between the shortest
+and longest bands) → tenor is not the driver, a **third** candidate is eliminated,
+and RT-053's anomaly stays open with no remaining hypothesis;
+(b) Q3 placements are **not** concentrated at short tenor → claim 3 fails and the
+calendar coincidence is not the explanation;
+(c) the moneyness rule **disappears** once tenor is controlled → RT-053's headline
+was a tenor effect in disguise and must be reissued, which would be the more
+serious outcome.
+
+**Why this is worth one more experiment rather than moving on.** Two candidates
+have already been eliminated by measurement (risk-limit withdrawal, classification
+artifact). If tenor also fails, the honest position is that the dealer's quoting
+has a regime change nobody has explained, and that is a finding in itself — a
+bounded negative result rather than an open loop.
+
+**Instrument.** Extend `quoteside` with a tenor axis: hours to expiry at quote
+time, cross-cut with quote-time moneyness, reporting counts alongside every ratio.
+
+**Discriminating experiment E-070**, preregistered before the run: seed 607, 8 h,
+`-log-mode full`.
+Status: **MIXED** — claim 1 falsified, claims 2 and 3 supported; tenor is
+eliminated as the anomaly's explanation, the third candidate to fall.
+
+
+**E-070 — H-065 MIXED. Tenor is eliminated as the explanation for
+[[RT-053]]'s anomaly — the third candidate to fall — but the anomaly is now
+described precisely: in Q3 the dealer quotes **only** short-dated contracts, and
+quotes every one of them in strictly paired form.**
+Base: `a666d02faede3d40f046b11e60eb672c59386a94`, seed 607, 8 h, `-log-mode full`.
+Reproduce: `go run research/tools/quoteside/main.go -dir <logdir>` and the same
+with `-quarter 3`.
+
+**Whole run**, bid/ask by quote-time moneyness × hours to expiry:
+
+| | <0.5h | 0.5–1h | 1–2h | 2–4h | ≥4h |
+|---|---|---|---|---|---|
+| ITM (+1…+5%) | **100%** | **100%** | **100%** | **100%** | **100%** |
+| at the money | 58% | 74% | 65% | 94% | 88% |
+| OTM (−1…−5%) | 34% | 15% | **9%** | 47% | 17% |
+
+**Claim 2 SUPPORTED — the moneyness rule is robust to tenor.** In-the-money
+placements are **exactly paired in every tenor band**; out-of-the-money ones never
+exceed 47%. RT-053's headline is not a tenor effect in disguise, so falsifier (c)
+does not fire.
+
+**Claim 1 FALSIFIED.** I predicted the ratio would rise toward 100% at short
+tenor. For OTM it runs **34%, 15%, 9%, 47%, 17%** — non-monotone, and the shortest
+band is not the highest. Tenor does matter (a 5.2× spread, so falsifier (a)'s
+"flat" does not fire either) but not in the direction predicted.
+
+**Claim 3 SUPPORTED: Q3 is entirely short-dated.** Its placements are 21.6%
+under 0.5 h, 23.7% at 0.5–1 h, 54.6% at 1–2 h — **99.9% under two hours** — and
+**zero** at ≥4 h, against **170 439** such placements in the run as a whole.
+
+**But tenor does not explain the anomaly, and the Q3-only cut proves it.**
+Restricting to the third quarter, **every cell is exactly 100%**:
+
+| Q3 only | <0.5h | 0.5–1h | 1–2h |
+|---|---|---|---|
+| ITM | 100% (6 383/6 383) | 100% (7 218/7 218) | 100% (19 698/19 698) |
+| at the money | 100% (3 088/3 088) | 100% (3 459/3 459) | 100% (8 973/8 973) |
+| **OTM** | **100% (3 475/3 476)** | **100% (3 542/3 542)** | **100% (8 750/8 750)** |
+
+Removing Q3 from the whole-run figures, the OTM band reads **27.7%, 10.4%, 3.9%,
+47.3%, 17.4%** — so outside Q3 short tenor does *not* produce paired quoting, and
+inside Q3 every tenor does. **Tenor and the anomaly are orthogonal.** Third
+candidate eliminated.
+
+**What Q3 actually is, stated as description rather than mechanism.** Two things
+change together: the dealer **stops quoting every contract with more than about
+two hours to expiry**, and it quotes those that remain in **strictly paired**
+form. Not a shift in degree — 3 542/3 542, 8 750/8 750, 19 698/19 698 — with a
+single unpaired ask in one cell (3 475/3 476) as the only blemish in 60 000
+placements.
+
+**Status: a bounded negative result, which is a finding rather than an open
+loop.** Three candidate explanations have now been eliminated by measurement —
+risk-limit withdrawal ([[RT-052]]), classification artifact ([[RT-053]]), and
+tenor (here). The dealer has a regime in which it quotes a restricted, short-dated
+subset of contracts symmetrically. **I do not know why, and after seven mechanism
+questions in this campaign that is the honest place to stop this lineage** rather
+than to keep generating candidates.
+
+**What an owner can do with this without further audit work.** The measurement is
+precise enough to act on: `option_dealer`'s quoting has two distinct modes, the
+transition happens around the +4 h expiry boundary, and in one mode it abandons
+all contracts beyond ~2 h tenor. Whether that is intended is a question about the
+dealer's design that its author can answer far more cheaply than I can measure it.
+
+**Scope.** One seed, one configuration. Placements count accepted orders, not
+resting depth. Quarters are calendar bucketing of the observer's choosing; the
+tenor axis is the dealer's own.
+
+Recorded as RT-054.
+
+
 ---
 
 ## F. Findings
@@ -5715,6 +5837,15 @@ See `research/red-team-findings.md` for the full records.
 - **RT-003** — bounded no-violation results (INV-2, INV-5, INV-6, identity).
 - **RT-006** — latency is delivered as configured across 225 link x channel
   rows; no unearned speed advantage. Transport only.
+- **RT-054** — **tenor eliminated** as the explanation for [[RT-053]]'s anomaly,
+  the third candidate to fall. The moneyness rule is robust to tenor (ITM exactly
+  paired in **every** band; OTM never above 47%), but the anomaly is orthogonal:
+  outside Q3 short tenor does not produce paired quoting (OTM 27.7%/10.4%/3.9%),
+  and inside Q3 **every** cell is exactly 100%. Q3 is now precisely described —
+  the dealer **stops quoting all contracts beyond ~2 h tenor** (zero placements at
+  ≥4 h, against 170 439 in the run) and quotes the rest in strictly paired form,
+  one unpaired ask in 60 000 placements. **Why is unknown, and this lineage stops
+  here** as a bounded negative result rather than a fourth guess.
 - **RT-053** — bucketing the dealer's quotes by **moneyness at quote time** gives a
   clean monotone rule over the 1.31 M placements that carry the volume —
   **100.0% in the money, 74.9% at the money, 16.7% out of it** — with the ITM

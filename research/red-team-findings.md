@@ -3121,3 +3121,58 @@ already collected.
 **Scope.** One seed, one configuration. Placements count accepted orders, not
 resting depth or time-weighted presence. Quote-time spot is the consensus mid at
 or before each placement, inheriting the 1 s snapshot cadence.
+
+## RT-054 — Tenor eliminated; the dealer's second regime described precisely
+
+**Classification.** BOUNDED NEGATIVE RESULT. Third candidate mechanism eliminated
+by measurement; the anomaly is now described sharply enough to act on without
+being explained.
+
+**Base.** `a666d02faede3d40f046b11e60eb672c59386a94`, seed 607, 8 h, full logs.
+
+**Whole run**, bid/ask by quote-time moneyness x hours to expiry:
+
+| | <0.5h | 0.5–1h | 1–2h | 2–4h | ≥4h |
+|---|---|---|---|---|---|
+| ITM (+1…+5%) | **100%** | **100%** | **100%** | **100%** | **100%** |
+| at the money | 58% | 74% | 65% | 94% | 88% |
+| OTM (−1…−5%) | 34% | 15% | **9%** | 47% | 17% |
+
+**The moneyness rule is robust to tenor.** In-the-money placements are exactly
+paired in *every* tenor band; out-of-the-money ones never exceed 47%. RT-053's
+headline is not a tenor effect in disguise.
+
+**The registered tenor prediction failed.** I expected the ratio to rise toward
+100% at short tenor. For OTM it runs 34, 15, 9, 47, 17 per cent — non-monotone,
+and the shortest band is not the highest. Tenor matters (a 5.2x spread) but not in
+the predicted direction.
+
+**Q3 is entirely short-dated**: 21.6% under 0.5 h, 23.7% at 0.5–1 h, 54.6% at
+1–2 h — **99.9% under two hours** — and **zero** placements at ≥4 h, against
+**170 439** in the run as a whole.
+
+**But tenor does not explain the anomaly.** Restricting to Q3, every cell is
+exactly 100%: OTM reads 3 475/3 476, 3 542/3 542, 8 750/8 750. Removing Q3 from
+the whole-run figures, the OTM band reads 27.7%, 10.4%, 3.9%, 47.3%, 17.4%.
+**Outside Q3 short tenor does not produce paired quoting; inside Q3 every tenor
+does.** The two are orthogonal.
+
+**What Q3 is, as description rather than mechanism.** Two things change together:
+the dealer **stops quoting every contract beyond about two hours to expiry**, and
+quotes those that remain in **strictly paired** form — 3 542/3 542, 8 750/8 750,
+19 698/19 698, with a single unpaired ask in roughly 60 000 placements.
+
+**Three candidates eliminated by measurement**: risk-limit withdrawal (RT-052),
+classification artifact (RT-053), tenor (this). **I do not know why the regime
+changes**, and after seven mechanism questions in this campaign that is where this
+lineage stops rather than producing a fourth guess.
+
+**Actionable without further audit work.** `option_dealer` has two distinct
+quoting modes; the transition sits near the +4 h expiry boundary; in one mode it
+abandons all contracts beyond ~2 h tenor. Whether that is intended is a question
+about the dealer's design its author can answer far more cheaply than this can be
+measured.
+
+**Scope.** One seed, one configuration. Placements count accepted orders, not
+resting depth. Quarters are the observer's calendar bucketing; the tenor axis is
+the dealer's own.

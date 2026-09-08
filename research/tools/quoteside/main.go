@@ -102,19 +102,43 @@ func class(role string) string {
 	return role[:cut]
 }
 
-var optionPattern = regexp.MustCompile(`^ABC-\d+-(\d+)-([CP])$`)
+var optionPattern = regexp.MustCompile(`^ABC-(\d+)-(\d+)-([CP])$`)
 
-// contract returns an option's strike and whether it is a call.
-func contract(symbol string) (strike float64, isCall, isOption bool) {
+// contract returns an option's expiry, strike and whether it is a call. The
+// timestamp embedded in the symbol is the expiry, not the listing: decoded
+// against the run start the five expiries fall at +2, +4, +6, +8 and +12 hours.
+func contract(symbol string) (expiry int64, strike float64, isCall, isOption bool) {
 	m := optionPattern.FindStringSubmatch(symbol)
 	if m == nil {
-		return 0, false, false
+		return 0, 0, false, false
 	}
-	value, err := strconv.ParseFloat(m[1], 64)
+	when, err := strconv.ParseInt(m[1], 10, 64)
 	if err != nil {
-		return 0, false, false
+		return 0, 0, false, false
 	}
-	return value, m[2] == "C", true
+	value, err := strconv.ParseFloat(m[2], 64)
+	if err != nil {
+		return 0, 0, false, false
+	}
+	return when, value, m[3] == "C", true
+}
+
+// tenorBucket names a band of hours remaining to expiry. A quarter of the run is
+// a calendar artifact of the observer; time to expiry is a quantity the dealer
+// actually sees.
+func tenorBucket(hours float64) (int, string) {
+	switch {
+	case hours < 0.5:
+		return 0, "<0.5h to expiry"
+	case hours < 1:
+		return 1, "0.5-1h"
+	case hours < 2:
+		return 2, "1-2h"
+	case hours < 4:
+		return 3, "2-4h"
+	default:
+		return 4, ">=4h"
+	}
 }
 
 // signedMoneyness is positive when the contract is in the money, for both calls
@@ -154,6 +178,7 @@ func main() {
 	logDir := flag.String("dir", "", "log directory of a full-log run")
 	greeksPath := flag.String("greeks", "", "greeks.json (default <dir>/greeks.json)")
 	focus := flag.String("class", "option_dealer", "participant class to attribute")
+	onlyQuarter := flag.Int("quarter", 0, "restrict to one run quarter, 1-4; 0 uses the whole run")
 	flag.Parse()
 	if *logDir == "" {
 		fmt.Fprintln(os.Stderr, "-dir is required")
@@ -288,13 +313,16 @@ func main() {
 		return consensus[stamps[i-1]], true
 	}
 
-	// Pass 3: bucket dealer placements by quote-time moneyness.
-	buckets := make([]tally, 5)
-	names := make([]string, 5)
+	// Pass 3: cross-cut placements by quote-time moneyness and time to expiry.
+	type cell struct{ bid, ask int }
+	grid := map[[2]int]*cell{}
+	moneyNames := make([]string, 5)
+	tenorNames := make([]string, 5)
+	q3Tenor := map[int]int{}
 	unpriced := 0
 	scan(func(rec record) {
 		symbol := rec.Data.Payload.Symbol
-		strike, isCall, isOption := contract(symbol)
+		expiry, strike, isCall, isOption := contract(symbol)
 		if !isOption {
 			return
 		}
@@ -306,49 +334,80 @@ func main() {
 			unpriced++
 			return
 		}
-		idx, label := bucketOf(signedMoneyness(spot, strike, isCall))
-		names[idx] = label
+		mi, mlabel := bucketOf(signedMoneyness(spot, strike, isCall))
+		hours := float64(expiry*1_000_000_000-rec.SimTS) / 3.6e12
+		ti, tlabel := tenorBucket(hours)
+		moneyNames[mi], tenorNames[ti] = mlabel, tlabel
 		side := rec.Data.Payload.Side
 		if side == "" {
 			side = rec.Data.Payload.Payload.Side
 		}
-		quarter := int((rec.SimTS - first) * 4 / span)
-		if quarter > 3 {
-			quarter = 3
+		quarter := int((rec.SimTS-first)*4/span) + 1
+		if quarter > 4 {
+			quarter = 4
+		}
+		if *onlyQuarter != 0 && quarter != *onlyQuarter {
+			return
+		}
+		idx := [2]int{mi, ti}
+		if grid[idx] == nil {
+			grid[idx] = &cell{}
 		}
 		if side == "BUY" {
-			buckets[idx].bid[quarter]++
+			grid[idx].bid++
 		} else {
-			buckets[idx].ask[quarter]++
+			grid[idx].ask++
+		}
+		if quarter == 3 {
+			q3Tenor[ti]++
 		}
 	})
 
-	fmt.Printf("%s placements by moneyness AT QUOTE TIME (spot = median ABC/USD mid)\n", *focus)
+	fmt.Printf("%s: bid/ask by quote-time moneyness (rows) and hours to expiry (cols)\n", *focus)
 	if unpriced > 0 {
 		fmt.Printf("  placements with no prior spot: %d\n", unpriced)
 	}
-	fmt.Printf("%-22s %10s %10s %9s   %s\n", "bucket", "bids", "asks", "bid/ask", "bid/ask by quarter")
-	for i := 0; i < 5; i++ {
-		bids, asks := sum(buckets[i].bid), sum(buckets[i].ask)
-		if bids+asks == 0 {
+	fmt.Printf("%-22s", "")
+	for t := 0; t < 5; t++ {
+		if tenorNames[t] == "" {
 			continue
 		}
-		ratio := "-"
-		if asks > 0 {
-			ratio = fmt.Sprintf("%.1f%%", float64(bids)/float64(asks)*100)
+		fmt.Printf("%22s", tenorNames[t])
+	}
+	fmt.Println()
+	for m := 0; m < 5; m++ {
+		if moneyNames[m] == "" {
+			continue
 		}
-		quarters := make([]string, 4)
-		for q := 0; q < 4; q++ {
-			if buckets[i].ask[q] > 0 {
-				quarters[q] = fmt.Sprintf("%.0f%%", float64(buckets[i].bid[q])/float64(buckets[i].ask[q])*100)
-			} else if buckets[i].bid[q] > 0 {
-				quarters[q] = "inf"
-			} else {
-				quarters[q] = "-"
+		fmt.Printf("%-22s", moneyNames[m])
+		for t := 0; t < 5; t++ {
+			if tenorNames[t] == "" {
+				continue
 			}
+			c := grid[[2]int{m, t}]
+			if c == nil || c.bid+c.ask == 0 {
+				fmt.Printf("%22s", "-")
+				continue
+			}
+			if c.ask == 0 {
+				fmt.Printf("%22s", fmt.Sprintf("inf (%d/0)", c.bid))
+				continue
+			}
+			fmt.Printf("%22s", fmt.Sprintf("%.0f%% (%d/%d)", float64(c.bid)/float64(c.ask)*100, c.bid, c.ask))
 		}
-		fmt.Printf("%-22s %10d %10d %9s   %s\n",
-			names[i], bids, asks, ratio, strings.Join(quarters, " "))
+		fmt.Println()
+	}
+
+	fmt.Printf("\nthird-quarter placements by tenor band\n")
+	total := 0
+	for _, n := range q3Tenor {
+		total += n
+	}
+	for t := 0; t < 5; t++ {
+		if q3Tenor[t] == 0 {
+			continue
+		}
+		fmt.Printf("  %-18s %8d  %5.1f%%\n", tenorNames[t], q3Tenor[t], float64(q3Tenor[t])/float64(total)*100)
 	}
 }
 
