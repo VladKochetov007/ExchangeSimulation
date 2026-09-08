@@ -2039,9 +2039,7 @@ func (e *DefaultExchange) CheckPositionMarginerLiquidations() {
 			if equity >= profile.Maintenance {
 				continue
 			}
-			for _, pos := range positions {
-				e.liquidate(clientID, client, symbol, pos, inst, timestamp)
-			}
+			e.liquidateAccount(clientID, client, quote, timestamp)
 			delete(profiles, key)
 		}
 	}
@@ -2081,12 +2079,13 @@ func (e *DefaultExchange) addPositionMarginerExposure(p *accountMarginProfile, c
 	return nil
 }
 
-// CheckLiquidations evaluates all positions for a symbol after a mark price update.
+// CheckLiquidations evaluates cross-margin accounts after a mark price update.
 // Cross-margin account model: equity = perp balance − borrowed quote debt +
 // equity contribution across EVERY margined book in the same quote asset (order
 // margin is locked, not lost); the maintenance requirement likewise sums over
-// all books, so the same cash can never back two symbols at once. On breach the triggering symbol's
-// positions are closed; other symbols resolve on their own mark updates.
+// all books, so the same cash can never back two symbols at once. On breach the
+// complete same-quote portfolio is closed in canonical order, then account debt
+// and any deficit are finalized once.
 // Hedge-mode Long/Short positions are included.
 func (e *DefaultExchange) CheckLiquidations(symbol string, perp *PerpFutures, markPrice int64) {
 	quote := perp.QuoteAsset()
@@ -2152,9 +2151,7 @@ func (e *DefaultExchange) CheckLiquidations(symbol string, perp *PerpFutures, ma
 					"maintenance_margin":             maintenanceMargin,
 				})
 			}
-			for _, pos := range positions {
-				e.liquidate(clientID, client, symbol, pos, perp, timestamp)
-			}
+			e.liquidateAccount(clientID, client, quote, timestamp)
 		} else if equity < warningMargin && e.LiquidationHandler != nil {
 			marginRatio := int64(0)
 			if notional > 0 {
@@ -2209,12 +2206,81 @@ func (e *DefaultExchange) EstimateLiquidationPrice(pos *Position, clientID uint6
 	return pos.EntryPrice + MulDiv(balance, precision, -pos.Size), nil
 }
 
-// liquidate forcibly closes a position via market order when maintenance margin is breached.
+type liquidationPosition struct {
+	symbol     string
+	position   Position
+	instrument Instrument
+}
+
+type liquidationFill struct {
+	symbol       string
+	positionSize int64
+	fillPrice    int64
+}
+
+// collectAccountLiquidationPositionsLocked returns every same-quote margined
+// position in canonical symbol/side order. A cross-margin breach is an account
+// event: choosing only the symbol whose mark arrived first lets a profitable
+// sibling hide or expose a deficit depending on event order.
+func (e *DefaultExchange) collectAccountLiquidationPositionsLocked(clientID uint64, quote string) []liquidationPosition {
+	positions := e.Positions.GetAllPositions(clientID)
+	slices.SortFunc(positions, func(a, b Position) int {
+		if order := cmp.Compare(a.Symbol, b.Symbol); order != 0 {
+			return order
+		}
+		return cmp.Compare(a.PositionSide, b.PositionSide)
+	})
+
+	result := make([]liquidationPosition, 0, len(positions))
+	for _, position := range positions {
+		book := e.Books[position.Symbol]
+		if book == nil || book.Instrument.QuoteAsset() != quote {
+			continue
+		}
+		if _, pending := e.settlementPending[position.Symbol]; pending {
+			continue
+		}
+		_, isMargined := book.Instrument.(etypes.Margined)
+		_, isPositionMargined := book.Instrument.(etypes.PositionMarginer)
+		if !isMargined && !isPositionMargined {
+			continue
+		}
+		result = append(result, liquidationPosition{symbol: position.Symbol, position: position, instrument: book.Instrument})
+	}
+	return result
+}
+
+func (e *DefaultExchange) hasOpenAccountLiquidationPositionLocked(clientID uint64, quote string) bool {
+	return len(e.collectAccountLiquidationPositionsLocked(clientID, quote)) > 0
+}
+
+// liquidateAccount closes the complete same-quote portfolio before it settles
+// any remaining debt or insurance deficit. Partial fills deliberately leave the
+// account open for a later mark-triggered retry; a positive sibling position is
+// never socialized away merely because a different symbol was attempted first.
 // Caller must hold e.mu.Lock().
-func (e *DefaultExchange) liquidate(clientID uint64, client *Client, symbol string, pos *Position, inst Instrument, timestamp int64) {
+func (e *DefaultExchange) liquidateAccount(clientID uint64, client *Client, quote string, timestamp int64) {
+	positions := e.collectAccountLiquidationPositionsLocked(clientID, quote)
+	fills := make([]liquidationFill, 0, len(positions))
+	for _, target := range positions {
+		fill, ok := e.liquidatePosition(clientID, client, target.symbol, &target.position, target.instrument, timestamp)
+		if ok {
+			fills = append(fills, fill)
+		}
+	}
+	if len(fills) > 0 {
+		e.finalizeAccountLiquidation(clientID, client, quote, timestamp, fills)
+	}
+}
+
+// liquidatePosition forcibly closes one position and records only the fill-local
+// effects. Account debt and insurance are finalized after every same-quote
+// position has had a chance to close.
+// Caller must hold e.mu.Lock().
+func (e *DefaultExchange) liquidatePosition(clientID uint64, client *Client, symbol string, pos *Position, inst Instrument, timestamp int64) (liquidationFill, bool) {
 	book := e.Books[symbol]
 	if book == nil {
-		return
+		return liquidationFill{}, false
 	}
 
 	closeSide := Sell
@@ -2224,111 +2290,97 @@ func (e *DefaultExchange) liquidate(clientID uint64, client *Client, symbol stri
 	fillPrice, filledQty, filled := e.forceClose(clientID, client, book, book.Instrument, closeSide, pos.PositionSide, abs(pos.Size), timestamp)
 	if !filled {
 		// No liquidity in the book; position stays open for retry on next mark price update.
-		return
+		return liquidationFill{}, false
 	}
 
 	// Fee on the quantity that actually closed: a thin book can absorb only
 	// part of the position, and billing the full attempted size would
 	// overcharge every partial liquidation.
 	e.chargeClearanceFee(clientID, client, symbol, inst, filledQty, fillPrice, timestamp)
+	return liquidationFill{symbol: symbol, positionSize: pos.Size, fillPrice: fillPrice}, true
+}
 
+func (e *DefaultExchange) finalizeAccountLiquidation(clientID uint64, client *Client, quote string, timestamp int64, fills []liquidationFill) {
 	if e.BorrowingMgr != nil {
-		borrowed := client.Borrowed[inst.QuoteAsset()]
+		borrowed := client.Borrowed[quote]
 		if borrowed > 0 {
-			availableForRepay := client.PerpAvailable(inst.QuoteAsset())
+			availableForRepay := client.PerpAvailable(quote)
 			if availableForRepay > 0 {
 				debtBefore := borrowed
 				repayAmount := min(borrowed, availableForRepay)
 
-				oldBorrowed := client.Borrowed[inst.QuoteAsset()]
-				oldPerp := client.PerpBalances[inst.QuoteAsset()]
-				client.Borrowed[inst.QuoteAsset()] -= repayAmount
-				client.BorrowedSpot[inst.QuoteAsset()] = min(
-					client.BorrowedSpot[inst.QuoteAsset()],
-					client.Borrowed[inst.QuoteAsset()],
-				)
-				debtAfter := client.Borrowed[inst.QuoteAsset()]
-				if debtAfter <= 0 {
-					e.closeCollateralInterestRemainderLocked(clientID, inst.QuoteAsset(), timestamp, "liquidation", debtBefore, debtAfter)
+				oldBorrowed := client.Borrowed[quote]
+				oldPerp := client.PerpBalances[quote]
+				client.Borrowed[quote] -= repayAmount
+				client.BorrowedSpot[quote] = min(client.BorrowedSpot[quote], client.Borrowed[quote])
+				debtAfter := client.Borrowed[quote]
+				if debtAfter == 0 {
+					e.closeCollateralInterestRemainderLocked(clientID, quote, timestamp, "liquidation", debtBefore, debtAfter)
 				}
-				client.PerpBalances[inst.QuoteAsset()] -= repayAmount
+				client.PerpBalances[quote] -= repayAmount
 
-				logBalanceChange(e, timestamp, clientID, symbol, "liquidation_repay", []BalanceDelta{
-					perpDelta(inst.QuoteAsset(), oldPerp, client.PerpBalances[inst.QuoteAsset()]),
-					borrowedDelta(inst.QuoteAsset(), oldBorrowed, client.Borrowed[inst.QuoteAsset()]),
+				logBalanceChange(e, timestamp, clientID, fills[0].symbol, "liquidation_repay", []BalanceDelta{
+					perpDelta(quote, oldPerp, client.PerpBalances[quote]),
+					borrowedDelta(quote, oldBorrowed, client.Borrowed[quote]),
 				})
 
 				if log := e.getLogger("_global"); log != nil {
 					log.LogEvent(timestamp, clientID, "repay", RepayEvent{
-						Timestamp:     timestamp,
-						ClientID:      clientID,
-						Asset:         inst.QuoteAsset(),
-						Principal:     repayAmount,
-						Interest:      0,
-						RemainingDebt: debtAfter,
-						Reason:        "liquidation",
+						Timestamp: timestamp, ClientID: clientID, Asset: quote,
+						Principal: repayAmount, Interest: 0,
+						RemainingDebt: debtAfter, Reason: "liquidation",
 					})
 				}
 			}
 		}
 	}
 
-	// Settlement already released this position's margin and the book's order
-	// margin was released by cancelClientOrdersOnBook. Remaining reservations
-	// back the client's orders and positions on OTHER symbols — never zero them.
-	// Bankruptcy is a negative cash balance after the close.
-	quote := inst.QuoteAsset()
-	balance := client.PerpBalances[quote]
+	// A still-open sibling is a live portfolio asset, not an insurance claim.
+	// Defer deficit socialization until all same-quote liquidation attempts have
+	// either closed or become terminally unfillable.
 	debt := int64(0)
-	if balance < 0 {
-		debt = -balance
-		client.PerpBalances[quote] = 0
-		e.moveVenueBalance(VenueInsuranceFund, quote, -debt, timestamp, symbol, "liquidation_deficit")
+	if !e.hasOpenAccountLiquidationPositionLocked(clientID, quote) {
+		balance := client.PerpBalances[quote]
+		if balance < 0 {
+			debt = -balance
+			client.PerpBalances[quote] = 0
+			e.moveVenueBalance(VenueInsuranceFund, quote, -debt, timestamp, fills[0].symbol, "liquidation_deficit")
 
-		logBalanceChange(e, timestamp, clientID, symbol, "liquidation_deficit", []BalanceDelta{
-			perpDelta(quote, balance, 0),
-		})
-	}
-
-	// A liquidation and any insurance-fund movement it causes must be visible in
-	// the event log, not only to a handler the run may not have installed. The
-	// logs are the observational surface for market behaviour after the fact.
-	if log := e.getLogger(symbol); log != nil {
-		log.LogEvent(timestamp, clientID, "liquidation", map[string]any{
-			"symbol":         symbol,
-			"position_size":  pos.Size,
-			"fill_price":     fillPrice,
-			"remaining_debt": debt,
-		})
-	}
-	if debt > 0 {
-		if log := e.getLogger("_global"); log != nil {
-			log.LogEvent(timestamp, clientID, "insurance_fund", map[string]any{
-				"symbol":  symbol,
-				"asset":   quote,
-				"delta":   -debt,
-				"balance": e.ExchangeBalance.InsuranceFund[quote],
-				"reason":  "liquidation_deficit",
+			logBalanceChange(e, timestamp, clientID, fills[0].symbol, "liquidation_deficit", []BalanceDelta{
+				perpDelta(quote, balance, 0),
 			})
 		}
 	}
 
-	if e.LiquidationHandler != nil {
-		e.LiquidationHandler.OnLiquidation(&LiquidationEvent{
-			Timestamp:     timestamp,
-			ClientID:      clientID,
-			Symbol:        symbol,
-			PositionSize:  pos.Size,
-			FillPrice:     fillPrice,
-			RemainingDebt: debt,
-		})
-		if debt > 0 {
+	// Emit every position fill after account-level finalization so each
+	// liquidation receipt carries the same terminal deficit, if any.
+	for _, fill := range fills {
+		if log := e.getLogger(fill.symbol); log != nil {
+			log.LogEvent(timestamp, clientID, "liquidation", map[string]any{
+				"symbol": fill.symbol, "position_size": fill.positionSize,
+				"fill_price": fill.fillPrice, "remaining_debt": debt,
+			})
+		}
+		if e.LiquidationHandler != nil {
+			e.LiquidationHandler.OnLiquidation(&LiquidationEvent{
+				Timestamp: timestamp, ClientID: clientID, Symbol: fill.symbol,
+				PositionSize: fill.positionSize, FillPrice: fill.fillPrice,
+				RemainingDebt: debt,
+			})
+		}
+	}
+	if debt > 0 {
+		if log := e.getLogger("_global"); log != nil {
+			log.LogEvent(timestamp, clientID, "insurance_fund", map[string]any{
+				"symbol": fills[0].symbol, "asset": quote,
+				"delta": -debt, "balance": e.ExchangeBalance.InsuranceFund[quote],
+				"reason": "liquidation_deficit",
+			})
+		}
+		if e.LiquidationHandler != nil {
 			e.LiquidationHandler.OnInsuranceFund(&InsuranceFundEvent{
-				Timestamp: timestamp,
-				Symbol:    symbol,
-				Delta:     -debt,
-				Balance:   e.ExchangeBalance.InsuranceFund[quote],
-				Reason:    "liquidation_deficit",
+				Timestamp: timestamp, Symbol: fills[0].symbol, Delta: -debt,
+				Balance: e.ExchangeBalance.InsuranceFund[quote], Reason: "liquidation_deficit",
 			})
 		}
 	}
