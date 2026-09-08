@@ -153,6 +153,7 @@ type runEvidenceDescriptor struct {
 }
 
 func readEvidenceFormat(dir string) (string, error) {
+	var selected string
 	for _, name := range []string{"run-config.json", "run-metadata.json"} {
 		raw, err := os.ReadFile(filepath.Join(dir, name))
 		if os.IsNotExist(err) {
@@ -165,11 +166,20 @@ func readEvidenceFormat(dir string) (string, error) {
 		if err := json.Unmarshal(raw, &descriptor); err != nil {
 			return "", fmt.Errorf("analysis: decode %s: %w", name, err)
 		}
-		if descriptor.EvidenceFormat != "" {
-			return descriptor.EvidenceFormat, nil
+		if descriptor.EvidenceFormat == "" {
+			continue
 		}
+		switch descriptor.EvidenceFormat {
+		case "jsonl", "evstream_v3":
+		default:
+			return "", fmt.Errorf("analysis: unsupported evidence format %q in %s", descriptor.EvidenceFormat, name)
+		}
+		if selected != "" && selected != descriptor.EvidenceFormat {
+			return "", fmt.Errorf("analysis: conflicting evidence formats %q and %q", selected, descriptor.EvidenceFormat)
+		}
+		selected = descriptor.EvidenceFormat
 	}
-	return "", nil
+	return selected, nil
 }
 
 // Open reads a run's report and indexes its event logs.

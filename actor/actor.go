@@ -507,17 +507,26 @@ func (a *BaseActor) decodeResponse(resp exchange.Response) []*Event {
 		event := &Event{
 			Type: eventType,
 			Data: OrderFillEvent{
-				OrderID:   data.OrderID,
-				Symbol:    data.Symbol,
-				Qty:       data.Qty,
-				Price:     data.Price,
-				Side:      data.Side,
-				IsFull:    data.IsFull,
-				TradeID:   data.TradeID,
-				FeeAmount: data.FeeAmount,
-				FeeAsset:  data.FeeAsset,
-				Timestamp: data.Timestamp,
+				OrderID:       data.OrderID,
+				Symbol:        data.Symbol,
+				Qty:           data.Qty,
+				Price:         data.Price,
+				Side:          data.Side,
+				IsFull:        data.IsFull,
+				TradeID:       data.TradeID,
+				FeeAmount:     data.FeeAmount,
+				FeeAsset:      data.FeeAsset,
+				Forced:        data.Forced,
+				LiquidationID: data.LiquidationID,
+				Timestamp:     data.Timestamp,
 			},
+		}
+		if data.Forced {
+			// A liquidation fill is produced by the venue's synthetic close order,
+			// not by a client request. Its order ID is intentionally absent from
+			// activeOrders; buffering it would lose the only actor-visible position
+			// transition forever.
+			return []*Event{event}
 		}
 		if _, ok := a.activeOrders.Load(data.OrderID); !ok {
 			a.bufferEarlyOrderEvent(data.OrderID, event)

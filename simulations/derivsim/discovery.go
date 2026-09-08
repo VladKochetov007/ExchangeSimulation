@@ -38,6 +38,7 @@ type contractSet struct {
 	onFill   func(symbol string, e actor.OrderFillEvent)
 	onAccept func(symbol string, reqID, orderID uint64)
 	onReject func(reqID uint64)
+	onCancel func(e actor.OrderCancelledEvent)
 }
 
 func newContractSet(underlying string) *contractSet {
@@ -126,6 +127,16 @@ func (cs *contractSet) handle(evt *actor.Event) bool {
 
 	case actor.EventOrderPartialFill, actor.EventOrderFilled:
 		e := evt.Data.(actor.OrderFillEvent)
+		if e.Forced {
+			// A forced liquidation fill carries its authoritative symbol because
+			// the venue-generated close order has no client acceptance to resolve.
+			// Never park it in earlyFill under a synthetic order ID.
+			if e.Symbol == "" {
+				return true
+			}
+			cs.dispatchFill(e.Symbol, e)
+			return true
+		}
 		sym, ok := cs.orderSym[e.OrderID]
 		if !ok {
 			// Marketable order: fill delivered before its accept.
@@ -138,6 +149,9 @@ func (cs *contractSet) handle(evt *actor.Event) bool {
 	case actor.EventOrderCancelled:
 		e := evt.Data.(actor.OrderCancelledEvent)
 		delete(cs.orderSym, e.OrderID)
+		if cs.onCancel != nil {
+			cs.onCancel(e)
+		}
 		return true
 	}
 	return false

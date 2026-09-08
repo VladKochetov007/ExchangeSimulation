@@ -178,9 +178,14 @@ type DefaultExchange struct {
 	// markEpochBySymbol binds each stored risk mark to the completed exchange
 	// mark pass that produced it. A cross-margin decision must never combine a
 	// caller-supplied trigger mark with an unrelated stale sibling mark.
-	markEpoch                    uint64
-	markEpochBySymbol            map[string]uint64
-	riskMarkSnapshots            map[string]riskMarkSnapshot
+	markEpoch         uint64
+	markEpochBySymbol map[string]uint64
+	riskMarkSnapshots map[string]riskMarkSnapshot
+	// The expiry scheduler can run at the same simulated timestamp as the
+	// price scheduler. Reusing this completed pass prevents stateful mark and
+	// liquidation work from being applied twice in one phase.
+	lastMarkPassTimestamp        int64
+	lastMarkPassEpoch            uint64
 	CollateralRate               int64
 	LiquidationFeeBps            int64
 	requireExactLinearAccounting bool
@@ -204,7 +209,13 @@ type DefaultExchange struct {
 	indexFeedSymbols    []string
 	indexFeedProvider   PriceSource
 	priceUpdateInterval time.Duration
-	listingPolicies     []etypes.ListingPolicy
+	// fundingScheduleStartNano is the exchange automation boundary from which
+	// newly started perpetual funding schedules are measured. Anchoring on the
+	// first one-second funding tick shifts every settlement by the scheduler
+	// quantum and makes the number of settlements depend on ticker cadence.
+	fundingScheduleStartNano int64
+	fundingScheduleStarted   bool
+	listingPolicies          []etypes.ListingPolicy
 	// settlementPending holds the explicit post-expiry state for contracts
 	// whose declared settlement source is unavailable. They remain permanently
 	// halted while retries continue under the declared retry-forever policy;
@@ -721,6 +732,54 @@ func (e *DefaultExchange) AddInstrument(instrument Instrument) {
 		Asks:       newBook(Sell),
 		LastTrade:  nil,
 		SeqNum:     0,
+	}
+	if e.fundingScheduleStarted {
+		if perp, ok := instrument.(*PerpFutures); ok {
+			e.initializePerpetualFundingLocked(symbol, perp, e.instrumentListedAt[symbol])
+		}
+	}
+}
+
+// initializeFundingScheduleLocked anchors every currently listed perpetual to
+// one exchange-wide automation boundary. Caller must hold e.mu.Lock().
+func (e *DefaultExchange) initializeFundingScheduleLocked(scheduleStartNano int64) {
+	if !e.fundingScheduleStarted {
+		e.fundingScheduleStarted = true
+		e.fundingScheduleStartNano = scheduleStartNano
+	}
+	symbols := make([]string, 0, len(e.Instruments))
+	for symbol, instrument := range e.Instruments {
+		if _, ok := instrument.(*PerpFutures); ok {
+			symbols = append(symbols, symbol)
+		}
+	}
+	slices.Sort(symbols)
+	for _, symbol := range symbols {
+		perp, ok := e.Instruments[symbol].(*PerpFutures)
+		if !ok {
+			continue
+		}
+		e.initializePerpetualFundingLocked(symbol, perp, e.fundingScheduleStartNano)
+	}
+}
+
+// initializePerpetualFundingLocked gives a perpetual listed after automation
+// starts its first full interval from listing, while pre-existing contracts
+// share the common automation boundary. Caller must hold e.mu.Lock().
+func (e *DefaultExchange) initializePerpetualFundingLocked(symbol string, perp *PerpFutures, anchorNano int64) {
+	if perp == nil {
+		return
+	}
+	funding := perp.GetFundingRate()
+	if funding.NextFunding != 0 {
+		return
+	}
+	if listedAt, ok := e.instrumentListedAt[symbol]; ok && listedAt > anchorNano {
+		anchorNano = listedAt
+	}
+	nextFunding, ok := nextFundingTimestamp(anchorNano, funding.Interval)
+	if ok {
+		funding.NextFunding = nextFunding
 	}
 }
 
@@ -1293,7 +1352,29 @@ func (e *DefaultExchange) SettleFunding(perp *PerpFutures) error {
 	}
 	e.mu.Lock()
 	now := e.Clock.NowUnixNano()
-	settled, settleErr := settleFunding(e.Positions, e.Clients, perp, now, buildFundingSink(e))
+	fundingRate := perp.GetFundingRate()
+	scheduleAnchor := fundingRate.NextFunding
+	var settleErr error
+	if scheduleAnchor != 0 {
+		switch {
+		case now < scheduleAnchor:
+			settleErr = ErrFundingNotDue
+		case now > scheduleAnchor:
+			// The exchange has no historical mark snapshot with which to
+			// reconstruct a missed deadline. Posting a payment at the later
+			// processing time would silently change the economic interval.
+			settleErr = ErrFundingDeadlineLate
+		}
+	} else {
+		// A zero deadline is the explicit bootstrap state for manually
+		// driven exchanges. Once a deadline exists, manual settlement must
+		// respect it rather than re-anchoring the schedule.
+		scheduleAnchor = now
+	}
+	settled := false
+	if settleErr == nil {
+		settled, settleErr = settleFundingAt(e.Positions, e.Clients, perp, now, scheduleAnchor, buildFundingSink(e))
+	}
 	settlementSnapshot := *perp.GetFundingRate()
 	if settled {
 		e.logFundingSettlementLocked(now, perp, settlementSnapshot)
@@ -1381,6 +1462,13 @@ func (e *DefaultExchange) StartAutomation(ctx context.Context) {
 		e.markPriceCalc = NewMidPriceCalculator()
 		e.autoAnchorMarks = true
 	}
+	// The funding calendar is a property of the automation lifecycle, not of
+	// the first callback that happens to observe a zero cursor. Initialize all
+	// already-listed perpetuals before registering periodic work so the first
+	// settlement is exactly one declared interval after startup.
+	e.mu.Lock()
+	e.initializeFundingScheduleLocked(e.Clock.NowUnixNano())
+	e.mu.Unlock()
 
 	e.automCtx, e.automCancel = context.WithCancel(ctx)
 	// Allocate scheduler-backed tickers before their goroutines start. Their
@@ -1662,6 +1750,11 @@ func (e *DefaultExchange) CommitMarkEpoch(symbols []string) (uint64, error) {
 }
 
 func (e *DefaultExchange) updateAllPerpPrices() {
+	e.mu.Lock()
+	if e.markPriceCalc == nil {
+		e.markPriceCalc = NewMidPriceCalculator()
+	}
+	e.mu.Unlock()
 	if e.autoAnchorMarks {
 		e.ensureAnchoredMarkCalcs()
 	}
@@ -1914,6 +2007,8 @@ func (e *DefaultExchange) updateAllPerpPrices() {
 				}
 			}
 		}
+		e.lastMarkPassTimestamp = timestamp
+		e.lastMarkPassEpoch = completedMarkEpoch
 	}
 	e.mu.Unlock()
 	for _, d := range deferred {
@@ -2039,6 +2134,61 @@ type riskMarkSnapshot struct {
 	timestamp      int64
 }
 
+type checkedPositionMarginer interface {
+	TryMaintenanceForPosition(size, precision int64) (int64, bool)
+}
+
+type checkedPositionMarginSnapshotter interface {
+	TryMaintenanceForPositionAtMark(size, precision, underlyingMark, positionMark, maintenanceBps int64) (int64, bool)
+}
+
+func safePositionMaintenance(pm PositionMarginer, size, precision int64) (maintenance int64, ok bool) {
+	defer func() {
+		if recover() != nil {
+			maintenance, ok = 0, false
+		}
+	}()
+	if checked, implements := pm.(checkedPositionMarginer); implements {
+		return checked.TryMaintenanceForPosition(size, precision)
+	}
+	maintenance = pm.MaintenanceForPosition(size, precision)
+	return maintenance, maintenance >= 0
+}
+
+func safePositionMaintenanceAtMark(inst Instrument, pm PositionMarginer, size, precision, underlyingMark, positionMark, maintenanceBps int64) (maintenance int64, ok bool) {
+	defer func() {
+		if recover() != nil {
+			maintenance, ok = 0, false
+		}
+	}()
+	if checked, implements := inst.(checkedPositionMarginSnapshotter); implements {
+		return checked.TryMaintenanceForPositionAtMark(size, precision, underlyingMark, positionMark, maintenanceBps)
+	}
+	snapshotter, implements := inst.(etypes.PositionMarginSnapshotter)
+	if !implements {
+		return 0, false
+	}
+	maintenance = snapshotter.MaintenanceForPositionAtMark(size, precision, underlyingMark, positionMark, maintenanceBps)
+	return maintenance, maintenance >= 0
+}
+
+func addRiskTotal(total *int64, amount int64, field string) error {
+	updated, ok := etypes.TryAdd(*total, amount)
+	if !ok {
+		return fmt.Errorf("risk %s overflows int64", field)
+	}
+	*total = updated
+	return nil
+}
+
+func checkedAccountEquity(client *Client, quote string, contribution int64) (int64, bool) {
+	netBalance, ok := etypes.TrySub(client.PerpBalance(quote), client.BorrowedPerpPortion(quote))
+	if !ok {
+		return 0, false
+	}
+	return etypes.TryAdd(netBalance, contribution)
+}
+
 func bindRiskSnapshotTimestamp(snapshot riskMarkSnapshot, expected *int64, bound *bool) error {
 	if !*bound {
 		*expected = snapshot.timestamp
@@ -2059,11 +2209,82 @@ func (e *DefaultExchange) committedRiskSnapshotLocked(symbol string, book *Order
 	return snapshot, nil
 }
 
+// accountMarkEpochAtTimestampLocked returns the single epoch shared by every
+// live margined position in one quote portfolio. A global epoch is not enough:
+// an option-only pass may advance it while a futures-only account still has a
+// valid snapshot from the preceding pass.
+func (e *DefaultExchange) accountMarkEpochAtTimestampLocked(clientID uint64, quote string, timestamp int64) (uint64, bool) {
+	positions := e.collectAccountLiquidationPositionsLocked(clientID, quote, timestamp)
+	var accountEpoch uint64
+	seenSymbols := make(map[string]struct{}, len(positions))
+	for _, position := range positions {
+		if _, seen := seenSymbols[position.symbol]; seen {
+			continue
+		}
+		seenSymbols[position.symbol] = struct{}{}
+		book := e.Books[position.symbol]
+		if book == nil {
+			return 0, false
+		}
+		snapshot, ok := e.riskMarkSnapshots[position.symbol]
+		if !ok || snapshot.timestamp != timestamp || snapshot.book != book || snapshot.epoch == 0 || e.markEpochBySymbol[position.symbol] != snapshot.epoch {
+			return 0, false
+		}
+		if accountEpoch == 0 {
+			accountEpoch = snapshot.epoch
+		} else if accountEpoch != snapshot.epoch {
+			return 0, false
+		}
+	}
+	return accountEpoch, len(seenSymbols) > 0
+}
+
 func (e *DefaultExchange) clientHasOpenPositionOnSymbolLocked(clientID uint64, symbol string) bool {
 	for _, side := range []PositionSide{PositionBoth, PositionLong, PositionShort} {
 		position := e.Positions.GetPositionBySide(clientID, symbol, side)
 		if position != nil && position.Size != 0 {
 			return true
+		}
+	}
+	return false
+}
+
+// hasMixedMarginExposureLocked reports whether one account has live exposure
+// to both a futures-style margin core and a position-margin instrument in the
+// same quote wallet. UpdateDerivativeMarks uses this narrow predicate to
+// request a complete mark refresh when an option-only lifecycle pass would
+// otherwise advance an epoch without refreshing its futures siblings.
+// Caller must hold e.mu.Lock().
+func (e *DefaultExchange) hasMixedMarginExposureLocked(timestamp int64) bool {
+	for clientID := range e.Clients {
+		linearQuotes := make(map[string]struct{})
+		positionMarginQuotes := make(map[string]struct{})
+		for _, position := range e.Positions.GetAllPositions(clientID) {
+			if position.Size == 0 {
+				continue
+			}
+			book := e.Books[position.Symbol]
+			if book == nil {
+				continue
+			}
+			if _, pending := e.settlementPending[position.Symbol]; pending {
+				continue
+			}
+			if exp, ok := book.Instrument.(Expirable); ok && timestamp >= exp.ExpiryNano() {
+				continue
+			}
+			quote := book.Instrument.QuoteAsset()
+			if marginCore(book.Instrument) != nil {
+				linearQuotes[quote] = struct{}{}
+			}
+			if _, ok := book.Instrument.(PositionMarginer); ok {
+				positionMarginQuotes[quote] = struct{}{}
+			}
+		}
+		for quote := range linearQuotes {
+			if _, ok := positionMarginQuotes[quote]; ok {
+				return true
+			}
 		}
 	}
 	return false
@@ -2180,15 +2401,38 @@ func (e *DefaultExchange) buildAccountMarginProfileAtEpoch(clientID uint64, quot
 		}
 		precision := perp.BasePrecision()
 		for _, pos := range positions {
-			p.EquityContribution += e.positionUPnL(pos, mark, precision)
-			notional := etypes.AbsMulDiv(pos.Size, mark, precision)
-			p.Notional += notional
+			pnl, ok := e.tryPositionUPnL(pos, mark, precision)
+			if !ok {
+				return accountMarginProfile{}, fmt.Errorf("risk PnL for %s overflows int64", symbol)
+			}
+			if err := addRiskTotal(&p.EquityContribution, pnl, "equity contribution"); err != nil {
+				return accountMarginProfile{}, fmt.Errorf("%s: %w", symbol, err)
+			}
+			notional, ok := etypes.TryAbsMulDiv(pos.Size, mark, precision)
+			if !ok {
+				return accountMarginProfile{}, fmt.Errorf("risk notional for %s overflows int64", symbol)
+			}
+			if err := addRiskTotal(&p.Notional, notional, "notional"); err != nil {
+				return accountMarginProfile{}, fmt.Errorf("%s: %w", symbol, err)
+			}
 			maintenanceBps, warningBps := perp.MaintenanceMarginRate, perp.WarningMarginRate
 			if markEpoch != 0 {
 				maintenanceBps, warningBps = snapshot.maintenanceBps, snapshot.warningBps
 			}
-			p.Maintenance += notional * maintenanceBps / 10000
-			p.Warning += notional * warningBps / 10000
+			maintenance, ok := etypes.TryMulBps(notional, maintenanceBps)
+			if !ok || maintenance < 0 {
+				return accountMarginProfile{}, fmt.Errorf("risk maintenance for %s is unrepresentable", symbol)
+			}
+			warning, ok := etypes.TryMulBps(notional, warningBps)
+			if !ok || warning < 0 {
+				return accountMarginProfile{}, fmt.Errorf("risk warning for %s is unrepresentable", symbol)
+			}
+			if err := addRiskTotal(&p.Maintenance, maintenance, "maintenance"); err != nil {
+				return accountMarginProfile{}, fmt.Errorf("%s: %w", symbol, err)
+			}
+			if err := addRiskTotal(&p.Warning, warning, "warning"); err != nil {
+				return accountMarginProfile{}, fmt.Errorf("%s: %w", symbol, err)
+			}
 		}
 	}
 	return p, nil
@@ -2287,7 +2531,11 @@ func (e *DefaultExchange) checkPositionMarginerLiquidationsAtEpoch(markEpoch uin
 				}
 				profiles[key] = profile
 			}
-			equity := client.PerpBalance(quote) - client.BorrowedPerpPortion(quote) + profile.EquityContribution
+			equity, arithmeticOK := checkedAccountEquity(client, quote, profile.EquityContribution)
+			if !arithmeticOK {
+				e.reportPriceUnavailable(timestamp, symbol, "option_liquidation", fmt.Errorf("cross-margin equity for client %d overflows int64", clientID))
+				continue
+			}
 			if equity >= profile.Maintenance {
 				continue
 			}
@@ -2329,27 +2577,52 @@ func (e *DefaultExchange) addPositionMarginerExposure(p *accountMarginProfile, c
 		// Option premiums have already moved through the perp wallet at each
 		// fill. Their contribution to equity is therefore the signed current
 		// premium value, unlike futures-style entry-to-mark PnL.
-		p.EquityContribution += MulDiv(pos.Size, m, precision)
-		p.Notional += etypes.AbsMulDiv(pos.Size, m, precision)
-		maintenance := pm.MaintenanceForPosition(pos.Size, precision)
+		equityContribution, ok := etypes.TryMulDiv(pos.Size, m, precision)
+		if !ok {
+			return fmt.Errorf("position equity for %s overflows int64", symbol)
+		}
+		notional, ok := etypes.TryAbsMulDiv(pos.Size, m, precision)
+		if !ok {
+			return fmt.Errorf("position notional for %s overflows int64", symbol)
+		}
+		if err := addRiskTotal(&p.EquityContribution, equityContribution, "equity contribution"); err != nil {
+			return fmt.Errorf("%s: %w", symbol, err)
+		}
+		if err := addRiskTotal(&p.Notional, notional, "notional"); err != nil {
+			return fmt.Errorf("%s: %w", symbol, err)
+		}
+		maintenance, ok := safePositionMaintenance(pm, pos.Size, precision)
+		if !ok || maintenance < 0 {
+			return fmt.Errorf("position maintenance for %s is unrepresentable", symbol)
+		}
 		if markEpoch != 0 {
-			snapshotMarginer, ok := inst.(etypes.PositionMarginSnapshotter)
-			if !ok {
+			if _, ok := inst.(etypes.PositionMarginSnapshotter); !ok {
 				return fmt.Errorf("position margin snapshot for %s is unavailable", symbol)
 			}
-			maintenance = snapshotMarginer.MaintenanceForPositionAtMark(
-				pos.Size, precision, snapshot.underlying, snapshot.mark, snapshot.maintenanceBps,
-			)
+			maintenance, ok = safePositionMaintenanceAtMark(inst, pm, pos.Size, precision, snapshot.underlying, snapshot.mark, snapshot.maintenanceBps)
+			if !ok || maintenance < 0 {
+				return fmt.Errorf("position marked maintenance for %s is unrepresentable", symbol)
+			}
 		}
 		// A short with zero maintenance means the instrument has no marks yet
 		// (the underlying hasn't printed): the exposure is unknown, not zero.
 		// Floor at the buy-back cost at the marked (or entry) premium so the
 		// window before the first mark tick cannot hide a short position.
 		if maintenance == 0 && pos.Size < 0 {
-			maintenance = MulDiv(-pos.Size, m, precision)
+			if m < 0 {
+				return fmt.Errorf("position mark for %s is negative", symbol)
+			}
+			maintenance, ok = etypes.TryAbsMulDiv(pos.Size, m, precision)
+			if !ok {
+				return fmt.Errorf("position fallback maintenance for %s is unrepresentable", symbol)
+			}
 		}
-		p.Maintenance += maintenance
-		p.Warning += maintenance
+		if err := addRiskTotal(&p.Maintenance, maintenance, "maintenance"); err != nil {
+			return fmt.Errorf("%s: %w", symbol, err)
+		}
+		if err := addRiskTotal(&p.Warning, maintenance, "warning"); err != nil {
+			return fmt.Errorf("%s: %w", symbol, err)
+		}
 	}
 	return nil
 }
@@ -2441,7 +2714,11 @@ func (e *DefaultExchange) checkLiquidationsAtEpoch(symbol string, perp *PerpFutu
 		// dodge liquidation. Net only the perp-attributed share — a spot-credited
 		// loan's cash never entered this wallet, so charging it here would
 		// liquidate a solvent account.
-		equity := client.PerpBalance(quote) - client.BorrowedPerpPortion(quote) + equityContribution
+		equity, arithmeticOK := checkedAccountEquity(client, quote, equityContribution)
+		if !arithmeticOK {
+			e.reportPriceUnavailable(timestamp, symbol, "liquidation", fmt.Errorf("cross-margin equity for client %d overflows int64", clientID))
+			continue
+		}
 		maintenanceMargin := profile.Maintenance
 		warningMargin := profile.Warning
 
@@ -2524,6 +2801,7 @@ type liquidationPosition struct {
 type liquidationFill struct {
 	symbol         string
 	positionSide   string
+	forcedOrderID  uint64
 	positionSize   int64
 	basePrecision  int64
 	attemptedQty   int64
@@ -2612,16 +2890,17 @@ func (e *DefaultExchange) liquidateAccount(clientID uint64, client *Client, quot
 	// They are part of the same cross-margin account even when the account has
 	// no current position on those books.
 	e.cancelClientOrdersAcrossQuoteBooksLocked(client, quote)
+	liquidationID := e.nextLiquidationID + 1
 	fills := make([]liquidationFill, 0, len(positions))
 	for _, target := range positions {
-		fill, ok := e.liquidatePosition(clientID, client, target.symbol, &target.position, target.instrument, timestamp)
+		fill, ok := e.liquidatePosition(clientID, client, target.symbol, &target.position, target.instrument, timestamp, liquidationID)
 		if ok {
 			fills = append(fills, fill)
 		}
 	}
 	if len(fills) > 0 {
-		e.nextLiquidationID++
-		e.finalizeAccountLiquidation(clientID, client, quote, timestamp, e.nextLiquidationID, fills)
+		e.nextLiquidationID = liquidationID
+		e.finalizeAccountLiquidation(clientID, client, quote, timestamp, liquidationID, fills)
 	}
 }
 
@@ -2629,7 +2908,7 @@ func (e *DefaultExchange) liquidateAccount(clientID uint64, client *Client, quot
 // effects. Account debt and insurance are finalized after every same-quote
 // position has had a chance to close.
 // Caller must hold e.mu.Lock().
-func (e *DefaultExchange) liquidatePosition(clientID uint64, client *Client, symbol string, pos *Position, inst Instrument, timestamp int64) (liquidationFill, bool) {
+func (e *DefaultExchange) liquidatePosition(clientID uint64, client *Client, symbol string, pos *Position, inst Instrument, timestamp int64, liquidationID uint64) (liquidationFill, bool) {
 	book := e.Books[symbol]
 	if book == nil {
 		return liquidationFill{}, false
@@ -2640,7 +2919,7 @@ func (e *DefaultExchange) liquidatePosition(clientID uint64, client *Client, sym
 		closeSide = Buy
 	}
 	attemptedQty := abs(pos.Size)
-	stats := e.forceCloseWithStats(clientID, client, book, book.Instrument, closeSide, pos.PositionSide, attemptedQty, timestamp)
+	stats := e.forceCloseWithStatsIdentity(clientID, client, book, book.Instrument, closeSide, pos.PositionSide, attemptedQty, timestamp, liquidationID)
 	if !stats.filled {
 		// No liquidity in the book; position stays open for retry on next mark price update.
 		return liquidationFill{}, false
@@ -2652,6 +2931,7 @@ func (e *DefaultExchange) liquidatePosition(clientID uint64, client *Client, sym
 	e.chargeClearanceFee(clientID, client, symbol, inst, stats.filledNotional, timestamp)
 	return liquidationFill{
 		symbol: symbol, positionSide: pos.PositionSide.String(), positionSize: pos.Size,
+		forcedOrderID: stats.orderID,
 		basePrecision: inst.BasePrecision(),
 		attemptedQty:  attemptedQty, filledQty: stats.filledQty, remainingQty: stats.remainingQty,
 		filledNotional: stats.filledNotional, vwapPrice: stats.vwapPrice, fillPrice: stats.fillPrice,
@@ -2722,7 +3002,8 @@ func (e *DefaultExchange) finalizeAccountLiquidation(clientID uint64, client *Cl
 		if log := e.getLogger(fill.symbol); log != nil {
 			log.LogEvent(timestamp, clientID, "liquidation", map[string]any{
 				"symbol": fill.symbol, "position_side": fill.positionSide,
-				"liquidation_id": liquidationID, "position_size": fill.positionSize,
+				"liquidation_id": liquidationID, "forced_order_id": fill.forcedOrderID,
+				"position_size": fill.positionSize,
 				"attempted_qty": fill.attemptedQty, "filled_qty": fill.filledQty,
 				"remaining_qty": fill.remainingQty, "filled_notional": fill.filledNotional,
 				"vwap_price": fill.vwapPrice, "fill_price": fill.fillPrice,
@@ -2733,7 +3014,8 @@ func (e *DefaultExchange) finalizeAccountLiquidation(clientID uint64, client *Cl
 		if e.LiquidationHandler != nil {
 			e.LiquidationHandler.OnLiquidation(&LiquidationEvent{
 				Timestamp: timestamp, ClientID: clientID, LiquidationID: liquidationID,
-				Symbol: fill.symbol, PositionSide: fill.positionSide,
+				ForcedOrderID: fill.forcedOrderID,
+				Symbol:        fill.symbol, PositionSide: fill.positionSide,
 				PositionSize: fill.positionSize, AttemptedQty: fill.attemptedQty,
 				FilledQty: fill.filledQty, RemainingQty: fill.remainingQty,
 				FillNotional: fill.filledNotional, VWAPPrice: fill.vwapPrice,
@@ -2841,8 +3123,14 @@ func (e *DefaultExchange) CheckAndSettleFunding() {
 			e.mu.Unlock()
 			continue
 		}
-		settlementTimestamp := e.Clock.NowUnixNano()
-		settled, settleErr := settleFunding(e.Positions, e.Clients, perp, settlementTimestamp, buildFundingSink(e))
+		scheduledDeadline := fundingRate.NextFunding
+		if now > scheduledDeadline {
+			e.mu.Unlock()
+			e.reportFundingSettlementFailure(now, perp.Symbol(), ErrFundingDeadlineLate)
+			continue
+		}
+		settlementTimestamp := now
+		settled, settleErr := settleFundingAt(e.Positions, e.Clients, perp, settlementTimestamp, scheduledDeadline, buildFundingSink(e))
 		if !settled {
 			e.mu.Unlock()
 			if settleErr == nil {
@@ -2953,6 +3241,16 @@ func (e *DefaultExchange) ValidateNoBorrowingDebt() error {
 	slices.Sort(clientIDs)
 	for _, clientID := range clientIDs {
 		client := e.Clients[clientID]
+		for _, asset := range sortedAssetNames(client.Balances) {
+			if balance := client.Balances[asset]; balance < 0 {
+				return fmt.Errorf("client %d has undeclared negative %s spot balance %d", clientID, asset, balance)
+			}
+		}
+		for _, asset := range sortedAssetNames(client.PerpBalances) {
+			if balance := client.PerpBalances[asset]; balance < 0 {
+				return fmt.Errorf("client %d has undeclared negative %s perp balance %d", clientID, asset, balance)
+			}
+		}
 		for _, asset := range sortedAssetNames(client.Borrowed) {
 			if debt := client.Borrowed[asset]; debt != 0 {
 				return fmt.Errorf("client %d has forbidden %s debt %d", clientID, asset, debt)
@@ -2966,6 +3264,71 @@ func (e *DefaultExchange) ValidateNoBorrowingDebt() error {
 		for _, asset := range sortedAssetNames(e.collateralInterestRemainders[clientID]) {
 			if remainder := e.collateralInterestRemainders[clientID][asset]; remainder != 0 {
 				return fmt.Errorf("client %d has forbidden %s interest remainder %d", clientID, asset, remainder)
+			}
+		}
+	}
+	return nil
+}
+
+// ValidateMaintenanceAtCurrentMarks verifies the strict terminal risk
+// boundary without mutating the exchange. Every live margined position must be
+// represented by the same committed mark epoch, and each account's marked
+// equity must cover its aggregate maintenance requirement. A pending or
+// expired position is an unresolved lifecycle state, not zero exposure.
+func (e *DefaultExchange) ValidateMaintenanceAtCurrentMarks() error {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+
+	timestamp := e.Clock.NowUnixNano()
+	clientIDs := make([]uint64, 0, len(e.Clients))
+	for clientID := range e.Clients {
+		clientIDs = append(clientIDs, clientID)
+	}
+	slices.Sort(clientIDs)
+	for _, clientID := range clientIDs {
+		client := e.Clients[clientID]
+		quotes := make(map[string]struct{})
+		for _, position := range e.Positions.GetAllPositions(clientID) {
+			if position.Size == 0 {
+				continue
+			}
+			book := e.Books[position.Symbol]
+			if book == nil {
+				return fmt.Errorf("client %d position %s has no live book", clientID, position.Symbol)
+			}
+			if pending, ok := e.settlementPending[position.Symbol]; ok {
+				return fmt.Errorf("client %d position %s remains %s after expiry (%s)", clientID, position.Symbol, pending.State, pending.LastReason)
+			}
+			if exp, ok := book.Instrument.(Expirable); ok && timestamp >= exp.ExpiryNano() {
+				return fmt.Errorf("client %d position %s crossed its expiry boundary", clientID, position.Symbol)
+			}
+			if marginCore(book.Instrument) == nil {
+				if _, ok := book.Instrument.(PositionMarginer); !ok {
+					continue
+				}
+			}
+			quotes[book.Instrument.QuoteAsset()] = struct{}{}
+		}
+		quoteNames := make([]string, 0, len(quotes))
+		for quote := range quotes {
+			quoteNames = append(quoteNames, quote)
+		}
+		slices.Sort(quoteNames)
+		for _, quote := range quoteNames {
+			markEpoch, ok := e.accountMarkEpochAtTimestampLocked(clientID, quote, timestamp)
+			if !ok || markEpoch == 0 {
+				return fmt.Errorf("client %d %s portfolio has no committed mark epoch", clientID, quote)
+			}
+			profile, err := e.buildAccountMarginProfileAtEpoch(clientID, quote, "", 0, markEpoch)
+			if err != nil {
+				return fmt.Errorf("client %d %s portfolio risk: %w", clientID, quote, err)
+			}
+			equity, arithmeticOK := checkedAccountEquity(client, quote, profile.EquityContribution)
+			if !arithmeticOK {
+				return fmt.Errorf("client %d %s equity overflows int64", clientID, quote)
+			}
+			if equity < profile.Maintenance {
+				return fmt.Errorf("client %d %s equity %d is below maintenance %d at mark epoch %d", clientID, quote, equity, profile.Maintenance, markEpoch)
 			}
 		}
 	}

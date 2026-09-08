@@ -200,6 +200,22 @@ func TestFuturesMMCancellationClearsQuoteLifecycle(t *testing.T) {
 	}
 }
 
+func TestFuturesMMForcedFillDoesNotClearUnrelatedQuote(t *testing.T) {
+	gw := newStubGateway()
+	mm := NewFuturesMarketMaker(1, gw, FuturesMMConfig{Underlying: "ABC/USD", QuoteInterval: time.Hour})
+	mm.HandleEvent(context.Background(), &actor.Event{Type: actor.EventInstrument, Data: actor.InstrumentEvent{Announcement: &etypes.InstrumentAnnouncement{
+		Action: "listed", Symbol: "ABC-FUT-1", InstrumentType: "FUTURE", Underlying: "ABC/USD", ExpiryNano: time.Hour.Nanoseconds(),
+	}}})
+	quote := mm.quotes["ABC-FUT-1"]
+	quote.bidID, quote.askID = 41, 42
+	mm.HandleEvent(context.Background(), &actor.Event{Type: actor.EventOrderFilled, Data: actor.OrderFillEvent{
+		OrderID: 999, Symbol: "ABC-FUT-1", Qty: 1, Side: exchange.Buy, IsFull: true, Forced: true,
+	}})
+	if quote.bidID != 41 || quote.askID != 42 {
+		t.Fatalf("forced fill changed unrelated quote lifecycle: bid=%d ask=%d", quote.bidID, quote.askID)
+	}
+}
+
 func TestOptionMMGreekProfileUsesFilledInventoryAndHedge(t *testing.T) {
 	gw := newStubGateway()
 	mm := NewOptionMarketMaker(1, gw, OptionMMConfig{

@@ -100,11 +100,15 @@ func TestOptionLiabilityUserAppliesForcedFillWithoutSyntheticOrder(t *testing.T)
 		TargetStrikeBps: 9_500, MaxPremium: 1, Interval: time.Second, BasePrecision: 1,
 	})
 	listPut(u, "ABC-P-95", 95, int64(time.Hour))
+	u.active[7] = "ABC-P-95"
+	u.onFill("ABC-P-95", actor.OrderFillEvent{
+		OrderID: 7, Symbol: "ABC-P-95", Qty: 4, Side: exchange.Buy, IsFull: true,
+	})
 	u.HandleEvent(context.Background(), &actor.Event{Type: actor.EventOrderFilled, Data: actor.OrderFillEvent{
-		OrderID: 1001, Symbol: "ABC-P-95", Qty: 4, Side: exchange.Buy, IsFull: true, Forced: true,
+		OrderID: 1001, Symbol: "ABC-P-95", Qty: 4, Side: exchange.Sell, IsFull: true, Forced: true,
 	}})
-	if got := u.Position(); got != 4 {
-		t.Fatalf("forced liability position = %d, want 4", got)
+	if got := u.Position(); got != 0 {
+		t.Fatalf("forced liability position = %d, want 0 after close", got)
 	}
 }
 
@@ -115,6 +119,10 @@ func TestOptionLiabilityForcedFillPreservesUnrelatedPendingRequest(t *testing.T)
 		TargetStrikeBps: 9_500, MaxPremium: 1, Interval: time.Second, BasePrecision: 1,
 	})
 	listPut(u, "ABC-P-95", 95, int64(time.Hour))
+	u.active[7] = "ABC-P-95"
+	u.onFill("ABC-P-95", actor.OrderFillEvent{
+		OrderID: 7, Symbol: "ABC-P-95", Qty: 4, Side: exchange.Buy, IsFull: true,
+	})
 	u.pending, u.pendingReq, u.pendingSym = true, 77, "ABC-P-95"
 	u.HandleEvent(context.Background(), &actor.Event{Type: actor.EventOrderFilled, Data: actor.OrderFillEvent{
 		OrderID: 1001, Symbol: "ABC-P-95", Qty: 4, Side: exchange.Sell, IsFull: true, Forced: true,
@@ -122,8 +130,29 @@ func TestOptionLiabilityForcedFillPreservesUnrelatedPendingRequest(t *testing.T)
 	if u.pending != true || u.pendingReq != 77 || u.pendingSym != "ABC-P-95" {
 		t.Fatalf("forced fill cleared unrelated pending request: pending=%v req=%d sym=%q", u.pending, u.pendingReq, u.pendingSym)
 	}
-	if got := u.Position(); got != -4 {
-		t.Fatalf("forced liability position = %d, want -4", got)
+	if got := u.Position(); got != 0 {
+		t.Fatalf("forced liability position = %d, want 0 after close", got)
+	}
+}
+
+func TestOptionLiabilityRejectsForcedOpenOrOverclose(t *testing.T) {
+	u := NewOptionLiabilityTaker(12, newStubGateway(), OptionLiabilityTakerConfig{
+		Underlying: "ABC/USD", TargetQty: 10, LotQty: 10,
+		TargetStrikeBps: 9_500, MaxPremium: 1, Interval: time.Second, BasePrecision: 1,
+	})
+	listPut(u, "ABC-P-95", 95, int64(time.Hour))
+	u.onFill("ABC-P-95", actor.OrderFillEvent{
+		OrderID: 1001, Symbol: "ABC-P-95", Qty: 4, Side: exchange.Buy, IsFull: true, Forced: true,
+	})
+	if got := u.Position(); got != 0 {
+		t.Fatalf("forced open changed liability position = %d", got)
+	}
+	u.positions["ABC-P-95"], u.position = 3, 3
+	u.onFill("ABC-P-95", actor.OrderFillEvent{
+		OrderID: 1002, Symbol: "ABC-P-95", Qty: 4, Side: exchange.Sell, IsFull: true, Forced: true,
+	})
+	if got := u.Position(); got != 3 {
+		t.Fatalf("forced over-close changed liability position = %d", got)
 	}
 }
 
@@ -135,8 +164,10 @@ func TestOptionLiabilitySettlementRemovesOnlyExpiredProtection(t *testing.T) {
 	})
 	listPut(u, "ABC-P-95-A", 95, int64(time.Hour))
 	listPut(u, "ABC-P-95-B", 95, int64(2*time.Hour))
-	u.onFill("ABC-P-95-A", actor.OrderFillEvent{OrderID: 1, Symbol: "ABC-P-95-A", Qty: 3, Side: exchange.Buy, IsFull: true, Forced: true})
-	u.onFill("ABC-P-95-B", actor.OrderFillEvent{OrderID: 2, Symbol: "ABC-P-95-B", Qty: 4, Side: exchange.Buy, IsFull: true, Forced: true})
+	u.active[1] = "ABC-P-95-A"
+	u.onFill("ABC-P-95-A", actor.OrderFillEvent{OrderID: 1, Symbol: "ABC-P-95-A", Qty: 3, Side: exchange.Buy, IsFull: true})
+	u.active[2] = "ABC-P-95-B"
+	u.onFill("ABC-P-95-B", actor.OrderFillEvent{OrderID: 2, Symbol: "ABC-P-95-B", Qty: 4, Side: exchange.Buy, IsFull: true})
 	if got := u.Position(); got != 7 {
 		t.Fatalf("active liability position = %d, want 7", got)
 	}

@@ -37,6 +37,21 @@ func lifecycleForcedFillWithSymbolLine(ts int64, venue string, clientID, orderID
 		ts, clientID, venue, symbol, orderID, quantity, filled, remaining, full)
 }
 
+func lifecycleStrictForcedFillLine(ts int64, venue string, clientID, orderID uint64, symbol, side, positionSide string, quantity, filled, remaining int64, full bool, liquidationID uint64) string {
+	return fmt.Sprintf(`{"sim_ts":%d,"client_id":%d,"event":"OrderFill","data":{"venue_id":%q,"payload":{"symbol":%q,"order_id":%d,"qty":%d,"filled_qty":%d,"remaining_qty":%d,"is_full":%t,"side":%q,"position_side":%q,"forced":true,"liquidation_id":%d}}}`,
+		ts, clientID, venue, symbol, orderID, quantity, filled, remaining, full, side, positionSide, liquidationID)
+}
+
+func lifecycleStrictLiquidationLine(ts int64, venue string, clientID uint64, symbol, positionSide string, liquidationID, forcedOrderID uint64, positionSize, attemptedQty, filledQty, remainingQty int64) string {
+	return fmt.Sprintf(`{"sim_ts":%d,"client_id":%d,"event":"liquidation","data":{"venue_id":%q,"payload":{"symbol":%q,"position_side":%q,"liquidation_id":%d,"forced_order_id":%d,"position_size":%d,"attempted_qty":%d,"filled_qty":%d,"remaining_qty":%d}}}`,
+		ts, clientID, venue, symbol, positionSide, liquidationID, forcedOrderID, positionSize, attemptedQty, filledQty, remainingQty)
+}
+
+func lifecycleExplicitOrdinaryFillWithSymbolLine(ts int64, venue string, clientID, orderID uint64, symbol string, quantity, filled, remaining int64, full bool) string {
+	return fmt.Sprintf(`{"sim_ts":%d,"client_id":%d,"event":"OrderFill","data":{"venue_id":%q,"client_id":%d,"symbol":%q,"payload":{"symbol":%q,"order_id":%d,"qty":%d,"filled_qty":%d,"remaining_qty":%d,"is_full":%t,"forced":false}}}`,
+		ts, clientID, venue, clientID, symbol, symbol, orderID, quantity, filled, remaining, full)
+}
+
 func TestOrderLifecycleAudit(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -209,7 +224,19 @@ func TestOrderLifecycleSuccessorRequiresExplicitForcedMarker(t *testing.T) {
 		return run
 	}
 
-	forced, err := makeRun(t, lifecycleForcedFillWithSymbolLine(instant, "north", 7, 99, "ABC-PERP", 10, 10, 0, true)).MeasureOrderLifecycle()
+	strictReceipt := lifecycleStrictLiquidationLine(instant, "north", 7, "ABC-PERP", "BOTH", 1, 99, -10, 10, 10, 0)
+	strictFill := lifecycleStrictForcedFillLine(instant, "north", 7, 99, "ABC-PERP", "BUY", "BOTH", 10, 10, 0, true, 1)
+	strictDir := writeRun(t, Report{}, map[string][]string{
+		"north/derivatives/ABC-PERP.jsonl": {strictFill, strictReceipt},
+	})
+	if err := os.WriteFile(filepath.Join(strictDir, "run-config.json"), []byte(`{"evidence_format":"evstream_v3"}`), 0o644); err != nil {
+		t.Fatalf("write strict descriptor: %v", err)
+	}
+	strictRun, err := Open(strictDir)
+	if err != nil {
+		t.Fatalf("open strict run: %v", err)
+	}
+	forced, err := strictRun.MeasureOrderLifecycle()
 	if err != nil {
 		t.Fatalf("measure forced successor fill: %v", err)
 	}
@@ -222,6 +249,74 @@ func TestOrderLifecycleSuccessorRequiresExplicitForcedMarker(t *testing.T) {
 	}
 	if ordinary.LiquidationFills != 0 || ordinary.UnlinkedFills != 1 {
 		t.Fatalf("ordinary unknown fill was rescued by liquidation row: %+v", ordinary)
+	}
+}
+
+func TestOrderLifecycleRejectsForcedIdentityOnAcceptedOrder(t *testing.T) {
+	const instant = int64(1_000_000_000)
+	dir := writeRun(t, Report{}, map[string][]string{
+		"north/derivatives/ABC-PERP.jsonl": {
+			lifecycleAcceptedLine(instant-1, "north", 7, 99, "LIMIT", "GTC", 10),
+			lifecycleStrictForcedFillLine(instant, "north", 7, 99, "ABC-PERP", "SELL", "BOTH", 10, 10, 0, true, 1),
+		},
+	})
+	if err := os.WriteFile(filepath.Join(dir, "run-config.json"), []byte(`{"evidence_format":"evstream_v3"}`), 0o644); err != nil {
+		t.Fatalf("write successor descriptor: %v", err)
+	}
+	run, err := Open(dir)
+	if err != nil {
+		t.Fatalf("open successor: %v", err)
+	}
+	result, err := run.MeasureOrderLifecycle()
+	if err != nil {
+		t.Fatalf("measure successor: %v", err)
+	}
+	if result.LiquidationIdentityFailures != 1 || result.LiquidationFills != 0 || len(result.Checks) != 1 || result.Checks[0].Failure != "accepted_order_has_forced_identity" {
+		t.Fatalf("forced identity collision was not rejected: %+v", result)
+	}
+}
+
+func TestOrderLifecycleCountsMissingForcedReceiptFill(t *testing.T) {
+	const instant = int64(1_000_000_000)
+	dir := writeRun(t, Report{}, map[string][]string{
+		"north/derivatives/ABC-PERP.jsonl": {
+			lifecycleStrictLiquidationLine(instant, "north", 7, "ABC-PERP", "BOTH", 1, 99, -10, 10, 10, 0),
+		},
+	})
+	if err := os.WriteFile(filepath.Join(dir, "run-config.json"), []byte(`{"evidence_format":"evstream_v3"}`), 0o644); err != nil {
+		t.Fatalf("write successor descriptor: %v", err)
+	}
+	run, err := Open(dir)
+	if err != nil {
+		t.Fatalf("open successor: %v", err)
+	}
+	result, err := run.MeasureOrderLifecycle()
+	if err != nil {
+		t.Fatalf("measure successor: %v", err)
+	}
+	if result.MissingForcedFills != 1 || result.LiquidationFills != 0 {
+		t.Fatalf("missing forced fill was not counted: %+v", result)
+	}
+}
+
+func TestOrderLifecycleLegacyDoesNotRescueExplicitOrdinaryMarker(t *testing.T) {
+	const instant = int64(1_000_000_000)
+	dir := writeRun(t, Report{}, map[string][]string{
+		"north/derivatives/ABC-PERP.jsonl": {
+			lifecycleExplicitOrdinaryFillWithSymbolLine(instant, "north", 7, 99, "ABC-PERP", 10, 10, 0, true),
+			lifecycleLiquidationLine(instant, "north", 7, "ABC-PERP"),
+		},
+	})
+	run, err := Open(dir)
+	if err != nil {
+		t.Fatalf("open legacy run: %v", err)
+	}
+	result, err := run.MeasureOrderLifecycle()
+	if err != nil {
+		t.Fatalf("measure legacy run: %v", err)
+	}
+	if result.LiquidationFills != 0 || result.UnlinkedFills != 1 {
+		t.Fatalf("explicit ordinary marker received legacy rescue: %+v", result)
 	}
 }
 

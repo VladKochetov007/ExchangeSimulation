@@ -7,6 +7,7 @@ import (
 )
 
 type liquidationExecutionStats struct {
+	orderID        uint64
 	fillPrice      int64
 	filledQty      int64
 	remainingQty   int64
@@ -40,11 +41,20 @@ func (e *DefaultExchange) forceClose(clientID uint64, client *Client, book *Orde
 // account-scope liquidation additionally needs the complete execution summary
 // for auditable partial fills and weighted pricing.
 func (e *DefaultExchange) forceCloseWithStats(clientID uint64, client *Client, book *OrderBook, instrument Instrument, side Side, posSide PositionSide, qty, timestamp int64) liquidationExecutionStats {
+	return e.forceCloseWithStatsIdentity(clientID, client, book, instrument, side, posSide, qty, timestamp, 0)
+}
+
+// forceCloseWithStatsIdentity is the account-liquidation path. The synthetic
+// taker order carries the account liquidation identity into every fill, so a
+// strict evidence consumer can bind an unknown order fill to exactly one
+// liquidation receipt instead of trusting a coincident timestamp tuple.
+func (e *DefaultExchange) forceCloseWithStatsIdentity(clientID uint64, client *Client, book *OrderBook, instrument Instrument, side Side, posSide PositionSide, qty, timestamp int64, liquidationID uint64) liquidationExecutionStats {
 	var stats liquidationExecutionStats
 	// Same allocation pattern as PlaceOrder (increment, then use): taking the
 	// value first would reuse the most recently placed order's ID.
 	e.NextOrderID++
 	orderID := e.NextOrderID
+	stats.orderID = orderID
 	order := getOrder()
 	order.ID = orderID
 	order.ClientID = clientID
@@ -97,7 +107,7 @@ func (e *DefaultExchange) forceCloseWithStats(clientID uint64, client *Client, b
 		stats.vwapPrice = etypes.MulDiv(stats.filledNotional, instrument.BasePrecision(), stats.filledQty)
 	}
 	levels := collectAffectedLevels(book, result.Executions)
-	e.processExecutions(book, result.Executions, order, plan)
+	e.processExecutions(book, result.Executions, order, plan, true, liquidationID)
 	e.removeMakerOrders(book, result.Executions)
 	e.publishLevels(book, levels)
 	putOrder(order)

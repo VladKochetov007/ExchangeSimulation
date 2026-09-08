@@ -133,6 +133,7 @@ func (r *Run) MeasureLiquidations() (*LiquidationAudit, error) {
 		Symbol         string `json:"symbol"`
 		PositionSide   string `json:"position_side"`
 		LiquidationID  uint64 `json:"liquidation_id"`
+		ForcedOrderID  uint64 `json:"forced_order_id"`
 		PositionSize   int64  `json:"position_size"`
 		AttemptedQty   int64  `json:"attempted_qty"`
 		FilledQty      int64  `json:"filled_qty"`
@@ -268,6 +269,9 @@ func (r *Run) MeasureLiquidations() (*LiquidationAudit, error) {
 					absLiquidationSize(payload.PositionSize) == uint64(payload.AttemptedQty)
 				validFields := liquidationSummaryFieldsPresent(event.Raw()) == nil
 				validPricing := false
+				if r.strictLifecycleIdentity && payload.ForcedOrderID == 0 {
+					validFields = false
+				}
 				if validFields {
 					// Signed contracts may legitimately report a negative or zero
 					// execution price. Validate the fixed-point identity without

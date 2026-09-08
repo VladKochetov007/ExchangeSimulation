@@ -2117,6 +2117,10 @@ func (s *Sim) Run(ctx context.Context) error {
 					riskErr = fmt.Errorf("multivenue: strict risk contract at %s: %w", venue.ID, err)
 					break
 				}
+				if err := venue.Exchange.ValidateMaintenanceAtCurrentMarks(); err != nil {
+					riskErr = fmt.Errorf("multivenue: strict maintenance boundary at %s: %w", venue.ID, err)
+					break
+				}
 			}
 			venue.TerminalRisk, riskErr = captureVenueRisk(venue, "terminal_post_mark")
 		}
@@ -2146,6 +2150,9 @@ func (s *Sim) Run(ctx context.Context) error {
 		if s.Config.StrictRiskContract {
 			if err := venue.Exchange.ValidateNoBorrowingDebt(); err != nil {
 				return fmt.Errorf("multivenue: strict risk contract at %s: %w", venue.ID, err)
+			}
+			if err := venue.Exchange.ValidateMaintenanceAtCurrentMarks(); err != nil {
+				return fmt.Errorf("multivenue: strict maintenance boundary at %s: %w", venue.ID, err)
 			}
 		}
 	}

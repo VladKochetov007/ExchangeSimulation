@@ -61,6 +61,7 @@ type executionContext struct {
 	timestamp     int64
 	log           Logger
 	forced        bool
+	liquidationID uint64
 }
 
 // requireParties asserts the invariant every settlement path relies on: both
@@ -164,7 +165,7 @@ type settlementOutcome struct {
 	tradeID         uint64
 }
 
-func (e *DefaultExchange) processExecutions(book *OrderBook, executions []*Execution, takerOrder *Order, plan *spotExecutionPlan, forced bool) {
+func (e *DefaultExchange) processExecutions(book *OrderBook, executions []*Execution, takerOrder *Order, plan *spotExecutionPlan, forced bool, liquidationID uint64) {
 	instrument := book.Instrument
 	timestamp := e.Clock.NowUnixNano()
 	basePrecision := instrument.BasePrecision()
@@ -178,7 +179,7 @@ func (e *DefaultExchange) processExecutions(book *OrderBook, executions []*Execu
 			}
 			planned = &plan.fills[i]
 		}
-		if e.handleExecution(book, exec, takerOrder, instrument, basePrecision, timestamp, log, planned, forced) {
+		if e.handleExecution(book, exec, takerOrder, instrument, basePrecision, timestamp, log, planned, forced, liquidationID) {
 			positionChanged = true
 		}
 	}
@@ -194,9 +195,11 @@ func (e *DefaultExchange) processExecutions(book *OrderBook, executions []*Execu
 func (e *DefaultExchange) handleExecution(
 	book *OrderBook, exec *Execution, takerOrder *Order,
 	instrument Instrument, basePrecision, timestamp int64, log Logger, planned *plannedSpotExecution, forced bool,
+	liquidationID uint64,
 ) bool {
 	ctx := e.newExecutionContext(book, exec, takerOrder, instrument, basePrecision, timestamp, log, planned)
 	ctx.forced = forced
+	ctx.liquidationID = liquidationID
 	outcome := e.settleExecution(ctx)
 	outcome.tradeID = e.createTrade(ctx)
 	e.reportFill(ctx, outcome)
@@ -545,6 +548,9 @@ func logFill(ctx executionContext, tradeID uint64, side fillSide) {
 	}
 	if ctx.forced && side.role == "taker" {
 		payload["forced"] = true
+		if ctx.liquidationID != 0 {
+			payload["liquidation_id"] = ctx.liquidationID
+		}
 	}
 	ctx.log.LogEvent(ctx.timestamp, side.clientID, "OrderFill", payload)
 }
@@ -577,8 +583,9 @@ func sendFillNotification(gw *ClientGateway, ctx executionContext, tradeID uint6
 			// Only the synthetic liquidation taker lacks a client acceptance.
 			// The resting maker received an ordinary fill for its own accepted
 			// order and must retain the normal order-ID lifecycle.
-			Forced:    ctx.forced && side.role == "taker",
-			Timestamp: ctx.exec.Timestamp,
+			Forced:        ctx.forced && side.role == "taker",
+			LiquidationID: ctx.liquidationID,
+			Timestamp:     ctx.exec.Timestamp,
 		},
 	})
 }

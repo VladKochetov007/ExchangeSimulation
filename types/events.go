@@ -12,6 +12,7 @@ type LiquidationEvent struct {
 	Timestamp     int64  `json:"timestamp"`
 	ClientID      uint64 `json:"client_id"`
 	LiquidationID uint64 `json:"liquidation_id"`
+	ForcedOrderID uint64 `json:"forced_order_id"`
 	Symbol        string `json:"symbol"`
 	PositionSide  string `json:"position_side"`
 	PositionSize  int64  `json:"position_size"`

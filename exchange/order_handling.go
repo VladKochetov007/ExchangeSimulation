@@ -207,7 +207,7 @@ func (e *DefaultExchange) PlaceOrder(clientID uint64, req *OrderRequest) Respons
 	}
 
 	levels := collectAffectedLevels(book, result.Executions)
-	e.processExecutions(book, result.Executions, order, spotPlan)
+	e.processExecutions(book, result.Executions, order, spotPlan, false, 0)
 	e.removeMakerOrders(book, result.Executions)
 	e.publishLevels(book, levels)
 	e.restOrReleaseOrder(client, book, order, req, log)

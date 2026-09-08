@@ -1,10 +1,127 @@
 package exchange
 
 import (
+	"context"
 	"errors"
 	"math"
 	"testing"
+	"time"
 )
+
+func TestFundingScheduleAnchorsAtAutomationStart(t *testing.T) {
+	clock := &expiryManualClock{now: 1_000}
+	factory := &recordingTickerFactory{}
+	ex := NewExchangeWithConfig(ExchangeConfig{
+		Clock:               clock,
+		TickerFactory:       factory,
+		DeterministicPhases: true,
+	})
+	defer ex.Shutdown()
+
+	perp := NewPerpFutures("ABC-PERP", "ABC", "USD", 1, 1, 1, 1)
+	perp.GetFundingRate().Interval = 2
+	ex.AddInstrument(perp)
+	ex.StartAutomation(context.Background())
+	ex.StopAutomation()
+
+	funding := perp.GetFundingRate()
+	wantFirst := clock.now + int64(2*time.Second)
+	if funding.NextFunding != wantFirst {
+		t.Fatalf("funding first deadline = %d, want automation-start deadline %d", funding.NextFunding, wantFirst)
+	}
+
+	clock.Advance(time.Second)
+	ex.CheckAndSettleFunding()
+	if funding.NextFunding != wantFirst {
+		t.Fatalf("funding deadline moved before its declared interval: got %d want %d", funding.NextFunding, wantFirst)
+	}
+
+	funding.MarkPrice = 100
+	funding.MarkAvailable = true
+	clock.Advance(time.Second)
+	ex.CheckAndSettleFunding()
+	wantSecond := clock.now + int64(2*time.Second)
+	if funding.NextFunding != wantSecond {
+		t.Fatalf("funding second deadline = %d, want %d", funding.NextFunding, wantSecond)
+	}
+}
+
+func TestPerpetualListedAfterAutomationStartsGetsFreshFundingInterval(t *testing.T) {
+	clock := &expiryManualClock{now: 1_000}
+	factory := &recordingTickerFactory{}
+	ex := NewExchangeWithConfig(ExchangeConfig{
+		Clock:               clock,
+		TickerFactory:       factory,
+		DeterministicPhases: true,
+	})
+	defer ex.Shutdown()
+	ex.StartAutomation(context.Background())
+	defer ex.StopAutomation()
+
+	clock.Advance(5 * time.Second)
+	perp := NewPerpFutures("LATE-PERP", "LATE", "USD", 1, 1, 1, 1)
+	perp.GetFundingRate().Interval = 2
+	ex.AddInstrument(perp)
+
+	want := clock.now + int64(2*time.Second)
+	if got := perp.GetFundingRate().NextFunding; got != want {
+		t.Fatalf("late perpetual first deadline = %d, want listing-relative deadline %d", got, want)
+	}
+}
+
+func TestDelayedFundingFailsClosedWithoutBoundMarkSnapshot(t *testing.T) {
+	clock := &expiryManualClock{now: 1_000}
+	ex := NewExchange(1, clock)
+	defer ex.Shutdown()
+	perp := NewPerpFutures("ABC-PERP", "ABC", "USD", 1, 1, 1, 1)
+	perp.GetFundingRate().Interval = 2
+	ex.AddInstrument(perp)
+	funding := perp.GetFundingRate()
+	funding.MarkPrice = 100
+	funding.MarkAvailable = true
+	funding.NextFunding = clock.now + int64(2*time.Second)
+	scheduledDeadline := funding.NextFunding
+	log := &recordingLogger{}
+	ex.SetLogger(perp.Symbol(), log)
+	clock.Advance(5 * time.Second)
+	ex.CheckAndSettleFunding()
+	if funding.NextFunding != scheduledDeadline {
+		t.Fatalf("late funding advanced deadline without a bound mark snapshot: got %d want %d", funding.NextFunding, scheduledDeadline)
+	}
+	failed := false
+	for _, record := range log.records {
+		if record.event != "funding_settlement_failed" {
+			continue
+		}
+		payload, ok := record.data.(map[string]any)
+		if ok && payload["reason"] == ErrFundingDeadlineLate.Error() {
+			failed = true
+		}
+	}
+	if !failed {
+		t.Fatalf("late funding did not emit a fail-closed marker: %#v", log.records)
+	}
+}
+
+func TestManualFundingDoesNotReanchorFutureDeadline(t *testing.T) {
+	clock := &expiryManualClock{now: 1_000}
+	ex := NewExchange(1, clock)
+	defer ex.Shutdown()
+	perp := NewPerpFutures("ABC-PERP", "ABC", "USD", 1, 1, 1, 1)
+	ex.AddInstrument(perp)
+	funding := perp.GetFundingRate()
+	funding.MarkPrice = 100
+	funding.MarkAvailable = true
+	funding.NextFunding = clock.now + int64(2*time.Second)
+	before := funding.NextFunding
+
+	if err := ex.SettleFunding(perp); !errors.Is(err, ErrFundingNotDue) {
+		t.Fatalf("manual funding before deadline = %v, want ErrFundingNotDue", err)
+	}
+	if funding.NextFunding != before {
+		t.Fatalf("manual funding re-anchored future deadline: got %d want %d", funding.NextFunding, before)
+	}
+}
 
 func TestFundingMissingMarkDefersWithoutEntryPriceFallback(t *testing.T) {
 	clock := &expiryManualClock{now: 1_000}

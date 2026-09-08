@@ -51,14 +51,16 @@ type OrderFillEvent struct {
 	// parity) cannot reconcile intent against reality without it: market
 	// orders fill before their accept response arrives, so an order-ID lookup
 	// is not yet populated when the first fill lands.
-	Symbol    string        `json:"symbol"`
-	Qty       int64         `json:"qty"`
-	Price     int64         `json:"price"`
-	Side      exchange.Side `json:"side"`
-	IsFull    bool          `json:"is_full"`
-	TradeID   uint64        `json:"trade_id"`
-	FeeAmount int64         `json:"fee_amount"`
-	FeeAsset  string        `json:"fee_asset"`
+	Symbol        string        `json:"symbol"`
+	Qty           int64         `json:"qty"`
+	Price         int64         `json:"price"`
+	Side          exchange.Side `json:"side"`
+	IsFull        bool          `json:"is_full"`
+	TradeID       uint64        `json:"trade_id"`
+	FeeAmount     int64         `json:"fee_amount"`
+	FeeAsset      string        `json:"fee_asset"`
+	Forced        bool          `json:"forced,omitempty"`
+	LiquidationID uint64        `json:"liquidation_id,omitempty"`
 	// Timestamp is the exchange-side execution time, not actor receipt time.
 	Timestamp int64 `json:"timestamp"`
 }

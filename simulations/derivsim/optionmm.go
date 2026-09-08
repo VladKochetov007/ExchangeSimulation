@@ -161,6 +161,7 @@ func NewOptionMarketMaker(id uint64, gw actor.Gateway, cfg OptionMMConfig) *Opti
 	mm.set.onFill = mm.onFill
 	mm.set.onAccept = mm.onQuoteAccepted
 	mm.set.onReject = mm.onQuoteRejected
+	mm.set.onCancel = mm.onQuoteCancelled
 	mm.SetHandler(mm)
 	mm.AddTicker(cfg.QuoteInterval, mm.onQuoteTick)
 	if cfg.HedgeEnabled {
@@ -230,6 +231,12 @@ func (mm *OptionMarketMaker) handleHedgeEvent(evt *actor.Event) bool {
 		return true
 	case actor.EventOrderPartialFill, actor.EventOrderFilled:
 		e := evt.Data.(actor.OrderFillEvent)
+		if e.Forced && e.Symbol == mm.cfg.Underlying {
+			filled := signedQty(e)
+			mm.hedgePos += filled
+			mm.hedgeQty += e.Qty
+			return true
+		}
 		if _, ok := mm.hedgeOrders[e.OrderID]; !ok {
 			return false
 		}
@@ -256,6 +263,19 @@ func (mm *OptionMarketMaker) handleHedgeEvent(evt *actor.Event) bool {
 		return true
 	}
 	return false
+}
+
+func (mm *OptionMarketMaker) onQuoteCancelled(e actor.OrderCancelledEvent) {
+	for _, quote := range mm.quotes {
+		if quote.bidID == e.OrderID {
+			quote.bidID = 0
+			quote.pendingBid = false
+		}
+		if quote.askID == e.OrderID {
+			quote.askID = 0
+			quote.pendingAsk = false
+		}
+	}
 }
 
 // onQuoteAccepted records the live order ID for a quote so it can be

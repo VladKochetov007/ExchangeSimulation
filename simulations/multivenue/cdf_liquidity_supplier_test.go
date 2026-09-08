@@ -409,6 +409,62 @@ func TestElasticLiquiditySupplierRecoversFromFillCancelRace(t *testing.T) {
 	}
 }
 
+func TestElasticLiquiditySupplierAppliesForcedCloseByLiquidationIdentity(t *testing.T) {
+	gw := newMetaGateway()
+	var fills []ElasticLiquiditySupplierFill
+	supplier := NewElasticLiquiditySupplier(1, gw, ElasticLiquiditySupplierConfig{
+		Role: "cdf_elastic_supplier_1", ClientID: 7, Symbol: "CDF/USD",
+		BasePrecision: 1, QuotePrecision: 1, InitialBaseBalance: 100, InitialQuoteBalance: 1_000,
+		ReferencePrice: 100, ReferenceHalfLife: time.Hour, MaxPosition: 100, MaxInventory: 200,
+		MaxQuoteQty: 25, FillObserver: func(fill ElasticLiquiditySupplierFill) { fills = append(fills, fill) },
+	})
+	supplier.position = 25
+	supplier.quote = elasticLiquidityQuote{orderID: 41, requestID: 12, side: exchange.Buy, price: 99, qty: 5}
+	supplier.quoteCashAvailable = 10
+	supplier.quoteCashReserved = 5
+
+	supplier.HandleEvent(context.Background(), &actor.Event{Type: actor.EventOrderFilled, Data: actor.OrderFillEvent{
+		OrderID: 900, Symbol: "CDF/USD", Side: exchange.Sell, Qty: 10, Price: 101,
+		IsFull: false, TradeID: 88, Forced: true, LiquidationID: 77, Timestamp: 123,
+	}})
+
+	if got, want := supplier.Position(), int64(15); got != want {
+		t.Fatalf("forced close position = %d, want %d", got, want)
+	}
+	if supplier.quote.orderID != 0 || supplier.pendingRequestID != 0 || supplier.cancelPending {
+		t.Fatalf("forced close left local order state = quote=%+v pending=%d cancel=%t", supplier.quote, supplier.pendingRequestID, supplier.cancelPending)
+	}
+	if supplier.quoteCashAvailable != 15 || supplier.quoteCashReserved != 0 {
+		t.Fatalf("forced close cash reservation = (%d, %d), want (15, 0)", supplier.quoteCashAvailable, supplier.quoteCashReserved)
+	}
+	if len(fills) != 1 || !fills[0].Forced || fills[0].LiquidationID != 77 || fills[0].OrderID != 900 || fills[0].PositionBefore != 25 || fills[0].PositionAfter != 15 {
+		t.Fatalf("forced fill evidence = %+v, want identity-bound close", fills)
+	}
+}
+
+func TestElasticLiquiditySupplierRejectsInvalidForcedCloseWithoutMutation(t *testing.T) {
+	supplier := NewElasticLiquiditySupplier(1, newMetaGateway(), ElasticLiquiditySupplierConfig{
+		Role: "cdf_elastic_supplier_1", ClientID: 7, Symbol: "CDF/USD",
+		InitialBaseBalance: 100, MaxPosition: 100, MaxInventory: 200, MaxQuoteQty: 25,
+	})
+	supplier.position = 25
+	invalidEvents := []actor.OrderFillEvent{
+		{OrderID: 0, Symbol: "CDF/USD", Side: exchange.Sell, Qty: 1, Forced: true, LiquidationID: 77},
+		{OrderID: 900, Symbol: "CDF/USD", Side: exchange.Buy, Qty: 1, Forced: true, LiquidationID: 77},
+		{OrderID: 900, Symbol: "CDF/USD", Side: exchange.Sell, Qty: 26, Forced: true, LiquidationID: 77},
+		{OrderID: 900, Symbol: "CDF/USD", Side: exchange.Sell, Qty: 1, Forced: true},
+	}
+	for _, event := range invalidEvents {
+		supplier.HandleEvent(context.Background(), &actor.Event{Type: actor.EventOrderFilled, Data: event})
+		if supplier.Position() != 25 {
+			t.Fatalf("invalid forced event %+v changed position to %d", event, supplier.Position())
+		}
+	}
+	if !supplier.equityUnavailable || !supplier.riskLimitTriggered {
+		t.Fatal("invalid forced event did not fail closed")
+	}
+}
+
 func testElasticLiquiditySupplierSpec() ElasticLiquiditySupplierSpec {
 	return ElasticLiquiditySupplierSpec{
 		Role: "cdf_elastic_supplier_1", Symbol: "CDF/USD", BaseAsset: "CDF", QuoteAsset: "USD",

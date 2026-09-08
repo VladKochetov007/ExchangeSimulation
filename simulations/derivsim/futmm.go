@@ -62,6 +62,12 @@ func NewFuturesMarketMaker(id uint64, gw actor.Gateway, cfg FuturesMMConfig) *Fu
 	}
 	mm.set.onSettle = func(c *Contract, _ int64) { delete(mm.quotes, c.Symbol) }
 	mm.set.onFill = func(sym string, e actor.OrderFillEvent) {
+		if e.Forced {
+			// A synthetic liquidation close is not this maker's accepted quote.
+			// Clearing a side solely from the fill side could erase an unrelated
+			// live quote and change future liquidity without a client order event.
+			return
+		}
 		if q, ok := mm.quotes[sym]; ok && e.IsFull {
 			if e.Side == exchange.Buy {
 				q.bidID = 0

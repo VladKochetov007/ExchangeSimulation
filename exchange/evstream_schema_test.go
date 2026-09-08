@@ -83,7 +83,7 @@ func TestFillEvidenceRoundTrip(t *testing.T) {
 			NewSize: math.MaxInt64, OrderID: math.MaxUint64, Price: math.MaxInt64,
 			Qty: math.MinInt64, RealizedPnL: math.MaxInt64, RemainingQty: math.MinInt64,
 			TradeID: math.MaxUint64, IsFull: false},
-		{OrderID: 12, Symbol: "ABC-PERP", Qty: 1, Forced: true},
+		{OrderID: 12, Symbol: "ABC-PERP", Qty: 1, Forced: true, LiquidationID: 99},
 	}
 	for _, original := range cases {
 		frame, reader := roundTripFrame(t, original)

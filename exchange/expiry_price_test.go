@@ -392,6 +392,51 @@ func TestExpirySettlementPendingRetriesThenSettlesExactlyOnce(t *testing.T) {
 	}
 }
 
+func TestStrictExpiryDoesNotCreateUndeclaredNegativeBalance(t *testing.T) {
+	clock := &expiryManualClock{now: 100}
+	ex := NewExchangeWithConfig(ExchangeConfig{
+		Clock:                                clock,
+		RequireExactLinearPositionAccounting: true,
+	})
+	defer ex.Shutdown()
+	future := NewExpiringFutures("ABC-FUT-DEFAULT", "ABC", "USD", 1, 1, 1, 1, clock.now)
+	future.ObserveSettlement(50, clock.now)
+	ex.AddInstrument(future)
+	for _, clientID := range []uint64{1, 2} {
+		ex.ConnectNewClient(clientID, nil, &FixedFee{})
+	}
+	ex.AddPerpBalance(1, "USD", 10)
+	ex.AddPerpBalance(2, "USD", 1_000)
+	if delta := ex.Positions.UpdatePosition(1, future.Symbol(), 1, 100, Buy, PositionBoth); delta.NewSize != 1 {
+		t.Fatalf("long position delta = %#v", delta)
+	}
+	if delta := ex.Positions.UpdatePosition(2, future.Symbol(), 1, 100, Sell, PositionBoth); delta.NewSize != -1 {
+		t.Fatalf("short position delta = %#v", delta)
+	}
+	marginLedger, ok := ex.Positions.(etypes.MarginLedger)
+	if !ok {
+		t.Fatal("position store does not expose margin ledger")
+	}
+	marginLedger.AddPositionMargin(1, future.Symbol(), PositionBoth, 100)
+
+	ex.CheckExpiries()
+	if _, pending := ex.settlementPending[future.Symbol()]; !pending {
+		t.Fatal("insolvent expiry was not quarantined as settlement-pending")
+	}
+	if ex.Clients[1].PerpBalances["USD"] < 0 {
+		t.Fatalf("expiry created undeclared negative perp balance: %d", ex.Clients[1].PerpBalances["USD"])
+	}
+	if position := ex.Positions.GetPosition(1, future.Symbol()); position == nil || position.Margin != 100 {
+		t.Fatalf("quarantined expiry consumed position margin: %#v", position)
+	}
+	if position := ex.Positions.GetPosition(1, future.Symbol()); position == nil || position.Size == 0 {
+		t.Fatalf("insolvent expiry discarded the unresolved position: %#v", position)
+	}
+	if err := ex.ValidateNoBorrowingDebt(); err != nil {
+		t.Fatalf("strict debt validation after quarantined expiry: %v", err)
+	}
+}
+
 func TestInstrumentReplayRetainsOriginalListingTime(t *testing.T) {
 	clock := &expiryManualClock{now: 100}
 	ex := NewExchange(1, clock)

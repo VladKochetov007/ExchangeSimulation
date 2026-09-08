@@ -29,6 +29,11 @@ type FillNotification struct {
 	RealizedPnL   int64        `json:"realized_pnl"`
 	NewSize       int64        `json:"new_size"`
 	NewEntryPrice int64        `json:"new_entry_price"`
+	// Forced marks a synthetic exchange risk close whose order ID was never
+	// submitted by the client. Actors must apply its symbol/side immediately
+	// instead of buffering it forever behind an absent order acceptance.
+	Forced        bool   `json:"forced,omitempty"`
+	LiquidationID uint64 `json:"liquidation_id,omitempty"`
 	// Timestamp is the exchange match time. It is intentionally distinct from
 	// client receipt time, which may include modeled response latency.
 	Timestamp int64 `json:"timestamp"`

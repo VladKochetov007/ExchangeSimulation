@@ -144,16 +144,42 @@ func (o *EuropeanOption) PositionMark() (int64, error) { return o.MarkPremium() 
 // per unit, Deribit-style — the premium term guarantees maintenance always
 // covers buying the position back at the mark.
 func (o *EuropeanOption) MaintenanceForPosition(size, precision int64) int64 {
+	maintenance, ok := o.TryMaintenanceForPosition(size, precision)
+	if !ok {
+		panic("option maintenance overflows int64")
+	}
+	return maintenance
+}
+
+// TryMaintenanceForPosition is the checked form used by strict exchange risk
+// aggregation. A missing mark is represented by zero maintenance for backward
+// compatibility; the exchange's marked path separately requires a committed
+// snapshot before accepting that value as risk evidence.
+func (o *EuropeanOption) TryMaintenanceForPosition(size, precision int64) (int64, bool) {
 	if size >= 0 {
-		return 0
+		return 0, true
+	}
+	if size == math.MinInt64 {
+		return 0, false
 	}
 	short := -size
 	m, marked := o.loadMarks()
 	if !marked {
-		return 0
+		return 0, true
 	}
-	mm := etypes.MulDiv(short, m.underlying, precision) * o.Margin.MMBps / 10000
-	return mm + etypes.MulDiv(short, m.premium, precision)
+	underlyingNotional, ok := etypes.TryMulDiv(short, m.underlying, precision)
+	if !ok {
+		return 0, false
+	}
+	mm, ok := etypes.TryMulBps(underlyingNotional, o.Margin.MMBps)
+	if !ok {
+		return 0, false
+	}
+	premiumNotional, ok := etypes.TryMulDiv(short, m.premium, precision)
+	if !ok {
+		return 0, false
+	}
+	return etypes.TryAdd(mm, premiumNotional)
 }
 
 // MaintenanceForPositionAtMark evaluates the option maintenance formula from
@@ -161,12 +187,37 @@ func (o *EuropeanOption) MaintenanceForPosition(size, precision int64) int64 {
 // read o.marks or o.Margin.MMBps, so a later mark/configuration mutation cannot
 // change a decision that was already committed to the snapshot.
 func (o *EuropeanOption) MaintenanceForPositionAtMark(size, precision, underlyingMark, positionMark, maintenanceBps int64) int64 {
+	maintenance, ok := o.TryMaintenanceForPositionAtMark(size, precision, underlyingMark, positionMark, maintenanceBps)
+	if !ok {
+		panic("option marked maintenance overflows int64")
+	}
+	return maintenance
+}
+
+// TryMaintenanceForPositionAtMark is the checked snapshot form. It uses only
+// caller-supplied immutable mark inputs, so risk aggregation cannot observe a
+// later mutable option configuration.
+func (o *EuropeanOption) TryMaintenanceForPositionAtMark(size, precision, underlyingMark, positionMark, maintenanceBps int64) (int64, bool) {
 	if size >= 0 {
-		return 0
+		return 0, true
+	}
+	if size == math.MinInt64 {
+		return 0, false
 	}
 	short := -size
-	mm := etypes.MulDiv(short, underlyingMark, precision) * maintenanceBps / 10000
-	return mm + etypes.MulDiv(short, positionMark, precision)
+	underlyingNotional, ok := etypes.TryMulDiv(short, underlyingMark, precision)
+	if !ok {
+		return 0, false
+	}
+	mm, ok := etypes.TryMulBps(underlyingNotional, maintenanceBps)
+	if !ok {
+		return 0, false
+	}
+	premiumNotional, ok := etypes.TryMulDiv(short, positionMark, precision)
+	if !ok {
+		return 0, false
+	}
+	return etypes.TryAdd(mm, premiumNotional)
 }
 
 // --- Expirable ---

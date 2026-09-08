@@ -11,7 +11,11 @@ import (
 	etypes "exchange_sim/types"
 )
 
-var ErrFundingArithmetic = errors.New("funding arithmetic overflow")
+var (
+	ErrFundingArithmetic   = errors.New("funding arithmetic overflow")
+	ErrFundingNotDue       = errors.New("funding deadline is in the future")
+	ErrFundingDeadlineLate = errors.New("funding deadline passed without a bound mark snapshot")
+)
 
 type positionKey struct {
 	Symbol string
@@ -692,7 +696,8 @@ func (pm *PositionManager) SettleFunding(clients map[uint64]*Client, perp *PerpF
 	if perp == nil {
 		return fmt.Errorf("funding settlement: %w", ErrNoBookPrice)
 	}
-	settled, err := settleFunding(pm, clients, perp, pm.clock.NowUnixNano(), fundingEventSink{})
+	now := pm.clock.NowUnixNano()
+	settled, err := settleFundingAt(pm, clients, perp, now, now, fundingEventSink{})
 	if !settled {
 		if err == nil {
 			err = ErrNoBookPrice
@@ -705,6 +710,14 @@ func (pm *PositionManager) SettleFunding(clients map[uint64]*Client, perp *PerpF
 // settleFunding applies funding payments from/to client PerpBalances.
 // Payments are zero-sum: net flow between longs and shorts routes to/from exchange revenue.
 func settleFunding(store PositionStore, clients map[uint64]*Client, perp *PerpFutures, timestamp int64, sink fundingEventSink) (bool, error) {
+	return settleFundingAt(store, clients, perp, timestamp, timestamp, sink)
+}
+
+// settleFundingAt applies one scheduled funding interval. The processing time
+// and the schedule anchor are separate: delayed execution must advance from
+// the declared prior deadline, otherwise ticker delay silently stretches the
+// economic funding interval.
+func settleFundingAt(store PositionStore, clients map[uint64]*Client, perp *PerpFutures, timestamp, scheduleAnchor int64, sink fundingEventSink) (bool, error) {
 	fundingRate := perp.GetFundingRate()
 	if !fundingRate.MarkAvailable {
 		// A missing mark is not permission to value funding at each position's
@@ -714,7 +727,7 @@ func settleFunding(store PositionStore, clients map[uint64]*Client, perp *PerpFu
 	}
 	precision := perp.BasePrecision()
 	quote := perp.QuoteAsset()
-	nextFunding, arithmeticOK := nextFundingTimestamp(timestamp, fundingRate.Interval)
+	nextFunding, arithmeticOK := nextFundingTimestamp(scheduleAnchor, fundingRate.Interval)
 	if !arithmeticOK {
 		return false, ErrFundingArithmetic
 	}

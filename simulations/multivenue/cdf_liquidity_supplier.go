@@ -11,6 +11,7 @@ import (
 	"exchange_sim/actor"
 	"exchange_sim/exchange"
 	"exchange_sim/simulation"
+	etypes "exchange_sim/types"
 )
 
 // ElasticLiquiditySupplierSpec is the serializable roster entry for a bounded
@@ -201,6 +202,8 @@ type ElasticLiquiditySupplierFill struct {
 	FeeAmount      int64  `json:"fee_amount"`
 	FeeAsset       string `json:"fee_asset"`
 	IsFull         bool   `json:"is_full"`
+	Forced         bool   `json:"forced,omitempty"`
+	LiquidationID  uint64 `json:"liquidation_id,omitempty"`
 	PositionBefore int64  `json:"position_before"`
 	PositionAfter  int64  `json:"position_after"`
 }
@@ -332,26 +335,36 @@ func (s *ElasticLiquiditySupplier) observeRejected(event actor.OrderRejectedEven
 }
 
 func (s *ElasticLiquiditySupplier) observeFill(event actor.OrderFillEvent) {
-	if event.Symbol != s.cfg.Symbol || event.OrderID != s.quote.orderID {
+	if event.Symbol != s.cfg.Symbol || event.Qty <= 0 {
 		return
 	}
 	positionBefore := s.position
-	if event.Side == exchange.Buy {
-		s.position += event.Qty
-	} else {
-		s.position -= event.Qty
+	if event.Forced {
+		if !s.isValidForcedClose(event) || !s.applyPositionDelta(event.Side, event.Qty) {
+			s.rejectFillTransition()
+			return
+		}
+		// Liquidation cancels the account's resting orders before the synthetic
+		// close executes. Clear local order state immediately as well: the forced
+		// fill has no client-submitted acceptance that could reconcile it later.
+		s.pendingRequestID = 0
+		s.quote = elasticLiquidityQuote{}
+		s.cancelPending = false
+		s.cancelRequestID = 0
+		s.releaseQuoteReservation()
+		s.emitFillEvidence(event, positionBefore)
+		return
+	}
+	if event.OrderID == 0 || event.OrderID != s.quote.orderID || event.Qty > s.quote.qty {
+		return
+	}
+	if !s.applyPositionDelta(event.Side, event.Qty) {
+		s.rejectFillTransition()
+		return
 	}
 	s.updateQuoteRemainingAfterFill(event)
 	s.applyQuoteFill(event)
-	if s.cfg.FillObserver != nil {
-		s.cfg.FillObserver(ElasticLiquiditySupplierFill{
-			Role: s.cfg.Role, ClientID: s.cfg.ClientID, Symbol: event.Symbol,
-			OrderID: event.OrderID, TradeID: event.TradeID, Timestamp: event.Timestamp,
-			Side: event.Side.String(), Price: event.Price, Qty: event.Qty,
-			FeeAmount: event.FeeAmount, FeeAsset: event.FeeAsset, IsFull: event.IsFull,
-			PositionBefore: positionBefore, PositionAfter: s.position,
-		})
-	}
+	s.emitFillEvidence(event, positionBefore)
 	if event.IsFull {
 		s.quote = elasticLiquidityQuote{}
 		// A full fill wins a concurrent cancellation race: the order no longer
@@ -361,6 +374,83 @@ func (s *ElasticLiquiditySupplier) observeFill(event actor.OrderFillEvent) {
 		s.cancelRequestID = 0
 		s.releaseQuoteReservation()
 	}
+}
+
+func (s *ElasticLiquiditySupplier) emitFillEvidence(event actor.OrderFillEvent, positionBefore int64) {
+	if s.cfg.FillObserver == nil {
+		return
+	}
+	s.cfg.FillObserver(ElasticLiquiditySupplierFill{
+		Role: s.cfg.Role, ClientID: s.cfg.ClientID, Symbol: event.Symbol,
+		OrderID: event.OrderID, TradeID: event.TradeID, Timestamp: event.Timestamp,
+		Side: event.Side.String(), Price: event.Price, Qty: event.Qty,
+		FeeAmount: event.FeeAmount, FeeAsset: event.FeeAsset, IsFull: event.IsFull,
+		Forced: event.Forced, LiquidationID: event.LiquidationID,
+		PositionBefore: positionBefore, PositionAfter: s.position,
+	})
+}
+
+func (s *ElasticLiquiditySupplier) rejectFillTransition() {
+	// A gateway event that cannot be reconciled is not safe to interpret as a
+	// partial economic transition. Withdraw on the next decision and keep the
+	// local actor fail-closed until an account snapshot can be supplied.
+	s.equityUnavailable = true
+	s.riskLimitTriggered = true
+}
+
+func (s *ElasticLiquiditySupplier) isValidForcedClose(event actor.OrderFillEvent) bool {
+	if event.OrderID == 0 || event.LiquidationID == 0 || s.position == 0 {
+		return false
+	}
+	positionMagnitude, ok := positionMagnitude(s.position)
+	if !ok || event.Qty > positionMagnitude {
+		return false
+	}
+	if s.position > 0 {
+		return event.Side == exchange.Sell
+	}
+	return event.Side == exchange.Buy
+}
+
+func positionMagnitude(position int64) (int64, bool) {
+	if position == math.MinInt64 {
+		return 0, false
+	}
+	if position < 0 {
+		return -position, true
+	}
+	return position, true
+}
+
+func (s *ElasticLiquiditySupplier) applyPositionDelta(side exchange.Side, quantity int64) bool {
+	if quantity <= 0 {
+		return false
+	}
+	delta := quantity
+	switch side {
+	case exchange.Buy:
+	case exchange.Sell:
+		delta = -quantity
+	default:
+		return false
+	}
+	updatedPosition, ok := etypes.TryAdd(s.position, delta)
+	if !ok || !s.positionWithinLimits(updatedPosition) {
+		return false
+	}
+	s.position = updatedPosition
+	return true
+}
+
+func (s *ElasticLiquiditySupplier) positionWithinLimits(position int64) bool {
+	if s.cfg.MaxPosition > 0 && (position < -s.cfg.MaxPosition || position > s.cfg.MaxPosition) {
+		return false
+	}
+	grossInventory, ok := etypes.TryAdd(s.cfg.InitialBaseBalance, position)
+	if !ok || grossInventory < 0 {
+		return false
+	}
+	return s.cfg.MaxInventory <= 0 || grossInventory <= s.cfg.MaxInventory
 }
 
 func (s *ElasticLiquiditySupplier) updateQuoteRemainingAfterFill(event actor.OrderFillEvent) {
@@ -584,12 +674,18 @@ func (s *ElasticLiquiditySupplier) quoteAccountingDisabled() bool {
 	return s.cfg.InitialQuoteBalance <= 0 || s.cfg.QuotePrecision <= 0
 }
 
-func (s *ElasticLiquiditySupplier) releaseQuoteReservation() {
+func (s *ElasticLiquiditySupplier) releaseQuoteReservation() bool {
 	if s.quoteAccountingDisabled() || s.quoteCashReserved <= 0 {
-		return
+		return true
 	}
-	s.quoteCashAvailable += s.quoteCashReserved
+	available, ok := etypes.TryAdd(s.quoteCashAvailable, s.quoteCashReserved)
+	if !ok {
+		s.equityUnavailable = true
+		return false
+	}
+	s.quoteCashAvailable = available
 	s.quoteCashReserved = 0
+	return true
 }
 
 func (s *ElasticLiquiditySupplier) applyQuoteFill(event actor.OrderFillEvent) {
@@ -606,16 +702,23 @@ func (s *ElasticLiquiditySupplier) applyQuoteFill(event actor.OrderFillEvent) {
 	}
 	if event.Side == exchange.Buy {
 		spent, ok := exactQuoteAmount(notional, fee)
-		if !ok || spent > s.quoteCashReserved {
-			s.quoteCashReserved = 0
-		} else {
-			s.quoteCashReserved -= spent
+		if !ok || spent < 0 || spent > s.quoteCashReserved {
+			s.equityUnavailable = true
+			return
 		}
+		s.quoteCashReserved -= spent
 	} else if event.Side == exchange.Sell {
 		received, ok := exactQuoteAmount(notional, -fee)
-		if ok {
-			s.quoteCashAvailable += received
+		if !ok || received < 0 {
+			s.equityUnavailable = true
+			return
 		}
+		available, addOK := etypes.TryAdd(s.quoteCashAvailable, received)
+		if !addOK {
+			s.equityUnavailable = true
+			return
+		}
+		s.quoteCashAvailable = available
 	}
 	if event.IsFull {
 		s.releaseQuoteReservation()

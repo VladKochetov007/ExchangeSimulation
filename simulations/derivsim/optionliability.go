@@ -3,6 +3,7 @@ package derivsim
 import (
 	"context"
 	"fmt"
+	"math"
 	"time"
 
 	"exchange_sim/actor"
@@ -167,7 +168,11 @@ func NewOptionLiabilityTaker(id uint64, gw actor.Gateway, cfg OptionLiabilityTak
 	u.set.onSettle = func(c *Contract, _ int64) {
 		delete(u.quotes, c.Symbol)
 		settledPosition, ok := u.positions[c.Symbol]
-		if !ok || settledPosition == 0 {
+		if !ok {
+			return
+		}
+		if settledPosition == 0 {
+			delete(u.positions, c.Symbol)
 			return
 		}
 		remainingPosition, ok := etypes.TrySub(u.position, settledPosition)
@@ -267,16 +272,35 @@ func (u *OptionLiabilityTaker) onFill(sym string, e actor.OrderFillEvent) {
 	if e.Side != exchange.Buy {
 		positionDelta = -e.Qty
 	}
+	contractPosition := u.positions[sym]
+	if e.Forced {
+		// A forced fill is an exchange-generated close, never an invitation to
+		// create a synthetic option liability. It must reduce an existing
+		// contract position in the opposite direction and cannot exceed that
+		// position. Rejecting impossible opens keeps actor state fail-closed when
+		// a malformed or misrouted liquidation notification arrives.
+		if contractPosition == 0 || contractPosition == math.MinInt64 {
+			return
+		}
+		if (contractPosition > 0 && (e.Side != exchange.Sell || e.Qty > contractPosition)) ||
+			(contractPosition < 0 && (e.Side != exchange.Buy || e.Qty > -contractPosition)) {
+			return
+		}
+	}
 	nextPosition, ok := etypes.TryAdd(u.position, positionDelta)
 	if !ok {
 		return
 	}
-	contractPosition, ok := etypes.TryAdd(u.positions[sym], positionDelta)
+	contractPosition, ok = etypes.TryAdd(contractPosition, positionDelta)
 	if !ok {
 		return
 	}
 	u.position = nextPosition
-	u.positions[sym] = contractPosition
+	if contractPosition == 0 {
+		delete(u.positions, sym)
+	} else {
+		u.positions[sym] = contractPosition
+	}
 	if u.cfg.FillObserver != nil {
 		u.cfg.FillObserver(OptionLiabilityFill{
 			VenueID: u.cfg.VenueID, User: u.cfg.User, ClientID: u.cfg.ClientID,

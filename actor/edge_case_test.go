@@ -102,6 +102,26 @@ func TestBaseActorFullFillBeforeAcceptLeavesNoGhostOrder(t *testing.T) {
 	}
 }
 
+func TestBaseActorDeliversForcedFillWithoutClientAcceptance(t *testing.T) {
+	trader := NewBaseActor(1, exchange.NewClientGateway(1))
+	const orderID = uint64(71)
+	const liquidationID = uint64(5)
+
+	events := trader.decodeResponse(exchange.Response{Success: true, Data: &exchange.FillNotification{
+		OrderID: orderID, Symbol: "ABC-PERP", Qty: 3, IsFull: false, Forced: true, LiquidationID: liquidationID,
+	}})
+	if len(events) != 1 || events[0].Type != EventOrderPartialFill {
+		t.Fatalf("forced fill events = %#v, want one partial-fill event", events)
+	}
+	fill, ok := events[0].Data.(OrderFillEvent)
+	if !ok || !fill.Forced || fill.LiquidationID != liquidationID || fill.Symbol != "ABC-PERP" {
+		t.Fatalf("forced fill event = %#v, want symbol and forced marker", events[0].Data)
+	}
+	if _, buffered := trader.earlyOrderEvents.Load(orderID); buffered {
+		t.Fatal("forced fill was buffered behind a synthetic order acceptance")
+	}
+}
+
 func TestBaseActorFillEventPreservesExchangeTimestamp(t *testing.T) {
 	trader := NewBaseActor(1, exchange.NewClientGateway(1))
 	const orderID = uint64(17)

@@ -30,7 +30,7 @@ const (
 // --- fillEvidence ---
 
 func (e fillEvidence) SchemaID() uint16      { return SchemaFillEvidence }
-func (e fillEvidence) SchemaVersion() uint16 { return 2 }
+func (e fillEvidence) SchemaVersion() uint16 { return 3 }
 
 func (e fillEvidence) AppendPayloadInterning(dst []byte, in evstream.Interner) ([]byte, error) {
 	dst = evstream.AppendInt64(dst, e.FeeAmount)
@@ -53,20 +53,21 @@ func (e fillEvidence) AppendPayloadInterning(dst []byte, in evstream.Interner) (
 		}
 		dst = evstream.AppendUint32(dst, ref)
 	}
-	return evstream.AppendBool(dst, e.Forced), nil
+	dst = evstream.AppendBool(dst, e.Forced)
+	return evstream.AppendUint64(dst, e.LiquidationID), nil
 }
 
 // DecodeFillEvidence reads the payload back.
 func DecodeFillEvidence(payload []byte, resolve evstream.Resolver, into *fillEvidence) error {
-	return DecodeFillEvidenceVersioned(payload, resolve, 2, into)
+	return DecodeFillEvidenceVersioned(payload, resolve, 3, into)
 }
 
-// DecodeFillEvidenceVersioned retains the v1 wire contract. Version 2 adds an
-// explicit forced marker after the existing fields, allowing an analyzer to
-// distinguish a venue-generated liquidation fill from an ordinary unknown
-// order identity without weakening historical v1 decoding.
+// DecodeFillEvidenceVersioned retains the v1/v2 wire contracts. Version 2 adds
+// an explicit forced marker; version 3 also binds that marker to the account
+// liquidation batch. Historical frames remain readable, while successor
+// evidence can reject a coincident but unrelated unknown fill.
 func DecodeFillEvidenceVersioned(payload []byte, resolve evstream.Resolver, schemaVersion uint16, into *fillEvidence) error {
-	if schemaVersion != 1 && schemaVersion != 2 {
+	if schemaVersion != 1 && schemaVersion != 2 && schemaVersion != 3 {
 		return unsupportedSchemaVersion(SchemaFillEvidence, schemaVersion)
 	}
 	cursor := evstream.NewCursor(payload)
@@ -97,8 +98,12 @@ func DecodeFillEvidenceVersioned(payload []byte, resolve evstream.Resolver, sche
 		*target = value
 	}
 	into.Forced = false
+	into.LiquidationID = 0
 	if schemaVersion == 2 {
 		into.Forced = cursor.Bool()
+	} else if schemaVersion == 3 {
+		into.Forced = cursor.Bool()
+		into.LiquidationID = cursor.Uint64()
 	}
 	return finishCursor(cursor)
 }
@@ -451,7 +456,7 @@ func RenderPayloadJSONVersioned(schemaID, schemaVersion uint16, payload []byte, 
 		return append(out, '}'), nil
 
 	case SchemaFillEvidence:
-		if schemaVersion != 1 && schemaVersion != 2 {
+		if schemaVersion != 1 && schemaVersion != 2 && schemaVersion != 3 {
 			return nil, unsupportedSchemaVersion(schemaID, schemaVersion)
 		}
 		var value fillEvidence
@@ -527,7 +532,7 @@ func currentSchemaVersion(schemaID uint16) uint16 {
 		return 2
 	}
 	if schemaID == SchemaFillEvidence {
-		return 2
+		return 3
 	}
 	return 1
 }
