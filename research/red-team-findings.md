@@ -2676,3 +2676,60 @@ prediction (RT-042) and the level-uncertainty falsifier (RT-036). The pattern is
 consistent: measurements survive, and the sentences I write *around* them are
 where the errors are. Consequences now get tested before they are published, not
 after.
+
+## RT-046 — The carry arbitrageurs cap out, but only in the second half
+
+**Classification.** MIXED. Confirms one measurement exactly and falsifies the
+unifying framing I proposed around it.
+
+**Base.** `a666d02faede3d40f046b11e60eb672c59386a94`, seed 607, 8 h, full logs.
+
+**Measured** (`research/tools/positionpath`, reconstructed from fill evidence):
+
+| venue | role | fills | terminal | first at limit | time at limit |
+|---|---|---:|---:|---:|---:|
+| central | carry_arb_1 | 1 529 | **500.00** | 4.27 h | 40.8% |
+| north | carry_arb_1 | 1 804 | **500.00** | 5.38 h | 32.7% |
+| south | carry_arb_1 | 1 399 | **500.00** | 3.82 h | 43.6% |
+| central | carry_arb_2 | 1 421 | **500.00** | 4.95 h | 38.1% |
+| north | carry_arb_2 | 1 673 | **500.00** | 5.52 h | 31.0% |
+| south | carry_arb_2 | 1 311 | **500.00** | 4.61 h | 42.4% |
+
+**Confirmed.** Every participant ends at exactly +500.00, the configured
+`carry_max_position`. RT-045's class sum of +3 000.00 was not hiding dispersion,
+and this reconstructs it from the fill stream rather than the account snapshots.
+
+**Falsified.** I predicted ≥80% of the run at the cap. Measured 31.0%–43.6%, every
+participant under the 50% falsifier threshold, first reaching the limit only at
+3.82–5.52 h into an 8 h run while trading 1 300–1 800 times each.
+
+**The framing this kills.** I proposed that the perp subsystem is "saturated at
+every layer: mark at its clamp, funding at its cap, arb at its limit". The first
+two are measured and stand (RT-043, RT-044). The third does not. **The carry
+arbitrageur trades actively through the first half and pins only in the second**,
+as the basis blows out past what it can absorb. Saturation here is **progressive,
+not initial**, and the arbitrageur is the layer that keeps responding longest.
+
+**This also qualifies RT-045.** Its exposure table is a terminal snapshot showing
+every carry arb at its cap, which reads as a standing state; the population spent
+about a third of the run there. Accurate and unrepresentative at once.
+
+**POST-HOC, noted not claimed.** Time-at-limit orders by venue — south earliest
+and longest, north latest and shortest, central between, with both participants
+agreeing inside each venue. Six points over three venues cannot support a venue
+effect, and it is confounded with RT-042's funding-interval heterogeneity.
+
+**Instrument note: the third occurrence of one trap, and the first caught by a
+cross-check.** The first version of this tool reported **terminal 0.00 for all six
+while counting 1 529 fills each**. Derivative `OrderFill` records nest the fill
+fields under `payload.payload`, keeping only the symbol at the outer level, so the
+tool matched the symbol, counted the record, and read `qty` as zero. The result
+was internally consistent and entirely plausible — "the carry arbs end flat" is a
+reasonable finding — and the **only** reason it was caught is that RT-045 had
+already measured +3 000.00 from a different source. The same nesting trap has now
+appeared in `Trade`, `BookSnapshot` and `OrderFill` payloads. `flowattrib` is
+unaffected: it reads the outer symbol, finds no `/`, and skips derivatives.
+
+The lesson is not "handle the schema". It is that **a tool returning a plausible
+wrong answer is invisible without an independent measurement to contradict it**,
+which is what the two-source discipline from RT-040 bought.

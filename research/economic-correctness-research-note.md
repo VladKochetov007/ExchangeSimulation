@@ -4766,6 +4766,124 @@ value, not an estimate of it.
 Recorded as RT-045.
 
 
+**H-057 (PREREGISTERED) — the perp subsystem is saturated at every layer: mark at
+its clamp, funding at its cap, and the carry arbitrageur at its position limit.**
+
+**Arithmetic that motivates it.** `carry_max_position: 50000000000` is **500.00
+contracts**, and `carry_arbitrageur_count: 2` on three venues gives six
+participants. [[RT-045]] measured the class net at **exactly +3 000.00**, which is
+6 × 500.00. Every carry arbitrageur appears to be **pinned at its maximum long**.
+
+**Why that completes a pattern rather than adding an isolated fact.** Three
+limiters govern this subsystem and all three appear to be against their stops:
+
+| layer | limit | state |
+|---|---|---|
+| mark | ±300 bps clamp | binding exactly ([[RT-044]]) |
+| funding | ±75 bps cap | latched, last 6 settlements ([[RT-043]]) |
+| carry arb | ±500 contracts | apparently at maximum |
+
+`carry_entry_bps: 2` against a measured basis of **−2 885 bps** means the entry
+condition is satisfied by a factor of ~1 440 and can never reverse, so the
+strategy is a step function that fired once. **Nothing in the perp subsystem is
+responding to anything.**
+
+**Claim 1 is a real check, not a formality.** RT-045 reported the class *sum*. A
+sum of +3 000.00 is also consistent with, say, +600/+400 splits. This tests each
+participant individually.
+
+**Claims.**
+1. **Every** `carry_arb` participant's terminal position is exactly
+   **+500.00** contracts, not merely the sum.
+2. They reach the cap early and stay: **≥80%** of the run is spent at the cap.
+
+**Falsifiers.**
+(a) any participant is materially below the cap → claim 1 falsified, and the sum
+was hiding dispersion;
+(b) time at cap **<50%** → the arbitrageurs are actively trading around the
+limit rather than latched, and the "saturated at every layer" framing is wrong;
+(c) positions oscillate across zero → the strategy is working as designed and the
+terminal snapshot was unrepresentative, which would make RT-045's exposure table
+a poor summary.
+
+**Instrument.** New Go tool `research/tools/positionpath`: reconstructs each
+participant's signed position over time from `OrderFill` evidence, reporting
+time-to-cap, fraction of the run at the cap, and the terminal position per
+participant. Independent of the account snapshots.
+
+**Discriminating experiment E-062**, preregistered before the run: seed 607, 8 h,
+`-log-mode full`, symbol `ABC-PERP`, cap 500.00.
+Status: **MIXED** — claim 1 supported exactly, claim 2 falsified (31-44% at cap,
+not the predicted >=80%).
+
+
+**E-062 — H-057 MIXED. Claim 1 supported exactly; claim 2 FALSIFIED, and with it
+my "saturated at every layer" framing.**
+Base: `a666d02faede3d40f046b11e60eb672c59386a94`, seed 607, 8 h, `-log-mode full`.
+Reproduce: `go run research/tools/positionpath/main.go -dir <logdir> -symbol ABC-PERP -role-prefix carry_arb -limit 500`.
+
+| venue | role | fills | terminal | first at limit | time at limit |
+|---|---|---:|---:|---:|---:|
+| central | carry_arb_1 | 1 529 | **500.00** | 4.27 h | 40.8% |
+| north | carry_arb_1 | 1 804 | **500.00** | 5.38 h | 32.7% |
+| south | carry_arb_1 | 1 399 | **500.00** | 3.82 h | 43.6% |
+| central | carry_arb_2 | 1 421 | **500.00** | 4.95 h | 38.1% |
+| north | carry_arb_2 | 1 673 | **500.00** | 5.52 h | 31.0% |
+| south | carry_arb_2 | 1 311 | **500.00** | 4.61 h | 42.4% |
+
+**Claim 1 SUPPORTED, per participant.** All six end at **exactly +500.00**, the
+configured `carry_max_position`. RT-045's class sum of +3 000.00 was not hiding
+dispersion, and this confirms it from the **fill stream** — an independent source
+from the account snapshots RT-045 used.
+
+**Claim 2 FALSIFIED. Falsifier (b) fires on all six.** I predicted ≥80% of the run
+at the cap; the measurement is **31.0%–43.6%**, every participant below the 50%
+threshold. They first reach the limit only at **3.82–5.52 h** into an 8 h run, and
+each trades 1 300–1 800 times.
+
+**So the unifying story I proposed is wrong, and the correction is more
+interesting than the claim.** I framed the perp subsystem as "saturated at every
+layer: mark at its clamp, funding at its cap, arb at its limit". The first two are
+measured and stand ([[RT-043]], [[RT-044]]). The third does not: **the carry
+arbitrageur is not latched — it trades actively through the first half of the run
+and pins only in the second**, as the basis blows out past anything it can absorb.
+The saturation is **progressive, not initial**, and the arb is the layer that
+keeps responding longest.
+
+**That also qualifies [[RT-045]].** Its exposure table is a terminal snapshot
+showing every carry arb at its cap, which reads as a permanent state. The
+population spent only about a third of the run there. The snapshot is accurate and
+unrepresentative at the same time. *(Falsifier (c) asked specifically about
+oscillation across zero; this experiment measures time-at-limit and first-hit, not
+sign changes, so whether the paths cross zero is **NOT EXERCISED**.)*
+
+**POST-HOC, not preregistered.** Time-at-limit orders consistently by venue —
+south earliest and longest (3.82/4.61 h, 43.6%/42.4%), north latest and shortest
+(5.38/5.52 h, 32.7%/31.0%), central between — with both participants agreeing
+within each venue. Six points across three venues is not enough to claim a venue
+effect, and it is confounded with the funding-interval heterogeneity of
+[[RT-042]]. Noted, not claimed.
+
+**Instrument note — the third occurrence of one trap, and the first that a
+cross-check caught.** The first version of `positionpath` reported **terminal
+0.00 for all six participants while counting 1 529 fills each**. Derivative
+`OrderFill` records nest the fill fields under `payload.payload` and keep only the
+symbol at the outer level, so the tool matched the symbol, counted the record, and
+read `qty` as zero. The output was internally consistent and entirely plausible —
+"the carry arbs end flat" is a perfectly reasonable finding — and **the only
+reason it was caught is that RT-045 had already measured +3 000.00 from a
+different source and the two disagreed.** The same nesting trap has now appeared
+in `Trade` payloads, `BookSnapshot` payloads and `OrderFill` payloads. `flowattrib`
+is unaffected: it reads the outer symbol, finds no `/`, and skips derivatives,
+which is why its spot figures never depended on the nested fields.
+
+The lesson is not "handle the schema" — it is that a tool returning a plausible
+wrong answer is invisible without an independent measurement to contradict it.
+The two-source discipline that RT-040 established is what made this catchable.
+
+Recorded as RT-046.
+
+
 ---
 
 ## F. Findings
@@ -4782,6 +4900,14 @@ See `research/red-team-findings.md` for the full records.
 - **RT-003** — bounded no-violation results (INV-2, INV-5, INV-6, identity).
 - **RT-006** — latency is delivered as configured across 225 link x channel
   rows; no unearned speed advantage. Transport only.
+- **RT-046** — all six `carry_arb` participants end at **exactly +500.00**, the
+  configured cap, confirming [[RT-045]]'s class sum from the fill stream rather
+  than the snapshots. But they spend only **31-44%** of the run there and first
+  reach it at **3.8-5.5 h**, which **falsifies my "saturated at every layer"
+  framing**: the mark clamp and funding cap latch, the arbitrageur does not. The
+  saturation is **progressive, not initial**. Third appearance of the nested
+  derivative-payload trap, and the first caught only because an independent
+  measurement disagreed with a plausible wrong answer.
 - **RT-045** — **retracts [[RT-044]]'s liquidation claim**: zero accounts are
   solvent at the mark and insolvent at the book, and the run logs **0
   liquidations**, because perp participants are heavily over-collateralised. The
