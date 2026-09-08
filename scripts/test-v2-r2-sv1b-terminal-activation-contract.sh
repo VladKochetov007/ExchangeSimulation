@@ -103,10 +103,16 @@ write_terminal_arm() {
 	stream_frames=$(jq -er '.stream_frames' "$stream_report")
 	stream_execution_hash=$(jq -er '.execution_stream_hash' "$stream_report")
 	stream_canonical_hash=$(jq -er '.canonical_execution_stream_hash' "$stream_report")
-	jq -nc --argjson time "$end" --arg hash "$stream_execution_hash" --argjson event_count "$stream_event_frames" \
-		'{domain:"execution_observations",ordering:"ordered_stream",sim_time:$time,event_count:$event_count,
-		 execution_stream_hash:$hash,rolling_hash:$hash,representation:"evstream_v3",unencodable_payloads:0,final:true}' \
-		>"$arm_dir/checkpoints.jsonl"
+	jq -nc --argjson start "$start" --argjson end "$end" --arg empty_hash "$zeros" \
+		--arg hash "$stream_execution_hash" --argjson event_count "$stream_event_frames" \
+		'[
+		 {domain:"execution_observations",ordering:"ordered_stream",sim_time:$start,event_count:0,
+		  execution_stream_hash:$empty_hash,rolling_hash:$empty_hash,representation:"evstream_v3",unencodable_payloads:0},
+		 {domain:"execution_observations",ordering:"ordered_stream",sim_time:$end,event_count:$event_count,
+		  execution_stream_hash:$hash,rolling_hash:$hash,representation:"evstream_v3",unencodable_payloads:0},
+		 {domain:"execution_observations",ordering:"ordered_stream",sim_time:$end,event_count:$event_count,
+		  execution_stream_hash:$hash,rolling_hash:$hash,representation:"evstream_v3",unencodable_payloads:0,final:true}
+		][]' >"$arm_dir/checkpoints.jsonl"
 	jq -n --arg hash "$stream_execution_hash" --arg canonical_hash "$stream_canonical_hash" \
 		--argjson event_frames "$stream_event_frames" --argjson stream_frames "$stream_frames" \
 		'{domain:"canonical_binary_execution_frames",ordering:"ordered_stream",hashing:"route_sequence_neutral_v1",
@@ -148,6 +154,44 @@ write_terminal_arm() {
 
 write_terminal_arm treatment "$v2_r2_sv1_activation_config"
 write_terminal_arm control "$v2_r2_sv1_activation_control_config"
+
+expect_checkpoint_rejected() {
+	local fixture_name=$1
+	if v2_r2_require_checkpoint_stream "$fixture_root/$fixture_name" "$start" "$end"; then
+		echo "invalid terminal checkpoint stream was accepted: $fixture_name" >&2
+		exit 1
+	fi
+}
+
+head -n 2 "$fixture_root/treatment/checkpoints.jsonl" >"$fixture_root/missing-terminal-checkpoint.jsonl"
+expect_checkpoint_rejected missing-terminal-checkpoint.jsonl
+head -c -8 "$fixture_root/treatment/checkpoints.jsonl" >"$fixture_root/truncated-checkpoint.jsonl"
+expect_checkpoint_rejected truncated-checkpoint.jsonl
+jq -nc --argjson start "$start" --argjson end "$end" --arg empty_hash "$zeros" \
+	--arg hash "$(jq -er '.execution_stream_hash' "$fixture_root/treatment/binary-evidence-attestation.json")" \
+	--argjson event_count "$(jq -er '.event_frames' "$fixture_root/treatment/binary-evidence-attestation.json")" \
+	'[
+	 {domain:"execution_observations",ordering:"ordered_stream",sim_time:$end,event_count:0,
+	  execution_stream_hash:$empty_hash,rolling_hash:$empty_hash,representation:"evstream_v3",unencodable_payloads:0},
+	 {domain:"execution_observations",ordering:"ordered_stream",sim_time:$start,event_count:$event_count,
+	  execution_stream_hash:$hash,rolling_hash:$hash,representation:"evstream_v3",unencodable_payloads:0},
+	 {domain:"execution_observations",ordering:"ordered_stream",sim_time:$end,event_count:$event_count,
+	  execution_stream_hash:$hash,rolling_hash:$hash,representation:"evstream_v3",unencodable_payloads:0,final:true}
+	][]' >"$fixture_root/out-of-order-checkpoint.jsonl"
+expect_checkpoint_rejected out-of-order-checkpoint.jsonl
+jq -nc --argjson start "$start" --argjson end "$end" --arg empty_hash "$zeros" \
+	--arg hash "$(jq -er '.execution_stream_hash' "$fixture_root/treatment/binary-evidence-attestation.json")" \
+	--argjson event_count "$(jq -er '.event_frames' "$fixture_root/treatment/binary-evidence-attestation.json")" \
+	'[
+	 {domain:"execution_observations",ordering:"ordered_stream",sim_time:$start,event_count:0,
+	  execution_stream_hash:$empty_hash,rolling_hash:$empty_hash,representation:"evstream_v3",unencodable_payloads:0},
+	 {domain:"execution_observations",ordering:"ordered_stream",sim_time:$end,event_count:$event_count,
+	  execution_stream_hash:$hash,rolling_hash:$hash,representation:"evstream_v3",unencodable_payloads:0},
+	 {domain:"execution_observations",ordering:"ordered_stream",sim_time:$end,event_count:($event_count + 1),
+	  execution_stream_hash:$hash,rolling_hash:$hash,representation:"evstream_v3",unencodable_payloads:0,final:true}
+	][]' >"$fixture_root/non-repeated-terminal-checkpoint.jsonl"
+expect_checkpoint_rejected non-repeated-terminal-checkpoint.jsonl
+
 comparison_path="$fixture_root/cdf-liquidity-comparison.json"
 jq -n --arg contract "$v2_r2_sv1_activation_contract" \
 	'{schema_version:2,contract:$contract,seed:643,status:"UNAVAILABLE_TERMINAL_FAILURE",valid:false,

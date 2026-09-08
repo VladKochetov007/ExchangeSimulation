@@ -373,6 +373,8 @@ v2_r2_sv1b_require_activation_arm_artifacts() {
 	else
 		v2_r2_terminal_failure_outcome_present "$arm_dir" || return 1
 	fi
+	v2_r2_require_checkpoint_stream "$arm_dir/checkpoints.jsonl" \
+		"$v2_r2_sv1_activation_simulation_start_nano" "$v2_r2_sv1_activation_simulation_end_nano" || return 1
 	jq -e '
 		type == "object" and .domain == "canonical_binary_execution_frames" and .ordering == "ordered_stream" and
 		.hashing == "route_sequence_neutral_v1" and (.event_frames | type) == "number" and .event_frames > 0 and
@@ -682,11 +684,11 @@ v2_r2_sv1b_require_activation_comparison_identity() {
 v2_r2_require_sv1b_activation_provenance() {
 	[[ $# -eq 3 ]] || return 1
 	local provenance_path=$1 expected_revision=$2 expected_binary_sha256=$3
-	local output_root treatment_dir control_dir comparison_path review_path analyzer_path simulator_path
+	local output_root treatment_dir control_dir comparison_path review_path analyzer_path simulator_path renderer_path
 	local expected_tree_sha256 actual_sha256 treatment_artifacts control_artifacts
 	local expected_treatment_config expected_control_config treatment_config_path control_config_path
 	local treatment_source_config_sha256 control_source_config_sha256
-	local analyzer_sha256 expected_supplier_count arm_config_sha256
+	local analyzer_sha256 renderer_sha256 expected_supplier_count arm_config_sha256
 	local expected_host_cpu_count expected_allowed_cpu_count expected_cpu_affinity
 	[[ "$provenance_path" == /* && "$provenance_path" != */ && "$provenance_path" != *$'\n'* && "$provenance_path" != *$'\t'* ]] || return 1
 	[[ "$expected_revision" =~ ^[0-9a-f]{40}$ && "$expected_binary_sha256" =~ ^[0-9a-f]{64}$ ]] || return 1
@@ -701,7 +703,8 @@ v2_r2_require_sv1b_activation_provenance() {
 	review_path=$(jq -er '.review_attestation_path | select(type == "string")' "$provenance_path") || return 1
 	analyzer_path=$(jq -er '.analyzer_binary_path | select(type == "string")' "$provenance_path") || return 1
 	simulator_path=$(jq -er '.simulator_binary_path | select(type == "string")' "$provenance_path") || return 1
-	for path in "$output_root" "$treatment_dir" "$control_dir" "$comparison_path" "$review_path" "$analyzer_path" "$simulator_path"; do
+	renderer_path=$(jq -er '.renderer_binary_path | select(type == "string")' "$provenance_path") || return 1
+	for path in "$output_root" "$treatment_dir" "$control_dir" "$comparison_path" "$review_path" "$analyzer_path" "$simulator_path" "$renderer_path"; do
 		[[ "$path" == /* && "$path" != */ && "$path" != *$'\n'* && "$path" != *$'\t'* ]] || return 1
 	done
 	[[ -d "$output_root" && ! -L "$output_root" && "$(realpath -e -- "$output_root")" == "$output_root" ]] || return 1
@@ -712,8 +715,10 @@ v2_r2_require_sv1b_activation_provenance() {
 	[[ "$comparison_path" == "$output_root/cdf-liquidity-comparison.json" ]] || return 1
 	[[ -f "$comparison_path" && ! -L "$comparison_path" && "$(realpath -e -- "$comparison_path")" == "$comparison_path" ]] || return 1
 	analyzer_sha256=$(jq -er '.analyzer_binary_sha256 | select(type == "string" and test("^[0-9a-f]{64}$"))' "$provenance_path") || return 1
+	renderer_sha256=$(jq -er '.renderer_binary_sha256 | select(type == "string" and test("^[0-9a-f]{64}$"))' "$provenance_path") || return 1
 	v2_r2_sv1b_require_pinned_binary "$simulator_path" "$expected_revision" "$expected_binary_sha256" "exchange_sim/cmd/multivenue" || return 1
 	v2_r2_sv1b_require_pinned_binary "$analyzer_path" "$expected_revision" "$analyzer_sha256" "exchange_sim/cmd/cdf-liquidity-audit" || return 1
+	v2_r2_sv1b_require_pinned_binary "$renderer_path" "$expected_revision" "$renderer_sha256" "exchange_sim/cmd/evsrender" || return 1
 	v2_r2_require_sv1b_review_attestation "$review_path" "$expected_revision" || return 1
 	[[ "$review_path" != "$output_root"/* && "$review_path" != "$root_dir"/* ]] || return 1
 	actual_sha256=$(sha256sum -- "$review_path" | awk '{print $1}') || return 1
@@ -729,6 +734,7 @@ v2_r2_require_sv1b_activation_provenance() {
 		--argjson expected_gomemlimit_bytes "$v2_r2_sv1_activation_gomemlimit_bytes" \
 		--argjson expected_minimum_free_bytes "$v2_r2_sv1_activation_minimum_free_bytes" \
 		--arg binary_sha256 "$expected_binary_sha256" \
+		--arg renderer_path "$renderer_path" --arg renderer_sha256 "$renderer_sha256" \
 		--arg expected_horizon "$v2_r2_sv1_activation_horizon" \
 		--arg expected_evidence_format "$v2_r2_sv1_activation_evidence_format" \
 		--arg expected_log_mode "$v2_r2_sv1_activation_log_mode" \
@@ -747,6 +753,7 @@ v2_r2_require_sv1b_activation_provenance() {
 		.treatment_terminal_status == "completed" and .control_terminal_status == "completed" and
 		.simulator_binary_sha256 == $binary_sha256 and
 		(.analyzer_binary_sha256 | type) == "string" and (.analyzer_binary_sha256 | test("^[0-9a-f]{64}$")) and
+		.renderer_binary_path == $renderer_path and .renderer_binary_sha256 == $renderer_sha256 and
 		(.review_attestation_sha256 | type) == "string" and (.review_attestation_sha256 | test("^[0-9a-f]{64}$")) and
 		(.comparison_sha256 | type) == "string" and (.comparison_sha256 | test("^[0-9a-f]{64}$")) and
 		(.treatment_config_sha256 | type) == "string" and (.treatment_config_sha256 | test("^[0-9a-f]{64}$")) and

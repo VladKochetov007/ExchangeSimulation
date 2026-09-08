@@ -20,6 +20,15 @@ rg -F 'v2_r2_require_sv1b_activation_provenance "$activation_provenance_pending"
 	echo "activation runner does not self-validate staged provenance" >&2
 	exit 1
 }
+rg -F 'renderer_binary_path' "$root_dir/scripts/v2-r2-sv1b-24h-contract.sh" >/dev/null || {
+	echo "SV1B activation contract does not carry renderer identity" >&2
+	exit 1
+}
+rg -F 'v2_r2_sv1b_require_pinned_binary "$renderer_path" "$expected_revision" "$renderer_sha256" "exchange_sim/cmd/evsrender"' \
+	"$root_dir/scripts/v2-r2-sv1b-24h-contract.sh" >/dev/null || {
+	echo "SV1B activation contract does not validate the recorded renderer identity" >&2
+	exit 1
+}
 assert_rejected() {
 	local output_root=$1
 	local stdout_log="$temp_root/runner.stdout" stderr_log="$temp_root/runner.stderr"
@@ -401,9 +410,12 @@ fixture_true_binary=$(type -P true) || {
 }
 cp -- "$fixture_true_binary" "$temp_root/sv1b-simulator"
 cp -- "$fixture_true_binary" "$temp_root/sv1b-analyzer"
+cp -- "$fixture_true_binary" "$temp_root/sv1b-renderer"
 chmod 0755 -- "$temp_root/sv1b-simulator" "$temp_root/sv1b-analyzer"
+chmod 0755 -- "$temp_root/sv1b-renderer"
 fixture_simulator_sha256=$(sha256sum -- "$temp_root/sv1b-simulator" | awk '{print $1}')
 fixture_analyzer_sha256=$(sha256sum -- "$temp_root/sv1b-analyzer" | awk '{print $1}')
+fixture_renderer_sha256=$(sha256sum -- "$temp_root/sv1b-renderer" | awk '{print $1}')
 if v2_r2_sv1b_require_pinned_binary "$temp_root/sv1b-simulator" "$review_revision" "$fixture_simulator_sha256" "exchange_sim/cmd/multivenue"; then
 	echo "an arbitrary non-Go executable passed the direct activation binary identity check" >&2
 	exit 1
@@ -468,7 +480,9 @@ write_activation_provenance() {
 		--arg comparison_path "$comparison_path" \
 		--arg review_path "$fixture_review" --arg review_sha256 "$(sha256sum -- "$fixture_review" | awk '{print $1}')" \
 		--arg simulator_path "$temp_root/sv1b-simulator" --arg analyzer_path "$temp_root/sv1b-analyzer" \
+		--arg renderer_path "$temp_root/sv1b-renderer" \
 		--arg simulator_sha256 "$fixture_simulator_sha256" --arg analyzer_sha256 "$fixture_analyzer_sha256" \
+		--arg renderer_sha256 "$fixture_renderer_sha256" \
 		--arg comparison_sha256 "$comparison_sha256" \
 		--arg treatment_source_config_path "$(realpath -e -- "$v2_r2_sv1_activation_config")" \
 		--arg control_source_config_path "$(realpath -e -- "$v2_r2_sv1_activation_control_config")" \
@@ -496,10 +510,11 @@ write_activation_provenance() {
 		 treatment_dir:$treatment_dir,control_dir:$control_dir,
 		 treatment_source_config_path:$treatment_source_config_path,control_source_config_path:$control_source_config_path,
 		 treatment_source_config_sha256:$treatment_source_config_sha256,control_source_config_sha256:$control_source_config_sha256,
-		 simulator_binary_path:$simulator_path,analyzer_binary_path:$analyzer_path,
+		 simulator_binary_path:$simulator_path,analyzer_binary_path:$analyzer_path,renderer_binary_path:$renderer_path,
 		 review_attestation_path:$review_path,review_attestation_sha256:$review_sha256,comparison_path:$comparison_path,
 		 treatment_config_sha256:$treatment_config_sha256,control_config_sha256:$control_config_sha256,
-		 simulator_binary_sha256:$simulator_sha256,analyzer_binary_sha256:$analyzer_sha256,comparison_sha256:$comparison_sha256,
+		 simulator_binary_sha256:$simulator_sha256,analyzer_binary_sha256:$analyzer_sha256,
+		 renderer_binary_sha256:$renderer_sha256,comparison_sha256:$comparison_sha256,
 		 status:"ACTIVATION_CONTRACT_SATISFIED",activation_satisfied:true,holdouts_consumed:false,
 		 treatment_runner_status:0,control_runner_status:0,treatment_terminal_status:"completed",control_terminal_status:"completed",
 		 treatment_run_status_sha256:$treatment_status_sha256,control_run_status_sha256:$control_status_sha256,
