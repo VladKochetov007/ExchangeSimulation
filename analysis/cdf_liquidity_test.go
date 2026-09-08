@@ -526,6 +526,8 @@ func TestCDFLiquidityAcceptsLegalNoActionWaitReasons(t *testing.T) {
 		"limit_or_touch_unavailable",
 		"quote_cash_limit",
 		"below_minimum_executable_qty",
+		"loss_limit",
+		"equity_unavailable",
 	}
 
 	for _, reason := range legalReasons {
