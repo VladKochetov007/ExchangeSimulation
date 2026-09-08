@@ -1573,3 +1573,37 @@ and it is why these four stand out rather than being the house style.
 
 **Prediction accuracy.** The sweep was preregistered expecting "one or two beyond
 the two already known". There are three — approximately right, recorded as such.
+
+## RT-026 (sharpened) — a reporting-channel defect, not an error-handling one
+
+A second sweep looked for the sibling class: errors on value-moving paths that
+reach **nothing** — discarded returns, or blocks that neither report nor
+propagate. Scope `exchange/`, where value moves.
+
+**There is no second member.**
+
+- Discarded error returns in `exchange/`: **zero**. The package contains no `_ =`
+  assignment at all.
+- Blocks that neither report nor propagate: **zero**, after classifying six
+  structural candidates. Five propagate by routes a regex cannot see —
+  `settleFunding` carries a captured `arithmeticError` out of its callback,
+  `exchange.go:1127` is a comma-ok accessor, and `exchange.go:1613`/`:1623` are a
+  deliberate deferral that appends the failed symbol and its error to a
+  `deferred` slice so the condition survives as state.
+- The sixth, `mustMarshalJSON` returning `""` on error, has one call site and
+  marshals a **string**. `json.Marshal` cannot fail on a string; the branch is
+  unreachable.
+
+**The two sweeps together state the defect precisely:**
+
+> The exchange propagates or reports **every** error it encounters. What it does
+> not do, for four specific conditions, is give that report a **second
+> observer**.
+
+A remedy framed as "handle errors properly" would find nothing to fix. The fix is
+to **add a channel** — a counter, a returned error, a field in
+`terminal-outcome.json` — not to change error handling.
+
+This is also the honest context for where this audit's findings sit: the
+arithmetic and error-handling layers have held under every sweep, and the
+findings have accumulated at the specification, reporting and valuation layers.

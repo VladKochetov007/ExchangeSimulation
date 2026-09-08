@@ -2569,6 +2569,75 @@ all silenced together by a single deployment flag. Recorded as RT-026; the
 remedy — a counter, an error, or a field in `terminal-outcome.json` — is one
 decision covering all four rather than four separate fixes.
 
+**H-039 — the sibling class: errors on value-moving paths that are not reported
+at all.**
+RT-026 enumerated checks whose result reaches only a log. The sibling shape is a
+condition that reaches **nothing**: a returned error discarded with `_ =`, or a
+loop that `continue`s past a failure without recording it. Where RT-026's members
+are silenced by a deployment flag, these are silent by construction.
+
+The sweep is over `exchange/` only, because that is where value moves, and over
+two patterns: a discarded error return on a call that mutates balances,
+positions or the venue ledger; and a `continue`/early `return` on an error inside
+a loop that settles, charges or liquidates.
+
+Predicted observable, recorded before sweeping: most hits are legitimate — `_ =`
+on a `hash.Write`, which cannot fail, or on a deferred `Close` whose failure is
+already handled elsewhere. The interesting residue is a discarded error on a path
+that has already moved value or is about to. I expect **zero to two** genuine
+ones, because the code has repeatedly shown careful error handling on the paths
+this audit has read closely — `settleFunding` threads an `arithmeticError`
+through its whole callback, the expiry preflight panics rather than proceeding on
+an unrepresentable settlement, and `TryAdd`/`TryMulDiv` are used in preference to
+bare arithmetic throughout.
+Falsifier: no discarded error on any value-moving path, which would close the
+class at one member (RT-026) rather than two.
+Mechanism family: detector reachability, systematic sweep, second pass.
+
+**E-040 — H-039, the sibling class does not exist.**
+Preregistered above. Method: sweep `exchange/` for errors that reach nothing —
+discarded returns, and error blocks that neither report nor propagate.
+
+Result: **H-039 FALSIFIED. There is no second member.**
+
+- **Discarded error returns in `exchange/`: zero.** Not "few" — the package
+  contains no `_ =` assignment at all.
+- **Error blocks that neither report nor propagate: zero**, after classifying the
+  six candidates a structural scan produced. Five propagate by a route the scan's
+  regex could not see: `settleFunding` carries a captured `arithmeticError` out
+  of its callback (`funding.go:741`, `:783`); `exchange.go:1127` is a comma-ok
+  accessor; and `exchange.go:1613`/`:1623` are a *deliberate* deferral that
+  appends the failed symbol and its error to a `deferred` slice, so the condition
+  survives as state.
+- The sixth, `mustMarshalJSON` returning `[]byte("\"\"")` on error
+  (`evstream_schema.go:521`), has exactly one call site and marshals a **string**
+  symbol. `json.Marshal` cannot fail on a string, so the branch is unreachable
+  and the fallback is a defensive default rather than a swallow.
+
+**Prediction accuracy.** The preregistration expected "zero to two genuine ones,
+because the code has repeatedly shown careful error handling on the paths this
+audit has read closely". The answer is zero — the low end of a range that was
+stated in advance and for a stated reason.
+
+**Why the negative sharpens RT-026 rather than merely padding the record.** The
+two sweeps together give a precise statement of the defect:
+
+> The exchange propagates or reports **every** error it encounters. What it does
+> not do, for four specific conditions, is give that report a **second
+> observer**.
+
+So RT-026 is not an error-handling discipline problem, and a remedy framed as
+"handle errors properly" would find nothing to fix. It is a **reporting-channel**
+problem: four conditions have exactly one channel, and that channel is switched
+off by a deployment flag. The fix is to add a channel — a counter, a returned
+error, a field in `terminal-outcome.json` — not to change how errors are
+handled.
+
+That distinction is the useful output, and it is also the honest context for
+where this audit's findings sit: the arithmetic and error-handling layers have
+held up under every sweep, and the findings have accumulated at the
+specification, reporting and valuation layers instead.
+
 ---
 
 ## F. Findings
@@ -2590,7 +2659,9 @@ See `research/red-team-findings.md` for the full records.
   `conservation_violation`, `margin_interest_failed`,
   `funding_settlement_failed`, and `price_unavailable` on the liquidation path.
   The interest one is economically material per RT-014. One remedy covers all
-  four. **Owner decision.**
+  four. **E-040 sharpened this**: `exchange/` has **zero** discarded errors and
+  zero blocks that neither report nor propagate, so RT-026 is a
+  **reporting-channel** defect, not an error-handling one. **Owner decision.**
 - **RT-025** — the live conservation check is **silenced by the logging
   configuration**: `verifyConservation` computes violations every tick and
   discards them when no venue logger exists, which is the case for every
