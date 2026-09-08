@@ -193,3 +193,40 @@ The exact candidate is now mechanically ready for one fresh independent
 Sol-xhigh review. The review must assess the complete tree, including R2
 calendar semantics, risk/funding/expiry hardening, forced-fill identity, the
 finite CDF supplier, and the unchanged JSON/evstream evidence contract.
+
+## Append-only update: exact-tree independent review rejection — 2026-09-08
+
+Two fresh read-only Sol-xhigh reviews inspected exact pushed tree
+`d70b1c00a1bf51d370dbd0e80150302f961f41df` after the clean `make test` and
+`go vet ./...` gates. No reviewer ran a registered world or holdout, and the
+worktree was not modified by either reviewer.
+
+The market-semantics reviewer (`Linnaeus`) returned **ACCEPT WITH REQUIRED
+CONDITIONS**. It accepted the R2 calendar identity/overlap deduplication,
+coherent risk marks, funding and collateral-interest arithmetic, expiry cohort
+preflight, forced liquidation identity, and finite delayed-local CDF supplier
+as suitable for a development probe. It identified one measurement blocker:
+the terminal-failure branch in `scripts/extract-v2-integrated-longrun-r2-cell.sh`
+could publish a valid economic terminal failure after limited checks without
+the prefix-safe conservation, funding, settlement, lifecycle, and forced-fill
+identity audits used by the ordinary path. This must be repaired and covered
+by mutation tests before promotion.
+
+The evidence reviewer (`Heisenberg`) returned **REJECT** with three blockers:
+
+1. `exchange/settlement.go` emits `OrderFill` as `map[string]any`, so the
+   binary sink stores production fills as opaque JSON; the typed fill-v3 codec
+   is only exercised by constructed tests.
+2. `analysis/order_lifecycle.go` does not require or validate fill role, trade
+   ID, exact price, notional, or causal order against `Trade` and liquidation
+   receipts, so compensating or substituted corruption can pass strict replay.
+3. `LogEvidenceOnly` sidecars carry only a per-venue sequence, reconstructed
+   sidecars omit global `event_seq`, are attested as an unordered multiset, and
+   use ordinary `json.Unmarshal`, which accepts duplicate-key ambiguity.
+
+These are evidence-contract defects discovered before a successor trajectory;
+they do not invalidate historical JSON results and require no historical
+rerun. The candidate is blocked. The next work is a narrow sequence of
+terminal-prefix audit hardening, production typed-fill routing and strict
+trade/liquidation reconciliation, and complete sidecar ordering/duplicate-key
+validation, each followed by focused tests and a fresh exact-tree review.
