@@ -20,6 +20,20 @@ fail() {
 	exit 1
 }
 
+verify_bound_manifest_file() {
+	[[ $# -eq 3 ]] || fail "internal manifest-file validation arity error"
+	local manifest_key=$1 expected_path=$2 label=$3 actual_path actual_sha expected_sha file_path
+	actual_path=$(jq -er --arg key "$manifest_key" '.[$key].path | select(type == "string")' "$provenance_manifest") ||
+		fail "$label path is missing from config provenance"
+	[[ "$actual_path" == "$expected_path" ]] || fail "$label path is not the registered path: $actual_path"
+	file_path="$root_dir/$actual_path"
+	[[ -s "$file_path" && ! -L "$file_path" ]] || fail "$label is missing or symlinked: $file_path"
+	actual_sha=$(sha256sum "$file_path" | awk '{print $1}')
+	expected_sha=$(jq -er --arg key "$manifest_key" '.[$key].sha256 | select(type == "string" and test("^[0-9a-f]{64}$"))' "$provenance_manifest") ||
+		fail "$label hash is missing from config provenance"
+	[[ "$actual_sha" == "$expected_sha" ]] || fail "$label hash mismatch"
+}
+
 expected_files=("control-${v2_r2_sv1_parity_seed}-none.json")
 for seed in "${v2_r2_sv1_seeds[@]}"; do
 	expected_files+=("control-$seed.json" "treatment-$seed.json")
@@ -51,6 +65,10 @@ if [[ "$v2_r2_sv1_require_generator_metadata" == true ]]; then
 	[[ -f "$generator_file" && ! -L "$generator_file" ]] || fail "config generator is missing or symlinked"
 	generator_sha=$(sha256sum "$generator_file" | awk '{print $1}')
 	[[ "$generator_sha" == "$(jq -er '.generator.sha256' "$provenance_manifest")" ]] || fail "config generator hash mismatch"
+fi
+if [[ "$v2_r2_sv1_candidate_id" == V2-R2-SV1C-* ]]; then
+	verify_bound_manifest_file contract_definition "$v2_r2_sv1_contract_path" "SV1C contract definition"
+	verify_bound_manifest_file contract_loader "$v2_r2_sv1_contract_loader_path" "SV1 contract loader"
 fi
 if v2_r2_is_successor_candidate; then
 	withdrawal_measurement_path=$(jq -er '.withdrawal_measurement.path' "$provenance_manifest") || fail "SV1B provenance omits withdrawal measurement amendment"

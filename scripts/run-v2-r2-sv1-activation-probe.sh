@@ -89,6 +89,20 @@ jq -e '(.elastic_liquidity_suppliers == null or .elastic_liquidity_suppliers == 
 	echo "control is not a no-CDF paired population" >&2
 	exit 1
 }
+if [[ "$v2_r2_sv1_candidate_id" == V2-R2-SV1C-* ]]; then
+	for strict_config in "$treatment_config" "$control_config"; do
+		jq -e '
+			.strict_risk_contract == true and
+			.auto_borrow_spot == false and
+			.cross_asset_spot_graph == true and
+			.cross_asset_collateral_marks == false and
+			(.perp_exposure_hedger == null or .perp_exposure_hedger.auto_borrow_perp != true)
+		' "$strict_config" >/dev/null || {
+			echo "SV1C activation config is not explicit strict-risk configuration: $strict_config" >&2
+			exit 1
+		}
+	done
+fi
 
 binary_revision=$(go version -m "$binary" | awk '$1 == "build" && index($2, "vcs.revision=") == 1 {sub("vcs.revision=", "", $2); print $2; exit}')
 binary_modified=$(go version -m "$binary" | awk '$1 == "build" && index($2, "vcs.modified=") == 1 {sub("vcs.modified=", "", $2); print $2; exit}')

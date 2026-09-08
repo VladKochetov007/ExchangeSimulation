@@ -120,6 +120,20 @@ no_log_source_hash=$(sha256sum "$source_dir/dev-607-none.json" | awk '{print $1}
 roster_hash=$(sha256sum "$activation_config" | awk '{print $1}')
 activation_control_hash=$(sha256sum "$activation_control_config" | awk '{print $1}')
 generator_hash=$(sha256sum "$root_dir/scripts/render-v2-r2-sv1c-24h-configs.sh" | awk '{print $1}')
+contract_definition_path="$v2_r2_sv1_contract_path"
+contract_definition_file="$root_dir/$contract_definition_path"
+[[ -s "$contract_definition_file" && ! -L "$contract_definition_file" ]] || {
+	echo "missing SV1C contract definition: $contract_definition_file" >&2
+	exit 1
+}
+contract_definition_hash=$(sha256sum "$contract_definition_file" | awk '{print $1}')
+contract_loader_path="$v2_r2_sv1_contract_loader_path"
+contract_loader_file="$root_dir/$contract_loader_path"
+[[ -s "$contract_loader_file" && ! -L "$contract_loader_file" ]] || {
+	echo "missing SV1 contract loader: $contract_loader_file" >&2
+	exit 1
+}
+contract_loader_hash=$(sha256sum "$contract_loader_file" | awk '{print $1}')
 withdrawal_measurement_hash=$(sha256sum "$withdrawal_measurement_file" | awk '{print $1}')
 preregistration_path="$v2_r2_sv1_preregistration_path"
 preregistration_file="$root_dir/$preregistration_path"
@@ -173,6 +187,10 @@ jq -n \
 	--arg activation_control_hash "$activation_control_hash" \
 	--arg generator_path "scripts/render-v2-r2-sv1c-24h-configs.sh" \
 	--arg generator_hash "$generator_hash" \
+	--arg contract_definition_path "$contract_definition_path" \
+	--arg contract_definition_hash "$contract_definition_hash" \
+	--arg contract_loader_path "$contract_loader_path" \
+	--arg contract_loader_hash "$contract_loader_hash" \
 	--arg withdrawal_measurement_path "$withdrawal_measurement_path" \
 	--arg withdrawal_measurement_hash "$withdrawal_measurement_hash" \
 	--arg activation_diagnostics_path "$activation_diagnostics_path" \
@@ -202,7 +220,9 @@ jq -n \
 		treatment: "inject the immutable SV1C activation roster and persist supplier decisions/receipts",
 		control: "remove only the SV1C roster and supplier-decision recording; preserve the paired base configuration"
 	 },
-	 generator: {path: $generator_path, sha256: $generator_hash},
+		 generator: {path: $generator_path, sha256: $generator_hash},
+		 contract_definition: {path: $contract_definition_path, sha256: $contract_definition_hash},
+		 contract_loader: {path: $contract_loader_path, sha256: $contract_loader_hash},
 	 withdrawal_measurement: {path: $withdrawal_measurement_path, sha256: $withdrawal_measurement_hash},
 	 activation_diagnostics: {path: $activation_diagnostics_path, sha256: $activation_diagnostics_hash},
 	 preregistration: {path: $preregistration_path, sha256: $preregistration_hash},

@@ -33,6 +33,15 @@ source "$selected_contract"
 [[ "$v2_r2_sv1_activation_arm_status_contract" == "v2-r2-sv1c-activation-arm-status-v1" ]] || exit 1
 [[ "$v2_r2_sv1_review_contract" == "v2-r2-sv1c-independent-review-v1" ]] || exit 1
 [[ "$v2_r2_sv1_predecessor_id" != "V2-R2-SV1" ]] || exit 1
+jq -e --arg contract_path "$v2_r2_sv1_contract_path" --arg loader_path "$v2_r2_sv1_contract_loader_path" '
+	(.contract_definition.path == $contract_path and
+	 (.contract_definition.sha256 | test("^[0-9a-f]{64}$"))) and
+	(.contract_loader.path == $loader_path and
+	 (.contract_loader.sha256 | test("^[0-9a-f]{64}$")))
+' "$v2_r2_sv1_config_provenance_manifest" >/dev/null || {
+	echo "SV1C provenance does not bind its contract definition and loader" >&2
+	exit 1
+}
 
 "$checker"
 

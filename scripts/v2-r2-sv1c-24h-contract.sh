@@ -13,6 +13,8 @@ v2_r2_sv1_require_candidate_metadata=true
 v2_r2_sv1_require_generator_metadata=true
 v2_r2_sv1_candidate_contract_version="v2-r2-sv1c-24h-candidate-v1"
 v2_r2_sv1_generator_path="scripts/render-v2-r2-sv1c-24h-configs.sh"
+v2_r2_sv1_contract_path="scripts/v2-r2-sv1c-24h-contract.sh"
+v2_r2_sv1_contract_loader_path="scripts/v2-r2-sv1-contract-loader.sh"
 v2_r2_sv1_withdrawal_measurement_path="research/v2-r2-sv1c-withdrawal-measurement-amendment-2026-09-08.md"
 v2_r2_sv1_activation_diagnostics_path="research/v2-r2-sv1c-activation-diagnostics-amendment-2026-09-08.md"
 v2_r2_sv1_preregistration_path="research/v2-r2-sv1c-strict-risk-amendment-2026-09-08.md"
@@ -363,7 +365,11 @@ v2_r2_sv1c_require_activation_arm_artifacts() {
 		.build.revision == $revision and .build.modified == false and .build.goos == "linux" and
 		.build.goarch == "amd64" and .build.goamd64 == "v1" and .venue_ids == $venue_ids and
 		.config.seed == $seed and .config.log_mode == $log_mode and .config.evidence_format == $evidence_format and
-		.config.record_market_data_receipts == true' "$arm_dir/manifest.json" >/dev/null || return 1
+		.config.record_market_data_receipts == true and
+		.config.strict_risk_contract == true and .config.auto_borrow_spot == false and
+		.config.cross_asset_spot_graph == true and .config.cross_asset_collateral_marks == false and
+		(.config.perp_exposure_hedger == null or .config.perp_exposure_hedger.auto_borrow_perp != true)' \
+		"$arm_dir/manifest.json" >/dev/null || return 1
 	if [[ "$expected_outcome" == completed ]]; then
 		jq -e --arg arm_name "$arm_name" --arg arm_status_contract "$v2_r2_sv1_activation_arm_status_contract" '
 			type == "object" and .schema_version == 2 and .contract == $arm_status_contract and

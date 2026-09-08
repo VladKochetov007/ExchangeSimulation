@@ -44,7 +44,15 @@
   },
   "generator": {
     "path": "scripts/render-v2-r2-sv1c-24h-configs.sh",
-    "sha256": "e6b3fa4b57d98b9b237350f78e877d999c91f49c8882a49749790909fd2116c6"
+    "sha256": "c1b3cffd242495634ea637facc68e5c36fbbc36c3625350e0421d79c8c1c830d"
+  },
+  "contract_definition": {
+    "path": "scripts/v2-r2-sv1c-24h-contract.sh",
+    "sha256": "af2a702c9adafcaf208cc3c156901f3d1ab3bbe72ceae8d5131c856f1ad389ed"
+  },
+  "contract_loader": {
+    "path": "scripts/v2-r2-sv1-contract-loader.sh",
+    "sha256": "802f9d588f627833e967cd51d816852587502daee068dd303007dee3ab4bd7c7"
   },
   "withdrawal_measurement": {
     "path": "research/v2-r2-sv1c-withdrawal-measurement-amendment-2026-09-08.md",
