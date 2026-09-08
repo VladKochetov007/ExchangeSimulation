@@ -5,8 +5,8 @@
 # and leaves every artifact in place for independent review.
 set -euo pipefail
 
-if [[ $# -gt 3 ]]; then
-	echo "usage: $0 [multivenue-binary] [cdf-liquidity-audit-binary] [evsrender-binary]" >&2
+if [[ $# -gt 4 ]]; then
+	echo "usage: $0 [multivenue-binary] [cdf-liquidity-audit-binary] [evsrender-binary] [checkpointvalidate-binary]" >&2
 	exit 2
 fi
 
@@ -49,8 +49,9 @@ control_config="$v2_r2_sv1_activation_control_config"
 binary=${1:-"$root_dir/bin/multivenue"}
 audit_binary=${2:-"$root_dir/bin/cdf-liquidity-audit"}
 renderer=${3:-"$root_dir/bin/evsrender"}
-[[ -x "$binary" && -x "$audit_binary" && -x "$renderer" && -s "$treatment_config" && -s "$control_config" ]] || {
-	echo "missing activation configs or executable: $treatment_config $control_config $binary $audit_binary $renderer" >&2
+checkpoint_validator=${4:-"$root_dir/bin/checkpointvalidate"}
+[[ -x "$binary" && -x "$audit_binary" && -x "$renderer" && -x "$checkpoint_validator" && -s "$treatment_config" && -s "$control_config" ]] || {
+	echo "missing activation configs or executable: $treatment_config $control_config $binary $audit_binary $renderer $checkpoint_validator" >&2
 	exit 1
 }
 
@@ -122,6 +123,7 @@ v2_r2_is_go_127 "$audit_go_version" || { echo "CDF analyzer is not Go 1.27: $aud
 binary_sha256=$(sha256sum -- "$binary" | awk '{print $1}')
 analyzer_sha256=$(sha256sum -- "$audit_binary" | awk '{print $1}')
 renderer_sha256=$(sha256sum -- "$renderer" | awk '{print $1}')
+checkpoint_validator_sha256=$(sha256sum -- "$checkpoint_validator" | awk '{print $1}')
 v2_r2_sv1b_require_pinned_binary "$binary" "$head_revision" "$binary_sha256" "exchange_sim/cmd/multivenue" || {
 	echo "multivenue binary failed the direct pinned-build identity check" >&2
 	exit 1
@@ -132,6 +134,10 @@ v2_r2_sv1b_require_pinned_binary "$audit_binary" "$head_revision" "$analyzer_sha
 }
 v2_r2_sv1b_require_pinned_binary "$renderer" "$head_revision" "$renderer_sha256" "exchange_sim/cmd/evsrender" || {
 	echo "evstream renderer failed the direct pinned-build identity check" >&2
+	exit 1
+}
+v2_r2_register_checkpoint_validator "$checkpoint_validator" "$head_revision" "$checkpoint_validator_sha256" || {
+	echo "checkpoint validator failed the direct pinned-build identity check" >&2
 	exit 1
 }
 
@@ -277,7 +283,10 @@ prepare_arm() {
 		--arg hypothesis "$hypothesis" \
 		--arg evidence_format "$v2_r2_sv1_activation_evidence_format" \
 		--arg log_mode "$v2_r2_sv1_activation_log_mode" \
-		--arg binary_path "$binary" \
+			--arg binary_path "$binary" \
+			--arg checkpoint_validator_path "$checkpoint_validator" \
+			--arg checkpoint_validator_revision "$head_revision" \
+			--arg checkpoint_validator_sha256 "$checkpoint_validator_sha256" \
 		--arg review_attestation_path "$review_attestation" \
 		--arg review_attestation_sha256 "$review_attestation_sha256" \
 		--arg binary_go_version "$binary_go_version" \
@@ -297,7 +306,9 @@ prepare_arm() {
 		 git_revision: $git_revision, config_experiment_id: $experiment,
 		 hypothesis_id: $hypothesis, evidence_format: $evidence_format, log_mode: $log_mode,
 		 venue_ids: $venue_ids, binary_path: $binary_path, binary_go_version: $binary_go_version,
-		 binary_goos: $binary_goos, binary_goarch: $binary_goarch, binary_goamd64: $binary_goamd64,
+			 binary_goos: $binary_goos, binary_goarch: $binary_goarch, binary_goamd64: $binary_goamd64,
+			 checkpoint_validator_path: $checkpoint_validator_path, checkpoint_validator_revision: $checkpoint_validator_revision,
+			 checkpoint_validator_sha256: $checkpoint_validator_sha256,
 		 review_attestation_path: $review_attestation_path, review_attestation_sha256: $review_attestation_sha256,
 		 gomaxprocs: $gomaxprocs, memory_limit_bytes: $memory_limit_bytes,
 		 gomemlimit_bytes: $gomemlimit_bytes, host_cpu_count: $host_cpu_count,
@@ -430,7 +441,7 @@ run_arm() {
 			(.terminal_accounts | type == "array" and length > 0 and all(.[]; .account.timestamp == $simulation_end_nano)) and
 			.report_status == "complete_terminal_valuation" and .terminal_valuation_available == true
 		 end)' "$arm/greeks.json" >/dev/null || return 1
-	v2_r2_require_checkpoint_stream "$arm/checkpoints.jsonl" "$simulation_start_nano" "$simulation_end_nano" || return 1
+	v2_r2_require_checkpoint_stream "$arm/checkpoints.jsonl" "$simulation_start_nano" "$simulation_end_nano" evstream_v3 || return 1
 	[[ "$metadata_sha_before" == "$(sha256sum -- "$arm/run-metadata.json" | awk '{print $1}')" ]] || {
 		echo "activation metadata changed during simulation: $arm" >&2
 		return 1
@@ -449,7 +460,7 @@ run_arm() {
 		--arg greeks_sha256 "$(sha256sum -- "$arm/greeks.json" | awk '{print $1}')" \
 		--arg latency_sha256 "$(sha256sum -- "$arm/latency.json" | awk '{print $1}')" \
 		--arg checkpoints_sha256 "$(sha256sum -- "$arm/checkpoints.jsonl" | awk '{print $1}')" \
-			--arg binary_attestation_sha256 "$(sha256sum -- "$arm/binary-evidence-attestation.json" | awk '{print $1}')" \
+				--arg binary_attestation_sha256 "$(sha256sum -- "$arm/binary-evidence-attestation.json" | awk '{print $1}')" \
 			--arg evidence_manifest_sha256 "$evidence_manifest_sha256" \
 			--argjson peak_rss_bytes "$simulator_peak_rss_bytes" --arg peak_rss_at "$simulator_peak_rss_at" \
 			--argjson initial_free_bytes "$simulator_initial_free_bytes" --argjson final_free_bytes "$simulator_final_free_bytes" \
@@ -554,6 +565,8 @@ write_pair_provenance() {
 			--arg review_attestation_sha256 "$review_attestation_sha256" \
 			--arg simulator_binary_path "$binary" --arg analyzer_binary_path "$audit_binary" --arg renderer_binary_path "$renderer" \
 			--arg renderer_binary_sha256 "$renderer_sha256" \
+			--arg checkpoint_validator_path "$checkpoint_validator" --arg checkpoint_validator_revision "$head_revision" \
+			--arg checkpoint_validator_sha256 "$checkpoint_validator_sha256" \
 			--argjson treatment_artifacts "$treatment_artifacts" --argjson control_artifacts "$control_artifacts" \
 			--arg treatment_source_config_path "$treatment_source_config_path" --arg control_source_config_path "$control_source_config_path" \
 			--arg treatment_source_config_sha256 "$treatment_source_config_sha256" --arg control_source_config_sha256 "$control_source_config_sha256" \
@@ -573,6 +586,8 @@ write_pair_provenance() {
 		 treatment_config_sha256: $treatment_config_sha256, control_config_sha256: $control_config_sha256,
 			 simulator_binary_sha256: $binary_sha256, analyzer_binary_sha256: $analyzer_sha256,
 			 renderer_binary_path: $renderer_binary_path, renderer_binary_sha256: $renderer_binary_sha256,
+			 checkpoint_validator_path: $checkpoint_validator_path, checkpoint_validator_revision: $checkpoint_validator_revision,
+			 checkpoint_validator_sha256: $checkpoint_validator_sha256,
 		 comparison_sha256: (if $comparison_sha256 == "" then null else $comparison_sha256 end),
 		 status: $pair_status, activation_satisfied: $activation_satisfied,
 		 treatment_runner_status: $treatment_run_status, control_runner_status: $control_run_status,

@@ -238,6 +238,8 @@ v2_r2_require_binary_capacity_attestation() {
 				 (.required_free_bytes | type) == "number" and .required_free_bytes == (.peak_output_bytes + .safety_margin_bytes)' \
 			"$attestation" >/dev/null || return 1
 	if [[ "${v2_r2_sv1_candidate_id:-}" == V2-R2-SV1B-* ]]; then
+		declare -F v2_r2_sv1b_require_checkpoint_validator_attestation_binding >/dev/null 2>&1 || return 1
+		v2_r2_sv1b_require_checkpoint_validator_attestation_binding "$attestation" || return 1
 		jq -e --argjson capacity_seed "${v2_r2_sv1_capacity_measurement_seed:-0}" \
 			'.capacity_only == true and .measurement_seed == $capacity_seed and .source_config_seed == 643 and
 				 .measurement_seed != .source_config_seed' "$attestation" >/dev/null || return 1
@@ -405,7 +407,13 @@ v2_r2_require_binary_capacity_attestation() {
 					-f "$root_dir/scripts/v2-r2-sv1-terminal-outcome.jq" "$probe_cell/terminal-outcome.json" >/dev/null || return 1
 				[[ "$(jq -er '.status' "$probe_cell/terminal-outcome.json")" == completed ]] || return 1
 			fi
-			v2_r2_require_checkpoint_stream "$probe_cell/checkpoints.jsonl" "$measured_start_nano" "$measured_end_nano" || return 1
+			if [[ "${v2_r2_sv1_candidate_id:-}" == V2-R2-SV1B-* ]]; then
+				v2_r2_require_checkpoint_stream "$probe_cell/checkpoints.jsonl" "$measured_start_nano" "$measured_end_nano" evstream_v3 || return 1
+				v2_r2_require_binary_checkpoint_stream_exact "$probe_cell/checkpoints.jsonl" \
+					"$measured_start_nano" "$measured_end_nano" "$probe_cell/binary-evidence-attestation.json" || return 1
+			else
+				v2_r2_require_checkpoint_stream "$probe_cell/checkpoints.jsonl" "$measured_start_nano" "$measured_end_nano" || return 1
+			fi
 		fi
 		actual_manifest_sha256=$(sha256sum -- "$probe_cell/evidence-manifest.json" | awk '{print $1}') || return 1
 		[[ "$actual_manifest_sha256" == "$(jq -er '.evidence_manifest_sha256' "$attestation")" ]] || return 1
@@ -440,35 +448,60 @@ v2_r2_require_current_source_revision() {
 # explicit without allowing an arbitrary duplicate in the ordered stream. The
 # optional representation argument adds binary-evidence invariants without
 # changing the historical JSON checkpoint contract.
+v2_r2_checkpoint_validator_path=""
+v2_r2_checkpoint_validator_revision=""
+v2_r2_checkpoint_validator_sha256=""
+v2_r2_checkpoint_validator_package="exchange_sim/cmd/checkpointvalidate"
+
+v2_r2_register_checkpoint_validator() {
+	[[ $# -eq 3 ]] || return 1
+	local validator=$1 revision=$2 sha256=$3 canonical_validator
+	[[ "$validator" == /* && "$validator" != */ && "$validator" != *$'\n'* && "$validator" != *$'\t'* ]] || return 1
+	[[ "$revision" =~ ^[0-9a-f]{40}$ && "$sha256" =~ ^[0-9a-f]{64}$ ]] || return 1
+	[[ -x "$validator" && ! -L "$validator" ]] || return 1
+	canonical_validator=$(realpath -e -- "$validator") || return 1
+	[[ "$canonical_validator" == "$validator" ]] || return 1
+	declare -F v2_r2_sv1b_require_pinned_binary >/dev/null 2>&1 || return 1
+	v2_r2_sv1b_require_pinned_binary "$validator" "$revision" "$sha256" "$v2_r2_checkpoint_validator_package" || return 1
+	if [[ -n "$v2_r2_checkpoint_validator_path" ]]; then
+		[[ "$v2_r2_checkpoint_validator_path" == "$validator" &&
+			"$v2_r2_checkpoint_validator_revision" == "$revision" &&
+			"$v2_r2_checkpoint_validator_sha256" == "$sha256" ]] || return 1
+		return 0
+	fi
+	v2_r2_checkpoint_validator_path="$validator"
+	v2_r2_checkpoint_validator_revision="$revision"
+	v2_r2_checkpoint_validator_sha256="$sha256"
+}
+
+v2_r2_require_registered_checkpoint_validator() {
+	[[ -n "$v2_r2_checkpoint_validator_path" &&
+		"$v2_r2_checkpoint_validator_revision" =~ ^[0-9a-f]{40}$ &&
+		"$v2_r2_checkpoint_validator_sha256" =~ ^[0-9a-f]{64}$ ]] || return 1
+	declare -F v2_r2_sv1b_require_pinned_binary >/dev/null 2>&1 || return 1
+	v2_r2_sv1b_require_pinned_binary \
+		"$v2_r2_checkpoint_validator_path" \
+		"$v2_r2_checkpoint_validator_revision" \
+		"$v2_r2_checkpoint_validator_sha256" \
+		"$v2_r2_checkpoint_validator_package"
+}
+
 v2_r2_require_binary_checkpoint_stream_exact() {
 	[[ $# -eq 3 || $# -eq 4 ]] || return 1
 	local checkpoints=$1
 	local simulation_start_nano=$2
 	local simulation_end_nano=$3
 	local attestation=${4:-}
-	local repository_root=${root_dir:-$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)}
-	local go_command=${V2_R2_CHECKPOINT_GO:-}
 	[[ "$checkpoints" == /* && "$checkpoints" != */ && "$checkpoints" != *$'\n'* && "$checkpoints" != *$'\t'* ]] || return 1
 	[[ "$simulation_start_nano" =~ ^-?[0-9]+$ && "$simulation_end_nano" =~ ^-?[0-9]+$ ]] || return 1
-	if [[ -z "$go_command" ]]; then
-		if [[ -x /usr/local/go/bin/go ]]; then
-			go_command=/usr/local/go/bin/go
-		else
-			go_command=$(command -v go) || return 1
-		fi
-	fi
-	[[ "$go_command" == /* && -x "$go_command" ]] || return 1
-	[[ -d "$repository_root" && ! -L "$repository_root" ]] || return 1
-	local -a validator_args=(run ./cmd/checkpointvalidate
+	v2_r2_require_registered_checkpoint_validator || return 1
+	local -a validator_args=("$v2_r2_checkpoint_validator_path"
 		-checkpoints "$checkpoints" -start "$simulation_start_nano" -end "$simulation_end_nano")
 	if [[ -n "$attestation" ]]; then
 		[[ "$attestation" == /* && "$attestation" != */ && "$attestation" != *$'\n'* && "$attestation" != *$'\t'* ]] || return 1
 		validator_args+=( -attestation "$attestation" )
 	fi
-	(
-		cd -- "$repository_root" || exit 1
-		"$go_command" "${validator_args[@]}"
-	)
+	"${validator_args[@]}"
 }
 
 v2_r2_require_checkpoint_stream() {

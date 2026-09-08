@@ -40,10 +40,16 @@ build_pinned_fixture_binary() {
 build_pinned_fixture_binary "$fixture_root/multivenue" ./cmd/multivenue
 build_pinned_fixture_binary "$fixture_root/cdf-liquidity-audit" ./cmd/cdf-liquidity-audit
 build_pinned_fixture_binary "$fixture_root/evsrender" ./cmd/evsrender
+build_pinned_fixture_binary "$fixture_root/checkpointvalidate" ./cmd/checkpointvalidate
 build_pinned_fixture_binary "$fixture_root/evsfixture" ./cmd/evsfixture
 binary_sha256=$(sha256sum -- "$fixture_root/multivenue" | awk '{print $1}')
 analyzer_sha256=$(sha256sum -- "$fixture_root/cdf-liquidity-audit" | awk '{print $1}')
 renderer_sha256=$(sha256sum -- "$fixture_root/evsrender" | awk '{print $1}')
+checkpoint_validator_sha256=$(sha256sum -- "$fixture_root/checkpointvalidate" | awk '{print $1}')
+v2_r2_register_checkpoint_validator "$fixture_root/checkpointvalidate" "$revision" "$checkpoint_validator_sha256" || {
+	echo "pinned checkpoint validator fixture could not be registered" >&2
+	exit 1
+}
 zeros=$(printf '%064d' 0)
 start=$v2_r2_sv1_activation_simulation_start_nano
 end=$v2_r2_sv1_activation_simulation_end_nano
@@ -78,12 +84,16 @@ write_terminal_arm() {
 		--arg config_sha256 "$config_sha256" --arg binary_sha256 "$binary_sha256" \
 		--arg experiment "$experiment" --arg hypothesis "$hypothesis" --argjson seed 643 \
 		--argjson start "$start" --argjson end "$end" --argjson venue_ids "$venue_ids" \
+		--arg checkpoint_validator_path "$fixture_root/checkpointvalidate" \
+		--arg checkpoint_validator_revision "$revision" --arg checkpoint_validator_sha256 "$checkpoint_validator_sha256" \
 		'{schema_version:1,cell:$cell,seed:$seed,simulated_horizon:"5m",
 		 simulation_start_nano:$start,simulation_end_nano:$end,config_sha256:$config_sha256,
 		 binary_sha256:$binary_sha256,git_revision:$revision,config_experiment_id:$experiment,
 		 hypothesis_id:$hypothesis,evidence_format:"evstream_v3",log_mode:"full",venue_ids:$venue_ids,
-		 binary_go_version:"go1.27.0",binary_goos:"linux",binary_goarch:"amd64",binary_goamd64:"v1",
-		 gomaxprocs:2,memory_limit_bytes:21474836480,gomemlimit_bytes:19327352832,
+			 binary_go_version:"go1.27.0",binary_goos:"linux",binary_goarch:"amd64",binary_goamd64:"v1",
+			 checkpoint_validator_path:$checkpoint_validator_path,checkpoint_validator_revision:$checkpoint_validator_revision,
+			 checkpoint_validator_sha256:$checkpoint_validator_sha256,
+			 gomaxprocs:2,memory_limit_bytes:21474836480,gomemlimit_bytes:19327352832,
 		 minimum_free_bytes:4294967296,cpu_limit_percent:90}' >"$arm_dir/run-metadata.json"
 	jq -n --argjson start "$start" --argjson end "$end" \
 		'{schema_version:2,status:"terminal_failure",code:"PRICE_UNAVAILABLE",phase:"terminal_post_mark",
@@ -259,6 +269,8 @@ provenance_path="$fixture_root/activation-provenance.json"
 jq -n --arg contract "$v2_r2_sv1_activation_pair_contract" --arg revision "$revision" \
 	--arg tree_sha256 "$tree_sha256" --arg binary_sha256 "$binary_sha256" --arg analyzer_sha256 "$analyzer_sha256" \
 	--arg renderer_sha256 "$renderer_sha256" --arg output_root "$fixture_root" \
+	--arg checkpoint_validator_path "$fixture_root/checkpointvalidate" --arg checkpoint_validator_revision "$revision" \
+	--arg checkpoint_validator_sha256 "$checkpoint_validator_sha256" \
 	--arg treatment_dir "$fixture_root/treatment" --arg control_dir "$fixture_root/control" \
 	--arg comparison_path "$comparison_path" --arg comparison_sha256 "$comparison_sha256" \
 	--arg treatment_config_sha256 "$treatment_config_sha256" --arg control_config_sha256 "$control_config_sha256" \
@@ -285,6 +297,8 @@ jq -n --arg contract "$v2_r2_sv1_activation_pair_contract" --arg revision "$revi
 	 simulator_binary_path:$simulator_binary_path,analyzer_binary_path:$analyzer_binary_path,renderer_binary_path:$renderer_binary_path,
 	 review_attestation_path:$review_attestation_path,review_attestation_sha256:$review_attestation_sha256,
 	 simulator_binary_sha256:$binary_sha256,analyzer_binary_sha256:$analyzer_sha256,renderer_binary_sha256:$renderer_sha256,
+	 checkpoint_validator_path:$checkpoint_validator_path,checkpoint_validator_revision:$checkpoint_validator_revision,
+	 checkpoint_validator_sha256:$checkpoint_validator_sha256,
 	 comparison_sha256:$comparison_sha256,
 	 treatment_config_sha256:$treatment_config_sha256,control_config_sha256:$control_config_sha256,
 	 treatment_run_status_sha256:$treatment_status_sha256,control_run_status_sha256:$control_status_sha256,

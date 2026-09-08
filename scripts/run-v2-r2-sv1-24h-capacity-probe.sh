@@ -5,6 +5,11 @@
 # production configuration and process width to a separate attestation.
 set -euo pipefail
 
+if [[ $# -gt 2 ]]; then
+	echo "usage: $0 [multivenue-binary] [checkpointvalidate-binary]" >&2
+	exit 2
+fi
+
 root_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 source "$root_dir/scripts/v2-r2-sv1-contract-loader.sh"
 contract_script=$(v2_r2_select_sv1_contract "$root_dir") || {
@@ -17,6 +22,22 @@ head_revision=$(git -C "$root_dir" rev-parse HEAD)
 scientific_root=$(realpath -e -- "$root_dir")
 
 binary=${1:-"$root_dir/bin/multivenue"}
+checkpoint_validator=${2:-"$root_dir/bin/checkpointvalidate"}
+checkpoint_validator_path=""
+checkpoint_validator_revision=""
+checkpoint_validator_sha256=""
+if [[ "${v2_r2_sv1_candidate_id:-}" == V2-R2-SV1B-* ]]; then
+	checkpoint_validator_path=$(realpath -e -- "$checkpoint_validator") || {
+		echo "could not resolve the checkpoint validator binary" >&2
+		exit 1
+	}
+	[[ "$checkpoint_validator_path" == "$checkpoint_validator" ]] || {
+		echo "checkpoint validator must be passed as a canonical non-symlink path" >&2
+		exit 1
+	}
+	checkpoint_validator_revision="$head_revision"
+	checkpoint_validator_sha256=$(sha256sum -- "$checkpoint_validator" | awk '{print $1}')
+fi
 primary_seed="${v2_r2_sv1_seeds[0]}"
 config="${V2_R2_SV1_CAPACITY_CONFIG:-${v2_r2_sv1_capacity_measurement_config:-$v2_r2_sv1_config_dir/treatment-$primary_seed.json}}"
 launch_config="${V2_R2_SV1_CAPACITY_LAUNCH_CONFIG:-${v2_r2_sv1_capacity_launch_config:-$config}}"
@@ -113,6 +134,8 @@ v2_r2_acquire_namespace_lock || fail "could not acquire the SV1 capacity namespa
 
 [[ -x "$binary" && -s "$config" && -s "$launch_config" ]] || fail "missing binary or capacity configuration"
 if [[ "${v2_r2_sv1_candidate_id:-}" == V2-R2-SV1B-* ]]; then
+	v2_r2_register_checkpoint_validator "$checkpoint_validator" "$head_revision" "$checkpoint_validator_sha256" ||
+		fail "checkpoint validator is not a pinned Go 1.27 build of current HEAD"
 	[[ "$(realpath -e -- "$config")" == "$v2_r2_sv1_config_dir/$(basename -- "$config")" ]] ||
 		fail "SV1B capacity measurement must use a registered production configuration"
 	[[ "$(realpath -e -- "$launch_config")" == "$(realpath -e -- "$config")" ]] ||
@@ -246,9 +269,11 @@ jq -n --arg git_revision "$head_revision" --arg binary_sha256 "$binary_sha256" -
 	--argjson memory_limit_bytes "$memory_limit_bytes" \
 	--argjson gomemlimit_bytes "$gomemlimit_bytes" \
 	--argjson host_cpu_count "$host_cpu_count" --argjson allowed_cpu_count "$allowed_cpu_count" --argjson cpu_limit_percent "${v2_r2_sv1_cpu_limit_percent:-0}" --arg cpu_affinity "$cpu_affinity" \
-	--argjson capacity_only "$capacity_only" --argjson source_config_seed "$source_config_seed" \
-	--arg probe_cell "$probe_cell_name" \
-	'{schema_version:2,contract:$contract,git_revision:$git_revision,binary_sha256:$binary_sha256,config_sha256:$config_sha256,measurement_config_sha256:$measurement_config_sha256,measurement_config_path:$measurement_config_path,primary_launch_config_sha256:$launch_config_sha256,launch_config_sha256:$launch_config_sha256,launch_config_path:$launch_config_path,authorized_launch_config_sha256:$authorized_launch_config_sha256,calibration_only:$calibration_only,capacity_only:$capacity_only,source_config_seed:$source_config_seed,activation_provenance_path:(if $activation_provenance_path == "" then null else $activation_provenance_path end),activation_provenance_sha256:(if $activation_provenance_sha256 == "" then null else $activation_provenance_sha256 end),activation_review_attestation_path:(if $activation_review_attestation_path == "" then null else $activation_review_attestation_path end),activation_review_attestation_sha256:(if $activation_review_attestation_sha256 == "" then null else $activation_review_attestation_sha256 end),memory_limit_bytes:$memory_limit_bytes,gomemlimit_bytes:$gomemlimit_bytes,binary_go_version:$binary_go_version,gomaxprocs:$gomaxprocs,host_cpu_count:$host_cpu_count,allowed_cpu_count:$allowed_cpu_count,cpu_limit_percent:$cpu_limit_percent,cpu_affinity:$cpu_affinity,minimum_free_bytes:$minimum_free_bytes,initial_available_free_bytes:$initial_available_free_bytes,seed:$seed,simulated_horizon:$horizon,log_mode:$log_mode,evidence_format:$evidence_format,simulation_start_nano:1735689600000000000,simulation_end_nano:1735776000000000000,probe_cell:$probe_cell}' >"$probe_dir/run-metadata.json"
+		--argjson capacity_only "$capacity_only" --argjson source_config_seed "$source_config_seed" \
+		--arg probe_cell "$probe_cell_name" \
+		--arg checkpoint_validator_path "$checkpoint_validator_path" --arg checkpoint_validator_revision "$checkpoint_validator_revision" \
+		--arg checkpoint_validator_sha256 "$checkpoint_validator_sha256" \
+		'{schema_version:2,contract:$contract,git_revision:$git_revision,binary_sha256:$binary_sha256,config_sha256:$config_sha256,measurement_config_sha256:$measurement_config_sha256,measurement_config_path:$measurement_config_path,primary_launch_config_sha256:$launch_config_sha256,launch_config_sha256:$launch_config_sha256,launch_config_path:$launch_config_path,authorized_launch_config_sha256:$authorized_launch_config_sha256,calibration_only:$calibration_only,capacity_only:$capacity_only,source_config_seed:$source_config_seed,activation_provenance_path:(if $activation_provenance_path == "" then null else $activation_provenance_path end),activation_provenance_sha256:(if $activation_provenance_sha256 == "" then null else $activation_provenance_sha256 end),activation_review_attestation_path:(if $activation_review_attestation_path == "" then null else $activation_review_attestation_path end),activation_review_attestation_sha256:(if $activation_review_attestation_sha256 == "" then null else $activation_review_attestation_sha256 end),memory_limit_bytes:$memory_limit_bytes,gomemlimit_bytes:$gomemlimit_bytes,binary_go_version:$binary_go_version,gomaxprocs:$gomaxprocs,host_cpu_count:$host_cpu_count,allowed_cpu_count:$allowed_cpu_count,cpu_limit_percent:$cpu_limit_percent,cpu_affinity:$cpu_affinity,minimum_free_bytes:$minimum_free_bytes,initial_available_free_bytes:$initial_available_free_bytes,seed:$seed,simulated_horizon:$horizon,log_mode:$log_mode,evidence_format:$evidence_format,simulation_start_nano:1735689600000000000,simulation_end_nano:1735776000000000000,checkpoint_validator_path:(if $checkpoint_validator_path == "" then null else $checkpoint_validator_path end),checkpoint_validator_revision:(if $checkpoint_validator_revision == "" then null else $checkpoint_validator_revision end),checkpoint_validator_sha256:(if $checkpoint_validator_sha256 == "" then null else $checkpoint_validator_sha256 end),probe_cell:$probe_cell}' >"$probe_dir/run-metadata.json"
 
 stdout_log="$probe_root/simulator.stdout.log"
 stderr_log="$probe_root/simulator.stderr.log"
@@ -356,7 +381,14 @@ jq -e --arg revision "$head_revision" --argjson seed "$measurement_seed" \
 	"$probe_dir/manifest.json" >/dev/null || fail "probe manifest provenance mismatch"
 jq -e --argjson start "$simulation_start_nano" --argjson end "$simulation_end_nano" \
 	'(.initial_accounts | type == "array" and length > 0 and all(.[]; .account.timestamp == $start)) and (.terminal_accounts | type == "array" and length > 0 and all(.[]; .account.timestamp == $end))' "$probe_dir/greeks.json" >/dev/null || fail "probe greeks do not attest the 24-hour horizon"
-v2_r2_require_checkpoint_stream "$probe_dir/checkpoints.jsonl" "$simulation_start_nano" "$simulation_end_nano" || fail "probe checkpoints do not attest the 24-hour horizon"
+if [[ "${v2_r2_sv1_candidate_id:-}" == V2-R2-SV1B-* ]]; then
+	v2_r2_require_checkpoint_stream "$probe_dir/checkpoints.jsonl" "$simulation_start_nano" "$simulation_end_nano" evstream_v3 || fail "probe checkpoints do not attest the 24-hour horizon"
+	v2_r2_require_binary_checkpoint_stream_exact "$probe_dir/checkpoints.jsonl" \
+		"$simulation_start_nano" "$simulation_end_nano" "$probe_dir/binary-evidence-attestation.json" ||
+		fail "probe checkpoints are not bound to the sealed binary evidence"
+else
+	v2_r2_require_checkpoint_stream "$probe_dir/checkpoints.jsonl" "$simulation_start_nano" "$simulation_end_nano" || fail "probe checkpoints do not attest the 24-hour horizon"
+fi
 v2_r2_write_evidence_manifest "$probe_dir" || fail "probe evidence manifest generation failed"
 v2_r2_verify_evidence_manifest "$probe_dir" || fail "probe evidence manifest verification failed"
 
@@ -389,12 +421,14 @@ jq -n --arg source_revision "$head_revision" --arg binary_sha256 "$binary_sha256
 	--arg activation_review_attestation_path "$activation_review_attestation_path" --arg activation_review_attestation_sha256 "$activation_review_attestation_sha256" \
 	--argjson memory_limit_bytes "$memory_limit_bytes" \
 	--argjson gomemlimit_bytes "$gomemlimit_bytes" \
-	--argjson capacity_only "$capacity_only" --argjson source_config_seed "$source_config_seed" \
-	--argjson peak_rss_bytes "$peak_rss_bytes" --arg peak_rss_at "$peak_rss_at" --arg log_mode "$log_mode" --arg probe_cell "$probe_cell_name" \
-	--argjson host_cpu_count "$host_cpu_count" --argjson allowed_cpu_count "$allowed_cpu_count" --argjson cpu_limit_percent "${v2_r2_sv1_cpu_limit_percent:-0}" --arg cpu_affinity "$cpu_affinity" \
-	--arg contract "${v2_r2_sv1_capacity_attestation_contract:-v2-integrated-longrun-r2-binary-capacity-v1}" \
+		--argjson capacity_only "$capacity_only" --argjson source_config_seed "$source_config_seed" \
+		--argjson peak_rss_bytes "$peak_rss_bytes" --arg peak_rss_at "$peak_rss_at" --arg log_mode "$log_mode" --arg probe_cell "$probe_cell_name" \
+		--argjson host_cpu_count "$host_cpu_count" --argjson allowed_cpu_count "$allowed_cpu_count" --argjson cpu_limit_percent "${v2_r2_sv1_cpu_limit_percent:-0}" --arg cpu_affinity "$cpu_affinity" \
+		--arg checkpoint_validator_path "$checkpoint_validator_path" --arg checkpoint_validator_revision "$checkpoint_validator_revision" \
+		--arg checkpoint_validator_sha256 "$checkpoint_validator_sha256" \
+		--arg contract "${v2_r2_sv1_capacity_attestation_contract:-v2-integrated-longrun-r2-binary-capacity-v1}" \
 	--argjson simulation_start_nano "$simulation_start_nano" --argjson simulation_end_nano "$simulation_end_nano" \
-	'{schema_version:1,contract:$contract,measurement:"full_24h_binary_evidence_capacity_probe",evidence_format:$evidence_format,log_mode:$log_mode,source_revision:$source_revision,binary_sha256:$binary_sha256,config_sha256:$config_sha256,measurement_config_sha256:$measurement_config_sha256,measurement_config_path:$measurement_config_path,measurement_seed:$measurement_seed,source_config_seed:$source_config_seed,capacity_only:$capacity_only,primary_launch_config_sha256:$launch_config_sha256,launch_config_sha256:$launch_config_sha256,launch_config_path:$launch_config_path,authorized_launch_config_sha256:$authorized_launch_config_sha256,calibration_only:$calibration_only,activation_provenance_path:(if $activation_provenance_path == "" then null else $activation_provenance_path end),activation_provenance_sha256:(if $activation_provenance_sha256 == "" then null else $activation_provenance_sha256 end),activation_review_attestation_path:(if $activation_review_attestation_path == "" then null else $activation_review_attestation_path end),activation_review_attestation_sha256:(if $activation_review_attestation_sha256 == "" then null else $activation_review_attestation_sha256 end),gomaxprocs:$gomaxprocs,host_cpu_count:$host_cpu_count,allowed_cpu_count:$allowed_cpu_count,cpu_limit_percent:$cpu_limit_percent,cpu_affinity:$cpu_affinity,minimum_free_bytes:$minimum_free_bytes,initial_available_free_bytes:$initial_available_free_bytes,memory_limit_bytes:$memory_limit_bytes,gomemlimit_bytes:$gomemlimit_bytes,peak_rss_bytes:$peak_rss_bytes,peak_rss_observed_at:$peak_rss_at,probe_root:$probe_root,probe_cell:$probe_cell,evidence_manifest_sha256:$evidence_manifest_sha256,peak_output_bytes:$peak_output_bytes,safety_margin_bytes:$safety_margin_bytes,required_free_bytes:$required_free_bytes,available_free_bytes:$final_available_free_bytes,peak_observed_at:$peak_at,simulation_start_nano:$simulation_start_nano,simulation_end_nano:$simulation_end_nano}' >"$attestation_tmp"
+		'{schema_version:1,contract:$contract,measurement:"full_24h_binary_evidence_capacity_probe",evidence_format:$evidence_format,log_mode:$log_mode,source_revision:$source_revision,binary_sha256:$binary_sha256,config_sha256:$config_sha256,measurement_config_sha256:$measurement_config_sha256,measurement_config_path:$measurement_config_path,measurement_seed:$measurement_seed,source_config_seed:$source_config_seed,capacity_only:$capacity_only,primary_launch_config_sha256:$launch_config_sha256,launch_config_sha256:$launch_config_sha256,launch_config_path:$launch_config_path,authorized_launch_config_sha256:$authorized_launch_config_sha256,calibration_only:$calibration_only,activation_provenance_path:(if $activation_provenance_path == "" then null else $activation_provenance_path end),activation_provenance_sha256:(if $activation_provenance_sha256 == "" then null else $activation_provenance_sha256 end),activation_review_attestation_path:(if $activation_review_attestation_path == "" then null else $activation_review_attestation_path end),activation_review_attestation_sha256:(if $activation_review_attestation_sha256 == "" then null else $activation_review_attestation_sha256 end),gomaxprocs:$gomaxprocs,host_cpu_count:$host_cpu_count,allowed_cpu_count:$allowed_cpu_count,cpu_limit_percent:$cpu_limit_percent,cpu_affinity:$cpu_affinity,minimum_free_bytes:$minimum_free_bytes,initial_available_free_bytes:$initial_available_free_bytes,memory_limit_bytes:$memory_limit_bytes,gomemlimit_bytes:$gomemlimit_bytes,peak_rss_bytes:$peak_rss_bytes,peak_rss_observed_at:$peak_rss_at,checkpoint_validator_path:(if $checkpoint_validator_path == "" then null else $checkpoint_validator_path end),checkpoint_validator_revision:(if $checkpoint_validator_revision == "" then null else $checkpoint_validator_revision end),checkpoint_validator_sha256:(if $checkpoint_validator_sha256 == "" then null else $checkpoint_validator_sha256 end),probe_root:$probe_root,probe_cell:$probe_cell,evidence_manifest_sha256:$evidence_manifest_sha256,peak_output_bytes:$peak_output_bytes,safety_margin_bytes:$safety_margin_bytes,required_free_bytes:$required_free_bytes,available_free_bytes:$final_available_free_bytes,peak_observed_at:$peak_at,simulation_start_nano:$simulation_start_nano,simulation_end_nano:$simulation_end_nano}' >"$attestation_tmp"
 	v2_r2_require_binary_capacity_attestation "$binary" "$head_revision" "$attestation_tmp" "" "$expected_gomaxprocs" "$minimum_free_bytes" true "$launch_config_sha256" "$memory_validation_arg" "$measurement_config_sha256" "$activation_provenance_sha256" "$activation_review_attestation_sha256" ||
 	fail "generated capacity attestation failed retained-evidence validation; output retained at $probe_root"
 mv -- "$attestation_tmp" "$attestation"

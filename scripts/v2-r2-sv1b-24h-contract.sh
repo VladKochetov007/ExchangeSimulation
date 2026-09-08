@@ -17,7 +17,7 @@ v2_r2_sv1_survival_contract="v2-r2-sv1b-24h-survival-side-availability-v2"
 v2_r2_sv1_paired_effect_contract="v2-r2-sv1b-24h-paired-survival-effect-v1"
 v2_r2_sv1_parity_contract="v2-r2-sv1b-24h-parity-v1"
 v2_r2_sv1_predecessor_id="V2-R2-SV1"
-v2_r2_sv1_runner_contract="v2-r2-sv1b-24h-runner-v3"
+v2_r2_sv1_runner_contract="v2-r2-sv1b-24h-runner-v4"
 v2_r2_sv1_require_terminal_outcome=true
 v2_r2_sv1_completion_sentinels='["greeks.json", "latency.json", "terminal-outcome.json"]'
 v2_r2_sv1_require_positive_loss_budget=true
@@ -35,7 +35,7 @@ v2_r2_sv1_activation_seed=643
 v2_r2_sv1_run_hypothesis_id="V2-R2-SV1B-24H-CDF-LIQUIDITY"
 v2_r2_sv1_activation_hypothesis_prefix="V2-R2-SV1B-CDF-LIQUIDITY"
 v2_r2_sv1_activation_contract="v2-r2-sv1b-activation-provenance-v2"
-v2_r2_sv1_activation_pair_contract="v2-r2-sv1b-activation-pair-v5"
+v2_r2_sv1_activation_pair_contract="v2-r2-sv1b-activation-pair-v6"
 v2_r2_sv1_activation_horizon="5m"
 v2_r2_sv1_activation_simulation_start_nano=1735689600000000000
 v2_r2_sv1_activation_simulation_end_nano=1735689900000000000
@@ -49,8 +49,8 @@ v2_r2_sv1_review_scope='["r2_calendar", "correctness_hardening", "binary_evidenc
 v2_r2_sv1_activation_review_scope='["activation_evidence", "cdf_activation", "binary_evidence", "resource_guards", "provenance_binding", "historical_boundary"]'
 v2_r2_sv1_capacity_attestation="/home/vlad/v2-r2-sv1b-24h-binary-capacity-20260903-v4-capacity-seed-659-treatment-g4.json"
 v2_r2_sv1_capacity_probe_prefix="v2-r2-sv1b-24h-capacity"
-v2_r2_sv1_capacity_attestation_contract="v2-r2-sv1b-24h-binary-capacity-v4"
-v2_r2_sv1_capacity_probe_contract="v2-r2-sv1b-24h-capacity-probe-v4"
+v2_r2_sv1_capacity_attestation_contract="v2-r2-sv1b-24h-binary-capacity-v5"
+v2_r2_sv1_capacity_probe_contract="v2-r2-sv1b-24h-capacity-probe-v5"
 v2_r2_sv1_capacity_measurement_config="$root_dir/research/configs/v2-r2-sv1b-24h/treatment-643.json"
 v2_r2_sv1_capacity_measurement_seed=659
 v2_r2_sv1_capacity_launch_config="$root_dir/research/configs/v2-r2-sv1b-24h/treatment-643.json"
@@ -157,6 +157,21 @@ v2_r2_sv1b_require_pinned_binary() {
 		"$goos" == "linux" && "$goarch" == "amd64" && "$goamd64" == "v1" && "$vcs" == "git" &&
 		"$vcs_revision" == "$expected_revision" && "$vcs_modified" == "false" ]] || return 1
 	[[ "$(sha256sum -- "$binary" | awk '{print $1}')" == "$expected_sha256" ]]
+}
+
+v2_r2_sv1b_require_checkpoint_validator_attestation_binding() {
+	[[ $# -eq 1 ]] || return 1
+	local attestation=$1
+	[[ -s "$attestation" && ! -L "$attestation" ]] || return 1
+	v2_r2_require_registered_checkpoint_validator || return 1
+	jq -e --arg path "$v2_r2_checkpoint_validator_path" \
+		--arg revision "$v2_r2_checkpoint_validator_revision" \
+		--arg sha256 "$v2_r2_checkpoint_validator_sha256" '
+		type == "object" and
+		.checkpoint_validator_path == $path and
+		.checkpoint_validator_revision == $revision and
+		.checkpoint_validator_sha256 == $sha256' \
+		"$attestation" >/dev/null
 }
 
 v2_r2_sv1b_git_tree_sha256() {
@@ -319,7 +334,10 @@ v2_r2_sv1b_require_activation_arm_artifacts() {
 		--arg evidence_format "$v2_r2_sv1_activation_evidence_format" --arg log_mode "$v2_r2_sv1_activation_log_mode" \
 		--arg expected_config_sha256 "$expected_config_sha256" --arg expected_binary_sha256 "$expected_binary_sha256" \
 		--arg arm_name "$arm_name" --arg expected_cell "${v2_r2_sv1_activation_output_prefix}-${v2_r2_sv1_activation_seed}-${arm_name}" \
-		--argjson start_nano "$v2_r2_sv1_activation_simulation_start_nano" --argjson end_nano "$v2_r2_sv1_activation_simulation_end_nano" '
+		--argjson start_nano "$v2_r2_sv1_activation_simulation_start_nano" --argjson end_nano "$v2_r2_sv1_activation_simulation_end_nano" \
+		--arg checkpoint_validator_path "$v2_r2_checkpoint_validator_path" \
+		--arg checkpoint_validator_revision "$v2_r2_checkpoint_validator_revision" \
+		--arg checkpoint_validator_sha256 "$v2_r2_checkpoint_validator_sha256" '
 		type == "object" and .schema_version == 1 and .cell == $expected_cell and .seed == $seed and
 		.simulated_horizon == "5m" and .simulation_start_nano == $start_nano and .simulation_end_nano == $end_nano and
 		.config_sha256 == $expected_config_sha256 and .binary_sha256 == $expected_binary_sha256 and
@@ -327,7 +345,11 @@ v2_r2_sv1b_require_activation_arm_artifacts() {
 		.evidence_format == $evidence_format and .log_mode == $log_mode and .venue_ids == $venue_ids and
 		.binary_go_version == "go1.27.0" and .binary_goos == "linux" and .binary_goarch == "amd64" and .binary_goamd64 == "v1" and
 		.gomaxprocs == 2 and .memory_limit_bytes == 21474836480 and .gomemlimit_bytes == 19327352832 and
-		.minimum_free_bytes == 4294967296 and .cpu_limit_percent == 90' "$arm_dir/run-metadata.json" >/dev/null || return 1
+		.minimum_free_bytes == 4294967296 and .cpu_limit_percent == 90 and
+		.checkpoint_validator_path == $checkpoint_validator_path and
+		.checkpoint_validator_revision == $checkpoint_validator_revision and
+		.checkpoint_validator_sha256 == $checkpoint_validator_sha256' \
+		"$arm_dir/run-metadata.json" >/dev/null || return 1
 	jq -e --arg revision "$expected_revision" --argjson seed "$v2_r2_sv1_activation_seed" \
 		--argjson venue_ids "$expected_venue_ids" --arg evidence_format "$v2_r2_sv1_activation_evidence_format" \
 		--arg log_mode "$v2_r2_sv1_activation_log_mode" '
@@ -435,9 +457,9 @@ v2_r2_sv1b_require_terminal_arm_reconstruction() {
 v2_r2_sv1b_require_terminal_failure_pair_provenance() {
 	[[ $# -eq 3 ]] || return 1
 	local provenance_path=$1 expected_revision=$2 expected_binary_sha256=$3
-	local output_root treatment_dir control_dir comparison_path review_path simulator_path analyzer_path renderer_path path
+	local output_root treatment_dir control_dir comparison_path review_path simulator_path analyzer_path renderer_path checkpoint_validator_path path
 	local treatment_status control_status arm arm_status expected_outcome arm_dir arm_config_sha256 artifacts
-	local actual_sha256 expected_sha256 expected_tree_sha256 analyzer_sha256 renderer_sha256
+	local actual_sha256 expected_sha256 expected_tree_sha256 analyzer_sha256 renderer_sha256 checkpoint_validator_revision checkpoint_validator_sha256
 	local treatment_config_path control_config_path expected_treatment_config expected_control_config
 	local treatment_source_config_sha256 control_source_config_sha256 treatment_venue_ids control_venue_ids
 	local treatment_experiment control_experiment treatment_hypothesis control_hypothesis
@@ -455,7 +477,10 @@ v2_r2_sv1b_require_terminal_failure_pair_provenance() {
 	simulator_path=$(jq -er '.simulator_binary_path | select(type == "string")' "$provenance_path") || return 1
 	analyzer_path=$(jq -er '.analyzer_binary_path | select(type == "string")' "$provenance_path") || return 1
 	renderer_path=$(jq -er '.renderer_binary_path | select(type == "string")' "$provenance_path") || return 1
-	for path in "$output_root" "$treatment_dir" "$control_dir" "$comparison_path" "$review_path" "$simulator_path" "$analyzer_path" "$renderer_path"; do
+	checkpoint_validator_path=$(jq -er '.checkpoint_validator_path | select(type == "string")' "$provenance_path") || return 1
+	checkpoint_validator_revision=$(jq -er '.checkpoint_validator_revision | select(type == "string" and test("^[0-9a-f]{40}$"))' "$provenance_path") || return 1
+	checkpoint_validator_sha256=$(jq -er '.checkpoint_validator_sha256 | select(type == "string" and test("^[0-9a-f]{64}$"))' "$provenance_path") || return 1
+	for path in "$output_root" "$treatment_dir" "$control_dir" "$comparison_path" "$review_path" "$simulator_path" "$analyzer_path" "$renderer_path" "$checkpoint_validator_path"; do
 		[[ "$path" == /* && "$path" != */ && "$path" != *$'\n'* && "$path" != *$'\t'* ]] || return 1
 	done
 	[[ -d "$output_root" && ! -L "$output_root" && "$(realpath -e -- "$output_root")" == "$output_root" ]] || return 1
@@ -489,6 +514,10 @@ v2_r2_sv1b_require_terminal_failure_pair_provenance() {
 	v2_r2_sv1b_require_pinned_binary "$simulator_path" "$expected_revision" "$expected_binary_sha256" "exchange_sim/cmd/multivenue" || return 1
 	v2_r2_sv1b_require_pinned_binary "$analyzer_path" "$expected_revision" "$analyzer_sha256" "exchange_sim/cmd/cdf-liquidity-audit" || return 1
 	v2_r2_sv1b_require_pinned_binary "$renderer_path" "$expected_revision" "$renderer_sha256" "exchange_sim/cmd/evsrender" || return 1
+	[[ "$checkpoint_validator_path" == "$v2_r2_checkpoint_validator_path" &&
+		"$checkpoint_validator_revision" == "$expected_revision" &&
+		"$checkpoint_validator_sha256" == "$v2_r2_checkpoint_validator_sha256" ]] || return 1
+	v2_r2_require_registered_checkpoint_validator || return 1
 	v2_r2_require_sv1b_review_attestation "$review_path" "$expected_revision" || return 1
 	actual_sha256=$(sha256sum -- "$review_path" | awk '{print $1}') || return 1
 	[[ "$actual_sha256" == "$(jq -er '.review_attestation_sha256 | select(type == "string" and test("^[0-9a-f]{64}$"))' "$provenance_path")" ]] || return 1
@@ -498,7 +527,8 @@ v2_r2_sv1b_require_terminal_failure_pair_provenance() {
 		--arg evidence_format "$v2_r2_sv1_activation_evidence_format" --arg log_mode "$v2_r2_sv1_activation_log_mode" \
 		--argjson venue_ids "$treatment_venue_ids" --arg treatment_experiment "$treatment_experiment" --arg control_experiment "$control_experiment" \
 		--arg treatment_hypothesis "$treatment_hypothesis" --arg control_hypothesis "$control_hypothesis" \
-		--arg binary_sha256 "$expected_binary_sha256" --arg analyzer_sha256 "$analyzer_sha256" --arg renderer_sha256 "$renderer_sha256" \
+			--arg binary_sha256 "$expected_binary_sha256" --arg analyzer_sha256 "$analyzer_sha256" --arg renderer_sha256 "$renderer_sha256" \
+			--arg checkpoint_validator_path "$checkpoint_validator_path" --arg checkpoint_validator_revision "$checkpoint_validator_revision" --arg checkpoint_validator_sha256 "$checkpoint_validator_sha256" \
 		--arg treatment_config_sha256 "$treatment_source_config_sha256" --arg control_config_sha256 "$control_source_config_sha256" \
 		--arg expected_host_cpu_count "$expected_host_cpu_count" --arg expected_allowed_cpu_count "$expected_allowed_cpu_count" \
 		--arg expected_cpu_affinity "$expected_cpu_affinity" --argjson expected_gomaxprocs "$v2_r2_sv1_activation_gomaxprocs" \
@@ -517,6 +547,8 @@ v2_r2_sv1b_require_terminal_failure_pair_provenance() {
 		(.treatment_terminal_status == "terminal_failure" or .control_terminal_status == "terminal_failure") and
 		.simulator_binary_sha256 == $binary_sha256 and .analyzer_binary_sha256 == $analyzer_sha256 and
 		.renderer_binary_sha256 == $renderer_sha256 and
+		.checkpoint_validator_path == $checkpoint_validator_path and .checkpoint_validator_revision == $checkpoint_validator_revision and
+		.checkpoint_validator_sha256 == $checkpoint_validator_sha256 and
 		.treatment_source_config_sha256 == $treatment_config_sha256 and .control_source_config_sha256 == $control_config_sha256 and
 		.treatment_config_sha256 == $treatment_config_sha256 and .control_config_sha256 == $control_config_sha256 and
 		all([.treatment_run_status_sha256, .control_run_status_sha256,
@@ -694,11 +726,11 @@ v2_r2_sv1b_require_activation_comparison_identity() {
 v2_r2_require_sv1b_activation_provenance() {
 	[[ $# -eq 3 ]] || return 1
 	local provenance_path=$1 expected_revision=$2 expected_binary_sha256=$3
-	local output_root treatment_dir control_dir comparison_path review_path analyzer_path simulator_path renderer_path
+	local output_root treatment_dir control_dir comparison_path review_path analyzer_path simulator_path renderer_path checkpoint_validator_path
 	local expected_tree_sha256 actual_sha256 treatment_artifacts control_artifacts
 	local expected_treatment_config expected_control_config treatment_config_path control_config_path
 	local treatment_source_config_sha256 control_source_config_sha256
-	local analyzer_sha256 renderer_sha256 expected_supplier_count arm_config_sha256
+	local analyzer_sha256 renderer_sha256 checkpoint_validator_revision checkpoint_validator_sha256 expected_supplier_count arm_config_sha256
 	local expected_host_cpu_count expected_allowed_cpu_count expected_cpu_affinity
 	[[ "$provenance_path" == /* && "$provenance_path" != */ && "$provenance_path" != *$'\n'* && "$provenance_path" != *$'\t'* ]] || return 1
 	[[ "$expected_revision" =~ ^[0-9a-f]{40}$ && "$expected_binary_sha256" =~ ^[0-9a-f]{64}$ ]] || return 1
@@ -714,7 +746,10 @@ v2_r2_require_sv1b_activation_provenance() {
 	analyzer_path=$(jq -er '.analyzer_binary_path | select(type == "string")' "$provenance_path") || return 1
 	simulator_path=$(jq -er '.simulator_binary_path | select(type == "string")' "$provenance_path") || return 1
 	renderer_path=$(jq -er '.renderer_binary_path | select(type == "string")' "$provenance_path") || return 1
-	for path in "$output_root" "$treatment_dir" "$control_dir" "$comparison_path" "$review_path" "$analyzer_path" "$simulator_path" "$renderer_path"; do
+	checkpoint_validator_path=$(jq -er '.checkpoint_validator_path | select(type == "string")' "$provenance_path") || return 1
+	checkpoint_validator_revision=$(jq -er '.checkpoint_validator_revision | select(type == "string" and test("^[0-9a-f]{40}$"))' "$provenance_path") || return 1
+	checkpoint_validator_sha256=$(jq -er '.checkpoint_validator_sha256 | select(type == "string" and test("^[0-9a-f]{64}$"))' "$provenance_path") || return 1
+	for path in "$output_root" "$treatment_dir" "$control_dir" "$comparison_path" "$review_path" "$analyzer_path" "$simulator_path" "$renderer_path" "$checkpoint_validator_path"; do
 		[[ "$path" == /* && "$path" != */ && "$path" != *$'\n'* && "$path" != *$'\t'* ]] || return 1
 	done
 	[[ -d "$output_root" && ! -L "$output_root" && "$(realpath -e -- "$output_root")" == "$output_root" ]] || return 1
@@ -729,6 +764,10 @@ v2_r2_require_sv1b_activation_provenance() {
 	v2_r2_sv1b_require_pinned_binary "$simulator_path" "$expected_revision" "$expected_binary_sha256" "exchange_sim/cmd/multivenue" || return 1
 	v2_r2_sv1b_require_pinned_binary "$analyzer_path" "$expected_revision" "$analyzer_sha256" "exchange_sim/cmd/cdf-liquidity-audit" || return 1
 	v2_r2_sv1b_require_pinned_binary "$renderer_path" "$expected_revision" "$renderer_sha256" "exchange_sim/cmd/evsrender" || return 1
+	[[ "$checkpoint_validator_path" == "$v2_r2_checkpoint_validator_path" &&
+		"$checkpoint_validator_revision" == "$expected_revision" &&
+		"$checkpoint_validator_sha256" == "$v2_r2_checkpoint_validator_sha256" ]] || return 1
+	v2_r2_require_registered_checkpoint_validator || return 1
 	v2_r2_require_sv1b_review_attestation "$review_path" "$expected_revision" || return 1
 	[[ "$review_path" != "$output_root"/* && "$review_path" != "$root_dir"/* ]] || return 1
 	actual_sha256=$(sha256sum -- "$review_path" | awk '{print $1}') || return 1
@@ -743,7 +782,8 @@ v2_r2_require_sv1b_activation_provenance() {
 		--argjson expected_memory_limit_bytes "$v2_r2_sv1_activation_memory_limit_bytes" \
 		--argjson expected_gomemlimit_bytes "$v2_r2_sv1_activation_gomemlimit_bytes" \
 		--argjson expected_minimum_free_bytes "$v2_r2_sv1_activation_minimum_free_bytes" \
-		--arg binary_sha256 "$expected_binary_sha256" \
+			--arg binary_sha256 "$expected_binary_sha256" \
+			--arg checkpoint_validator_path "$checkpoint_validator_path" --arg checkpoint_validator_revision "$checkpoint_validator_revision" --arg checkpoint_validator_sha256 "$checkpoint_validator_sha256" \
 		--arg renderer_path "$renderer_path" --arg renderer_sha256 "$renderer_sha256" \
 		--arg expected_horizon "$v2_r2_sv1_activation_horizon" \
 		--arg expected_evidence_format "$v2_r2_sv1_activation_evidence_format" \
@@ -762,6 +802,8 @@ v2_r2_require_sv1b_activation_provenance() {
 		.holdouts_consumed == false and .treatment_runner_status == 0 and .control_runner_status == 0 and
 		.treatment_terminal_status == "completed" and .control_terminal_status == "completed" and
 		.simulator_binary_sha256 == $binary_sha256 and
+		.checkpoint_validator_path == $checkpoint_validator_path and .checkpoint_validator_revision == $checkpoint_validator_revision and
+		.checkpoint_validator_sha256 == $checkpoint_validator_sha256 and
 		(.analyzer_binary_sha256 | type) == "string" and (.analyzer_binary_sha256 | test("^[0-9a-f]{64}$")) and
 		.renderer_binary_path == $renderer_path and .renderer_binary_sha256 == $renderer_sha256 and
 		(.review_attestation_sha256 | type) == "string" and (.review_attestation_sha256 | test("^[0-9a-f]{64}$")) and

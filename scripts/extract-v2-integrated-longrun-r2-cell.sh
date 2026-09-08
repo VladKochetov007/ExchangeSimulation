@@ -161,6 +161,16 @@ funding_interval_seconds=$(jq -er '.funding_interval_seconds' "$cell/run-config.
 simulation_start_nano=$(jq -er '.simulation_start_nano' "$cell/run-metadata.json")
 simulation_end_nano=$(jq -er '.simulation_end_nano' "$cell/run-metadata.json")
 [[ "$seed" == "$config_seed" ]] || fail "metadata/config seed mismatch"
+	if [[ "${v2_r2_sv1_candidate_id:-}" == V2-R2-SV1B-* ]]; then
+		checkpoint_validator_path=$(jq -er '.checkpoint_validator_path | select(type == "string")' "$cell/run-metadata.json") ||
+			fail "SV1B run metadata omits the checkpoint validator path"
+		checkpoint_validator_revision=$(jq -er '.checkpoint_validator_revision | select(type == "string")' "$cell/run-metadata.json") ||
+			fail "SV1B run metadata omits the checkpoint validator revision"
+		checkpoint_validator_sha256=$(jq -er '.checkpoint_validator_sha256 | select(type == "string" and test("^[0-9a-f]{64}$"))' "$cell/run-metadata.json") ||
+			fail "SV1B run metadata omits the checkpoint validator hash"
+		v2_r2_register_checkpoint_validator "$checkpoint_validator_path" "$checkpoint_validator_revision" "$checkpoint_validator_sha256" ||
+			fail "SV1B checkpoint validator is not a pinned build of the recorded source revision"
+	fi
 	[[ "$log_mode" == full || "$log_mode" == none ]] || fail "unsupported development log mode: $log_mode"
 	[[ "$evidence_format" == "evstream_v3" ]] || fail "successor development extraction requires evstream_v3 evidence"
 jq -e --argjson simulation_start_nano "$simulation_start_nano" --argjson simulation_end_nano "$simulation_end_nano" \
@@ -380,8 +390,16 @@ if [[ "$terminal_failure" != true ]]; then
 		 all(.[]; .account.timestamp == $simulation_end_nano))' \
 		"$cell/greeks.json" >/dev/null || fail "greeks report does not attest the registered 24-hour horizon"
 fi
-v2_r2_require_checkpoint_stream "$cell/checkpoints.jsonl" "$simulation_start_nano" "$simulation_end_nano" ||
-	fail "checkpoint stream does not attest the registered 24-hour horizon"
+if [[ "${v2_r2_sv1_candidate_id:-}" == V2-R2-SV1B-* ]]; then
+	v2_r2_require_checkpoint_stream "$cell/checkpoints.jsonl" "$simulation_start_nano" "$simulation_end_nano" evstream_v3 ||
+		fail "exact evstream_v3 checkpoint stream does not attest the registered 24-hour horizon"
+	v2_r2_require_binary_checkpoint_stream_exact "$cell/checkpoints.jsonl" \
+		"$simulation_start_nano" "$simulation_end_nano" "$cell/binary-evidence-attestation.json" ||
+		fail "checkpoint stream is not bound to the sealed binary evidence"
+else
+	v2_r2_require_checkpoint_stream "$cell/checkpoints.jsonl" "$simulation_start_nano" "$simulation_end_nano" ||
+		fail "checkpoint stream does not attest the registered 24-hour horizon"
+fi
 
 for json_file in "$cell"/*.json; do
 	[[ -f "$json_file" ]] || continue

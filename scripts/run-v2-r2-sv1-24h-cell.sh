@@ -4,8 +4,8 @@
 # all required. This namespace has no holdout selector.
 set -euo pipefail
 
-if [[ $# -lt 1 || $# -gt 3 ]]; then
-	echo "usage: $0 treatment-SEED|control-SEED|treatment-PARITY_SEED-g8|control-PARITY_SEED-none [multivenue-binary] [prunegate-binary]" >&2
+if [[ $# -lt 1 || $# -gt 4 ]]; then
+	echo "usage: $0 treatment-SEED|control-SEED|treatment-PARITY_SEED-g8|control-PARITY_SEED-none [multivenue-binary] [prunegate-binary] [checkpointvalidate-binary]" >&2
 	exit 2
 fi
 cell=$1
@@ -67,6 +67,7 @@ output_root="$v2_r2_output_root"
 output="$output_root/$cell"
 binary=${2:-"$root_dir/bin/multivenue"}
 prunegate_binary=${3:-"$root_dir/bin/prunegate"}
+checkpoint_validator=${4:-"$root_dir/bin/checkpointvalidate"}
 sim_revision=${V2_R2_SV1_SIMULATOR_REVISION:-$(git -C "$root_dir" rev-parse HEAD)}
 horizon=24h
 simulation_start_nano=1735689600000000000
@@ -148,6 +149,9 @@ v2_r2_is_go_127 "$prunegate_go_version" || {
 }
 
 binary_sha256=$(sha256sum "$binary" | awk '{print $1}')
+checkpoint_validator_path=""
+checkpoint_validator_revision=""
+checkpoint_validator_sha256=""
 activation_provenance_sha256=""
 measurement_config_sha256=""
 capacity_measurement_config_path=""
@@ -163,6 +167,20 @@ allowed_cpu_count=0
 cpu_affinity=""
 cpu_launch_prefix=()
 if [[ "${v2_r2_sv1_candidate_id:-}" == V2-R2-SV1B-* ]]; then
+	checkpoint_validator_path=$(realpath -e -- "$checkpoint_validator") || {
+		echo "could not resolve the checkpoint validator binary" >&2
+		exit 1
+	}
+	[[ "$checkpoint_validator_path" == "$checkpoint_validator" ]] || {
+		echo "checkpoint validator must be passed as a canonical non-symlink path" >&2
+		exit 1
+	}
+	checkpoint_validator_revision="$head_revision"
+	checkpoint_validator_sha256=$(sha256sum -- "$checkpoint_validator" | awk '{print $1}')
+	v2_r2_register_checkpoint_validator "$checkpoint_validator" "$head_revision" "$checkpoint_validator_sha256" || {
+		echo "checkpoint validator is not a pinned Go 1.27 build of current HEAD" >&2
+		exit 1
+	}
 	activation_provenance=$(v2_r2_sv1_activation_provenance_path "$head_revision") || {
 		echo "could not resolve accepted SV1B activation provenance path" >&2
 		exit 1
@@ -282,7 +300,10 @@ jq -n \
 	--arg prunegate_vcs_modified "$prunegate_modified" \
 	--arg prunegate_trimpath "$prunegate_trimpath" \
 	--arg prunegate_cgo_enabled "$prunegate_cgo_enabled" \
-	--arg prunegate_go_version "$prunegate_go_version" \
+		--arg prunegate_go_version "$prunegate_go_version" \
+		--arg checkpoint_validator_path "$checkpoint_validator_path" \
+		--arg checkpoint_validator_revision "$checkpoint_validator_revision" \
+		--arg checkpoint_validator_sha256 "$checkpoint_validator_sha256" \
 		--argjson gomaxprocs "$GOMAXPROCS" \
 		--argjson memory_limit_bytes "${v2_r2_sv1_capacity_memory_limit_bytes:-0}" \
 		--argjson gomemlimit_bytes "$gomemlimit_bytes" --argjson minimum_free_bytes "$minimum_free_bytes" \
@@ -324,7 +345,10 @@ jq -n \
 		  prunegate_vcs_revision: $prunegate_vcs_revision,
 		  prunegate_vcs_modified: ($prunegate_vcs_modified == "true"),
 		  prunegate_trimpath: ($prunegate_trimpath == "true"),
-		  prunegate_cgo_enabled: $prunegate_cgo_enabled, prunegate_go_version: $prunegate_go_version,
+			  prunegate_cgo_enabled: $prunegate_cgo_enabled, prunegate_go_version: $prunegate_go_version,
+			  checkpoint_validator_path: (if $checkpoint_validator_path == "" then null else $checkpoint_validator_path end),
+			  checkpoint_validator_revision: (if $checkpoint_validator_revision == "" then null else $checkpoint_validator_revision end),
+			  checkpoint_validator_sha256: (if $checkpoint_validator_sha256 == "" then null else $checkpoint_validator_sha256 end),
 		  binary_vcs_revision: $binary_vcs_revision, binary_vcs_modified: ($binary_vcs_modified == "true"),
 		  binary_trimpath: ($binary_trimpath == "true"), binary_cgo_enabled: $binary_cgo_enabled,
 		  git_revision: $git_revision, go_version: $go_version, binary_go_version: $binary_go_version,
@@ -578,10 +602,22 @@ if [[ "$terminal_failure" != true ]]; then
 		exit 1
 	}
 fi
-v2_r2_require_checkpoint_stream "$output/checkpoints.jsonl" "$simulation_start_nano" "$simulation_end_nano" || {
-	echo "checkpoint stream does not attest the registered 24-hour horizon: $output" >&2
-	exit 1
-}
+if [[ "${v2_r2_sv1_candidate_id:-}" == V2-R2-SV1B-* ]]; then
+	v2_r2_require_checkpoint_stream "$output/checkpoints.jsonl" "$simulation_start_nano" "$simulation_end_nano" evstream_v3 || {
+		echo "exact evstream_v3 checkpoint stream does not attest the registered 24-hour horizon: $output" >&2
+		exit 1
+	}
+	v2_r2_require_binary_checkpoint_stream_exact "$output/checkpoints.jsonl" \
+		"$simulation_start_nano" "$simulation_end_nano" "$output/binary-evidence-attestation.json" || {
+		echo "checkpoint stream is not bound to the sealed binary evidence: $output" >&2
+		exit 1
+	}
+else
+	v2_r2_require_checkpoint_stream "$output/checkpoints.jsonl" "$simulation_start_nano" "$simulation_end_nano" || {
+		echo "checkpoint stream does not attest the registered 24-hour horizon: $output" >&2
+		exit 1
+	}
+fi
 run_metadata_sha256_after=$(sha256sum "$output/run-metadata.json" | awk '{print $1}')
 [[ "$run_metadata_sha256_before" == "$run_metadata_sha256_after" ]] || {
 	echo "run metadata changed during simulation: $output" >&2
