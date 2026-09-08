@@ -4884,6 +4884,126 @@ The two-source discipline that RT-040 established is what made this catchable.
 Recorded as RT-046.
 
 
+**H-058 (PREREGISTERED) — the spot makers' hedge stopped hedging: it is written
+against an instrument that decoupled from the thing it protects, turning a hedge
+into the population's largest directional bet.**
+
+**Configuration.** `maker_hedge_symbol: "ABC-PERP"`, band 1.00 contract, 60 s
+interval. The ABC/USD makers offset spot inventory by trading the perpetual
+(`stoikov.go:1502`). That is why [[RT-045]] found `spot_maker` holding the
+population's largest perp short, **−3 675.64 contracts** — a fact I flagged and
+did not explain.
+
+**Why the hedge should fail here, mechanically.** A hedge works only if the two
+legs move together. This campaign has established that they do not:
+
+- `ABC/USD` is held rigid by a configured peg — terminal drift **−1.4%**
+  ([[RT-032]]);
+- `ABC-PERP` has no working tether — mark pinned on its clamp, book **−17% to
+  −29%** from index ([[RT-043]], [[RT-044]]).
+
+So the maker is long a book that barely moves and short a book that collapsed.
+The short does not offset a loss; it **manufactures a gain** far larger than the
+exposure it was meant to neutralise. That is the mechanism behind RT-045's
+finding that `spot_maker` is reported **−46.8 M below** what the book would pay —
+the largest single revaluation in the population.
+
+**Claims.**
+1. The perp position **tracks spot inventory in sign and rough magnitude** — it
+   is a hedge by construction, not an independent position.
+2. The hedge relationship **breaks**: the perp leg's gain exceeds the spot leg's
+   loss by a factor of **>5**, because the two prices decoupled.
+
+**Falsifiers.**
+(a) perp position is uncorrelated with, or the same sign as, spot inventory →
+it is not a hedge and the mechanism is something else entirely;
+(b) perp gain and spot loss are comparable (ratio **<2**) → the hedge is doing
+its job, there is no decoupling story, and RT-045's revaluation has another
+cause;
+(c) `spot_maker` spot inventory is near zero → there was nothing to hedge and the
+perp position is discretionary, which is a different finding.
+
+**Instrument change with a built-in cross-check.** `positionpath` currently reads
+`new_size`, the exchange's post-fill position, which spot fills do not carry (they
+log `new_size: 0`). It will accumulate signed quantity instead, **and compare
+against `new_size` wherever that field is non-zero**, reporting any disagreement.
+That converts the accumulate-versus-authoritative question into a self-test rather
+than an assumption — the accumulation path is exactly what produced the plausible
+wrong answer in [[RT-046]].
+
+**Discriminating experiment E-063**, preregistered before the run: seed 607, 8 h,
+`-log-mode full`; per `spot_maker` participant report `ABC/USD` inventory and
+`ABC-PERP` position, and decompose the class result into spot and perp legs.
+Status: **SUPPORTED WITHIN TESTED SCOPE** on both claims; no falsifier fired.
+
+
+**E-063 — H-058 SUPPORTED on both claims. The hedge is executed almost perfectly
+and is economically catastrophic, because the hedge instrument decoupled from the
+asset it protects.**
+Base: `a666d02faede3d40f046b11e60eb672c59386a94`, seed 607, 8 h, `-log-mode full`.
+Reproduce: `go run research/tools/positionpath/main.go -dir <logdir> -symbol ABC-PERP -role-prefix spot_maker`
+and the same with `-symbol ABC/USD`.
+
+**Claim 1 SUPPORTED, and far more tightly than "rough magnitude".** Per
+participant, spot inventory against perp position:
+
+| participant | `ABC/USD` inventory | `ABC-PERP` position | residual |
+|---|---:|---:|---:|
+| central_2 | +501.71 | −498.81 | +2.90 |
+| south_2 | +636.62 | −635.93 | +0.69 |
+| north_2 | +476.61 | −476.87 | −0.26 |
+| central_4 | +186.17 | −188.17 | −2.00 |
+| … (12 in total) | | | |
+| **class** | **+3 673.77** | **−3 675.65** | **−1.88** |
+
+Every participant is delta-flat to within **2.90 contracts** on positions of
+130–640, and the class nets to **−1.88 contracts out of 3 674** — inside the
+configured 1.00-contract hedge band per participant. This is a hedge working
+exactly as designed, and it independently reproduces [[RT-045]]'s −3 675.64 from
+the fill stream rather than the account snapshots.
+
+**Instrument self-test.** On the perp leg, **7 803 fills carried an
+exchange-reported post-fill position and 0 disagreed with accumulation**. On the
+spot leg no fill carries one, and the tool says so — "accumulation is unchecked"
+— rather than implying a verification it did not perform.
+
+**Claim 2 SUPPORTED. The hedge neutralises quantity and not value.**
+
+| leg | value |
+|---|---:|
+| inventory exposure being hedged (3 673.77 ABC × −704.95 USD) | **−2.59 M** |
+| spot leg result from fills | −0.88 M |
+| perp leg at mark | −5.94 M |
+| **perp leg at book** | **+40.88 M** |
+
+The perp leg at book is **15.8×** the inventory exposure it was written to
+neutralise, and **46×** the spot leg's own result. Predicted >5; falsifier (b)
+required <2.
+
+**The mechanism is the collision of two findings.** A hedge is only a hedge if
+the legs move together. This campaign has measured that they do not: `ABC/USD` is
+held rigid by a configured peg at **−1.4%** ([[RT-032]]) while `ABC-PERP`'s book
+falls to **−29%** ([[RT-044]]). The maker is long a book that cannot move and
+short a book with nothing holding it. Delta-neutral in contracts, wildly
+directional in value.
+
+**What this does to the fairness reading.** [[RT-045]] showed `spot_maker` moving
+from the second-largest donor at marks (−6.8 M) to the second-largest winner at
+book (+40.0 M). E-063 identifies the whole of that swing as **one configured
+hedge into a dislocated instrument**. It is not market-making skill, and it is not
+a strategy outcompeting anyone — the same shape as `triangle_arb`'s +174 M
+([[RT-035]]), reached through a different mechanism. **Two of the population's
+three largest results are now traced to instruments that lost their anchors.**
+
+**Scope.** One seed, one configuration. The perp-leg-at-book figure is assembled
+from three tools measuring the same run — `flowattrib` for the spot leg,
+`classpnl` for the class total, `marksolvency` for the mark-to-book gap — so it
+inherits each of their scope limits, and the book valuation ignores the depth
+closing 3 675 contracts would consume.
+
+Recorded as RT-047.
+
+
 ---
 
 ## F. Findings
@@ -4900,6 +5020,15 @@ See `research/red-team-findings.md` for the full records.
 - **RT-003** — bounded no-violation results (INV-2, INV-5, INV-6, identity).
 - **RT-006** — latency is delivered as configured across 225 link x channel
   rows; no unearned speed advantage. Transport only.
+- **RT-047** — the spot makers' configured hedge into `ABC-PERP` is executed
+  **almost perfectly in quantity** (class net −1.88 contracts out of 3 674, every
+  participant flat to within 2.90) and is **economically enormous**, because the
+  legs decoupled: `ABC/USD` is pegged at −1.4% ([[RT-032]]) while the perp book
+  falls to −29% ([[RT-044]]). The perp leg at book is **+40.88 M — 15.8x the
+  inventory exposure it was written to neutralise and 46x the spot leg's own
+  result**. This is the entire source of [[RT-045]]'s swing from second-largest
+  donor to second-largest winner. **Two of the population's three largest results
+  now trace to instruments that lost their anchors.**
 - **RT-046** — all six `carry_arb` participants end at **exactly +500.00**, the
   configured cap, confirming [[RT-045]]'s class sum from the fill stream rather
   than the snapshots. But they spend only **31-44%** of the run there and first

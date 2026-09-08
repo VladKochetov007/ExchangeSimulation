@@ -84,6 +84,10 @@ type path struct {
 	firstHit int64
 	hasHit   bool
 	fills    int
+	// authoritative counts fills where the exchange reported a post-fill
+	// position; mismatch counts those where it disagreed with accumulation.
+	authoritative int
+	mismatch      int
 }
 
 func main() {
@@ -168,10 +172,22 @@ func main() {
 				p.atLimit += rec.SimTS - p.lastTS
 			}
 			p.lastTS = rec.SimTS
-			// new_size is the exchange's own post-fill position, which is
-			// authoritative and avoids accumulating sign errors across a long
-			// fill stream.
-			p.position = fill.NewSize
+			// Accumulate the signed quantity, because spot fills carry no
+			// post-fill position (they log new_size 0). Where the exchange does
+			// report one, compare against it: that turns the accumulation into a
+			// self-test rather than an assumption, which is the step that was
+			// missing when this tool first returned a plausible wrong answer.
+			if fill.Side == "BUY" {
+				p.position += fill.Qty
+			} else {
+				p.position -= fill.Qty
+			}
+			if fill.NewSize != 0 {
+				p.authoritative++
+				if fill.NewSize != p.position {
+					p.mismatch++
+				}
+			}
 			p.fills++
 			if !p.hasHit && abs(p.position) >= limitUnits {
 				p.firstHit, p.hasHit = rec.SimTS, true
@@ -215,6 +231,17 @@ func main() {
 		}
 		fmt.Printf("%-9s %-16s %8d %14.2f %14s %11.1f%%\n",
 			k.venue, p.role, p.fills, float64(p.position)/(*basePrecision), hit, share)
+	}
+	totalAuth, totalMismatch := 0, 0
+	for _, p := range tracked {
+		totalAuth += p.authoritative
+		totalMismatch += p.mismatch
+	}
+	if totalAuth > 0 {
+		fmt.Printf("\nself-test: %d fills carried an exchange-reported position, %d disagreed with accumulation\n",
+			totalAuth, totalMismatch)
+	} else {
+		fmt.Printf("\nself-test: no fill carried an exchange-reported position; accumulation is unchecked\n")
 	}
 }
 
