@@ -6453,6 +6453,125 @@ the config does not state explicitly.
 Recorded as RT-059.
 
 
+**H-071 (PREREGISTERED) — testing my own sentence: is the position cap actually
+what stops the perpetual's arbitrageur, or did I assert that?**
+
+**The claim under test is [[RT-059]]'s.** I wrote that `carry_arb` "has flow but
+no balance sheet" and that "the binding constraint is the position cap". That was
+an inference from RT-046's terminal positions, not a measurement of *when* the cap
+binds. **[[RT-046]] itself measured those participants at their cap only 31–44% of
+the time**, first reaching it 3.8–5.5 h into an 8 h run — so for most of the run
+they are **below** the limit, which is not what a binding constraint looks like.
+
+**The arithmetic that makes the assertion doubtful.** `carry_lot_qty` is 2
+contracts per tick at a 2 s interval, so 500 contracts is reachable in **≈8
+minutes** of continuous accumulation. They took **hours**. Something other than
+the cap governs the accumulation for most of the run, and `carry_entry_bps: 2`
+against a basis [[RT-044]] measured at **−2 900 bps** means the entry threshold is
+satisfied by a factor of ~1 450 and cannot be what holds them back either.
+
+**Discriminator.** Join the perpetual's basis against the arbitrageur's aggregate
+position **on the same time axis**, and ask what the position is *when the
+dislocation is most extreme*. A capacity limit and a signal limit make opposite
+predictions there.
+
+**Claims.**
+1. At timestamps where the perp basis is beyond **20%** from index, `carry_arb`'s
+   aggregate position is at or near its cap — **≥80% of the 3 000-contract
+   class limit**.
+2. Position and |basis| are **positively related**: the arb leans further in as
+   the dislocation widens.
+
+**Falsifiers.**
+(a) at extreme basis the position is **below 50%** of the cap → the cap is **not**
+the binding constraint, RT-059's sentence is **wrong** and must be corrected; the
+limit is the signal or the accumulation path;
+(b) position is **uncorrelated** with |basis| → the arbitrageur is not responding
+to the dislocation at all, which is a worse finding than a capacity limit and
+would mean the convergence force is not merely small but absent;
+(c) the basis never exceeds 20% in the sampled window → the test is **NOT
+EXERCISED** and the thresholds must be restated against the observed range.
+
+**Why this is worth a checkpoint.** Six asserted mechanisms in this campaign have
+failed their own tests. RT-059's is the seventh assertion of that shape and it is
+load-bearing: the whole "configured too small to answer the question" conclusion
+rests on the cap being what binds. If it is the signal instead, the conclusion
+changes from "under-resourced by design" to "the strategy declines to act", which
+is a different instruction to the owner.
+
+**Instrument.** New Go tool `research/tools/arbresponse`: perp basis from
+`BookSnapshot` against the consensus index, joined to `carry_arb` aggregate
+position reconstructed from fills, bucketed by |basis|.
+
+**Discriminating experiment E-076**, preregistered before the run: seed 607, 8 h,
+`-log-mode full`.
+Status: **SUPPORTED WITHIN TESTED SCOPE** — position is at exactly 100% of cap in
+all 8 780 samples where |basis| exceeds 5%; no falsifier fired.
+
+
+**E-076 — H-071 SUPPORTED on both claims. [[RT-059]]'s asserted mechanism
+survives its own test: the cap binds **exactly** when the dislocation is material,
+in all 8 780 samples.**
+Base: `a666d02faede3d40f046b11e60eb672c59386a94`, seed 607, 8 h, `-log-mode full`.
+Reproduce: `go run research/tools/arbresponse/main.go -dir <logdir>`.
+
+`carry_arb` aggregate position against `ABC-PERP` |basis|, class cap 3 000
+contracts:
+
+| basis band | samples | mean basis | mean position | max position | **% of cap** |
+|---|---:|---:|---:|---:|---:|
+| 0–5% | 19 983 | 0.37% | 1 209.6 | 3 000.0 | 40.3% |
+| **5–10%** | 2 583 | 7.17% | **3 000.0** | 3 000.0 | **100.0%** |
+| **10–20%** | 3 802 | 14.46% | **3 000.0** | 3 000.0 | **100.0%** |
+| **20–30%** | 2 395 | 24.88% | **3 000.0** | 3 000.0 | **100.0%** |
+
+**Whenever the basis exceeds 5%, the position is at exactly 100% of the cap —
+mean and maximum both 3 000.0 — in every one of 8 780 samples.** Not near the
+limit; on it. Claim 1 predicted ≥80% at basis beyond 20%; the measurement is
+100%. Claim 2's monotonicity holds: 40.3% → 100% → 100% → 100%.
+
+**No falsifier fires.** (a) needed under 50% at extreme basis; (b) needed no
+relationship; (c) needed the basis never to exceed 20%, and there are 2 395
+samples in the 20–30% band.
+
+**This reconciles [[RT-046]] with [[RT-059]], which looked inconsistent.** RT-046
+measured these participants at their cap only **31–44% of the time**, which I
+flagged as evidence against a binding constraint. The resolution is in the
+distribution: the basis is **under 5% for 69.5% of the run**, and during those
+stretches the arbitrageur sits at 40% of its limit — legitimately, because there
+is little to arbitrage. It is pinned for **30.5%** of the run, which is **exactly
+the fraction of the time the dislocation is material**. The two measurements were
+never in conflict; I had compared a time-average against a conditional one.
+
+**RT-059's sentence is verified rather than retracted.** "The arbitrageur has flow
+but no balance sheet" is now measured: at full extension it holds **3 000
+contracts against a book carrying 116 722 contracts of volume — 2.6%** — and the
+basis stays at **−29%** while it is pinned there. **Even at maximum capacity the
+convergence force cannot close the gap.** That is a stronger statement than the
+volume-share argument of RT-059, because it is conditional on the arbitrageur
+doing everything its configuration permits.
+
+**Calibration note, recorded because the failures have been.** Six asserted
+mechanisms in this campaign failed their own tests, and I have logged each. This
+is the first load-bearing one in that sequence to **survive**. The discipline is
+worth the same note in both directions: testing assertions is not a ritual that
+always finds them wrong, and the one that held is the one now carrying the
+campaign's central conclusion about capacity.
+
+**What this hands the owner.** The perpetual's convergence force is configured at
+3 000 contracts across six participants. It reaches that limit whenever the basis
+exceeds 5% and holds it while the basis runs to 29%. **Raising `carry_max_position`
+is the single parameter that would test whether convergence is achievable at
+all**; at the current value the question cannot be answered, because the answer is
+bounded by configuration rather than by market behaviour.
+
+**Scope.** One seed, one configuration. Position is the exchange's own post-fill
+position per contract summed across the class; basis is top-of-book perp mid
+against the consensus index at matching timestamps.
+
+Recorded as RT-060.
+
+
 ---
 
 ## F. Findings
@@ -6469,6 +6588,15 @@ See `research/red-team-findings.md` for the full records.
 - **RT-003** — bounded no-violation results (INV-2, INV-5, INV-6, identity).
 - **RT-006** — latency is delivered as configured across 225 link x channel
   rows; no unearned speed advantage. Transport only.
+- **RT-060** — **[[RT-059]]'s asserted mechanism verified.** `carry_arb`'s
+  aggregate position is at **exactly 100% of its 3 000-contract cap in all 8 780
+  samples where the perp basis exceeds 5%** (mean and max both 3 000.0), and at
+  40.3% when the basis is under 5%. This reconciles [[RT-046]]'s "at cap only
+  31–44% of the time" — the basis is immaterial for **69.5%** of the run, so the
+  cap binds **exactly when it matters**. At full extension the class holds
+  **2.6% of the book's volume** while the basis sits at **−29%**: even at maximum
+  capacity the convergence force cannot close the gap. **`carry_max_position` is
+  the one parameter that would make the convergence question answerable.**
 - **RT-059** — the convergence force is **1.7% of taker flow on `ABC/CDF`, 5.3% on
   the futures, but 24.3% on `ABC-PERP`** — so capacity explains two of the three
   unanchored instruments and **not** the perpetual, where the basis is still −29%.

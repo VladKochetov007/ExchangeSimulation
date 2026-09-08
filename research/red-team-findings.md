@@ -3474,3 +3474,56 @@ configured too small to answer them.**
 **Scope.** One seed, one configuration. Volume is per fill side. "Designated
 arbitrageur" is my reading of which class is meant to converge each book; the
 config does not state it.
+
+## RT-060 — The cap binds exactly when the dislocation is material
+
+**Classification.** VERIFICATION of RT-059's asserted mechanism, and the
+reconciliation of two earlier measurements that looked inconsistent.
+
+**Base.** `a666d02faede3d40f046b11e60eb672c59386a94`, seed 607, 8 h, full logs.
+
+**Measured** (`research/tools/arbresponse`), `carry_arb` aggregate position
+against `ABC-PERP` |basis|, class cap 3 000 contracts:
+
+| basis band | samples | mean basis | mean position | max position | **% of cap** |
+|---|---:|---:|---:|---:|---:|
+| 0–5% | 19 983 | 0.37% | 1 209.6 | 3 000.0 | 40.3% |
+| **5–10%** | 2 583 | 7.17% | **3 000.0** | 3 000.0 | **100.0%** |
+| **10–20%** | 3 802 | 14.46% | **3 000.0** | 3 000.0 | **100.0%** |
+| **20–30%** | 2 395 | 24.88% | **3 000.0** | 3 000.0 | **100.0%** |
+
+**Whenever the basis exceeds 5% the position is at exactly the cap** — mean and
+maximum both 3 000.0 — in every one of 8 780 samples. The registered claim asked
+for 80% of cap beyond a 20% basis; the measurement is 100%. No falsifier fires.
+
+**It reconciles RT-046 with RT-059.** RT-046 measured these participants at their
+cap only **31–44% of the time**, which I had flagged as evidence *against* a
+binding constraint. The basis is under 5% for **69.5% of the run**, and during
+those stretches the arbitrageur legitimately sits at 40% of its limit because
+there is little to arbitrage. It is pinned for **30.5%** of the run — exactly the
+fraction during which the dislocation is material. The two measurements were never
+in conflict; a time-average had been compared against a conditional one.
+
+**RT-059's sentence is verified, not retracted.** "Flow but no balance sheet" now
+has a measurement: at full extension the class holds **3 000 contracts against a
+book carrying 116 722 contracts of volume — 2.6%** — and the basis stays at
+**−29%** while it is pinned there. **Even at maximum permitted capacity the
+convergence force cannot close the gap**, which is stronger than the volume-share
+argument because it is conditional on the arbitrageur doing everything its
+configuration allows.
+
+**Calibration note.** Six asserted mechanisms in this campaign failed their own
+tests and each was logged. This is the first load-bearing one in that sequence to
+survive. The note belongs in both directions: testing assertions is not a ritual
+that always finds them wrong, and the one that held now carries the campaign's
+central conclusion about capacity.
+
+**For the owner.** The perpetual's convergence force is configured at 3 000
+contracts across six participants, reaches that limit whenever the basis exceeds
+5%, and holds it while the basis runs to 29%. **`carry_max_position` is the single
+parameter that would make the convergence question answerable**; at its current
+value the answer is bounded by configuration rather than by market behaviour.
+
+**Scope.** One seed, one configuration. Position is the exchange's post-fill
+position per contract summed across the class; basis is the top-of-book perp mid
+against the consensus index at matching timestamps.
