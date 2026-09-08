@@ -2308,6 +2308,10 @@ type venueLogger struct {
 }
 
 func (l venueLogger) LogEvent(simTime int64, clientID uint64, eventName string, event any) {
+	l.logEvent(simTime, clientID, eventName, event, event)
+}
+
+func (l venueLogger) logEvent(simTime int64, clientID uint64, eventName string, sinkEvent, rawEvent any) {
 	if l.sequenceMu != nil {
 		l.sequenceMu.Lock()
 		defer l.sequenceMu.Unlock()
@@ -2317,14 +2321,24 @@ func (l venueLogger) LogEvent(simTime int64, clientID uint64, eventName string, 
 		(*l.sequence)++
 		sequence = *l.sequence
 	}
-	l.sink.observe(simTime, clientID, eventName, l.venueID, event, l.route, sequence)
+	if l.sink == nil || l.sink.binary == nil {
+		sinkEvent = rawEvent
+	}
+	l.sink.observe(simTime, clientID, eventName, l.venueID, sinkEvent, l.route, sequence)
 	if l.inner == nil {
 		return
 	}
 	if l.sink.replacesRawLog() {
 		return
 	}
-	l.inner.LogEvent(simTime, clientID, eventName, venueLogEvent{VenueID: l.venueID, Payload: event})
+	l.inner.LogEvent(simTime, clientID, eventName, venueLogEvent{VenueID: l.venueID, Payload: rawEvent})
+}
+
+// LogTypedEvent is the optional exchange logger extension used by production
+// evidence paths. It deliberately shares LogEvent's routing so typed payloads
+// get the same sequence, sink, and raw-log behavior without a second event.
+func (l venueLogger) LogTypedEvent(simTime int64, clientID uint64, eventName string, typedEvent, legacyEvent any) {
+	l.logEvent(simTime, clientID, eventName, typedEvent, legacyEvent)
 }
 
 // LogEvidenceOnly persists an observation without adding it to the ordered

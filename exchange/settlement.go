@@ -165,6 +165,14 @@ type settlementOutcome struct {
 	tradeID         uint64
 }
 
+// typedEvidenceLogger is an optional extension to Logger. Keeping it
+// optional preserves the public logger contract while allowing the successor
+// evidence sink to receive the concrete schema value before any JSON
+// compatibility conversion occurs.
+type typedEvidenceLogger interface {
+	LogTypedEvent(simTime int64, clientID uint64, eventName string, typedEvent, legacyEvent any)
+}
+
 func (e *DefaultExchange) processExecutions(book *OrderBook, executions []*Execution, takerOrder *Order, plan *spotExecutionPlan, forced bool, liquidationID uint64) {
 	instrument := book.Instrument
 	timestamp := e.Clock.NowUnixNano()
@@ -524,35 +532,26 @@ func logFill(ctx executionContext, tradeID uint64, side fillSide) {
 	if ctx.log == nil {
 		return
 	}
-	// Keep the public logger payload compatible with the established map
-	// contract. The successor binary sink has its own typed schemas and an
-	// opaque JSON fallback, so changing the evidence representation must not
-	// change what custom Logger implementations observe.
-	payload := map[string]any{
-		"order_id":        side.orderID,
-		"symbol":          ctx.book.Symbol,
-		"qty":             ctx.exec.Qty,
-		"price":           ctx.exec.Price,
-		"side":            side.side.String(),
-		"position_side":   side.posSide.String(),
-		"filled_qty":      side.filledQty,
-		"remaining_qty":   side.totalQty - side.filledQty,
-		"is_full":         side.isFull(),
-		"trade_id":        tradeID,
-		"role":            side.role,
-		"fee_amount":      side.fee.Amount,
-		"fee_asset":       side.fee.Asset,
-		"realized_pnl":    side.realizedPnL,
-		"new_size":        side.delta.NewSize,
-		"new_entry_price": side.delta.NewEntryPrice,
+	payload := fillEvidence{
+		OrderID: side.orderID, Symbol: ctx.book.Symbol, Qty: ctx.exec.Qty,
+		Price: ctx.exec.Price, Side: side.side.String(), PositionSide: side.posSide.String(),
+		FilledQty: side.filledQty, RemainingQty: side.totalQty - side.filledQty,
+		IsFull: side.isFull(), TradeID: tradeID, Role: side.role,
+		FeeAmount: side.fee.Amount, FeeAsset: side.fee.Asset,
+		RealizedPnL: side.realizedPnL, NewSize: side.delta.NewSize,
+		NewEntryPrice: side.delta.NewEntryPrice,
 	}
 	if ctx.forced && side.role == "taker" {
-		payload["forced"] = true
+		payload.Forced = true
 		if ctx.liquidationID != 0 {
-			payload["liquidation_id"] = ctx.liquidationID
+			payload.LiquidationID = ctx.liquidationID
 		}
 	}
-	ctx.log.LogEvent(ctx.timestamp, side.clientID, "OrderFill", payload)
+	if typed, ok := ctx.log.(typedEvidenceLogger); ok {
+		typed.LogTypedEvent(ctx.timestamp, side.clientID, "OrderFill", payload, payload.legacyFillPayload())
+		return
+	}
+	ctx.log.LogEvent(ctx.timestamp, side.clientID, "OrderFill", payload.legacyFillPayload())
 }
 
 func sendFillNotification(gw *ClientGateway, ctx executionContext, tradeID uint64, side fillSide) {

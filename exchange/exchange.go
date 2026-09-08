@@ -135,6 +135,23 @@ func (l scopedInstrumentLogger) LogEvent(simTime int64, clientID uint64, eventNa
 	})
 }
 
+func (l scopedInstrumentLogger) LogTypedEvent(simTime int64, clientID uint64, eventName string, typedEvent, legacyEvent any) {
+	if typed, ok := l.Logger.(typedEvidenceLogger); ok {
+		typed.LogTypedEvent(simTime, clientID, eventName, instrumentLogEvent{
+			Symbol:  l.symbol,
+			Payload: typedEvent,
+		}, instrumentLogEvent{
+			Symbol:  l.symbol,
+			Payload: legacyEvent,
+		})
+		return
+	}
+	l.Logger.LogEvent(simTime, clientID, eventName, instrumentLogEvent{
+		Symbol:  l.symbol,
+		Payload: legacyEvent,
+	})
+}
+
 type DefaultExchange struct {
 	ID          string
 	Clients     map[uint64]*Client

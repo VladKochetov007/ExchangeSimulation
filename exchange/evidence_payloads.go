@@ -50,3 +50,35 @@ type fillEvidence struct {
 	Forced        bool   `json:"forced,omitempty"`
 	LiquidationID uint64 `json:"liquidation_id,omitempty"`
 }
+
+// legacyFillPayload is the compatibility representation used only when a
+// caller supplies a logger that has not opted into typed evidence. The binary
+// successor path receives fillEvidence itself, while older Logger
+// implementations continue to observe the established map payload.
+func (e fillEvidence) legacyFillPayload() map[string]any {
+	payload := map[string]any{
+		"order_id":        e.OrderID,
+		"symbol":          e.Symbol,
+		"qty":             e.Qty,
+		"price":           e.Price,
+		"side":            e.Side,
+		"position_side":   e.PositionSide,
+		"filled_qty":      e.FilledQty,
+		"remaining_qty":   e.RemainingQty,
+		"is_full":         e.IsFull,
+		"trade_id":        e.TradeID,
+		"role":            e.Role,
+		"fee_amount":      e.FeeAmount,
+		"fee_asset":       e.FeeAsset,
+		"realized_pnl":    e.RealizedPnL,
+		"new_size":        e.NewSize,
+		"new_entry_price": e.NewEntryPrice,
+	}
+	if e.Forced {
+		payload["forced"] = true
+		if e.LiquidationID != 0 {
+			payload["liquidation_id"] = e.LiquidationID
+		}
+	}
+	return payload
+}

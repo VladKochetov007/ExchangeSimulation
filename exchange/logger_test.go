@@ -9,6 +9,11 @@ type recordingLogger struct {
 	records []logRecord
 }
 
+type typedRecordingLogger struct {
+	recordingLogger
+	typed []logRecord
+}
+
 type logRecord struct {
 	event string
 	data  any
@@ -16,6 +21,71 @@ type logRecord struct {
 
 func (l *recordingLogger) LogEvent(_ int64, _ uint64, event string, data any) {
 	l.records = append(l.records, logRecord{event: event, data: data})
+}
+
+func (l *typedRecordingLogger) LogTypedEvent(_ int64, _ uint64, event string, typedData, _ any) {
+	l.typed = append(l.typed, logRecord{event: event, data: typedData})
+}
+
+func TestLogFillUsesTypedEvidenceWhenLoggerSupportsIt(t *testing.T) {
+	log := &typedRecordingLogger{}
+	ctx := executionContext{
+		book:      &OrderBook{Symbol: "ABC-PERP"},
+		exec:      &Execution{Qty: 7, Price: 101},
+		timestamp: 99, log: log, forced: true, liquidationID: 44,
+	}
+	side := fillSide{
+		clientID: 12, orderID: 13, side: Buy, posSide: PositionBoth,
+		fee: Fee{Amount: 3, Asset: "USD"}, filledQty: 7, totalQty: 7,
+		delta:       PositionDelta{NewSize: -5, NewEntryPrice: 100},
+		realizedPnL: -2, role: "taker",
+	}
+
+	logFill(ctx, 14, side)
+
+	if len(log.records) != 0 {
+		t.Fatalf("typed logger received compatibility event: %#v", log.records)
+	}
+	if len(log.typed) != 1 {
+		t.Fatalf("typed events = %#v, want one", log.typed)
+	}
+	payload, ok := log.typed[0].data.(fillEvidence)
+	if !ok {
+		t.Fatalf("typed payload = %T, want fillEvidence", log.typed[0].data)
+	}
+	if payload.OrderID != 13 || payload.TradeID != 14 || payload.Symbol != "ABC-PERP" ||
+		payload.Qty != 7 || payload.Price != 101 || payload.Role != "taker" ||
+		!payload.Forced || payload.LiquidationID != 44 || payload.NewSize != -5 {
+		t.Fatalf("typed fill payload = %#v", payload)
+	}
+}
+
+func TestLogFillPreservesCompatibilityPayloadForLegacyLogger(t *testing.T) {
+	log := &recordingLogger{}
+	ctx := executionContext{
+		book: &OrderBook{Symbol: "ABC/USD"}, exec: &Execution{Qty: 2, Price: 99},
+		timestamp: 100, log: log,
+	}
+	logFill(ctx, 8, fillSide{
+		clientID: 4, orderID: 5, side: Sell, posSide: PositionBoth,
+		fee: Fee{Amount: 1, Asset: "USD"}, filledQty: 1, totalQty: 2,
+		delta: PositionDelta{NewSize: 3, NewEntryPrice: 98}, realizedPnL: 6, role: "maker",
+	})
+
+	if len(log.records) != 1 {
+		t.Fatalf("legacy records = %#v, want one", log.records)
+	}
+	payload, ok := log.records[0].data.(map[string]any)
+	if !ok {
+		t.Fatalf("legacy payload = %T, want map[string]any", log.records[0].data)
+	}
+	if payload["order_id"] != uint64(5) || payload["trade_id"] != uint64(8) ||
+		payload["symbol"] != "ABC/USD" || payload["role"] != "maker" || payload["is_full"] != false {
+		t.Fatalf("legacy fill payload = %#v", payload)
+	}
+	if _, forced := payload["forced"]; forced {
+		t.Fatalf("ordinary legacy fill acquired forced marker: %#v", payload)
+	}
 }
 
 func TestInstrumentLoggerFallbackDoesNotReplaceGlobalLogger(t *testing.T) {
