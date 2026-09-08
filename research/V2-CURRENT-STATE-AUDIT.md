@@ -1155,3 +1155,29 @@ freeze, or holdout was run. The historical `23594b2` rejection is retained,
 not rewritten. The current tree needs a new exact-tree independent review after
 the repair. The performance feed has no commit after `b1847ac`; no performance
 implementation was merged. Holdouts `619`, `631`, and `641` remain untouched.
+
+## Append-only checkpoint: terminal diagnostic comparison-hash binding — 2026-09-08
+
+The current scientific successor is `f817823` on
+`feature/r2-cdf-survival-successor`, clean and pushed. The latest change is
+limited to the fail-closed terminal-diagnostic provenance boundary. Its pair
+validator now hashes the actual comparison JSON and compares that digest with
+the provenance-declared `comparison_sha256`; the terminal contract fixture
+contains a regression that mutates this digest and verifies rejection. This
+closes the remaining comparison-artifact substitution gap without changing the
+R2 calendar amendment, finite CDF participant, risk/lifecycle semantics, or
+historical evidence.
+
+The post-change clean `GOMAXPROCS=2 make test` passed all packages and the
+integrated SV1, capacity-archive, R2-archive, parity, activation, and terminal
+diagnostic contracts. `GOMAXPROCS=2 go vet ./...`, all shell syntax checks,
+and `git diff --check` passed. No activation, capacity, development, freeze,
+or holdout execution has occurred. The exact tree has not yet received a fresh
+accepted independent Sol-xhigh review; pinned Go 1.27 builds and seed-643
+activation remain closed until that review and a real attestation are
+verified.
+
+The asynchronous performance branch was fetched at marker `b1847ac` and has
+no newer commit. Its deferred `f153e12` analyzer correction and VNext binary
+evidence work remain outside the scientific tree. Holdouts `619`, `631`, and
+`641` remain untouched.

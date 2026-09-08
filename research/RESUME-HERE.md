@@ -1318,3 +1318,29 @@ holdout run occurred. The performance branch was fetched after the semantic
 repair and still has no commit after `b1847ac`; no performance code was
 imported. A fresh exact-tree Sol-xhigh review of the post-repair tree is now
 required before pinned build or seed-643 activation.
+
+## Append-only operational update: terminal diagnostic comparison-hash gate — 2026-09-08
+
+The exact pushed successor HEAD is now `f817823` on
+`feature/r2-cdf-survival-successor`. This is a narrow protocol-test hardening
+step following the `23594b2` exact-tree review and its `758b10e` repair: the
+terminal-failure pair validator now recomputes the comparison artifact's
+SHA-256 and requires it to equal the provenance-declared
+`comparison_sha256`. The focused terminal contract mutates that hash as well
+as the terminal-outcome hash and rejects both substitutions. R2 calendar,
+lifecycle, risk, supplier, and historical evidence semantics are unchanged.
+
+The clean `GOMAXPROCS=2 make test` gate at `f817823` passed, including all Go
+packages and integrated SV1, capacity-archive, R2-archive, parity, activation,
+and terminal-diagnostic contracts. `GOMAXPROCS=2 go vet ./...`, shell syntax,
+and `git diff --check` also pass. No simulator activation, capacity probe,
+development cell, freeze authorization, or holdout run has occurred. The
+current tree is clean and pushed; it still has no accepted independent review
+attestation for this exact HEAD, so pinned builds and seed-643 activation remain
+closed.
+
+The performance feed was fetched through the unchanged marker `b1847ac`; no
+new performance commits were found. The deferred `f153e12` analyzer finding
+and separate VNext binary-evidence line remain unimported. Holdouts `619`,
+`631`, and `641` remain untouched. The next gate is one fresh exact-tree
+independent Sol-xhigh review after this checkpoint.

@@ -200,3 +200,18 @@ binary evidence remain unmerged. A fresh review of the post-repair exact tree
 is required before any pinned build or activation. No activation, capacity,
 development, freeze, or holdout run occurred; holdouts `619`, `631`, and `641`
 remain untouched.
+
+## Append-only feed checkpoint: no new commits; terminal comparison hash hardened — 2026-09-08
+
+The performance branch was fetched again with `b1847ac` as the last-reviewed
+marker. There is no new commit to inspect. The deferred `f153e12`
+reaction-analyzer book-key correction and the separate VNext binary-evidence
+prototype remain unmerged and do not alter the current evidence contract.
+
+The scientific branch advanced to `f817823` with a narrow protocol regression:
+terminal-diagnostic pair validation now recomputes and binds the comparison
+JSON SHA-256, and the focused contract rejects a mutated comparison digest.
+The clean full test and static checks pass at this exact tree. This is not a
+performance import and does not change simulator economics or historical
+results. A new exact-tree independent Sol-xhigh review remains required before
+the pinned build/activation boundary.
