@@ -1344,3 +1344,46 @@ new performance commits were found. The deferred `f153e12` analyzer finding
 and separate VNext binary-evidence line remain unimported. Holdouts `619`,
 `631`, and `641` remain untouched. The next gate is one fresh exact-tree
 independent Sol-xhigh review after this checkpoint.
+
+## Append-only operational update: terminal reconstruction review repair — 2026-09-08
+
+Fresh independent Sol-xhigh review `Faraday` rejected exact pushed tree
+`a2b3cc1a573f287831886bd5f058db7a8c416211`. The first blocker was a real
+runtime/analyzer contract mismatch: the finite CDF supplier can legally emit
+`wait` with `reason=loss_limit` or `reason=equity_unavailable` after risk
+management, but the analyzer's wait-state validator did not admit either
+registered reason. A minimal reproduction using those two legal no-action
+events failed with `unknown supplier wait reason`, so valid activation evidence
+would have been marked invalid. Commit `5d98985` adds both reasons to the
+registered legal set; clean full tests then passed.
+
+The second blocker was a provenance/evidence weakness in the terminal-failure
+diagnostic path. Its fixture used a non-evstream payload and fabricated binary
+attestation values, while the terminal validator checked shape and hashes but
+did not independently parse a sealed `events.evs` stream through the production
+renderer. The pair predicate also omitted exact candidate-tree, renderer,
+source-config, review, analyzer, and resource identity bindings. Commits
+`c0dc4c5`, `f5d2ee0`, `aa4d4f7`, and `0475c74` repair this boundary: the test
+fixture now builds real Go 1.27 binaries and a valid `evstream_v3` stream with a
+completion trailer; the validator invokes `evsrender`, checks rendered routes,
+event/dictionary/total frame counts, projected and raw hashes, exact registered
+config and venue identities, review/binary/resource provenance, and artifact
+records; mutation tests cover outcome, comparison, tree, renderer, resource,
+and truncated-stream substitutions. The pinned-build parser was also corrected
+to read the Go version from the first-line `PATH: VERSION` format.
+
+Validation at `0475c74`: clean `GOMAXPROCS=2 make test` passed all Go packages,
+integrated/SV1 contracts, capacity archive, R2 archive, parity, activation,
+terminal diagnostics, and evidence archive fixtures; `go vet ./...` passed;
+the bounded race suites for `analysis`, `evstream`, `exchange`, `types`, and
+evidence-focused `simulations/multivenue` passed (the multivenue portion took
+143.782 seconds); shell syntax and `git diff --check` passed. The exact tree
+is clean and pushed. No activation, capacity measurement, registered
+development cell, freeze authorization, or holdout execution occurred.
+
+This review remains a rejection, not an acceptance of the repaired tree. One
+new exact-tree independent Sol-xhigh review is required next. Until it accepts
+the post-repair tree, pinned builds and the paired seed-643 activation remain
+closed. The performance branch was fetched through unchanged marker `b1847ac`
+with no new commits; no performance implementation was imported. Holdouts
+`619`, `631`, and `641` remain untouched.

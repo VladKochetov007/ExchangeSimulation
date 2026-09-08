@@ -1181,3 +1181,51 @@ The asynchronous performance branch was fetched at marker `b1847ac` and has
 no newer commit. Its deferred `f153e12` analyzer correction and VNext binary
 evidence work remain outside the scientific tree. Holdouts `619`, `631`, and
 `641` remain untouched.
+
+## Append-only checkpoint: Faraday terminal-evidence rejection and repair — 2026-09-08
+
+The fresh exact-tree Sol-xhigh review of
+`a2b3cc1a573f287831886bd5f058db7a8c416211` was **REJECTED**. It identified
+two protocol defects; neither changes the predecessor R2 result or the CDF
+economic hypothesis.
+
+1. `loss_limit` and `equity_unavailable` are legal post-risk supplier wait
+   reasons emitted by the current CDF actor, but
+   `analysis/cdf_liquidity.go` routed all waits through a validator whose
+   legal-reason set omitted them. The independent minimal reproduction
+   produced a false `EvidenceValid=false` result for otherwise valid terminal
+   supplier behavior. This is fixed in `5d98985`, with regression coverage for
+   both reasons.
+
+2. The terminal-failure test fixture did not contain a valid sealed binary
+   stream; it used a synthetic payload and fabricated attestation values. The
+   terminal pair validator did not perform the same renderer-backed stream
+   reconstruction as the successful path, and its top-level predicate did not
+   bind several identity fields. This could allow coordinated replacement of a
+   terminal diagnostic while preserving JSON shape.
+
+The repair lineage is explicit and additive: `c0dc4c5` adds the production
+`evsfixture` test adapter and renderer-backed terminal reconstruction;
+`f5d2ee0` moves the synthetic review attestation to external scratch as
+required by the provenance contract; `aa4d4f7` corrects parsing of Go's
+first-line `PATH: go1.27.0` build-info format; and `0475c74` localizes
+terminal-validator state. The repaired contract now requires a real sealed
+`evstream_v3` stream, completion trailer, exact event/dictionary/total frame
+counts, route output, projected and raw stream hashes, exact registered
+source-config bytes and identities, candidate revision/tree,
+simulator/analyzer/renderer build metadata and hashes, review attestation,
+resource policy, comparison hash, and complete artifact records. The fixture
+rejects mutations of outcome, comparison, tree, renderer, resource policy, and
+stream truncation.
+
+At `0475c74`, clean `GOMAXPROCS=2 make test`, `go vet ./...`, shell syntax,
+`git diff --check`, the focused terminal contract, and bounded race suites
+passed. The evidence-focused multivenue race portion passed in 143.782
+seconds. No activation, capacity, registered development, freeze, or holdout
+world was run. The working tree is clean and the revision is pushed.
+
+Disposition: Faraday's review is retained as a rejection of `a2b3cc1`; the
+post-repair tree has not been accepted yet. A fresh exact-tree independent
+Sol-xhigh review is the next promotion gate. The performance feed remains
+unchanged after `b1847ac`; its analyzer candidate `f153e12` and VNext binary
+format remain unmerged. Holdouts `619`, `631`, and `641` remain untouched.

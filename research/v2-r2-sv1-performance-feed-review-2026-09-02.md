@@ -215,3 +215,28 @@ The clean full test and static checks pass at this exact tree. This is not a
 performance import and does not change simulator economics or historical
 results. A new exact-tree independent Sol-xhigh review remains required before
 the pinned build/activation boundary.
+
+## Append-only feed checkpoint: no new commits; terminal evidence review repair — 2026-09-08
+
+Fetching `origin/autoresearch/v2-performance-research` again found no commit
+after the last-reviewed marker `b1847ac`. The deferred `f153e12`
+reaction-analyzer correction and VNext binary-evidence prototype remain
+unmerged and did not affect this checkpoint.
+
+At the scientific promotion boundary, independent Sol-xhigh reviewer Faraday
+rejected exact tree `a2b3cc1`. One finding was a semantic analyzer admission
+bug, not performance work: legal CDF supplier waits with `loss_limit` and
+`equity_unavailable` were rejected. `5d98985` adds regression coverage and
+acceptance for those registered reasons. The second finding was a terminal
+diagnostic contract weakness: the fixture did not use a valid sealed evstream
+and the validator lacked renderer-backed reconstruction and several exact
+identity bindings. The scientific branch repaired this in `c0dc4c5`, `f5d2ee0`,
+`aa4d4f7`, and `0475c74`; no performance-branch code was imported.
+
+The repaired terminal contract builds real Go 1.27 test binaries, generates a
+valid `evstream_v3` stream with a completion trailer, independently renders
+each terminal arm, and rejects provenance/tree/renderer/resource/comparison/
+outcome and stream-truncation mutations. Clean full tests, vet, shell syntax,
+diff-check, and bounded race/evidence gates pass at `0475c74`. No activation,
+capacity, development, freeze, or holdout run occurred. A fresh exact-tree
+review remains required; the performance feed is still deferred at `b1847ac`.
