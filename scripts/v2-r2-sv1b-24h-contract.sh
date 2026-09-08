@@ -424,7 +424,7 @@ v2_r2_sv1b_require_terminal_failure_pair_provenance() {
 	[[ $# -eq 3 ]] || return 1
 	local provenance_path=$1 expected_revision=$2 expected_binary_sha256=$3
 	local output_root treatment_dir control_dir comparison_path review_path simulator_path analyzer_path renderer_path path
-	local treatment_status control_status arm expected_outcome arm_dir arm_config_sha256 artifacts
+	local treatment_status control_status arm arm_status expected_outcome arm_dir arm_config_sha256 artifacts
 	local actual_sha256 expected_sha256 expected_tree_sha256 analyzer_sha256 renderer_sha256
 	local treatment_config_path control_config_path expected_treatment_config expected_control_config
 	local treatment_source_config_sha256 control_source_config_sha256 treatment_venue_ids control_venue_ids
