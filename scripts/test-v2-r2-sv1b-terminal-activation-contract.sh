@@ -157,11 +157,46 @@ write_terminal_arm control "$v2_r2_sv1_activation_control_config"
 
 expect_checkpoint_rejected() {
 	local fixture_name=$1
-	if v2_r2_require_checkpoint_stream "$fixture_root/$fixture_name" "$start" "$end"; then
+	if v2_r2_require_checkpoint_stream "$fixture_root/$fixture_name" "$start" "$end" evstream_v3; then
 		echo "invalid terminal checkpoint stream was accepted: $fixture_name" >&2
 		exit 1
 	fi
 }
+
+v2_r2_require_checkpoint_stream "$fixture_root/treatment/checkpoints.jsonl" "$start" "$end" evstream_v3
+v2_r2_sv1b_require_checkpoint_attestation_binding \
+	"$fixture_root/treatment/checkpoints.jsonl" "$fixture_root/treatment/binary-evidence-attestation.json"
+
+jq -c 'if .sim_time == 1735689600000000000 then .sim_time = 1735689600000000000.5 else . end' \
+	"$fixture_root/treatment/checkpoints.jsonl" >"$fixture_root/fractional-sim-time-checkpoint.jsonl"
+expect_checkpoint_rejected fractional-sim-time-checkpoint.jsonl
+jq -c 'if .event_count == 0 then .event_count = 0.5 else . end' \
+	"$fixture_root/treatment/checkpoints.jsonl" >"$fixture_root/fractional-event-count-checkpoint.jsonl"
+expect_checkpoint_rejected fractional-event-count-checkpoint.jsonl
+jq -c '.representation = "jsonl"' "$fixture_root/treatment/checkpoints.jsonl" >"$fixture_root/wrong-representation-checkpoint.jsonl"
+expect_checkpoint_rejected wrong-representation-checkpoint.jsonl
+jq -c '.unencodable_payloads = 99' "$fixture_root/treatment/checkpoints.jsonl" >"$fixture_root/unencodable-checkpoint.jsonl"
+expect_checkpoint_rejected unencodable-checkpoint.jsonl
+jq -c '.rolling_hash = ("f" * 64)' "$fixture_root/treatment/checkpoints.jsonl" >"$fixture_root/mismatched-rolling-hash-checkpoint.jsonl"
+expect_checkpoint_rejected mismatched-rolling-hash-checkpoint.jsonl
+
+jq -c --argjson end "$end" 'if .sim_time == $end then .event_count += 1 else . end' \
+	"$fixture_root/treatment/checkpoints.jsonl" >"$fixture_root/mismatched-attestation-count-checkpoint.jsonl"
+v2_r2_require_checkpoint_stream "$fixture_root/mismatched-attestation-count-checkpoint.jsonl" "$start" "$end" evstream_v3
+if v2_r2_sv1b_require_checkpoint_attestation_binding \
+	"$fixture_root/mismatched-attestation-count-checkpoint.jsonl" "$fixture_root/treatment/binary-evidence-attestation.json"; then
+	echo "checkpoint/binary attestation accepted a mismatched terminal event count" >&2
+	exit 1
+fi
+jq -c --argjson end "$end" \
+	'if .sim_time == $end then .execution_stream_hash = ("e" * 64) | .rolling_hash = ("e" * 64) else . end' \
+	"$fixture_root/treatment/checkpoints.jsonl" >"$fixture_root/mismatched-attestation-hash-checkpoint.jsonl"
+v2_r2_require_checkpoint_stream "$fixture_root/mismatched-attestation-hash-checkpoint.jsonl" "$start" "$end" evstream_v3
+if v2_r2_sv1b_require_checkpoint_attestation_binding \
+	"$fixture_root/mismatched-attestation-hash-checkpoint.jsonl" "$fixture_root/treatment/binary-evidence-attestation.json"; then
+	echo "checkpoint/binary attestation accepted a mismatched terminal stream hash" >&2
+	exit 1
+fi
 
 head -n 2 "$fixture_root/treatment/checkpoints.jsonl" >"$fixture_root/missing-terminal-checkpoint.jsonl"
 expect_checkpoint_rejected missing-terminal-checkpoint.jsonl

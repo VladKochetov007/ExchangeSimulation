@@ -437,20 +437,34 @@ v2_r2_require_current_source_revision() {
 # attestation, which may repeat the terminal ordinary checkpoint when an event
 # lands exactly on a checkpoint boundary. The repeated row must be identical
 # in state and must be marked final; this keeps the terminal attestation
-# explicit without allowing an arbitrary duplicate in the ordered stream.
+# explicit without allowing an arbitrary duplicate in the ordered stream. The
+# optional representation argument adds binary-evidence invariants without
+# changing the historical JSON checkpoint contract.
 v2_r2_require_checkpoint_stream() {
-	[[ $# -eq 3 ]] || return 1
+	[[ $# -eq 3 || $# -eq 4 ]] || return 1
 	local checkpoints=$1
 	local simulation_start_nano=$2
 	local simulation_end_nano=$3
+	local expected_representation=${4:-}
+	[[ -z "$expected_representation" || "$expected_representation" == "evstream_v3" ]] || return 1
 	jq -e -s --argjson simulation_start_nano "$simulation_start_nano" --argjson simulation_end_nano "$simulation_end_nano" \
+		--arg expected_representation "$expected_representation" \
 		'. as $checkpoints |
-			 ($checkpoints | length) >= 2 and
-			 all($checkpoints[]; .domain == "execution_observations" and .ordering == "ordered_stream" and
-			(.sim_time | type) == "number" and (.event_count | type) == "number" and
-			(.execution_stream_hash | type) == "string" and (.execution_stream_hash | test("^[0-9a-f]{64}$")) and
-			.sim_time >= $simulation_start_nano and .sim_time <= $simulation_end_nano and .event_count >= 0) and
-			 ($checkpoints | map(select(.final == true)) | length) == 1 and
+				 ($checkpoints | length) >= 2 and
+				 all($checkpoints[]; .domain == "execution_observations" and .ordering == "ordered_stream" and
+				(.sim_time | type) == "number" and ((.sim_time | floor) == .sim_time) and
+				(.event_count | type) == "number" and ((.event_count | floor) == .event_count) and
+				(.execution_stream_hash | type) == "string" and (.execution_stream_hash | test("^[0-9a-f]{64}$")) and
+				.sim_time >= $simulation_start_nano and .sim_time <= $simulation_end_nano and .event_count >= 0 and
+				(if $expected_representation == "evstream_v3" then
+					.representation == "evstream_v3" and
+					(.rolling_hash | type) == "string" and (.rolling_hash | test("^[0-9a-f]{64}$")) and
+					.rolling_hash == .execution_stream_hash and
+					((.unencodable_payloads // 0) | type) == "number" and
+					(((.unencodable_payloads // 0) | floor) == (.unencodable_payloads // 0)) and
+					((.unencodable_payloads // 0) == 0)
+				 else true end)) and
+				 ($checkpoints | map(select(.final == true)) | length) == 1 and
 			 $checkpoints[-1].final == true and
 			 all(range(1; (($checkpoints | length) - 1));
 				 ($checkpoints[. - 1].final != true and $checkpoints[.].final != true and
@@ -460,7 +474,7 @@ v2_r2_require_checkpoint_stream() {
 			 $checkpoints[-2].sim_time == $checkpoints[-1].sim_time and
 			 $checkpoints[-2].event_count == $checkpoints[-1].event_count and
 			 ($checkpoints[-2] | del(.final)) == ($checkpoints[-1] | del(.final)) and
-			 $checkpoints[-1].sim_time == $simulation_end_nano and $checkpoints[-1].final == true' \
+			$checkpoints[-1].sim_time == $simulation_end_nano and $checkpoints[-1].final == true' \
 		"$checkpoints" >/dev/null
 }
 

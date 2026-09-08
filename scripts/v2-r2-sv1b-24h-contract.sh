@@ -374,15 +374,28 @@ v2_r2_sv1b_require_activation_arm_artifacts() {
 		v2_r2_terminal_failure_outcome_present "$arm_dir" || return 1
 	fi
 	v2_r2_require_checkpoint_stream "$arm_dir/checkpoints.jsonl" \
-		"$v2_r2_sv1_activation_simulation_start_nano" "$v2_r2_sv1_activation_simulation_end_nano" || return 1
+		"$v2_r2_sv1_activation_simulation_start_nano" "$v2_r2_sv1_activation_simulation_end_nano" evstream_v3 || return 1
+	v2_r2_sv1b_require_checkpoint_attestation_binding "$arm_dir/checkpoints.jsonl" "$arm_dir/binary-evidence-attestation.json" || return 1
 	jq -e '
 		type == "object" and .domain == "canonical_binary_execution_frames" and .ordering == "ordered_stream" and
-		.hashing == "route_sequence_neutral_v1" and (.event_frames | type) == "number" and .event_frames > 0 and
-		(.stream_frames | type) == "number" and .stream_frames >= .event_frames and
+		.hashing == "route_sequence_neutral_v1" and (.event_frames | type) == "number" and (.event_frames | floor) == .event_frames and .event_frames > 0 and
+		(.stream_frames | type) == "number" and (.stream_frames | floor) == .stream_frames and .stream_frames >= .event_frames and
 		(.execution_stream_hash | type) == "string" and (.execution_stream_hash | test("^[0-9a-f]{64}$")) and
 		(.canonical_execution_stream_hash | type) == "string" and (.canonical_execution_stream_hash | test("^[0-9a-f]{64}$")) and
-		((.unencodable_payloads // 0) | type) == "number" and ((.unencodable_payloads // 0) | . == 0)' \
+		((.unencodable_payloads // 0) | type) == "number" and (((.unencodable_payloads // 0) | floor) == (.unencodable_payloads // 0)) and ((.unencodable_payloads // 0) | . == 0)' \
 		"$arm_dir/binary-evidence-attestation.json" >/dev/null || return 1
+}
+
+v2_r2_sv1b_require_checkpoint_attestation_binding() {
+	[[ $# -eq 2 ]] || return 1
+	local checkpoints=$1 attestation=$2
+	[[ -s "$checkpoints" && ! -L "$checkpoints" && -s "$attestation" && ! -L "$attestation" ]] || return 1
+	jq -e -s --slurpfile attestation "$attestation" '
+		($attestation | length) == 1 and
+		length >= 2 and .[-1].final == true and
+		(.[-1].event_count == $attestation[0].event_frames) and
+		(.[-1].execution_stream_hash == $attestation[0].execution_stream_hash)' \
+		"$checkpoints" >/dev/null
 }
 
 v2_r2_sv1b_require_terminal_arm_reconstruction() {
