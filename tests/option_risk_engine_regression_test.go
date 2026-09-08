@@ -60,6 +60,7 @@ func TestRegressionShortOptionMaintenanceTriggersLiquidation(t *testing.T) {
 	// against $5,000 equity. The tiny perp leg alone needs only $250.
 	injectOptionRiskPositions(ex, BTCAmount(0.1), -BTCAmount(1), USDAmount(3_000))
 	opt.SetMarks(USDAmount(50_000), USDAmount(3_000))
+	commitOptionRiskMarkEpoch(t, ex, perp, opt)
 
 	if _, reject := InjectLimitOrder(ex, 2, "BTC-PERP", Buy, PriceUSD(50_000, DOLLAR_TICK), BTCAmount(1)); reject != "" {
 		t.Fatalf("liquidity order rejected: %s", reject)
@@ -78,6 +79,7 @@ func TestRegressionLongOptionCarriesNoMaintenance(t *testing.T) {
 	// the perp's $250 requirement stands against $5,000 equity.
 	injectOptionRiskPositions(ex, BTCAmount(0.1), BTCAmount(1), USDAmount(3_000))
 	opt.SetMarks(USDAmount(50_000), USDAmount(3_000))
+	commitOptionRiskMarkEpoch(t, ex, perp, opt)
 
 	if _, reject := InjectLimitOrder(ex, 2, "BTC-PERP", Buy, PriceUSD(50_000, DOLLAR_TICK), BTCAmount(1)); reject != "" {
 		t.Fatalf("liquidity order rejected: %s", reject)
@@ -96,6 +98,7 @@ func TestRegressionOptionMarkToMarketMovesEquity(t *testing.T) {
 	// drops equity to $2,100, below the 1-BTC perp's $2,500 maintenance.
 	injectOptionRiskPositions(ex, BTCAmount(1), BTCAmount(1), USDAmount(3_000))
 	opt.SetMarks(USDAmount(50_000), USDAmount(100))
+	commitOptionRiskMarkEpoch(t, ex, perp, opt)
 
 	if _, reject := InjectLimitOrder(ex, 2, "BTC-PERP", Buy, PriceUSD(50_000, DOLLAR_TICK), BTCAmount(1)); reject != "" {
 		t.Fatalf("liquidity order rejected: %s", reject)
@@ -104,5 +107,15 @@ func TestRegressionOptionMarkToMarketMovesEquity(t *testing.T) {
 
 	if handler.liquidations == 0 {
 		t.Fatal("option mark-to-market loss invisible to risk engine: equity $2,100 vs $2,500 maintenance did not liquidate")
+	}
+}
+
+func commitOptionRiskMarkEpoch(t *testing.T, ex *Exchange, perp *PerpFutures, option *EuropeanOption) {
+	t.Helper()
+	if err := perp.UpdateFundingRate(PriceUSD(50_000, DOLLAR_TICK), PriceUSD(50_000, DOLLAR_TICK)); err != nil {
+		t.Fatalf("perpetual mark: %v", err)
+	}
+	if _, err := ex.CommitMarkEpoch([]string{perp.Symbol(), option.Symbol()}); err != nil {
+		t.Fatalf("commit option risk mark epoch: %v", err)
 	}
 }

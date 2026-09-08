@@ -211,7 +211,13 @@ func TestCrossSymbolMaintenanceAggregation(t *testing.T) {
 	pm.InjectPosition(1, "ETH-PERP", &Position{ClientID: 1, Symbol: "ETH-PERP", Size: ETHAmount(1.0), EntryPrice: entry100()})
 	pm.InjectPosition(3, "BTC-PERP", &Position{ClientID: 3, Symbol: "BTC-PERP", Size: BTCAmount(1.0), EntryPrice: entry100()})
 	pm.Unlock()
+	if err := btcPerp.UpdateFundingRate(entry100(), entry100()); err != nil {
+		t.Fatalf("BTC mark: %v", err)
+	}
 	ethPerp.UpdateFundingRate(entry100(), entry100())
+	if _, err := ex.CommitMarkEpoch([]string{"BTC-PERP", "ETH-PERP"}); err != nil {
+		t.Fatalf("commit cross-symbol mark epoch: %v", err)
+	}
 
 	// Liquidity so client 1's forced close can fill at entry (uPnL stays 0).
 	InjectLimitOrder(ex, 2, "BTC-PERP", Buy, entry100(), BTCAmount(2.0))

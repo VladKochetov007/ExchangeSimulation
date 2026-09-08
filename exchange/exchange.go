@@ -173,16 +173,21 @@ type DefaultExchange struct {
 	// Entries survive debt closure so a repay/reborrow at one timestamp cannot
 	// replay the old period.
 	collateralInterestLastTimestamps map[uint64]map[string]int64
-	CollateralRate                   int64
-	LiquidationFeeBps                int64
-	requireExactLinearAccounting     bool
-	autoAnchorMarks                  bool
-	deterministicIngress             bool
-	deterministicPhases              bool
-	markEMAWindow                    int
-	markBandBps                      int64
-	autoAnchoredSymbols              map[string]bool
-	requestsInFlight                 atomic.Int64
+	// markEpochBySymbol binds each stored risk mark to the completed exchange
+	// mark pass that produced it. A cross-margin decision must never combine a
+	// caller-supplied trigger mark with an unrelated stale sibling mark.
+	markEpoch                    uint64
+	markEpochBySymbol            map[string]uint64
+	CollateralRate               int64
+	LiquidationFeeBps            int64
+	requireExactLinearAccounting bool
+	autoAnchorMarks              bool
+	deterministicIngress         bool
+	deterministicPhases          bool
+	markEMAWindow                int
+	markBandBps                  int64
+	autoAnchoredSymbols          map[string]bool
+	requestsInFlight             atomic.Int64
 	// automInFlight counts automation-loop work (mark prices, funding,
 	// expiry) in progress. These loops react to the same clock the runner
 	// advances, so a barrier that ignored them would move time while the
@@ -319,6 +324,7 @@ func NewExchangeWithConfig(config ExchangeConfig) *DefaultExchange {
 		Loggers:                          make(map[string]Logger),
 		collateralInterestRemainders:     make(map[uint64]map[string]int64),
 		collateralInterestLastTimestamps: make(map[uint64]map[string]int64),
+		markEpochBySymbol:                make(map[string]uint64),
 		settlementPending:                make(map[string]expirySettlementPending),
 		tickerFactory:                    config.TickerFactory,
 		deterministicIngress:             config.DeterministicIngress,
@@ -686,6 +692,7 @@ func (e *DefaultExchange) AddInstrument(instrument Instrument) {
 		}
 	}
 	e.Instruments[symbol] = instrument
+	delete(e.markEpochBySymbol, symbol)
 	if isLinear {
 		if registrar, ok := e.Positions.(etypes.PositionPrecisionRegistrar); ok {
 			registrar.SetPositionPrecision(symbol, instrument.BasePrecision())
@@ -1378,9 +1385,9 @@ func (e *DefaultExchange) StartAutomation(ctx context.Context) {
 		e.addDeterministicPhaseJob(phaseJobAutomation, collateralTicker, e.ChargeCollateralInterest)
 		e.addDeterministicPhaseJob(phaseJobAutomation, expiryTicker, func() {
 			e.CheckListings()
-			e.UpdateDerivativeMarks()
+			derivativeMarkEpoch := e.UpdateDerivativeMarks()
 			e.CheckExpiries()
-			e.CheckPositionMarginerLiquidations()
+			e.checkPositionMarginerLiquidationsAtEpoch(derivativeMarkEpoch)
 		})
 		return
 	}
@@ -1567,6 +1574,53 @@ func (e *DefaultExchange) UpdatePerpPrices() {
 	e.updateAllPerpPrices()
 }
 
+// CommitMarkEpoch records that the caller has atomically installed usable
+// marks for the supplied margined instruments. It is the explicit bridge for
+// integrations that maintain marks outside UpdatePerpPrices; a multi-book
+// liquidation call without this boundary fails closed. The caller must list
+// every margined symbol that can contribute to the accounts it will sweep.
+func (e *DefaultExchange) CommitMarkEpoch(symbols []string) (uint64, error) {
+	if len(symbols) == 0 {
+		return 0, errors.New("mark epoch requires at least one symbol")
+	}
+
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	seenSymbols := make(map[string]struct{}, len(symbols))
+	for _, symbol := range symbols {
+		if _, duplicate := seenSymbols[symbol]; duplicate {
+			return 0, fmt.Errorf("mark epoch duplicate symbol %s", symbol)
+		}
+		seenSymbols[symbol] = struct{}{}
+		book := e.Books[symbol]
+		if book == nil {
+			return 0, fmt.Errorf("mark epoch unknown symbol %s", symbol)
+		}
+		if _, pending := e.settlementPending[symbol]; pending {
+			return 0, fmt.Errorf("mark epoch symbol %s is settlement-pending", symbol)
+		}
+		if perp := marginCore(book.Instrument); perp != nil {
+			if !perp.GetFundingRate().MarkAvailable {
+				return 0, fmt.Errorf("mark epoch symbol %s is unavailable", symbol)
+			}
+			continue
+		}
+		if _, ok := book.Instrument.(PositionMarginer); ok {
+			if _, err := riskMark(book.Instrument, book); err != nil {
+				return 0, fmt.Errorf("mark epoch symbol %s: %w", symbol, err)
+			}
+			continue
+		}
+		return 0, fmt.Errorf("mark epoch symbol %s is not margined", symbol)
+	}
+
+	e.markEpoch++
+	for symbol := range seenSymbols {
+		e.markEpochBySymbol[symbol] = e.markEpoch
+	}
+	return e.markEpoch, nil
+}
+
 func (e *DefaultExchange) updateAllPerpPrices() {
 	if e.autoAnchorMarks {
 		e.ensureAnchoredMarkCalcs()
@@ -1711,6 +1765,7 @@ func (e *DefaultExchange) updateAllPerpPrices() {
 		})
 	}
 
+	var completedMarkEpoch uint64
 	e.mu.Lock()
 	for i := range deferred {
 		d := &deferred[i]
@@ -1719,6 +1774,7 @@ func (e *DefaultExchange) updateAllPerpPrices() {
 		// availability contract; the numeric fields remain diagnostics only
 		// when it is false.
 		d.perp.ClearMarkReferences()
+		delete(e.markEpochBySymbol, d.symbol)
 		d.fundingSnapshot = *d.perp.GetFundingRate()
 	}
 	for i := range updates {
@@ -1728,6 +1784,7 @@ func (e *DefaultExchange) updateAllPerpPrices() {
 			// Expiry can win the lock after price collection but before this
 			// commit. Do not resurrect a halted contract's mark in that race.
 			u.skippedPending = true
+			delete(e.markEpochBySymbol, u.symbol)
 			u.fundingSnapshot = *u.perp.GetFundingRate()
 			continue
 		}
@@ -1738,6 +1795,9 @@ func (e *DefaultExchange) updateAllPerpPrices() {
 		}
 		u.fundingSnapshot = *u.perp.GetFundingRate()
 		u.ready = u.updateErr == nil
+		if !u.ready {
+			delete(e.markEpochBySymbol, u.symbol)
+		}
 	}
 	for index := range optionCandidates {
 		candidate := &optionCandidates[index]
@@ -1749,6 +1809,7 @@ func (e *DefaultExchange) updateAllPerpPrices() {
 				// candidate identity is protected by the exchange lock.
 				candidate.option.ClearMarks()
 			}
+			delete(e.markEpochBySymbol, candidate.symbol)
 			continue
 		}
 		liveBook := e.Books[candidate.symbol]
@@ -1757,10 +1818,38 @@ func (e *DefaultExchange) updateAllPerpPrices() {
 			e.Instruments[candidate.symbol] != candidate.option ||
 			timestamp >= candidate.option.ExpiryNano() {
 			candidate.skippedLifecycle = true
+			delete(e.markEpochBySymbol, candidate.symbol)
 			continue
 		}
 		candidate.option.SetMarks(candidate.underlyingPrice, candidate.premium)
 		candidate.ready = true
+	}
+	for _, update := range updates {
+		if update.ready {
+			completedMarkEpoch = e.markEpoch + 1
+			break
+		}
+	}
+	if completedMarkEpoch == 0 {
+		for _, candidate := range optionCandidates {
+			if candidate.ready {
+				completedMarkEpoch = e.markEpoch + 1
+				break
+			}
+		}
+	}
+	if completedMarkEpoch != 0 {
+		e.markEpoch = completedMarkEpoch
+		for _, update := range updates {
+			if update.ready {
+				e.markEpochBySymbol[update.symbol] = completedMarkEpoch
+			}
+		}
+		for _, candidate := range optionCandidates {
+			if candidate.ready {
+				e.markEpochBySymbol[candidate.symbol] = completedMarkEpoch
+			}
+		}
 	}
 	e.mu.Unlock()
 	for _, d := range deferred {
@@ -1829,7 +1918,7 @@ func (e *DefaultExchange) updateAllPerpPrices() {
 	// its mark into the shared portfolio state.
 	for _, u := range updates {
 		if u.ready {
-			e.CheckLiquidations(u.symbol, u.perp, u.markPrice)
+			e.checkLiquidationsAtEpoch(u.symbol, u.perp, u.markPrice, completedMarkEpoch)
 		}
 	}
 }
@@ -1876,7 +1965,25 @@ type accountMarginProfile struct {
 	Warning            int64
 }
 
+func (e *DefaultExchange) clientHasOpenPositionOnSymbolLocked(clientID uint64, symbol string) bool {
+	for _, side := range []PositionSide{PositionBoth, PositionLong, PositionShort} {
+		position := e.Positions.GetPositionBySide(clientID, symbol, side)
+		if position != nil && position.Size != 0 {
+			return true
+		}
+	}
+	return false
+}
+
 func (e *DefaultExchange) buildAccountMarginProfile(clientID uint64, quote, triggerSymbol string, triggerMark int64) (accountMarginProfile, error) {
+	return e.buildAccountMarginProfileAtEpoch(clientID, quote, triggerSymbol, triggerMark, 0)
+}
+
+// buildAccountMarginProfileAtEpoch evaluates every exposed same-quote book
+// against one completed mark pass. A nonzero markEpoch is strict: triggerMark
+// is only a diagnostic and cannot override a missing or older sibling mark.
+// Caller must hold e.mu.
+func (e *DefaultExchange) buildAccountMarginProfileAtEpoch(clientID uint64, quote, triggerSymbol string, triggerMark int64, markEpoch uint64) (accountMarginProfile, error) {
 	var p accountMarginProfile
 	// Cross-margin marks can fail on the first unmarked book and emit the
 	// reason into the execution evidence.  A map walk here therefore made the
@@ -1909,6 +2016,9 @@ func (e *DefaultExchange) buildAccountMarginProfile(clientID uint64, quote, trig
 			// mark-to-market and maintenance; skipping them makes a short-vol
 			// account invisible to the risk engine and unliquidatable.
 			if pm, ok := book.Instrument.(PositionMarginer); ok && book.Instrument.QuoteAsset() == quote {
+				if markEpoch != 0 && e.clientHasOpenPositionOnSymbolLocked(clientID, symbol) && e.markEpochBySymbol[symbol] != markEpoch {
+					return accountMarginProfile{}, fmt.Errorf("cross-margin mark epoch for %s is unavailable", symbol)
+				}
 				if err := e.addPositionMarginerExposure(&p, clientID, symbol, book.Instrument, pm, book); err != nil {
 					return accountMarginProfile{}, err
 				}
@@ -1928,8 +2038,17 @@ func (e *DefaultExchange) buildAccountMarginProfile(clientID uint64, quote, trig
 		if len(positions) == 0 {
 			continue
 		}
+		if markEpoch != 0 {
+			if e.markEpochBySymbol[symbol] != markEpoch {
+				return accountMarginProfile{}, fmt.Errorf("cross-margin mark epoch for %s is unavailable", symbol)
+			}
+			fundingRate := perp.GetFundingRate()
+			if !fundingRate.MarkAvailable {
+				return accountMarginProfile{}, fmt.Errorf("cross-margin mark for %s is unavailable", symbol)
+			}
+		}
 		mark := triggerMark
-		if symbol != triggerSymbol {
+		if markEpoch != 0 || symbol != triggerSymbol {
 			fundingRate := perp.GetFundingRate()
 			mark = fundingRate.MarkPrice
 			if !fundingRate.MarkAvailable {
@@ -1973,6 +2092,13 @@ func (e *DefaultExchange) clientHasSettlementPendingExposureLocked(clientID uint
 // a pure short-vol account could sink arbitrarily far underwater untouched.
 // Runs on the derivative mark cadence, after marks refresh.
 func (e *DefaultExchange) CheckPositionMarginerLiquidations() {
+	e.mu.RLock()
+	markEpoch := e.markEpoch
+	e.mu.RUnlock()
+	e.checkPositionMarginerLiquidationsAtEpoch(markEpoch)
+}
+
+func (e *DefaultExchange) checkPositionMarginerLiquidationsAtEpoch(markEpoch uint64) {
 	timestamp := e.Clock.NowUnixNano()
 
 	e.mu.Lock()
@@ -2028,7 +2154,7 @@ func (e *DefaultExchange) CheckPositionMarginerLiquidations() {
 			if !ok {
 				// No trigger symbol: every book contributes its stored mark.
 				var err error
-				profile, err = e.buildAccountMarginProfile(clientID, quote, "", 0)
+				profile, err = e.buildAccountMarginProfileAtEpoch(clientID, quote, "", 0, markEpoch)
 				if err != nil {
 					e.reportPriceUnavailable(timestamp, symbol, "option_liquidation", err)
 					continue
@@ -2088,6 +2214,13 @@ func (e *DefaultExchange) addPositionMarginerExposure(p *accountMarginProfile, c
 // and any deficit are finalized once.
 // Hedge-mode Long/Short positions are included.
 func (e *DefaultExchange) CheckLiquidations(symbol string, perp *PerpFutures, markPrice int64) {
+	e.checkLiquidationsAtEpoch(symbol, perp, markPrice, 0)
+}
+
+// checkLiquidationsAtEpoch is the exchange-owned risk path. A nonzero epoch
+// makes the profile consume only marks committed by the same completed batch;
+// this is the path used by automation after it installs all marks.
+func (e *DefaultExchange) checkLiquidationsAtEpoch(symbol string, perp *PerpFutures, markPrice int64, markEpoch uint64) {
 	quote := perp.QuoteAsset()
 
 	e.mu.Lock()
@@ -2119,7 +2252,22 @@ func (e *DefaultExchange) CheckLiquidations(symbol string, perp *PerpFutures, ma
 			continue
 		}
 
-		profile, err := e.buildAccountMarginProfile(clientID, quote, symbol, markPrice)
+		profileEpoch := markEpoch
+		if profileEpoch == 0 {
+			positions := e.collectAccountLiquidationPositionsLocked(clientID, quote)
+			exposedSymbols := make(map[string]struct{}, len(positions))
+			for _, position := range positions {
+				exposedSymbols[position.symbol] = struct{}{}
+			}
+			if len(exposedSymbols) > 1 {
+				if !e.accountMarkEpochReadyLocked(clientID, quote, e.markEpoch) {
+					e.reportPriceUnavailable(e.Clock.NowUnixNano(), symbol, "liquidation", fmt.Errorf("cross-margin account %d has no coherent mark epoch", clientID))
+					continue
+				}
+				profileEpoch = e.markEpoch
+			}
+		}
+		profile, err := e.buildAccountMarginProfileAtEpoch(clientID, quote, symbol, markPrice, profileEpoch)
 		if err != nil {
 			e.reportPriceUnavailable(e.Clock.NowUnixNano(), symbol, "liquidation", err)
 			continue
@@ -2248,6 +2396,41 @@ func (e *DefaultExchange) collectAccountLiquidationPositionsLocked(clientID uint
 		result = append(result, liquidationPosition{symbol: position.Symbol, position: position, instrument: book.Instrument})
 	}
 	return result
+}
+
+func (e *DefaultExchange) accountMarkEpochReadyLocked(clientID uint64, quote string, markEpoch uint64) bool {
+	if markEpoch == 0 {
+		return false
+	}
+	positions := e.collectAccountLiquidationPositionsLocked(clientID, quote)
+	seenSymbols := make(map[string]struct{}, len(positions))
+	for _, position := range positions {
+		if _, seen := seenSymbols[position.symbol]; seen {
+			continue
+		}
+		seenSymbols[position.symbol] = struct{}{}
+		if e.markEpochBySymbol[position.symbol] != markEpoch {
+			return false
+		}
+		book := e.Books[position.symbol]
+		if book == nil {
+			return false
+		}
+		if perp := marginCore(book.Instrument); perp != nil {
+			if !perp.GetFundingRate().MarkAvailable {
+				return false
+			}
+			continue
+		}
+		if _, ok := book.Instrument.(PositionMarginer); ok {
+			if _, err := riskMark(book.Instrument, book); err != nil {
+				return false
+			}
+			continue
+		}
+		return false
+	}
+	return len(seenSymbols) > 0
 }
 
 func (e *DefaultExchange) hasOpenAccountLiquidationPositionLocked(clientID uint64, quote string) bool {

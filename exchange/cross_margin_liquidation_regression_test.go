@@ -34,6 +34,11 @@ func seedCrossMarginLiquidationCase(t *testing.T) (*DefaultExchange, *PerpFuture
 	if err := b.UpdateFundingRate(150, 150); err != nil {
 		t.Fatalf("B mark: %v", err)
 	}
+	// The direct test fixture installs both marks as one completed exchange
+	// batch. Production automation records this epoch in updateAllPerpPrices.
+	if _, err := ex.CommitMarkEpoch([]string{a.Symbol(), b.Symbol()}); err != nil {
+		t.Fatalf("commit mark epoch: %v", err)
+	}
 	for _, liquidity := range []struct {
 		requestID uint64
 		symbol    string
@@ -58,11 +63,11 @@ func runCrossMarginLiquidationCase(t *testing.T, triggerFirst string) crossMargi
 	ex, a, b := seedCrossMarginLiquidationCase(t)
 	defer ex.Shutdown()
 	if triggerFirst == a.Symbol() {
-		ex.CheckLiquidations(a.Symbol(), a, 50)
-		ex.CheckLiquidations(b.Symbol(), b, 150)
+		ex.checkLiquidationsAtEpoch(a.Symbol(), a, 50, ex.markEpoch)
+		ex.checkLiquidationsAtEpoch(b.Symbol(), b, 150, ex.markEpoch)
 	} else {
-		ex.CheckLiquidations(b.Symbol(), b, 150)
-		ex.CheckLiquidations(a.Symbol(), a, 50)
+		ex.checkLiquidationsAtEpoch(b.Symbol(), b, 150, ex.markEpoch)
+		ex.checkLiquidationsAtEpoch(a.Symbol(), a, 50, ex.markEpoch)
 	}
 	outcome := crossMarginLiquidationOutcome{
 		insurance: ex.ExchangeBalance.InsuranceFund["USD"],
@@ -108,7 +113,7 @@ func TestCrossMarginLiquidationDefersDeficitDuringPartialPortfolioClose(t *testi
 		t.Fatalf("partial A liquidity rejected: %s", response.Error)
 	}
 
-	ex.CheckLiquidations(a.Symbol(), a, 50)
+	ex.checkLiquidationsAtEpoch(a.Symbol(), a, 50, ex.markEpoch)
 	if got := ex.ExchangeBalance.InsuranceFund["USD"]; got != 0 {
 		t.Fatalf("partial close socialized an interim deficit: %d", got)
 	}
@@ -117,5 +122,25 @@ func TestCrossMarginLiquidationDefersDeficitDuringPartialPortfolioClose(t *testi
 	}
 	if position := ex.Positions.GetPosition(1, b.Symbol()); position == nil || position.Size != 10 {
 		t.Fatalf("B sibling = %#v, want live size 10", position)
+	}
+}
+
+func TestPublicCrossMarginLiquidationFailsClosedWithoutCoherentMarkEpoch(t *testing.T) {
+	ex, a, b := seedCrossMarginLiquidationCase(t)
+	defer ex.Shutdown()
+	ex.markEpoch = 0
+	delete(ex.markEpochBySymbol, a.Symbol())
+	delete(ex.markEpochBySymbol, b.Symbol())
+
+	ex.CheckLiquidations(a.Symbol(), a, 50)
+
+	for _, symbol := range []string{a.Symbol(), b.Symbol()} {
+		position := ex.Positions.GetPosition(1, symbol)
+		if position == nil || position.Size != 10 {
+			t.Fatalf("public mixed-epoch call changed %s position: %#v", symbol, position)
+		}
+	}
+	if got := ex.ExchangeBalance.InsuranceFund["USD"]; got != 0 {
+		t.Fatalf("public mixed-epoch call changed insurance: %d", got)
 	}
 }

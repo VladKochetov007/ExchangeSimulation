@@ -379,7 +379,7 @@ func (e *DefaultExchange) expiryLoop(ticker Ticker) {
 		case <-ticker.C():
 			e.automInFlight.Add(1)
 			e.CheckListings()
-			e.UpdateDerivativeMarks()
+			derivativeMarkEpoch := e.UpdateDerivativeMarks()
 			// Expiry is contractual settlement, not a liquidation trigger. Settle
 			// and delist contracts first so an at-expiry option cannot be
 			// force-traded (and charged a clearance fee) just before cash exercise.
@@ -387,7 +387,7 @@ func (e *DefaultExchange) expiryLoop(ticker Ticker) {
 			// After marks refresh: option books never enter the perp mark
 			// loop, so this sweep is the only liquidation path for accounts
 			// whose exposure is options-only.
-			e.CheckPositionMarginerLiquidations()
+			e.checkPositionMarginerLiquidationsAtEpoch(derivativeMarkEpoch)
 			e.automInFlight.Add(-1)
 			acknowledgeTicker(ticker)
 		}
@@ -432,8 +432,9 @@ func (e *DefaultExchange) CheckListings() {
 
 // UpdateDerivativeMarks feeds settlement observations to every live Expirable
 // and refreshes option marks (underlying mid + Black-76 premium) used by the
-// seller margin formula.
-func (e *DefaultExchange) UpdateDerivativeMarks() {
+// seller margin formula. It returns the completed option-mark epoch, or zero
+// when no option received a usable mark in this pass.
+func (e *DefaultExchange) UpdateDerivativeMarks() uint64 {
 	now := e.Clock.NowUnixNano()
 
 	type expirableData struct {
@@ -452,6 +453,7 @@ func (e *DefaultExchange) UpdateDerivativeMarks() {
 	slices.SortFunc(expirables, func(a, b expirableData) int {
 		return strings.Compare(a.inst.Symbol(), b.inst.Symbol())
 	})
+	markedOptionSymbols := make([]string, 0, len(expirables))
 
 	for _, data := range expirables {
 		inst := data.inst
@@ -464,6 +466,7 @@ func (e *DefaultExchange) UpdateDerivativeMarks() {
 				if opt, ok := inst.(*einstrument.EuropeanOption); ok {
 					opt.ClearMarks()
 				}
+				delete(e.markEpochBySymbol, data.symbol)
 			}
 			e.mu.Unlock()
 			e.reportPriceUnavailable(now, inst.Symbol(), "derivative_mark", err)
@@ -485,6 +488,22 @@ func (e *DefaultExchange) UpdateDerivativeMarks() {
 				yearsLeft := float64(opt.ExpiryNano()-now) / float64(365*24*time.Hour)
 				mark := eprice.Black76Premium(underlyingPrice, opt.Strike, opt.IV, yearsLeft, opt.IsCall)
 				opt.SetMarks(underlyingPrice, mark)
+				markedOptionSymbols = append(markedOptionSymbols, data.symbol)
+			}
+		}
+		e.mu.Unlock()
+	}
+	var completedMarkEpoch uint64
+	if len(markedOptionSymbols) > 0 {
+		e.mu.Lock()
+		completedMarkEpoch = e.markEpoch + 1
+		e.markEpoch = completedMarkEpoch
+		for _, symbol := range markedOptionSymbols {
+			if _, pending := e.settlementPending[symbol]; pending {
+				continue
+			}
+			if _, live := e.Books[symbol]; live {
+				e.markEpochBySymbol[symbol] = completedMarkEpoch
 			}
 		}
 		e.mu.Unlock()
@@ -495,6 +514,7 @@ func (e *DefaultExchange) UpdateDerivativeMarks() {
 		// expiry. It must remain read-only because it runs outside e.mu.
 		e.postDerivativeMarkHook()
 	}
+	return completedMarkEpoch
 }
 
 // publishIndexFeeds publishes the venue's reference price for each configured
@@ -857,6 +877,7 @@ func (e *DefaultExchange) settleExpiredInstrument(symbol string, now int64) {
 	listedAt, hasListedAt := e.instrumentListedAt[symbol]
 	delete(e.Books, symbol)
 	delete(e.Instruments, symbol)
+	delete(e.markEpochBySymbol, symbol)
 	delete(e.instrumentListedAt, symbol)
 	delete(e.settlementPending, symbol)
 	// The AUTO-anchored mark calculator dies with the instrument: the map is
