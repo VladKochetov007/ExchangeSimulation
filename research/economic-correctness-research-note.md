@@ -3312,6 +3312,189 @@ mechanism and the campaign has a single dominant artifact. Spread across
 `ABC/USD` and `CDF/USD` ⇒ two separate problems.
 
 
+**H-046 (PREREGISTERED) — `triangle_arb`'s +174.2 M is earned on the
+self-referential cross book, making [[RT-031]] and [[RT-033]] one artifact rather
+than two problems.**
+
+E-048 left this as the highest-information-gain next step. RT-031 showed
+`ABC/CDF` is self-referential and ends −69% from its bootstrap; RT-033 showed
+`triangle_arb` takes 75.4% of every gain in the population. Whether those are the
+same fact is not yet measured.
+
+**Representation change.** E-048 measured value per *class*. This measures value
+per *(class, book)* pair and per *counterparty*, which the account snapshots
+cannot express. `OrderFill` evidence (`exchange/settlement.go:526`) carries
+`symbol`, `qty`, `price`, `side`, `trade_id` and the acting `client_id`, and two
+fill rows share a `trade_id`, so the trade graph can be reconstructed: who traded
+what with whom, on which book.
+
+**Per-book contribution.** For a book `BASE/QUOTE`, a participant's cash flow
+accrues in QUOTE and its inventory in BASE:
+
+    contribution_book = Σ(signed quote cash flow) + (net base inventory) × terminal mark
+
+both converted to USD at terminal marks.
+
+**Self-test that gates the result, independent of E-048's.** Summed over books,
+a class's contribution must reproduce its carry-adjusted PnL from `classpnl`:
+
+    Σ_books contribution ≈ carry_adjusted_pnl
+
+These are computed from **different sources** — fill-by-fill evidence versus
+account snapshots — so agreement is a real cross-check rather than a restatement.
+A mismatch above 5% of the class result means the fill stream does not account
+for the class's result, and the per-book split is then reported as INCONCLUSIVE
+rather than explained away. Funding, borrow interest and liquidation transfers
+are the known terms the fill stream omits, so a mismatch is *expected* for
+derivative classes and is itself informative about which classes earn outside the
+order book.
+
+**Prediction.** For `triangle_arb`, the `ABC/CDF` book contributes the majority
+of +174.2 M, and its dominant counterparty classes there are `noise_flow` and
+`abc_cdf_spot_maker`.
+
+**Falsifiers.** (a) the self-test fails for `triangle_arb` → INCONCLUSIVE;
+(b) `ABC/CDF` contributes less than half → H-046 falsified and the concentration
+is a separate problem from RT-031; (c) the dominant counterparty is a class other
+than the two named → the routing story in RT-033 is wrong even if the book is
+right.
+
+**Discriminating experiment E-049**, preregistered before the run: re-run
+`clock-control-5h-101.json` seed 607 with `-log-mode full`, reconstruct the trade
+graph from `OrderFill` evidence, run the self-test, then read the split.
+Status: **SUPPORTED WITHIN TESTED SCOPE** by E-049 — 98.1% of the result is
+`ABC/CDF` and 92.3% of that is a single counterparty; the `noise_flow` half of
+the counterparty prediction was wrong.
+
+
+**E-049 — H-046 SUPPORTED WITHIN TESTED SCOPE, and it exposes an error in
+RT-033's mechanism sentence. 98.1% of `triangle_arb`'s result is one book, and
+92.3% of that is one counterparty.**
+Base: `a666d02faede3d40f046b11e60eb672c59386a94`.
+Run: `clock-control-5h-101.json`, seed 607, 8h, `-log-mode full`.
+Reproduce: `go run research/tools/flowattrib/main.go -dir <logdir>`.
+5 130 138 `OrderFill` records across 15 files, **zero unpaired executions**.
+
+**Self-test first, and it passes on the class that matters.** Fill-stream
+contribution against account-snapshot carry-adjusted PnL — two entirely
+different sources:
+
+| class | from fills | from snapshots | gap |
+|---|---:|---:|---:|
+| triangle_arb | 174 203 545 | 174 217 981 | **−0.0%** |
+| noise_flow | −219 422 999 | −220 204 919 | 0.4% |
+| abc_cdf_spot_maker | 6 858 652 | 6 879 438 | −0.3% |
+| elastic_supplier | −2 028 598 | −2 026 313 | −0.1% |
+| latent_liquidity | −1 030 003 | −1 029 326 | −0.1% |
+| futures_maker | 0 | 7 056 275 | −100.0% |
+| perp_maker | 0 | 2 484 659 | −100.0% |
+| option_dealer | 5 645 | 795 504 | −99.3% |
+
+The spot-traded classes reconcile to a fraction of a percent from two independent
+sources. The 100% gaps are the preregistered expectation working as designed:
+those classes trade only derivative books, which this tool deliberately does not
+fold in, so **the gap column reads off which classes earn nothing in a spot order
+book**. `futures_maker`'s +7.06 M and `perp_maker`'s +2.48 M are entirely
+derivative-side.
+
+**Where `triangle_arb`'s +174.2 M comes from:**
+
+| book | contribution |
+|---|---:|
+| **ABC/CDF** | **170 904 176 (98.1%)** |
+| ABC/USD | 2 083 684 |
+| CDF/USD | 1 215 685 |
+
+**Who pays it, on ABC/CDF:**
+
+| counterparty | value to `triangle_arb` | base traded |
+|---|---:|---:|
+| **abc_cdf_spot_maker** | **157 661 074 (92.3%)** | 6 547.6 ABC |
+| imbalance_maker | 6 790 225 | 257.8 ABC |
+| fixed_distance_maker | 6 452 877 | 230.7 ABC |
+
+H-046 is supported: the cross book is where essentially all of it is earned, so
+[[RT-031]] and [[RT-033]] are **one artifact, not two problems**.
+
+**The rate is the tell.** 157.7 M USD across 6 547.6 ABC is **24 080 USD of
+profit per ABC traded**, against an ABC worth ≈49 294 USD — **48.8% of notional
+captured per unit**. No spread, no latency edge and no inventory skill produces
+half of notional. It is the signature of picking off a counterparty quoting
+around a mid that RT-031 showed had drifted −69% from fair.
+
+**CORRECTION to RT-033, published because it was wrong in a way that matters.**
+RT-033 stated the mechanism as `triangle_arb` "harvesting a self-referential
+book's 69% dislocation **from uninformed flow configured into it**". The
+counterparty table falsifies the second half: **`noise_flow` does not appear as a
+direct counterparty of `triangle_arb` on any book.** The direct donor is
+`abc_cdf_spot_maker`, the self-anchored maker itself. Falsifier (c) does not
+fire, because the dominant counterparty is one of the two classes named — but the
+half of the prediction naming `noise_flow` was wrong and the causal sentence in
+RT-033 must be corrected rather than quietly re-read.
+
+The corrected chain is a **two-step transfer, and the middle link is not a
+loser**: `abc_cdf_spot_maker` pays 157.7 M to `triangle_arb` and still finishes
+at **+6.88 M overall**, so it recovers ≈164 M from the rest of its flow. Which
+class supplies that is **NOT EXERCISED** by this experiment — the tool
+reconstructs counterparties for the focus class only. `noise_flow`'s −219 M is
+still the population's funding, but the path from it to `triangle_arb` is
+inferred, not measured.
+
+**Next experiment, highest information gain.** Re-run `flowattrib` with
+`-class abc_cdf_spot_maker` to close the chain: if its ≈164 M of recovery comes
+from `noise_flow` on `ABC/CDF`, the whole campaign result is one mechanism end to
+end. That is a single command against logs of the same run.
+
+
+**E-050 — the chain closes exactly. The campaign's entire competitive result is
+one mechanism, end to end.**
+Same run and logs as E-049; the experiment E-049 named, run as specified.
+Reproduce: `go run research/tools/flowattrib/main.go -dir <logdir> -class abc_cdf_spot_maker`.
+
+`abc_cdf_spot_maker` on `ABC/CDF`, its only book:
+
+| counterparty | value to the maker | base traded |
+|---|---:|---:|
+| **noise_flow** | **+188 620 463** | 354 838.7 ABC |
+| abc_cdf_spot_maker | 0 | 17 200.7 ABC |
+| imbalance_maker | −9 419 245 | 715.2 ABC |
+| fixed_distance_maker | −14 598 989 | 1 148.3 ABC |
+| **triangle_arb** | **−157 743 578** | 6 547.6 ABC |
+| **net** | **+6 858 652** | |
+
+The five rows sum to the class's total to the unit. The ≈164 M of recovery
+E-049 could only infer is now measured: **188.6 M of it comes from `noise_flow`
+on `ABC/CDF`**, exactly as the preregistered interpretation required. The
+population's headline result is a single two-step transfer:
+
+    noise_flow  ──+188.6M──▶  abc_cdf_spot_maker  ──−157.7M──▶  triangle_arb
+
+**The two rates are the fairness verdict, and they are not comparable
+quantities.**
+
+| leg | notional | value | rate |
+|---|---:|---:|---:|
+| noise_flow → maker | 354 838.7 ABC | 188.6 M | **531 USD/ABC ≈ 1.08% of notional** |
+| maker → triangle_arb | 6 547.6 ABC | 157.7 M | **24 092 USD/ABC ≈ 48.9% of notional** |
+
+The maker collects an ordinary ~1% spread from uninformed flow — a market-making
+result — and hands **83.6% of that gross away on 1.72% of its traded volume** to
+one class, at forty-five times the per-unit rate it charges. A market maker does
+not lose half of notional to adverse selection; it loses a spread. **This is not
+adverse selection, it is a maker quoting around a mid that is −69% from fair
+(RT-031) while a single class lifts the wrong side of it.**
+
+**Incidental observation, POST-HOC.** `abc_cdf_spot_maker` trades **17 200.7 ABC
+against itself** — the two cross makers on a venue crossing each other — at
+exactly zero net value to the class. That is 2.6× `triangle_arb`'s entire volume
+on the book, redistributed between same-class participants. It nets to zero at
+class level so it does not affect any result above, and it is **NOT EXERCISED**
+whether it distorts per-participant rankings inside the class or the book's
+reported volume statistics. Flagged, not claimed.
+
+Recorded as RT-035.
+
+
 ---
 
 ## F. Findings
@@ -3328,6 +3511,18 @@ See `research/red-team-findings.md` for the full records.
 - **RT-003** — bounded no-violation results (INV-2, INV-5, INV-6, identity).
 - **RT-006** — latency is delivered as configured across 225 link x channel
   rows; no unearned speed advantage. Transport only.
+- **RT-035** — the chain closes: **noise_flow −188.6 M → abc_cdf_spot_maker
+  −157.7 M → triangle_arb**, five counterparty rows summing to the maker's total
+  to the unit. The maker charges uninformed flow **1.08% of notional** and pays
+  `triangle_arb` **48.9% of notional** on 1.72% of its volume — 45x the rate,
+  83.6% of its gross. Not adverse selection: a maker quoting around a mid that is
+  −69% from fair. The campaign's entire competitive result is one mechanism.
+- **RT-034** — `triangle_arb`'s dominance is **one book and one counterparty**:
+  98.1% of its +174.2 M is earned on `ABC/CDF`, and 92.3% of that comes from
+  `abc_cdf_spot_maker` — the self-anchored maker of [[RT-031]] — at **24 080 USD
+  per ABC traded, 48.8% of notional**. [[RT-031]] and [[RT-033]] are one artifact.
+  Corrects RT-033: `noise_flow` is **not** a direct counterparty of
+  `triangle_arb` on any book; the transfer is two-step through the maker.
 - **RT-033** — the campaign's competitive outcome is **not close and not
   competitive**. With the shared revaluation tide removed, `triangle_arb` takes
   **+174.2 M, 75.4% of every gain in the population, with 6 participants of

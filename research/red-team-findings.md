@@ -1986,3 +1986,77 @@ nothing — the script used `'\\n'` where it needed `'\n'`, matched no anchor, a
 reported success anyway. The hypothesis is therefore labelled POST-HOC in the
 artifact rather than back-dated. Note edits now assert that the anchor matched
 and that the file grew.
+
+## RT-034/RT-035 — The campaign's competitive result is one mechanism, end to end
+
+**Classification.** REAL. Resolves how RT-031 and RT-033 relate, and corrects
+RT-033's mechanism sentence.
+
+**Base.** `a666d02faede3d40f046b11e60eb672c59386a94`.
+`clock-control-5h-101.json`, seed 607, 8h, `-log-mode full`.
+`research/tools/flowattrib` over 5 130 138 `OrderFill` records, 15 files, **zero
+unpaired executions**.
+
+**Instrument and its self-test.** Two `OrderFill` rows share a `trade_id`
+(`exchange/settlement.go:526`), so the trade graph is recoverable: who traded
+what, with whom, on which book. Contribution per book is
+`Σ(signed quote cash flow, net of quote fees) + (net base inventory) × terminal mark`.
+Before reporting any split the tool reconciles each class against a completely
+different source — the account snapshots' carry-adjusted PnL of RT-033:
+
+| class | from fills | from snapshots | gap |
+|---|---:|---:|---:|
+| triangle_arb | 174 203 545 | 174 217 981 | **−0.0%** |
+| noise_flow | −219 422 999 | −220 204 919 | 0.4% |
+| abc_cdf_spot_maker | 6 858 652 | 6 879 438 | −0.3% |
+| futures_maker | 0 | 7 056 275 | −100.0% |
+| perp_maker | 0 | 2 484 659 | −100.0% |
+
+Spot-traded classes agree to a fraction of a percent from independent sources.
+The 100% gaps are the tool working as designed: it deliberately folds in no
+derivative book, so **the gap column reads off which classes earn nothing in a
+spot order book** — `futures_maker` and `perp_maker` are entirely derivative-side.
+
+**RT-034 — one book, one counterparty.** `triangle_arb`'s +174.2 M splits
+`ABC/CDF` **170 904 176 (98.1%)**, `ABC/USD` 2 083 684, `CDF/USD` 1 215 685. On
+`ABC/CDF` its counterparties are `abc_cdf_spot_maker` **157 661 074 (92.3%)**,
+`imbalance_maker` 6 790 225, `fixed_distance_maker` 6 452 877. So RT-031 and
+RT-033 are **one artifact, not two problems**.
+
+**RT-035 — the chain closes.** `abc_cdf_spot_maker` on its only book:
+`noise_flow` **+188 620 463** (354 838.7 ABC), itself 0 (17 200.7 ABC),
+`imbalance_maker` −9 419 245, `fixed_distance_maker` −14 598 989, `triangle_arb`
+**−157 743 578** (6 547.6 ABC), net **+6 858 652** — summing to the class total to
+the unit.
+
+    noise_flow  ──+188.6M──▶  abc_cdf_spot_maker  ──−157.7M──▶  triangle_arb
+
+**The two rates are the verdict.** The maker charges uninformed flow
+**531 USD/ABC, 1.08% of notional** — an ordinary market-making result — and pays
+`triangle_arb` **24 092 USD/ABC, 48.9% of notional**, on **1.72% of its traded
+volume**, which is **83.6% of its gross**. Forty-five times the rate. A market
+maker loses a spread to adverse selection, not half of notional. This is a maker
+quoting around a mid that RT-031 measured at −69% from fair while one class lifts
+the wrong side of it.
+
+**Correction to RT-033, published because it was wrong in a way that matters.**
+RT-033 stated `triangle_arb` was "harvesting a self-referential book's 69%
+dislocation **from uninformed flow configured into it**". `noise_flow` is **not a
+direct counterparty of `triangle_arb` on any book**. The direct donor is the
+self-anchored maker. The transfer is two-step, and the middle link is not a loser
+— it finishes +6.88 M.
+
+**Owner decision.** Nothing here is an exchange-engine defect: the accounting
+reconciles from two independent sources to a fraction of a percent. What it shows
+is that the population's competitive ranking is produced by a modelling choice —
+a cross maker with `ReferenceSymbol` equal to its own symbol and no price-elastic
+demand on its book — and not by strategy quality. Whether to give `ABC/CDF` an
+implied-rate anchor or elastic demand is the owner's call; drawing
+strategy-performance conclusions from the current configuration is not.
+
+**Incidental, flagged not claimed.** `abc_cdf_spot_maker` trades 17 200.7 ABC
+**against itself** — same-class makers on a venue crossing each other — at exactly
+zero net class value, 2.6× `triangle_arb`'s entire volume on the book. It nets to
+zero at class level so no result above is affected; whether it distorts
+per-participant rankings inside the class or the book's volume statistics is not
+exercised.
