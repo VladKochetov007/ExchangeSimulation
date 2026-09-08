@@ -95,15 +95,16 @@ Evidence searched:
 * current SV1C config/provenance and normalizer-registration JSON;
 * the full `make test` log at `7d91d14`;
 * the `go vet ./...` and targeted race logs;
-* the exact focused package log at
-  `/tmp/sv1c-focused-7d91d14.log`; and
+* the exact focused package log retained outside the repository; and
 * retained external-scratch artifacts, which contain predecessor SV1B
   activation/review material but no accepted SV1C exact-tree attestation.
 
 Observed status:
 
-* clean `make test`, `go vet ./...`, targeted race, focused packages, binary
-  evidence, renderer, calendar, and fresh-process determinism checks pass;
+* the focused packages, `go vet ./...`, targeted race, binary evidence,
+  renderer, calendar, and fresh-process determinism checks pass; the current
+  full `make test` rerun is still open because a repository-path contract test
+  found the temporary-path wording in this note;
 * the focused packages `evstream`, `types`, `exchange`, and
   `simulations/multivenue` pass at the exact current source;
 * no SV1C normalizer-generated world exists;
@@ -143,3 +144,30 @@ rejection requires a focused repair and a new mechanical gate; a reviewer
 acceptance is the only authorization to proceed to pinned binaries and the
 development-only activation probe. Holdouts remain forbidden before explicit
 freeze authorization.
+
+## Append-only update: semantic hardening checkpoint — 2026-09-08
+
+The exact successor source checkpoint is now pushed as
+`2bd4450ffdfee02689d119493b688cba6dccfc92`. The checkpoint adds regression
+coverage and minimal corrections for coherent same-timestamp mark inputs,
+funding deadline handling, checked aggregate risk arithmetic, atomic expiry
+cohorts (including singleton preflight), forced liquidation identity, and
+bounded supplier reconciliation of identity-bound forced closes. Generic
+legacy expiry arithmetic is contained and converted into a settlement-pending
+deferral rather than a process panic. These are successor contract changes;
+they do not rewrite the R2 predecessor or any retained trajectory.
+
+The focused suites and all Go packages passed. A full `make test` run executed
+all Go packages and the preceding repository contracts successfully, then
+stopped only at the pinned-checkpoint-validator fixture because this research
+note was still dirty and the temporary validator binary correctly exposed
+`vcs.modified=true`. The clean-tree contract run remains outstanding and is the
+next mechanical check. The new regressions passed independently before the
+commit, and no simulator world was generated.
+
+The latest read-only remote fetch found no commits after performance-port
+`39768df`, binary/performance feed `b1847ac`, or economic red-team `e85e16c`.
+No auxiliary implementation was imported, binary evidence remains a separate
+promotion candidate, and no evidence or holdout was consumed. The candidate is
+still awaiting a fresh exact-tree independent Sol-xhigh review before any
+activation authorization.

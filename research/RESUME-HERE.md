@@ -1914,3 +1914,40 @@ world ran; retained evidence was not deleted, and holdouts `619`, `631`, and
 The next promotion boundary is one fresh independent exact-tree review of the
 complete SV1C candidate. Only an accepted review can authorize clean pinned
 Go 1.27 production binaries and the registered seed-643 activation probe.
+
+## Append-only operational update: risk/evidence hardening checkpoint — 2026-09-08
+
+The exact pushed scientific checkpoint is
+`2bd4450ffdfee02689d119493b688cba6dccfc92` on
+`feature/r2-cdf-survival-successor`. It preserves the R2 calendar/lifecycle
+semantics and predecessor boundary, and adds fail-closed successor hardening
+for coherent mark epochs, funding deadlines, aggregate same-expiry
+settlement, overflow-aware account risk, explicit liquidation identity, and
+strict order lifecycle evidence. The bounded CDF supplier now reconciles
+identity-bound forced closes locally, rejects malformed or over-sized
+transitions without mutating inventory, and records liquidation identity in
+its observer evidence. Historical eight ABC/USD suppliers and historical R2
+configurations remain unchanged; no world was run.
+
+The focused suites and all Go packages passed under the bounded two-core
+policy, including the new expiry arithmetic, mark-source, funding-boundary,
+forced-fill, and CDF supplier regressions. The first full `make test` after
+this checkpoint passed every Go package and the preceding repository
+contracts. Its final pinned-checkpoint fixture intentionally rejected the
+still-dirty worktree because the fixture binary carried `vcs.modified=true`;
+this is a clean-tree prerequisite and will be rerun after this note is
+committed. No evidence was deleted or rewritten.
+
+The asynchronous refs were fetched again without switching worktrees. They
+remain at performance-port `39768df`, binary/performance feed `b1847ac`, and
+economic red-team `e85e16c`, with no new commits and no implementation
+imported. Disk remained approximately 56 GiB free and available memory
+approximately 23 GiB. The binary evidence prototype remains deferred until
+its separate promotion contract is complete. No activation, capacity,
+development, freeze, or holdout world ran; holdouts `619`, `631`, and `641`
+remain untouched.
+
+The next gate is a clean full contract run, followed by one fresh independent
+Sol-xhigh review of this exact complete successor tree. Review acceptance is
+required before pinned production binaries or the registered seed-643
+activation probe.

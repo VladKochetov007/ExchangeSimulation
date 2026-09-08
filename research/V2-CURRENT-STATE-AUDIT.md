@@ -1744,3 +1744,35 @@ independent review of R2 calendar semantics, finite CDF economics, strict-risk
 and liquidation invariants, evidence/provenance fail-closed behavior, and
 historical-boundary compliance. Only accepted review may authorize pinned
 binaries and seed-643 activation.
+
+## Append-only audit update: pushed successor hardening checkpoint — 2026-09-08
+
+The current scientific source checkpoint is
+`2bd4450ffdfee02689d119493b688cba6dccfc92` on
+`feature/r2-cdf-survival-successor`; no cherry-pick is in progress. This
+checkpoint retains the accepted calendar-based R2 lifecycle and the explicit
+R2 negative-control result. Its semantic hardening covers same-timestamp mark
+source changes, scheduled funding deadlines, atomic same-expiry cohorts,
+checked cross-margin arithmetic, forced liquidation fill identity, strict
+evidence reconstruction, and bounded CDF supplier forced-close handling.
+
+Focused packages and the full Go package test suite passed with two-core
+affinity. The repository-level `make test` run reached the final
+SV1B terminal fixture but returned status 2 because the research note was still
+uncommitted and the temporary validator binary therefore reported a modified
+VCS tree. That result is retained as a dirty-tree diagnostic; it is not being
+treated as a clean promotion gate. The note is now being committed separately
+so the contract can be rerun against an actually clean source tree.
+
+The asynchronous refs were fetched at this checkpoint and have not advanced:
+performance-port `39768df`, binary/performance feed `b1847ac`, and economic
+red-team `e85e16c`. No auxiliary implementation was merged. No registered
+activation, capacity, development, freeze, or holdout world ran; no retained
+evidence was removed or rewritten; holdouts `619`, `631`, and `641` remain
+untouched. Disk was approximately 56 GiB free and available memory
+approximately 23 GiB.
+
+The candidate remains unpromoted. After the clean contract rerun, the required
+next step is one fresh independent Sol-xhigh review of the exact complete tree;
+only an accepted attestation can authorize pinned Go 1.27 binaries and the
+seed-643 activation probe.
