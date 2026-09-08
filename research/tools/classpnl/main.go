@@ -185,9 +185,19 @@ func main() {
 		}
 	}
 
+	// The venue takes fees in whichever asset the book quotes, so ABC/CDF fees
+	// accrue in CDF and ABC/USD fees in USD. Summing only the reporting asset
+	// discards a real transfer that the participants have already paid, which
+	// inflates the closure residual by the discarded amount. RT-039 records the
+	// measurement that caught this.
 	take := int64(0)
 	for _, l := range data.VenueLedgers {
-		take += l.FeeRevenue[*reportAsset] + l.InsuranceFund[*reportAsset]
+		for asset, amount := range l.FeeRevenue {
+			take += convertToReport(amount, asset, endMarks)
+		}
+		for asset, amount := range l.InsuranceFund {
+			take += convertToReport(amount, asset, endMarks)
+		}
 	}
 
 	closure := totalCarry + take
@@ -282,6 +292,17 @@ func participantIndex(role string) int {
 		index = index*10 + int(r-'0')
 	}
 	return index
+}
+
+// convertToReport values one asset amount in the reporting asset at its terminal
+// mark. A mark of zero means the run never valued that asset, so the amount is
+// dropped rather than silently counted at par.
+func convertToReport(amount int64, asset string, marks map[string]int64) int64 {
+	mark, valued := marks[asset]
+	if !valued || mark == 0 {
+		return 0
+	}
+	return int64(float64(amount) / assetPrecision(asset) * float64(mark))
 }
 
 func abs(v int64) int64 {

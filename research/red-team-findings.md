@@ -2235,3 +2235,75 @@ table as inactive, removing the validation that currently reads as assurance.
 (2) Drop the step to resolve the modelled delays and accept ~120x compute.
 (3) Keep the coarse step for population-scale questions and run a separate
 fine-step configuration for latency questions. Not my choice to make.
+
+## RT-039 — The closure residual was my own tool, and the real accounting is exact
+
+**Classification.** INSTRUMENT DEFECT in this audit's tooling, not in the
+simulator. Corrects two scope limits published in RT-033 and RT-036, both in the
+simulator's favour.
+
+**Base.** `a666d02faede3d40f046b11e60eb672c59386a94`, 8 h, seeds 607/608/609.
+
+**How it surfaced.** Every `classpnl` run this session printed a residual of
+−4 946 638 USD against a take of +4 944 035 USD — a ratio of 1.00053. I had been
+reporting the magnitude ("0.89% of gross, admissible but narrow") and ignoring
+the structure. A residual that equals the take suggests participants are charged
+twice what the ledger records, which would be a serious defect, so it was
+preregistered as H-050 with my own tool listed as candidate explanation (4) and
+required to be excluded first.
+
+**Result.** The seed sweep falsified the double-charge reading — the ratio is
+1.00053, 1.00450, **0.81955**, an 18% spread outside the ±10% band — and the raw
+per-asset ledger identified the cause:
+
+| seed | `fee_revenue/USD` | `fee_revenue/CDF` | `fee_revenue/ABC` |
+|---|---:|---:|---:|
+| 607 | 494 403 495 651 | **153 469 520 553** | 89 805 |
+| 608 | 463 937 957 961 | **155 245 978 261** | 73 893 |
+| 609 | 502 372 867 994 | **154 672 166 782** | 93 574 |
+
+**The venue takes fees in whichever asset the book quotes.** `ABC/CDF` fees accrue
+in CDF — visible in every fill record as `"fee_asset": "CDF"`. `classpnl` summed
+`FeeRevenue["USD"]` only, discarding ~1 534 CDF ~ 4.6 M USD per run, coincidentally
+close to the USD take, which manufactured the near-perfect ratio at two seeds.
+
+**Corrected closure** (same runs, same carry-adjusted numbers; take now valued
+across all assets at terminal marks):
+
+| seed | Σ carry-adjusted | take | residual | of gross |
+|---|---:|---:|---:|---:|
+| 607 | −9 890 673 | +9 891 169 | **+496** | **0.0001%** |
+| 608 | −9 299 639 | +9 299 900 | **+261** | **0.0000%** |
+| 609 | −9 140 911 | +9 144 241 | **+3 330** | **0.0005%** |
+
+The population's entire trading loss equals the venue's entire take to **496 USD
+out of ~558 M of gross flow**, across three assets and three venues. This is a
+strong conservation result that I had been reporting as a weakness.
+
+**Correction 1 — RT-033's resolution limit is retracted.** RT-033 stated that no
+class below ~±5 M was distinguishable from the residual and listed **twelve of
+twenty classes** as not exercised. With the residual at ~500 USD every class is
+resolved, `elastic_supplier` and `latent_liquidity` included. The ranking is
+unchanged, because carry-adjusted PnL never used the take; only the uncertainty
+attached to it was inflated, by my own defect.
+
+**Correction 2 — RT-036's mis-specified falsifier resolves in its favour.** That
+falsifier compared a 240 USD spread against per-participant closure noise of
+~19 600 USD. Corrected, that noise is ~**2 USD**, so the spread is two orders of
+magnitude above it. The falsifier does not fire, and RT-036's magnitude claim is
+supported rather than merely bounded.
+
+**Blast radius.** `research/tools/populationclosure` has the same single-asset
+take (`l.FeeRevenue[*asset]`); any residual it reported for a cross-asset run is
+overstated by the discarded CDF fees. Flagged, not re-run. `flowattrib` never
+used the take, which is why its independent cross-check reconciled to −0.0% and
+gave no warning — the tool that agreed with reality was the one that did not
+depend on the broken term.
+
+**Why it survived four checkpoints.** The self-test was built to refuse a bad
+decomposition and never fired, because the defect lived *inside* the reference
+quantity the test compares against and left the residual just under the 1%
+tolerance. A gate calibrated in one asset cannot detect a multi-asset omission.
+The lesson is not to tighten the tolerance — at 1% the runs passed legitimately —
+but that **a conservation check must enumerate every asset the system can move
+value in, not the one the report is denominated in.**

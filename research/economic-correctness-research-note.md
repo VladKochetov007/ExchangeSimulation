@@ -3936,6 +3936,148 @@ population-scale questions and run a separate fine-step configuration for the
 latency questions specifically. Choosing among these is not mine to do.
 
 
+**H-050 (PREREGISTERED) — the closure residual is not noise: it *is* the exchange
+take, counted once where it should be counted twice (or charged twice where it is
+recorded once).**
+
+**Mined from a residual I had been dismissing.** Every `classpnl` run this session
+printed the same three numbers at seed 607:
+
+    Σ carry-adjusted pnl   −9 890 673 USD
+    exchange take          +4 944 035 USD
+    residual               −4 946 638 USD   (0.8866% of gross)
+
+I reported that residual as a magnitude — "0.89% of gross, admissible but
+narrow" — and moved on. Its **structure** is far more informative:
+
+    |residual| / take = 4 946 638 / 4 944 035 = 1.00053
+
+The residual is the take, to five parts in ten thousand. Equivalently
+**Σ carry_adjusted ≈ −2 × take**.
+
+**Why that is a defect and not an identity.** Fees move value from participants to
+the venue. Participants should lose exactly what the venue gains, so
+`Σ Δequity = −take` and, with revaluation removed,
+`Σ carry_adjusted + take = 0`. Observed instead is
+`Σ carry_adjusted + take = −take`. Participants are down **twice** what the
+ledger says the venue collected. One of these is true:
+
+1. participants are charged twice per fill and the ledger records once;
+2. the ledger records one side of a two-sided charge (but `MakerBps` is 0, so
+   there should be only a taker side);
+3. a second sink exists that is not `FeeRevenue + InsuranceFund` — funding,
+   borrow interest, or a liquidation transfer — and coincidentally equals the
+   take;
+4. my `classpnl` take extraction reads only part of the ledger.
+
+**(4) is mine and must be excluded first**, so the experiment reads the ledger
+fields directly rather than trusting the tool's aggregate.
+
+**Prediction.** Across independent seeds, `|residual| / take` stays ≈ 1 with a
+tight spread. A structural miscount reproduces; a coincidence does not.
+
+**Falsifiers.** (a) the ratio varies materially across seeds (outside ±10%) →
+seed 607 was a coincidence, H-050 falsified, and the residual returns to being an
+unexplained magnitude; (b) the ratio is ≈1 but a non-fee sink of the same size is
+identified → explanation (3), which is a different finding and not a
+double-count.
+
+**Consequence if supported.** Every closure self-test in this session
+([[RT-033]], [[RT-034]]) passed at 0.89% *because the tolerance was 1%*. If the
+residual is a structural double-count rather than noise, the tolerance was
+absorbing a real defect, and the "admissible but narrow" caveat I attached to
+RT-033 was the right instinct for the wrong reason.
+
+**Discriminating experiment E-055**, preregistered before the runs: repeat at
+seeds 607, 608, 609 at the 8 h horizon; print `Σ carry-adjusted`, the raw ledger
+`fee_revenue` and `insurance_fund` per venue and asset, and the ratio.
+Status: **FALSIFIED WITHIN TESTED SCOPE** — the ratio does not reproduce across
+seeds, and the cause is explanation (4), my own tool discarding non-USD fee
+revenue.
+
+
+**E-055 — H-050 FALSIFIED. The residual was my own tool discarding non-USD fee
+revenue. Corrected, the population accounting closes to 0.0001%, and two earlier
+scope limits I published were far too conservative.**
+Base: `a666d02faede3d40f046b11e60eb672c59386a94`, 8 h, seeds 607/608/609.
+Reproduce: `go run research/tools/classpnl/main.go -file <logdir>/greeks.json`.
+
+**Falsifier (a) fires on the seed sweep.** `|residual| / take` was 1.00053 at
+seed 607, 1.00450 at 608, but **0.81955 at 609** — an 18% spread, outside the
+preregistered ±10% band. The "residual is exactly the take" pattern does not
+reproduce, so the double-charge reading was wrong.
+
+**Falsifier (4) — the explanation I flagged as mine and required to be excluded
+first — is the actual cause.** Dumping the raw ledger per asset:
+
+| seed | `fee_revenue/USD` | `fee_revenue/CDF` | `fee_revenue/ABC` |
+|---|---:|---:|---:|
+| 607 | 494 403 495 651 | **153 469 520 553** | 89 805 |
+| 608 | 463 937 957 961 | **155 245 978 261** | 73 893 |
+| 609 | 502 372 867 994 | **154 672 166 782** | 93 574 |
+
+**The venue takes fees in whichever asset the book quotes.** `ABC/CDF` fees
+accrue in **CDF** — visible all along in the fill records as
+`"fee_asset": "CDF"`. `classpnl` summed `FeeRevenue["USD"]` only, discarding
+≈1 534 CDF ≈ 4.6 M USD per run: almost exactly the size of the USD take, which is
+what manufactured the near-perfect 1.0 ratio at two of three seeds.
+
+**Corrected closure, same runs, same carry-adjusted numbers, take now valued
+across all assets at terminal marks:**
+
+| seed | Σ carry-adjusted | take | residual | of gross |
+|---|---:|---:|---:|---:|
+| 607 | −9 890 673 | +9 891 169 | **+496** | **0.0001%** |
+| 608 | −9 299 639 | +9 299 900 | **+261** | **0.0000%** |
+| 609 | −9 140 911 | +9 144 241 | **+3 330** | **0.0005%** |
+
+**This is a strong positive result about the simulator that I had been
+reporting as a weakness.** The population's entire trading loss equals the venue's
+entire take to **496 USD out of ~558 M of gross flow**. Conservation across
+participants, venues and three assets holds essentially exactly. My published
+figure of "0.8866% of gross, admissible but narrow" understated the accounting's
+accuracy by nearly four orders of magnitude.
+
+**CORRECTION 1 — [[RT-033]]'s resolution limit was wrong.** I wrote that no class
+below ≈±5 M was distinguishable from the residual, and listed **twelve of twenty
+classes** as NOT EXERCISED on that basis. With the residual at ~500 USD, **every
+class is resolved**, including `elastic_supplier` (−2 026 313) and
+`latent_liquidity` (−1 029 326). The ranking itself is unchanged — carry-adjusted
+PnL never depended on the take — but the uncertainty I attached to it was
+inflated by my own defect. The twelve classes are reinstated as measured.
+
+**CORRECTION 2 — [[RT-036]]'s mis-specified falsifier is resolved, in its
+favour.** E-051 recorded that preregistered falsifier (b) compared the suppliers'
+240 USD spread against "per-participant closure noise" of ≈19 600 USD, so by its
+letter the result read INCONCLUSIVE, and I argued the ordering claim survived
+because monotonicity is scale-free. With the corrected residual the
+per-participant noise is ≈**2 USD**, not 19 600. The 240 USD spread is two orders
+of magnitude above it. **Falsifier (b) does not fire at all**, and RT-036's
+*magnitude* claim — construction order is worth 0.28% to a price-elastic taker —
+is supported rather than bounded. My scale-free defence was correct but was not
+needed.
+
+**Instrument defect, and its blast radius.** `research/tools/populationclosure`
+carries the same single-asset take (`l.FeeRevenue[*asset]`). Its published
+outputs are affected the same way and any residual it reported for a cross-asset
+run is overstated by the discarded CDF fees. Not re-run here; flagged.
+`flowattrib`'s cross-check never used the take, which is why it independently
+reconciled to −0.0% and gave no hint of a problem — a useful reminder that the
+tool which agreed with reality was the one that did not depend on the broken
+term.
+
+**Why this was missed for four checkpoints.** The self-test was designed to
+refuse a bad decomposition and it never fired, because the defect sat *inside*
+the reference quantity the test compares against, and it happened to leave the
+residual just under the 1% tolerance. A gate calibrated in a single asset cannot
+detect a multi-asset omission. The lesson is not "tighten the tolerance" — at 1%
+the run passed legitimately — but **that a conservation check must enumerate
+every asset the system can move value in**, not the one the report is
+denominated in.
+
+Recorded as RT-039.
+
+
 ---
 
 ## F. Findings
@@ -3952,6 +4094,16 @@ See `research/red-team-findings.md` for the full records.
 - **RT-003** — bounded no-violation results (INV-2, INV-5, INV-6, identity).
 - **RT-006** — latency is delivered as configured across 225 link x channel
   rows; no unearned speed advantage. Transport only.
+- **RT-039** — the closure residual I reported at 0.89% for four checkpoints was
+  **my own tool discarding non-USD fee revenue**: the venue takes `ABC/CDF` fees
+  in CDF, and `classpnl` summed only `FeeRevenue["USD"]`. Corrected, the
+  population's trading loss equals the venue take to **496 USD on ~558 M of gross
+  flow (0.0001%)** across three seeds — conservation holds essentially exactly.
+  Retracts [[RT-033]]'s ±5 M resolution limit (twelve classes reinstated as
+  measured) and resolves [[RT-036]]'s mis-specified falsifier in its favour
+  (per-participant noise ≈2 USD, not 19 600). **A conservation check must
+  enumerate every asset the system moves value in, not the one the report is
+  denominated in.** `populationclosure` has the same defect, flagged not fixed.
 - **RT-038** — **the entire latency model is inert.** Four configurations
   spanning 1 µs to 500 ms — including a 625x change to the cross maker and a
   20 000x change to `noise_flow` — produce **byte-identical runs** (same
