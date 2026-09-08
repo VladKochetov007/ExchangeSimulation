@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "contract": "v2-r2-sv1c-24h-config-provenance-v1",
+  "contract": "v2-r2-sv1c-24h-config-provenance-v2",
   "candidate": "V2-R2-SV1C-24H-CDF-LIQUIDITY-STRICT-RISK",
   "predecessor": "V2-R2-SV1B-24H-CDF-LIQUIDITY",
   "source_configs": {
@@ -44,15 +44,32 @@
   },
   "generator": {
     "path": "scripts/render-v2-r2-sv1c-24h-configs.sh",
-    "sha256": "c1b3cffd242495634ea637facc68e5c36fbbc36c3625350e0421d79c8c1c830d"
+    "sha256": "041c83e9ec89a8cdb40fab4f4c70a07e0bc628f23bacd21f1ddce7a0524616bd"
   },
   "contract_definition": {
     "path": "scripts/v2-r2-sv1c-24h-contract.sh",
-    "sha256": "af2a702c9adafcaf208cc3c156901f3d1ab3bbe72ceae8d5131c856f1ad389ed"
+    "sha256": "6fcaba069a6902aac9691cf57fa0e11b59ca737e2c42d3af0c456c30ca4aa2c1"
   },
   "contract_loader": {
     "path": "scripts/v2-r2-sv1-contract-loader.sh",
-    "sha256": "802f9d588f627833e967cd51d816852587502daee068dd303007dee3ab4bd7c7"
+    "sha256": "6accd1d7e9a1f8a2e65fa05a90fef818c6dd46e7c04cb3eb2af23d16ff87160b"
+  },
+  "contract_dependencies": [
+    {
+      "path": "scripts/v2-r2-sv1-24h-contract.sh",
+      "sha256": "d483259ea8b5208d2b34b08f66445fbb6b33a6e3b9af9facf4c5264853737092"
+    },
+    {
+      "path": "scripts/v2-integrated-longrun-r2-contract.sh",
+      "sha256": "deef6138a7304f7833c1019928945bdc3cfc5beea06ee5c55b1ff58f943da242"
+    }
+  ],
+  "normalizer": {
+    "path": "bin/multivenue",
+    "sha256": "ea64ac5dc2ed81fc9b22bbc128191693ea82c55385bc7a6172ac763af2876ee3",
+    "revision": "ab3cd9617d7e6fc8e8921dc5e521b45934c87e64",
+    "go_version": "go1.27.0",
+    "package": "exchange_sim/cmd/multivenue"
   },
   "withdrawal_measurement": {
     "path": "research/v2-r2-sv1c-withdrawal-measurement-amendment-2026-09-08.md",
