@@ -93,6 +93,7 @@ type persistedEvent struct {
 	Data     any    `json:"data"`
 	Event    string `json:"event"`
 	SimTS    int64  `json:"sim_ts"`
+	EventSeq uint64 `json:"event_seq,omitempty"`
 }
 
 func NewJSONLinesLogger(path string) (*JSONLinesLogger, error) {
@@ -110,7 +111,24 @@ func newJSONLinesLogger(f io.WriteCloser, bufferSize int) *JSONLinesLogger {
 }
 
 func (l *JSONLinesLogger) LogEvent(simTime int64, clientID uint64, eventName string, event any) {
-	b, err := json.Marshal(persistedEvent{ClientID: clientID, Data: event, Event: eventName, SimTS: simTime})
+	l.logEvent(simTime, clientID, eventName, 0, event)
+}
+
+// LogEventWithSequence is the evidence-only extension used by the binary
+// successor. The sequence is persistence metadata and is omitted by the
+// historical LogEvent path so old JSON evidence remains byte-compatible.
+func (l *JSONLinesLogger) LogEventWithSequence(simTime int64, clientID uint64, eventName string, eventSequence uint64, event any) {
+	if eventSequence == 0 {
+		l.mu.Lock()
+		l.fail(fmt.Errorf("persisted event %q has zero global sequence", eventName))
+		l.mu.Unlock()
+		return
+	}
+	l.logEvent(simTime, clientID, eventName, eventSequence, event)
+}
+
+func (l *JSONLinesLogger) logEvent(simTime int64, clientID uint64, eventName string, eventSequence uint64, event any) {
+	b, err := json.Marshal(persistedEvent{ClientID: clientID, Data: event, Event: eventName, SimTS: simTime, EventSeq: eventSequence})
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.err != nil || l.closed {

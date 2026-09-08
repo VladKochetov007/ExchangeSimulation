@@ -2,6 +2,7 @@ package multivenue
 
 import (
 	"crypto/sha256"
+	"fmt"
 	"hash"
 	"os"
 	"sync"
@@ -10,7 +11,10 @@ import (
 	eexchange "exchange_sim/exchange"
 )
 
-const binaryExecutionHashContract = "route_sequence_neutral_v1"
+const (
+	binaryExecutionHashContract       = "route_sequence_neutral_v1"
+	binaryGlobalExecutionHashContract = "route_and_global_sequence_neutral_v2"
+)
 
 // binaryEvidence is the canonical binary sink: the same ordered event sequence
 // the JSON path records, encoded as typed frames instead of marshalled JSON.
@@ -59,6 +63,12 @@ func newNeutralBinaryEvidence(out interface{ Write([]byte) (int, error) }) *bina
 	})}
 }
 
+func newGlobalNeutralBinaryEvidence(out interface{ Write([]byte) (int, error) }) *binaryEvidence {
+	return &binaryEvidence{hashing: binaryGlobalExecutionHashContract, writer: evstream.NewWriter(out, evstream.WriterOptions{
+		HashFrame: hashGlobalBinaryExecutionFrame,
+	})}
+}
+
 func hashBinaryExecutionFrame(digest hash.Hash, frame []byte) {
 	header, err := evstream.ParseFrameHeader(frame)
 	if err != nil || header.SchemaID == evstream.SchemaDictionary || len(frame) < evstream.FrameHeaderSize+16 {
@@ -80,6 +90,25 @@ func hashBinaryExecutionFrame(digest hash.Hash, frame []byte) {
 	_, _ = digest.Write(frame[sequenceEnd:])
 }
 
+func hashGlobalBinaryExecutionFrame(digest hash.Hash, frame []byte) {
+	header, err := evstream.ParseFrameHeader(frame)
+	if err != nil || header.SchemaID == evstream.SchemaDictionary || len(frame) < evstream.FrameHeaderSize+24 {
+		_, _ = digest.Write(frame)
+		return
+	}
+
+	// Both route-local sequence fields and the global evidence order are
+	// persistence metadata. They are normalized out of the execution identity
+	// so adding/removing evidence-only observations cannot change the economic
+	// execution hash, while the fields remain available for exact rendering.
+	sequenceStart := evstream.FrameHeaderSize + 8
+	globalSequenceEnd := sequenceStart + 16
+	_, _ = digest.Write(frame[:sequenceStart])
+	var zeroSequences [16]byte
+	_, _ = digest.Write(zeroSequences[:])
+	_, _ = digest.Write(frame[globalSequenceEnd:])
+}
+
 // sinkEnvelope carries the event name alongside the payload.
 //
 // The frame header holds sequence, time, schema, venue and client, but not the
@@ -88,10 +117,12 @@ func hashBinaryExecutionFrame(digest hash.Hash, frame []byte) {
 // every payload is prefixed with an interned name reference — four bytes,
 // because the set of event names is tiny and closed.
 type sinkEnvelope struct {
-	routeRef uint32
-	eventRef uint32
-	sequence uint64
-	inner    evstream.InterningAppender
+	routeRef             uint32
+	eventRef             uint32
+	sequence             uint64
+	globalSequence       uint64
+	globalSequenceStored bool
+	inner                evstream.InterningAppender
 }
 
 func (e sinkEnvelope) SchemaID() uint16      { return e.inner.SchemaID() }
@@ -101,6 +132,9 @@ func (e sinkEnvelope) AppendPayloadInterning(dst []byte, in evstream.Interner) (
 	dst = evstream.AppendUint32(dst, e.routeRef)
 	dst = evstream.AppendUint32(dst, e.eventRef)
 	dst = evstream.AppendUint64(dst, e.sequence)
+	if e.globalSequenceStored {
+		dst = evstream.AppendUint64(dst, e.globalSequence)
+	}
 	return e.inner.AppendPayloadInterning(dst, in)
 }
 
@@ -111,6 +145,21 @@ func (e sinkEnvelope) AppendPayloadInterning(dst []byte, in evstream.Interner) (
 // raised one family at a time without the sink ever being partly JSON and
 // partly binary at the file level.
 func (b *binaryEvidence) record(simTime int64, clientID uint64, eventName, venueID string, payload any, route string, sequence uint64) error {
+	return b.recordWithGlobalSequence(simTime, clientID, eventName, venueID, payload, route, sequence, 0)
+}
+
+func (b *binaryEvidence) recordGlobal(simTime int64, clientID uint64, eventName, venueID string, payload any, route string, sequence, globalSequence uint64) error {
+	return b.recordWithGlobalSequence(simTime, clientID, eventName, venueID, payload, route, sequence, globalSequence)
+}
+
+func (b *binaryEvidence) recordWithGlobalSequence(simTime int64, clientID uint64, eventName, venueID string, payload any, route string, sequence, globalSequence uint64) error {
+	if b.hashing == binaryGlobalExecutionHashContract {
+		if globalSequence == 0 {
+			return fmt.Errorf("binary evidence: %s requires a nonzero global sequence", binaryGlobalExecutionHashContract)
+		}
+	} else if globalSequence != 0 {
+		return fmt.Errorf("binary evidence: global sequence supplied to %q contract", b.hashing)
+	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.err != nil {
@@ -141,7 +190,14 @@ func (b *binaryEvidence) record(simTime int64, clientID uint64, eventName, venue
 	if !typed {
 		inner = eexchange.OpaqueJSON{Value: payload}
 	}
-	frame := sinkEnvelope{routeRef: routeRef, eventRef: eventRef, sequence: sequence, inner: inner}
+	frame := sinkEnvelope{
+		routeRef:             routeRef,
+		eventRef:             eventRef,
+		sequence:             sequence,
+		globalSequence:       globalSequence,
+		globalSequenceStored: b.hashing == binaryGlobalExecutionHashContract,
+		inner:                inner,
+	}
 	if err := b.writer.AppendInterning(simTime, clientID, venueRef, frame); err != nil {
 		// Preserve the event slot when a payload cannot be encoded. The
 		// substitute is itself canonical and keeps sequence continuity; the

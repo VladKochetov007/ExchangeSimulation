@@ -255,6 +255,20 @@ func decodeStrictJSONDocument(raw []byte, target any, description string) error 
 	return nil
 }
 
+func validateStrictJSONValue(raw []byte, description string) error {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	if _, err := decodeStrictJSONValue(decoder); err != nil {
+		return fmt.Errorf("decode %s: %w", description, err)
+	}
+	if _, err := decodeStrictJSONValue(decoder); err == nil {
+		return fmt.Errorf("decode %s: multiple top-level values", description)
+	} else if !errors.Is(err, io.EOF) {
+		return fmt.Errorf("decode %s: trailing value: %w", description, err)
+	}
+	return nil
+}
+
 func decodeStrictJSONValue(decoder *json.Decoder) (any, error) {
 	token, err := decoder.Token()
 	if err != nil {

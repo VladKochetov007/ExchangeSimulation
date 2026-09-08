@@ -16,15 +16,16 @@ import (
 )
 
 // renderSidecarCursor keeps only the next LogEvidenceOnly record from one
-// route. The binary stream is ordered per venue sequence, so a small heap of
-// these cursors is enough to merge sidecars without retaining a whole run.
+// route. A small heap of these cursors is enough to merge sidecars without
+// retaining a whole run.
 type renderSidecarCursor struct {
-	key     renderRouteKey
-	file    *os.File
-	scanner *bufio.Scanner
-	current renderRecord
-	ready   bool
-	done    bool
+	key                renderRouteKey
+	file               *os.File
+	scanner            *bufio.Scanner
+	current            renderRecord
+	lastGlobalSequence uint64
+	ready              bool
+	done               bool
 }
 
 type renderSidecarHeap []*renderSidecarCursor
@@ -52,14 +53,44 @@ func (h *renderSidecarHeap) Pop() any {
 	return value
 }
 
-type renderSidecars struct {
-	byVenue map[string]*renderSidecarHeap
-	all     []*renderSidecarCursor
-	digest  renderArtifactDigest
+type renderGlobalSidecarHeap []*renderSidecarCursor
+
+func (h renderGlobalSidecarHeap) Len() int { return len(h) }
+
+func (h renderGlobalSidecarHeap) Less(left, right int) bool {
+	leftRecord, rightRecord := h[left].current, h[right].current
+	if leftRecord.globalSequence != rightRecord.globalSequence {
+		return leftRecord.globalSequence < rightRecord.globalSequence
+	}
+	if h[left].key.venue != h[right].key.venue {
+		return h[left].key.venue < h[right].key.venue
+	}
+	return h[left].key.route < h[right].key.route
 }
 
-func openRenderSidecars(venuesDir string) (*renderSidecars, error) {
-	sidecars := &renderSidecars{byVenue: make(map[string]*renderSidecarHeap)}
+func (h renderGlobalSidecarHeap) Swap(left, right int) { h[left], h[right] = h[right], h[left] }
+
+func (h *renderGlobalSidecarHeap) Push(value any) { *h = append(*h, value.(*renderSidecarCursor)) }
+
+func (h *renderGlobalSidecarHeap) Pop() any {
+	items := *h
+	last := len(items) - 1
+	value := items[last]
+	items[last] = nil
+	*h = items[:last]
+	return value
+}
+
+type renderSidecars struct {
+	byVenue        map[string]*renderSidecarHeap
+	global         renderGlobalSidecarHeap
+	globalOrdering bool
+	all            []*renderSidecarCursor
+	digest         renderArtifactDigest
+}
+
+func openRenderSidecars(venuesDir string, globalOrdering bool) (*renderSidecars, error) {
+	sidecars := &renderSidecars{byVenue: make(map[string]*renderSidecarHeap), globalOrdering: globalOrdering}
 	venuesInfo, err := os.Lstat(venuesDir)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -108,14 +139,18 @@ func openRenderSidecars(venuesDir string) (*renderSidecars, error) {
 			scanner: bufio.NewScanner(file),
 		}
 		cursor.scanner.Buffer(make([]byte, 64*1024), 16*1024*1024)
-		if err := cursor.advance(&sidecars.digest); err != nil {
+		if err := cursor.advance(&sidecars.digest, globalOrdering); err != nil {
 			_ = file.Close()
 			return err
 		}
 		sidecars.all = append(sidecars.all, cursor)
 		if cursor.ready {
-			sidecars.heapForVenue(venue)
-			heap.Push(sidecars.byVenue[venue], cursor)
+			if globalOrdering {
+				heap.Push(&sidecars.global, cursor)
+			} else {
+				sidecars.heapForVenue(venue)
+				heap.Push(sidecars.byVenue[venue], cursor)
+			}
 		}
 		return nil
 	})
@@ -126,6 +161,7 @@ func openRenderSidecars(venuesDir string) (*renderSidecars, error) {
 	for _, venueHeap := range sidecars.byVenue {
 		heap.Init(venueHeap)
 	}
+	heap.Init(&sidecars.global)
 	return sidecars, nil
 }
 
@@ -150,7 +186,7 @@ func (s *renderSidecars) heapForVenue(venue string) *renderSidecarHeap {
 	return venueHeap
 }
 
-func (c *renderSidecarCursor) advance(digest *renderArtifactDigest) error {
+func (c *renderSidecarCursor) advance(digest *renderArtifactDigest, globalOrdering bool) error {
 	if c.done {
 		return nil
 	}
@@ -170,14 +206,47 @@ func (c *renderSidecarCursor) advance(digest *renderArtifactDigest) error {
 	if event.Event == "" || event.Data.VenueID != c.key.venue || event.Data.Sequence == 0 || len(event.Data.Payload) == 0 {
 		return fmt.Errorf("multivenue: sidecar %s/%s has incomplete persisted event", c.key.venue, c.key.route)
 	}
-	c.current = renderRecord{sequence: event.Data.Sequence, raw: raw}
+	if globalOrdering {
+		if event.EventSeq == 0 || (c.lastGlobalSequence != 0 && event.EventSeq <= c.lastGlobalSequence) {
+			return fmt.Errorf("multivenue: sidecar %s/%s has non-increasing global event sequence", c.key.venue, c.key.route)
+		}
+		c.lastGlobalSequence = event.EventSeq
+	}
+	c.current = renderRecord{sequence: event.Data.Sequence, globalSequence: event.EventSeq, raw: raw}
 	c.ready = true
 	digest.add(raw)
 	return nil
 }
 
 func unmarshalRenderSidecar(raw []byte, event *renderPersistedEvent) error {
+	var object map[string]any
+	if err := decodeStrictJSONDocument(raw, &object, "rendered sidecar"); err != nil {
+		return err
+	}
+	if err := requireExactRenderKeys(object, "client_id", "data", "event", "sim_ts", "event_seq"); err != nil {
+		return err
+	}
+	data, ok := object["data"].(map[string]any)
+	if !ok {
+		return errors.New("rendered sidecar data is not an object")
+	}
+	if err := requireExactRenderKeys(data, "venue_id", "sequence", "payload"); err != nil {
+		return err
+	}
 	return json.Unmarshal(raw, event)
+}
+
+func requireExactRenderKeys(object map[string]any, allowed ...string) error {
+	allowedKeys := make(map[string]struct{}, len(allowed))
+	for _, key := range allowed {
+		allowedKeys[key] = struct{}{}
+	}
+	for key := range object {
+		if _, ok := allowedKeys[key]; !ok {
+			return fmt.Errorf("unexpected JSON field %q", key)
+		}
+	}
+	return nil
 }
 
 func (s *renderSidecars) top(venue string) *renderSidecarCursor {
@@ -195,13 +264,70 @@ func (s *renderSidecars) pop(venue string) (renderRouteKey, renderRecord, bool, 
 	}
 	cursor := heap.Pop(venueHeap).(*renderSidecarCursor)
 	key, record := cursor.key, cursor.current
-	if err := cursor.advance(&s.digest); err != nil {
+	if err := cursor.advance(&s.digest, s.globalOrdering); err != nil {
 		return renderRouteKey{}, renderRecord{}, false, err
 	}
 	if cursor.ready {
 		heap.Push(venueHeap, cursor)
 	}
 	return key, record, true, nil
+}
+
+func (s *renderSidecars) globalTop() *renderSidecarCursor {
+	if len(s.global) == 0 {
+		return nil
+	}
+	return s.global[0]
+}
+
+func (s *renderSidecars) popGlobal() (renderRouteKey, renderRecord, bool, error) {
+	if len(s.global) == 0 {
+		return renderRouteKey{}, renderRecord{}, false, nil
+	}
+	cursor := heap.Pop(&s.global).(*renderSidecarCursor)
+	key, record := cursor.key, cursor.current
+	if err := cursor.advance(&s.digest, s.globalOrdering); err != nil {
+		return renderRouteKey{}, renderRecord{}, false, err
+	}
+	if cursor.ready {
+		heap.Push(&s.global, cursor)
+	}
+	return key, record, true, nil
+}
+
+func (s *renderSidecars) flushGlobalBefore(sequence uint64, output *renderOutput) error {
+	for {
+		cursor := s.globalTop()
+		if cursor == nil || cursor.current.globalSequence >= sequence {
+			return nil
+		}
+		key, record, ok, err := s.popGlobal()
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return nil
+		}
+		if err := output.append(key, record); err != nil {
+			return err
+		}
+	}
+}
+
+func (s *renderSidecars) flushGlobalAll(output *renderOutput) error {
+	for s.globalTop() != nil {
+		key, record, ok, err := s.popGlobal()
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return nil
+		}
+		if err := output.append(key, record); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *renderSidecars) flushBefore(venue string, sequence uint64, output *renderOutput) error {
@@ -274,13 +400,16 @@ type renderOutput struct {
 	outputDir        string
 	stageDir         string
 	routeCompression RouteCompression
+	globalOrdering   bool
 	routes           map[renderRouteKey]*renderRouteOutput
 	nextVenueSeq     map[string]uint64
+	nextGlobalSeq    uint64
+	fullEvidence     renderCanonicalDigest
 	closed           bool
 	committed        bool
 }
 
-func newRenderOutput(outputDir string, routeCompression RouteCompression) (*renderOutput, error) {
+func newRenderOutput(outputDir string, routeCompression RouteCompression, globalOrdering bool) (*renderOutput, error) {
 	stageDir, err := os.MkdirTemp(filepath.Dir(outputDir), "."+filepath.Base(outputDir)+"-render-")
 	if err != nil {
 		return nil, fmt.Errorf("multivenue: create render staging directory: %w", err)
@@ -289,8 +418,10 @@ func newRenderOutput(outputDir string, routeCompression RouteCompression) (*rend
 		outputDir:        outputDir,
 		stageDir:         stageDir,
 		routeCompression: routeCompression,
+		globalOrdering:   globalOrdering,
 		routes:           make(map[renderRouteKey]*renderRouteOutput),
 		nextVenueSeq:     make(map[string]uint64),
+		fullEvidence:     newRenderCanonicalDigest(),
 	}, nil
 }
 
@@ -332,6 +463,19 @@ func (o *renderOutput) append(key renderRouteKey, record renderRecord) error {
 	if err := validateRoute(key.route); err != nil {
 		return fmt.Errorf("multivenue: rendered route %s/%s: %w", key.venue, key.route, err)
 	}
+	if o.globalOrdering {
+		if record.globalSequence == 0 {
+			return fmt.Errorf("multivenue: canonical reconstruction stream has zero global sequence for %s/%s", key.venue, key.route)
+		}
+		expectedGlobal := o.nextGlobalSeq + 1
+		if record.globalSequence != expectedGlobal {
+			kind := "missing"
+			if record.globalSequence < expectedGlobal {
+				kind = "duplicate or out-of-order"
+			}
+			return fmt.Errorf("multivenue: canonical reconstruction stream has %s global sequence %d (expected %d)", kind, record.globalSequence, expectedGlobal)
+		}
+	}
 	expected := o.nextVenueSeq[key.venue]
 	if expected == 0 {
 		expected = 1
@@ -368,6 +512,10 @@ func (o *renderOutput) append(key renderRouteKey, record renderRecord) error {
 		return fmt.Errorf("multivenue: write rendered route newline %q: %w", key.route, err)
 	}
 	o.nextVenueSeq[key.venue] = expected + 1
+	if o.globalOrdering {
+		o.nextGlobalSeq = record.globalSequence
+		o.fullEvidence.add(key, record)
+	}
 	return nil
 }
 
@@ -444,3 +592,10 @@ func (o *renderOutput) cleanup() {
 }
 
 func (o *renderOutput) routeCount() int { return len(o.routes) }
+
+func (o *renderOutput) fullEvidenceHash() string {
+	if !o.globalOrdering {
+		return ""
+	}
+	return o.fullEvidence.hex()
+}

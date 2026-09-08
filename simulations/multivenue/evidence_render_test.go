@@ -116,6 +116,114 @@ func TestRenderBinaryEvidenceMergesEvidenceOnlySidecarsByVenueSequence(t *testin
 	}
 }
 
+func TestRenderBinaryEvidenceMergesGlobalSidecarsByLogicalSequence(t *testing.T) {
+	inputDir := t.TempDir()
+	for _, venue := range []string{"north", "south"} {
+		if err := os.MkdirAll(filepath.Join(inputDir, "venues", venue), 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	eventsFile, err := os.Create(filepath.Join(inputDir, "events.evs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sink := newGlobalNeutralBinaryEvidence(eventsFile)
+	if err := sink.recordGlobal(1, 7, "binary_north", "north", map[string]int{"value": 1}, "general.jsonl", 1, 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := sink.recordGlobal(4, 9, "binary_south", "south", map[string]int{"value": 4}, "general.jsonl", 2, 4); err != nil {
+		t.Fatal(err)
+	}
+	if err := sink.finish(); err != nil {
+		t.Fatal(err)
+	}
+	if err := eventsFile.Close(); err != nil {
+		t.Fatal(err)
+	}
+	northSidecar := []byte(`{"client_id":8,"data":{"venue_id":"north","sequence":2,"payload":{"value":3}},"event":"sidecar_north","sim_ts":3,"event_seq":3}`)
+	southSidecar := []byte(`{"client_id":10,"data":{"venue_id":"south","sequence":1,"payload":{"value":2}},"event":"sidecar_south","sim_ts":2,"event_seq":2}`)
+	if err := os.WriteFile(filepath.Join(inputDir, "venues", "north", "general.jsonl"), append(northSidecar, '\n'), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(inputDir, "venues", "south", "general.jsonl"), append(southSidecar, '\n'), 0644); err != nil {
+		t.Fatal(err)
+	}
+	writeRenderMetadata(t, inputDir, sink, "full", northSidecar, southSidecar)
+
+	outDir := filepath.Join(t.TempDir(), "rendered")
+	report, err := RenderBinaryEvidence(inputDir, outDir)
+	if err != nil {
+		t.Fatalf("render global evidence: %v", err)
+	}
+	if report.FullEvidenceHash == "" {
+		t.Fatalf("global render omitted canonical full-evidence hash: %+v", report)
+	}
+	renderedNorth, err := os.ReadFile(filepath.Join(outDir, "venues", "north", "general.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.HasPrefix(renderedNorth, []byte(`{"client_id":7,"data":{"venue_id":"north","sequence":1,"payload":{"value":1}},"event":"binary_north","sim_ts":1,"event_seq":1}`)) {
+		t.Fatalf("logical global sequence was not rendered independently of transport frames: %s", renderedNorth)
+	}
+	// The south sidecar has global sequence 2 and must precede the south binary
+	// frame at sequence 4 even though the binary stream stores that frame first.
+	renderedSouth, err := os.ReadFile(filepath.Join(outDir, "venues", "south", "general.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.HasPrefix(renderedSouth, []byte(`{"client_id":10,"data":{"venue_id":"south","sequence":1,"payload":{"value":2}},"event":"sidecar_south","sim_ts":2,"event_seq":2}`)) {
+		t.Fatalf("global sidecar was not emitted before later binary frame: %s", renderedSouth)
+	}
+}
+
+func TestRenderOutputRejectsGlobalSequenceMutations(t *testing.T) {
+	tests := []struct {
+		name         string
+		firstGlobal  uint64
+		secondGlobal uint64
+		want         string
+	}{
+		{name: "zero", firstGlobal: 0, secondGlobal: 0, want: "zero global sequence"},
+		{name: "duplicate", firstGlobal: 1, secondGlobal: 1, want: "duplicate or out-of-order global sequence"},
+		{name: "missing", firstGlobal: 1, secondGlobal: 3, want: "missing global sequence"},
+		{name: "swapped", firstGlobal: 2, secondGlobal: 1, want: "missing global sequence"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			output, err := newRenderOutput(filepath.Join(t.TempDir(), "rendered"), RouteCompressionNone, true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer output.cleanup()
+			first := renderRecord{sequence: 1, globalSequence: test.firstGlobal, raw: []byte("{}")}
+			if err := output.append(renderRouteKey{venue: "north", route: "general.jsonl"}, first); err != nil {
+				if test.firstGlobal == 0 || test.firstGlobal == 2 {
+					if !strings.Contains(err.Error(), test.want) {
+						t.Fatalf("first append error = %v, want %q", err, test.want)
+					}
+					return
+				}
+				t.Fatal(err)
+			}
+			second := renderRecord{sequence: 2, globalSequence: test.secondGlobal, raw: []byte("{}")}
+			if err := output.append(renderRouteKey{venue: "south", route: "general.jsonl"}, second); err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("second append error = %v, want %q", err, test.want)
+			}
+		})
+	}
+}
+
+func TestBinaryEvidenceGlobalEnvelopeRequiresLogicalSequence(t *testing.T) {
+	global := newGlobalNeutralBinaryEvidence(io.Discard)
+	if err := global.record(1, 1, "event", "north", map[string]int{"value": 1}, "general.jsonl", 1); err == nil {
+		t.Fatal("global contract accepted an envelope without a logical sequence")
+	}
+	legacy := newNeutralBinaryEvidence(io.Discard)
+	if err := legacy.recordGlobal(1, 1, "event", "north", map[string]int{"value": 1}, "general.jsonl", 1, 1); err == nil {
+		t.Fatal("legacy contract accepted a logical sequence envelope")
+	}
+}
+
 func TestRenderBinaryEvidenceRejectsOutOfOrderSidecarSequence(t *testing.T) {
 	inputDir := t.TempDir()
 	venueDir := filepath.Join(inputDir, "venues", "north")
@@ -339,6 +447,38 @@ func minimalRenderInput(t *testing.T, logMode string, sidecar []byte) string {
 	return inputDir
 }
 
+func TestRenderBinaryEvidenceRejectsDuplicateKeysInSidecarsAndOpaquePayloads(t *testing.T) {
+	duplicateSidecar := []byte(`{"client_id":8,"data":{"venue_id":"north","sequence":2,"payload":{"value":1,"value":2}},"event":"sidecar","sim_ts":2}`)
+	inputDir := minimalRenderInput(t, "full", duplicateSidecar)
+	if _, err := RenderBinaryEvidence(inputDir, filepath.Join(t.TempDir(), "rendered")); err == nil || !strings.Contains(err.Error(), "duplicate object key") {
+		t.Fatalf("duplicate nested sidecar key was accepted or misclassified: %v", err)
+	}
+
+	inputDir = t.TempDir()
+	if err := os.MkdirAll(filepath.Join(inputDir, "venues", "north"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	eventsFile, err := os.Create(filepath.Join(inputDir, "events.evs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sink := newBinaryEvidence(eventsFile)
+	opaque := exchange.OpaqueJSON{Value: json.RawMessage(`{"value":1,"value":2}`)}
+	if err := sink.record(1, 7, "opaque", "north", opaque, "general.jsonl", 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := sink.finish(); err != nil {
+		t.Fatal(err)
+	}
+	if err := eventsFile.Close(); err != nil {
+		t.Fatal(err)
+	}
+	writeRenderMetadata(t, inputDir, sink, "none")
+	if _, err := RenderBinaryEvidence(inputDir, filepath.Join(t.TempDir(), "rendered")); err == nil || !strings.Contains(err.Error(), "duplicate object key") {
+		t.Fatalf("duplicate opaque payload key was accepted or misclassified: %v", err)
+	}
+}
+
 func duplicateJSONField(raw []byte, field string) ([]byte, error) {
 	marker := []byte(`"` + field + `"`)
 	fieldStart := bytes.Index(raw, marker)
@@ -400,7 +540,7 @@ func TestBinaryEvidenceFormatIsExplicitAndAttested(t *testing.T) {
 		t.Fatal(err)
 	}
 	if attestation.Domain != "canonical_binary_execution_frames" || attestation.Ordering != "ordered_stream" ||
-		attestation.Hashing != binaryExecutionHashContract || attestation.ExecutionStreamHash == "" || attestation.CanonicalExecutionStreamHash == "" {
+		attestation.Hashing != binaryGlobalExecutionHashContract || attestation.ExecutionStreamHash == "" || attestation.CanonicalExecutionStreamHash == "" {
 		t.Fatalf("binary attestation = %+v", attestation)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "evidence-artifact-hash.json")); !os.IsNotExist(err) {
@@ -435,7 +575,7 @@ func TestBinaryEvidenceProductionPathRunsAndRenders(t *testing.T) {
 	if err != nil {
 		t.Fatalf("render production path: %v", err)
 	}
-	if report.EventFrames == 0 || report.Routes == 0 || report.ExecutionHash == "" {
+	if report.EventFrames == 0 || report.Routes == 0 || report.ExecutionHash == "" || report.FullEvidenceHash == "" {
 		t.Fatalf("production render report = %+v", report)
 	}
 }

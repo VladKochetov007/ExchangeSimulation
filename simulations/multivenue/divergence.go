@@ -62,6 +62,7 @@ type checkpointSink struct {
 	lastCheckpointEvents int64
 	finalSimTime         int64
 	firstEvent           bool
+	globalSequence       uint64
 	err                  error
 	closed               bool
 }
@@ -151,7 +152,7 @@ func newCheckpointSinkWithBinary(dir string, intervalSeconds int, traceFrom, tra
 		// I/O — an unfair comparison in the binary path's disfavour. Discarding
 		// makes the two paths do the same amount of writing, which is none.
 		if discard {
-			sink.binary = newNeutralBinaryEvidence(io.Discard)
+			sink.binary = newGlobalNeutralBinaryEvidence(io.Discard)
 		} else {
 			file, err := os.Create(filepath.Join(dir, "events.evs"))
 			if err != nil {
@@ -159,7 +160,7 @@ func newCheckpointSinkWithBinary(dir string, intervalSeconds int, traceFrom, tra
 			}
 			sink.binaryFile = file
 			sink.binaryBuf = bufio.NewWriterSize(file, 1<<20)
-			sink.binary = newNeutralBinaryEvidence(sink.binaryBuf)
+			sink.binary = newGlobalNeutralBinaryEvidence(sink.binaryBuf)
 		}
 	}
 	return sink, nil
@@ -167,24 +168,19 @@ func newCheckpointSinkWithBinary(dir string, intervalSeconds int, traceFrom, tra
 
 // observe folds one event into the rolling digest and writes a checkpoint
 // whenever simulated time crosses the next boundary.
-func (s *checkpointSink) observe(simTime int64, clientID uint64, eventName, venueID string, payload any, route string, sequence uint64) {
+func (s *checkpointSink) observe(simTime int64, clientID uint64, eventName, venueID string, payload any, route string, sequence uint64) uint64 {
 	if s == nil {
-		return
+		return 0
 	}
-	encoded, err := json.Marshal(payload)
-	unencodable := err != nil
-	if err != nil {
-		encoded = []byte(`"unencodable"`)
-	}
-	payloadDigest := sha256.Sum256(encoded)
-
-	hasher := sha256.New()
-	var scratch [8]byte
-
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
-		return
+		return 0
+	}
+	globalSequence := uint64(0)
+	if s.binary != nil {
+		s.globalSequence++
+		globalSequence = s.globalSequence
 	}
 	// A boundary is provisional until the first event at a later simulated
 	// timestamp. This prevents multiple ordinary checkpoints at one timestamp
@@ -195,9 +191,9 @@ func (s *checkpointSink) observe(simTime int64, clientID uint64, eventName, venu
 	// replaces the marshal and the per-event digest entirely, so when it is
 	// selected the JSON encoder is never reached.
 	if s.binary != nil {
-		if err := s.binary.record(simTime, clientID, eventName, venueID, payload, route, sequence); err != nil {
+		if err := s.binary.recordGlobal(simTime, clientID, eventName, venueID, payload, route, sequence, globalSequence); err != nil {
 			s.failLocked(fmt.Errorf("record binary evidence: %w", err))
-			return
+			return globalSequence
 		}
 		s.lastSimTime = simTime
 		s.events++
@@ -206,8 +202,16 @@ func (s *checkpointSink) observe(simTime int64, clientID uint64, eventName, venu
 			s.firstEvent = false
 		}
 		s.schedulePendingCheckpointLocked(simTime)
-		return
+		return globalSequence
 	}
+	encoded, err := json.Marshal(payload)
+	unencodable := err != nil
+	if err != nil {
+		encoded = []byte(`"unencodable"`)
+	}
+	payloadDigest := sha256.Sum256(encoded)
+	hasher := sha256.New()
+	var scratch [8]byte
 	s.lastSimTime = simTime
 	if unencodable {
 		s.unencodable++
@@ -244,6 +248,24 @@ func (s *checkpointSink) observe(simTime int64, clientID uint64, eventName, venu
 	}
 
 	s.schedulePendingCheckpointLocked(simTime)
+	return globalSequence
+}
+
+// observeEvidenceOnly allocates the same global persistence order as an
+// execution event but deliberately leaves the execution hash and checkpoint
+// event count unchanged. Binary full-log reconstruction uses this order to
+// merge sidecars with canonical execution frames.
+func (s *checkpointSink) observeEvidenceOnly() uint64 {
+	if s == nil {
+		return 0
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed || s.binary == nil {
+		return 0
+	}
+	s.globalSequence++
+	return s.globalSequence
 }
 
 func (s *checkpointSink) flushPendingCheckpointBeforeEventLocked(simTime int64) {
@@ -327,6 +349,15 @@ func (s *checkpointSink) failLocked(err error) {
 	if err != nil {
 		s.err = errors.Join(s.err, err)
 	}
+}
+
+func (s *checkpointSink) fail(err error) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.failLocked(err)
 }
 
 func (s *checkpointSink) replacesRawLog() bool {

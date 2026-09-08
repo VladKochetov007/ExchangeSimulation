@@ -3,12 +3,15 @@ package multivenue
 import (
 	"bufio"
 	"bytes"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"io"
 	"os"
+	"path/filepath"
 	"testing"
 
+	"exchange_sim/evstream"
 	"exchange_sim/simulations/feesim"
 )
 
@@ -167,7 +170,7 @@ func TestBinaryReplacementKeepsOnlySequencedEvidenceOnlySidecars(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sink := &checkpointSink{binary: newBinaryEvidence(io.Discard), replaceRaw: true}
+	sink := &checkpointSink{binary: newGlobalNeutralBinaryEvidence(io.Discard), replaceRaw: true}
 	var sequence uint64
 	logger := venueLogger{venueID: "north", route: "general.jsonl", inner: inner, sink: sink, sequence: &sequence}
 	logger.LogEvent(1, 7, "hashed_event", map[string]int{"value": 1})
@@ -193,5 +196,75 @@ func TestBinaryReplacementKeepsOnlySequencedEvidenceOnlySidecars(t *testing.T) {
 	}
 	if record.Event != "sidecar_event" || record.Data.Sequence != 2 {
 		t.Fatalf("sidecar record = %+v, want sidecar_event sequence 2", record)
+	}
+}
+
+type recordingOnlyLogger struct{}
+
+func (recordingOnlyLogger) LogEvent(int64, uint64, string, any) {}
+
+func TestBinaryEvidenceOnlyFailsClosedForUnsupportedSequenceLogger(t *testing.T) {
+	sink := &checkpointSink{binary: newGlobalNeutralBinaryEvidence(io.Discard), replaceRaw: true}
+	logger := venueLogger{venueID: "north", route: "general.jsonl", inner: recordingOnlyLogger{}, sink: sink}
+	logger.LogEvidenceOnly(1, 7, "sidecar_event", map[string]int{"value": 1})
+	if sink.err == nil {
+		t.Fatal("binary evidence accepted a logger without the sequence extension")
+	}
+	if err := sink.close(); err == nil {
+		t.Fatal("binary evidence close concealed unsupported sidecar logger")
+	}
+}
+
+func TestBinaryNoLogEvidenceOnlyDoesNotReserveSequences(t *testing.T) {
+	dir := t.TempDir()
+	eventsFile, err := os.Create(filepath.Join(dir, "events.evs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sink := &checkpointSink{binary: newGlobalNeutralBinaryEvidence(eventsFile), replaceRaw: true}
+	var sequence uint64
+	logger := venueLogger{venueID: "north", route: "general.jsonl", sink: sink, sequence: &sequence}
+	logger.LogEvidenceOnly(1, 7, "discarded_sidecar", map[string]int{"value": 1})
+	logger.LogEvent(2, 7, "persisted_event", map[string]int{"value": 2})
+	if sequence != 1 {
+		t.Fatalf("discarded evidence reserved venue sequence %d, want 1 for the persisted event", sequence)
+	}
+	if err := sink.close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := eventsFile.Close(); err != nil {
+		t.Fatal(err)
+	}
+	stream, err := os.Open(filepath.Join(dir, "events.evs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stream.Close()
+	reader, err := evstream.NewReader(stream, evstream.ReaderOptions{VerifyHash: true, HashFrame: hashGlobalBinaryExecutionFrame})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var eventFrames int
+	err = reader.Range(func(frame evstream.Frame) error {
+		if frame.Header.SchemaID == evstream.SchemaDictionary {
+			return nil
+		}
+		eventFrames++
+		if len(frame.Payload) < 24 {
+			t.Fatalf("event frame payload length = %d, want at least 24", len(frame.Payload))
+		}
+		if got := binary.LittleEndian.Uint64(frame.Payload[8:16]); got != 1 {
+			t.Fatalf("venue sequence = %d, want 1", got)
+		}
+		if got := binary.LittleEndian.Uint64(frame.Payload[16:24]); got != 1 {
+			t.Fatalf("global sequence = %d, want 1", got)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if eventFrames != 1 || !reader.Terminated() {
+		t.Fatalf("stream event frames=%d terminated=%v", eventFrames, reader.Terminated())
 	}
 }

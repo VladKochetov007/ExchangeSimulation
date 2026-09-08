@@ -10,6 +10,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -140,6 +141,34 @@ func TestJSONLinesLoggerEvidenceDigestCountsPersistedRecordsOnce(t *testing.T) {
 	want := hex.EncodeToString(raw[:])
 	if count != got.Events || want != got.Hex() {
 		t.Fatalf("offline evidence %d/%s, runtime %d/%s", count, want, got.Events, got.Hex())
+	}
+}
+
+func TestJSONLinesLoggerPersistsExplicitSequenceMetadata(t *testing.T) {
+	path := t.TempDir() + "/sequenced.jsonl"
+	logger, err := NewJSONLinesLogger(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	logger.LogEventWithSequence(1, 7, "sidecar", 42, map[string]int{"n": 1})
+	if err := logger.Close(); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"client_id":7,"data":{"n":1},"event":"sidecar","sim_ts":1,"event_seq":42}` + "\n"
+	if string(raw) != want {
+		t.Fatalf("sequenced persisted event = %s, want %s", raw, want)
+	}
+}
+
+func TestJSONLinesLoggerRejectsZeroExplicitSequence(t *testing.T) {
+	logger := newJSONLinesLogger(&injectedWriteCloser{}, 1024)
+	logger.LogEventWithSequence(1, 7, "sidecar", 0, map[string]int{"n": 1})
+	if err := logger.Close(); err == nil || !strings.Contains(err.Error(), "zero global sequence") {
+		t.Fatalf("zero sequence close error = %v", err)
 	}
 }
 

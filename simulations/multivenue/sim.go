@@ -2197,7 +2197,7 @@ func (s *Sim) closeEvidence() error {
 		binaryArtifact := binaryEvidenceArtifactRecord{
 			Domain:                       "canonical_binary_execution_frames",
 			Ordering:                     "ordered_stream",
-			Hashing:                      binaryExecutionHashContract,
+			Hashing:                      s.checkpoints.binary.hashing,
 			EventFrames:                  s.checkpoints.binary.count(),
 			StreamFrames:                 s.checkpoints.binary.writer.Count(),
 			ExecutionStreamHash:          hex.EncodeToString(digest[:]),
@@ -2295,6 +2295,10 @@ type sequencedVenueLogEvent struct {
 	Payload  any    `json:"payload"`
 }
 
+type sequencedEventLogger interface {
+	LogEventWithSequence(simTime int64, clientID uint64, eventName string, eventSequence uint64, event any)
+}
+
 type venueLogger struct {
 	venueID    string
 	route      string
@@ -2349,19 +2353,32 @@ func (l venueLogger) LogEvidenceOnly(simTime int64, clientID uint64, eventName s
 		l.sequenceMu.Lock()
 		defer l.sequenceMu.Unlock()
 	}
+	// With raw persistence disabled there is no sidecar record to merge. Do not
+	// reserve either the venue-local or global evidence sequence for a discarded
+	// observation, or the next persisted event would appear to have a gap.
+	if l.inner == nil {
+		return
+	}
 	sequence := uint64(0)
 	if l.sequence != nil {
 		(*l.sequence)++
 		sequence = *l.sequence
 	}
-	if l.inner == nil {
-		return
-	}
+	globalSequence := l.sink.observeEvidenceOnly()
+	var persistedEvent any = venueLogEvent{VenueID: l.venueID, Payload: event}
 	if l.sink.replacesRawLog() {
-		l.inner.LogEvent(simTime, clientID, eventName, sequencedVenueLogEvent{VenueID: l.venueID, Sequence: sequence, Payload: event})
+		persistedEvent = sequencedVenueLogEvent{VenueID: l.venueID, Sequence: sequence, Payload: event}
+	}
+	if globalSequence != 0 {
+		sequenced, ok := l.inner.(sequencedEventLogger)
+		if !ok {
+			l.sink.fail(fmt.Errorf("multivenue: binary evidence sidecar logger for %s does not support global event sequences", eventName))
+			return
+		}
+		sequenced.LogEventWithSequence(simTime, clientID, eventName, globalSequence, persistedEvent)
 		return
 	}
-	l.inner.LogEvent(simTime, clientID, eventName, venueLogEvent{VenueID: l.venueID, Payload: event})
+	l.inner.LogEvent(simTime, clientID, eventName, persistedEvent)
 }
 
 type manifest struct {
