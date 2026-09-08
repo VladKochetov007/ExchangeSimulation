@@ -67,7 +67,7 @@ v2_r2_sv1c_require_pinned_binary "$normalizer" "$normalizer_revision" "$normaliz
 }
 normalizer_go_version="$registered_normalizer_go_version"
 normalizer_package="$registered_normalizer_package"
-normalizer_snapshot=$(mktemp /tmp/sv1c-normalizer-snapshot.XXXXXX)
+normalizer_snapshot=$(mktemp)
 trap 'rm -f -- "$normalizer_snapshot"' EXIT
 cp -- "$normalizer" "$normalizer_snapshot" || {
 	echo "could not snapshot config normalizer" >&2

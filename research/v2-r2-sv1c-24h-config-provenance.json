@@ -44,7 +44,7 @@
   },
   "generator": {
     "path": "scripts/render-v2-r2-sv1c-24h-configs.sh",
-    "sha256": "b9578671ad4f56be70555df775cc213b314fa67ca8ddb14bcd41e1e71a34a3c2"
+    "sha256": "1783a74e71c9cb385a3d8d7ff3e62e1fb38e98028ee7c9eed8b7017aee0a56d5"
   },
   "contract_definition": {
     "path": "scripts/v2-r2-sv1c-24h-contract.sh",
