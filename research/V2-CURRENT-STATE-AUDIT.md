@@ -1095,3 +1095,32 @@ unrelated books); it is not in the SV1B activation path and was not imported.
 Historical reaction-dependent claims, if reused, require retained-evidence
 rescore/replay under a corrected analyzer. The binary evidence and ordering
 changes remain deferred VNext work. The next performance marker is `b1847ac`.
+
+## Append-only checkpoint: staged activation provenance publication — 2026-09-08
+
+The current exact pushed scientific tree is `c676b8d` on
+`feature/r2-cdf-survival-successor`. The change is limited to the SV1B
+activation protocol. The runner now writes a successful pair provenance record
+to a pending path, invokes the complete producer-backed provenance validator on
+that pending record, and publishes `activation-provenance.json` only after the
+validator returns success. If the final self-check rejects the package, the
+pending record is retained under `activation-provenance.invalid.json`; no
+accepted-status artifact is published. The focused contract statically checks
+this ordering.
+
+The clean mechanical state is now: focused activation contract pass; clean
+`GOMAXPROCS=2 make test` pass across all Go packages and integrated/SV1,
+capacity-archive, R2-archive, and parity fixtures; `GOMAXPROCS=2 go vet ./...`
+pass; all shell syntax checks pass; `git diff --check` passes; and the bounded
+targeted `-race` core plus binary-evidence/fresh-process determinism suites
+pass. No simulator activation, capacity measurement, registered development
+cell, freeze, or holdout has run.
+
+The exact-tree independent Sol-xhigh review of the predecessor checkpoint
+`30e2bf0` remains a retained **REJECT** for sparse/arbitrary activation fixtures,
+missing direct producer build identity, incomplete exact population binding, and
+missing post-write validation. Commits `9b0e0a7`, `dd435bc`, `a6e2c44`, and
+`c676b8d` address those reported protocol gaps, but no fresh acceptance is
+claimed until a reviewer inspects the exact clean pushed tree. The performance
+branch remains reviewed through `b1847ac`, with no newer commit and no
+performance code merged. Holdouts `619`, `631`, and `641` remain untouched.

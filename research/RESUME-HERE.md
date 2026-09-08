@@ -1252,3 +1252,34 @@ independent Sol-xhigh review. The performance branch was fetched through
 `b1847ac`; its `f153e12` analyzer-only reaction book-key correction is recorded
 as deferred red-team input, while the VNext binary evidence line remains
 separate and unmerged. Holdouts `619`, `631`, and `641` remain untouched.
+
+## Append-only operational update: fail-closed activation provenance publication — 2026-09-08
+
+The exact pushed successor HEAD is `c676b8d` on
+`feature/r2-cdf-survival-successor`. This protocol-only change preserves the
+R2 calendar/lifecycle semantics, finite CDF roster, historical ABC/USD roster,
+and predecessor negative boundary. It closes the last publication-order gap
+identified by the independent review of the earlier exact tree: an activation
+runner no longer leaves a promotable `ACTIVATION_CONTRACT_SATISFIED` file in
+place before its own final provenance validation completes. It stages the
+success record, validates both producer arms and the replayed analyzer output,
+and atomically publishes the final provenance only after validation. A failed
+self-validation is retained as `activation-provenance.invalid.json`.
+
+At `c676b8d`, the focused activation boundary contract, clean
+`GOMAXPROCS=2 make test`, `go vet ./...`, shell syntax checks, and
+`git diff --check` passed. The earlier bounded race gate also passed for
+`analysis`, `evstream`, `exchange`, `types`, and the targeted
+`simulations/multivenue` binary-evidence/fresh-process determinism tests. The
+broader pre-existing multivenue race sweep remains a duration limitation, not
+a claimed pass. The clean full test included integrated, SV1, capacity-archive,
+R2-archive, and parity fixtures.
+
+The exact-tree Sol-xhigh review of `30e2bf0` remains a historical **REJECT**;
+the repairs in `9b0e0a7`, `dd435bc`, `a6e2c44`, and `c676b8d` have not been
+retroactively treated as accepted. No accepted review attestation exists yet,
+so pinned Go 1.27 builds, activation seed 643, capacity seed 659, registered
+development cells, freeze authorization, and holdout execution remain closed.
+The performance feed was fetched through `b1847ac` with no newer commit; no
+performance implementation was imported. Holdouts `619`, `631`, and `641`
+remain untouched.

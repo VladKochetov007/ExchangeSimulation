@@ -155,3 +155,26 @@ independent Sol-xhigh review of the complete exact tree before pinned binaries
 or the five-minute activation probe. Capacity, development, freeze and
 holdout execution remain closed; holdouts `619`, `631`, and `641` remain
 untouched. The next performance marker is `b1847ac`.
+
+## Append-only feed checkpoint: no new performance commits; scientific protocol hardening — 2026-09-08
+
+`git fetch origin autoresearch/v2-performance-research` found no commit after
+the last reviewed marker `b1847ac`; the asynchronous performance feed is
+unchanged. The deferred `f153e12` reaction-analyzer book-key correction and the
+separate VNext binary-evidence line remain unimported. No performance branch
+code was merged into the scientific successor.
+
+The scientific branch advanced to `c676b8d` for a fail-closed protocol repair,
+not a performance change. The activation runner stages a positive provenance
+record, validates it against complete producer artifacts and deterministic
+analyzer replay, and only then publishes the accepted filename. A failed final
+validation is retained under an invalid diagnostic filename. Focused activation
+tests, clean `GOMAXPROCS=2 make test`, `go vet ./...`, shell syntax, and
+`git diff --check` pass; the bounded targeted race/evidence/determinism gate
+also passes. This does not change any economic model or historical result.
+
+The exact-tree review of `30e2bf0` remains a historical rejection. The current
+tree still requires a fresh independent exact-tree Sol-xhigh review before
+build or activation. No activation, capacity, development, freeze, or holdout
+run has occurred, and holdouts `619`, `631`, and `641` remain untouched. The
+next performance marker remains `b1847ac`.
