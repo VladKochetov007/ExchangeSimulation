@@ -502,6 +502,12 @@ write_pair_provenance() {
 	[[ $# -ge 3 ]] && comparison_sha=$3
 	local provenance_path="$output_root/activation-provenance.json"
 	[[ $# -ge 4 ]] && provenance_path=$4
+	local comparison_path="$output_root/cdf-liquidity-comparison.json"
+	[[ $# -ge 5 ]] && comparison_path=$5
+	local analyzer_exit_status=0
+	[[ $# -ge 6 ]] && analyzer_exit_status=$6
+	local comparison_object_valid=true
+	[[ $# -ge 7 ]] && comparison_object_valid=$7
 	local provenance_tmp="${provenance_path}.tmp-$$"
 	local treatment_terminal_status_json=null control_terminal_status_json=null
 	local treatment_status_sha256="" control_status_sha256=""
@@ -567,10 +573,12 @@ write_pair_provenance() {
 			--arg renderer_binary_sha256 "$renderer_sha256" \
 			--arg checkpoint_validator_path "$checkpoint_validator" --arg checkpoint_validator_revision "$head_revision" \
 			--arg checkpoint_validator_sha256 "$checkpoint_validator_sha256" \
-			--argjson treatment_artifacts "$treatment_artifacts" --argjson control_artifacts "$control_artifacts" \
-			--arg treatment_source_config_path "$treatment_source_config_path" --arg control_source_config_path "$control_source_config_path" \
-			--arg treatment_source_config_sha256 "$treatment_source_config_sha256" --arg control_source_config_sha256 "$control_source_config_sha256" \
-			--argjson activation_gomaxprocs "$activation_gomaxprocs" \
+				--argjson treatment_artifacts "$treatment_artifacts" --argjson control_artifacts "$control_artifacts" \
+				--arg treatment_source_config_path "$treatment_source_config_path" --arg control_source_config_path "$control_source_config_path" \
+				--arg treatment_source_config_sha256 "$treatment_source_config_sha256" --arg control_source_config_sha256 "$control_source_config_sha256" \
+				--arg comparison_path "$comparison_path" --argjson analyzer_exit_status "$analyzer_exit_status" \
+				--argjson comparison_object_valid "$comparison_object_valid" \
+				--argjson activation_gomaxprocs "$activation_gomaxprocs" \
 			--argjson activation_memory_limit_bytes "$activation_memory_limit_bytes" \
 			--argjson activation_gomemlimit_bytes "$activation_gomemlimit_bytes" \
 			--argjson activation_host_cpu_count "$activation_host_cpu_count" \
@@ -590,7 +598,8 @@ write_pair_provenance() {
 			 treatment_source_config_sha256: $treatment_source_config_sha256, control_source_config_sha256: $control_source_config_sha256,
 			 simulator_binary_path: $simulator_binary_path, analyzer_binary_path: $analyzer_binary_path,
 			 review_attestation_path: $review_attestation_path, review_attestation_sha256: $review_attestation_sha256,
-			 comparison_path: ($output_root + "/cdf-liquidity-comparison.json"),
+				 comparison_path: $comparison_path, analyzer_exit_status: $analyzer_exit_status,
+				 comparison_object_valid: $comparison_object_valid,
 		 treatment_config_sha256: $treatment_config_sha256, control_config_sha256: $control_config_sha256,
 			 simulator_binary_sha256: $binary_sha256, analyzer_binary_sha256: $analyzer_sha256,
 			 renderer_binary_path: $renderer_binary_path, renderer_binary_sha256: $renderer_binary_sha256,
@@ -665,8 +674,24 @@ else
 	audit_status=$?
 fi
 if [[ "$audit_status" -ne 0 ]] || ! jq -e 'type == "object"' "$comparison_tmp" >/dev/null; then
-	mv -- "$comparison_tmp" "$output_root/cdf-liquidity-comparison.json.invalid"
-	write_pair_provenance "INVALID_AUDIT_EVIDENCE" false
+	invalid_comparison_path="$output_root/cdf-liquidity-comparison.json.invalid"
+	comparison_object_valid=false
+	if jq -e 'type == "object"' "$comparison_tmp" >/dev/null; then
+		comparison_object_valid=true
+	fi
+	mv -- "$comparison_tmp" "$invalid_comparison_path"
+	comparison_sha=$(sha256sum -- "$invalid_comparison_path" | awk '{print $1}')
+	activation_provenance_pending="$output_root/activation-provenance.pending.json"
+	write_pair_provenance "INVALID_AUDIT_EVIDENCE" false "$comparison_sha" "$activation_provenance_pending" "$invalid_comparison_path" "$audit_status" "$comparison_object_valid"
+	if ! v2_r2_sv1b_require_invalid_audit_pair_provenance "$activation_provenance_pending" "$head_revision" "$binary_sha256" "$audit_status" "$comparison_object_valid"; then
+		mv -- "$activation_provenance_pending" "$output_root/activation-provenance.invalid.json" || true
+		echo "activation probe produced invalid-audit evidence that failed its provenance self-validation" >&2
+		exit 1
+	fi
+	mv -- "$activation_provenance_pending" "$output_root/activation-provenance.json" || {
+		echo "activation probe could not publish its self-validated invalid-audit provenance" >&2
+		exit 1
+	}
 	echo "activation probe rejected malformed CDF audit evidence; see $output_root" >&2
 	exit 1
 fi

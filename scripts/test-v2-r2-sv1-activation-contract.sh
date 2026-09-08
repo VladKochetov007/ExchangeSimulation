@@ -20,6 +20,22 @@ rg -F 'v2_r2_require_sv1b_activation_provenance "$activation_provenance_pending"
 	echo "activation runner does not self-validate staged provenance" >&2
 	exit 1
 }
+rg -F 'invalid_comparison_path="$output_root/cdf-liquidity-comparison.json.invalid"' "$runner" >/dev/null || {
+	echo "activation runner does not retain the invalid analyzer output under a bound path" >&2
+	exit 1
+}
+rg -F 'v2_r2_sv1b_require_invalid_audit_pair_provenance "$activation_provenance_pending"' "$runner" >/dev/null || {
+	echo "activation runner does not self-validate invalid-audit provenance" >&2
+	exit 1
+}
+rg -F 'comparison_path: $comparison_path, analyzer_exit_status: $analyzer_exit_status' "$runner" >/dev/null || {
+	echo "activation provenance does not serialize invalid-audit path and analyzer status" >&2
+	exit 1
+}
+rg -F 'comparison_object_valid: $comparison_object_valid' "$runner" >/dev/null || {
+	echo "activation provenance does not serialize malformed-audit output state" >&2
+	exit 1
+}
 for required_binding in \
 	'--argjson activation_gomaxprocs "$activation_gomaxprocs"' \
 	'--argjson activation_memory_limit_bytes "$activation_memory_limit_bytes"' \
@@ -189,6 +205,46 @@ if jq '.result.risk_state_decision_count = 0' "$temp_root/marked-risk.json" >"$t
 fi
 
 source "$root_dir/scripts/v2-r2-sv1b-24h-contract.sh"
+
+invalid_diagnostic_root="$temp_root/invalid-audit-diagnostic"
+mkdir -- "$invalid_diagnostic_root"
+invalid_diagnostic_path="$invalid_diagnostic_root/cdf-liquidity-comparison.json.invalid"
+printf '%s\n' '{"valid":false,"evidence_valid":false}' >"$invalid_diagnostic_path"
+invalid_diagnostic_sha256=$(sha256sum -- "$invalid_diagnostic_path" | awk '{print $1}')
+jq -n --arg output_root "$invalid_diagnostic_root" --arg comparison_path "$invalid_diagnostic_path" \
+	--arg comparison_sha256 "$invalid_diagnostic_sha256" --argjson analyzer_exit_status 1 --argjson comparison_object_valid true \
+	'{status:"INVALID_AUDIT_EVIDENCE",activation_satisfied:false,holdouts_consumed:false,
+	 analyzer_exit_status:$analyzer_exit_status,comparison_object_valid:$comparison_object_valid,
+	 comparison_path:$comparison_path,comparison_sha256:$comparison_sha256}' \
+	>"$temp_root/invalid-audit-provenance.json"
+v2_r2_sv1b_require_invalid_audit_diagnostic "$temp_root/invalid-audit-provenance.json" "$invalid_diagnostic_root" 1 true || {
+	echo "bound invalid-audit diagnostic fixture was rejected" >&2
+	exit 1
+}
+if jq '.comparison_path = (.output_root + "/cdf-liquidity-comparison.json")' "$temp_root/invalid-audit-provenance.json" >"$temp_root/invalid-audit-canonical-path.json" &&
+	v2_r2_sv1b_require_invalid_audit_diagnostic "$temp_root/invalid-audit-canonical-path.json" "$invalid_diagnostic_root" 1 true; then
+	echo "invalid-audit diagnostic accepted a canonical comparison path" >&2
+	exit 1
+fi
+if jq '.analyzer_exit_status = 0' "$temp_root/invalid-audit-provenance.json" >"$temp_root/invalid-audit-zero-status.json" &&
+	v2_r2_sv1b_require_invalid_audit_diagnostic "$temp_root/invalid-audit-zero-status.json" "$invalid_diagnostic_root" 1 true; then
+	echo "invalid-audit diagnostic accepted a zero analyzer status" >&2
+	exit 1
+fi
+if jq '.comparison_sha256 = ("0" * 64)' "$temp_root/invalid-audit-provenance.json" >"$temp_root/invalid-audit-wrong-hash.json" &&
+	v2_r2_sv1b_require_invalid_audit_diagnostic "$temp_root/invalid-audit-wrong-hash.json" "$invalid_diagnostic_root" 1 true; then
+	echo "invalid-audit diagnostic accepted a mismatched comparison hash" >&2
+	exit 1
+fi
+printf '%s\n' 'not-json' >"$invalid_diagnostic_path"
+malformed_diagnostic_sha256=$(sha256sum -- "$invalid_diagnostic_path" | awk '{print $1}')
+jq --arg malformed_diagnostic_sha256 "$malformed_diagnostic_sha256" \
+	'.analyzer_exit_status = 0 | .comparison_object_valid = false | .comparison_sha256 = $malformed_diagnostic_sha256' \
+	"$temp_root/invalid-audit-provenance.json" >"$temp_root/malformed-audit-provenance.json"
+v2_r2_sv1b_require_invalid_audit_diagnostic "$temp_root/malformed-audit-provenance.json" "$invalid_diagnostic_root" 0 false || {
+	echo "malformed zero-status audit diagnostic was rejected" >&2
+	exit 1
+}
 
 capacity_selector_fixture="$temp_root/capacity-selector.json"
 authorized_capacity_hashes=$(jq -c '[.registered_configs[]]' "$root_dir/research/v2-r2-sv1b-24h-config-provenance.json")
