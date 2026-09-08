@@ -3849,6 +3849,93 @@ Recorded as RT-038.
 built to do. No numbers from that run are quoted beyond the fact that it differs.
 
 
+**H-049 (PREREGISTERED) — [[RT-038]]'s inertness is caused by the step size, not
+by broken latency plumbing.**
+
+E-053 established that latency changes do nothing and *inferred* the 1 s `step`
+as the cause without proving it. The two candidate diagnoses have completely
+different fixes, so the distinction is worth one cheap experiment:
+
+- **Resolution artifact** — delays below `step` are quantised away. Fix: reduce
+  `step`. The latency model is correct and merely out-resolved.
+- **Broken plumbing** — latency never reaches delivery at any resolution. Fix: a
+  code defect in the mount/gateway path. Materially worse, and it would mean the
+  link model has never worked in any configuration.
+
+**Design: a 2×2, comparing *within* each step regime so the step change is never
+itself the comparison.**
+
+| cell | step | `default_latency_profile` |
+|---|---|---|
+| A | 1 s | 5 ms (as configured) |
+| B | 1 s | 500 ms |
+| C | 1 ms | 5 ms |
+| D | 1 ms | 500 ms |
+
+Duration 2 m for every cell, seed 607, compared by md5 of `greeks.json`.
+Comparing A↔B and C↔D keeps `step` fixed inside each contrast, so a difference
+is attributable to latency alone.
+
+**Prediction.** **A = B** (reproducing E-053 at short duration) and **C ≠ D**
+(latency bites once the step is finer than the delay). That is the resolution
+artifact.
+
+**Falsifiers.** (a) **C = D** → the step is *not* the cause and the latency path
+is inert at any resolution — a code defect, and RT-038's diagnosis must be
+rewritten from "out-resolved" to "broken"; (b) **A ≠ B** → E-053's byte-identical
+result does not reproduce at 2 m, meaning the effect is duration-dependent and
+the whole RT-038 measurement needs re-examination.
+
+**Discriminating experiment E-054**, preregistered before any cell is run.
+Status: **SUPPORTED WITHIN TESTED SCOPE** — A = B byte for byte, C ≠ D; neither
+falsifier fired.
+
+
+**E-054 — H-049 SUPPORTED WITHIN TESTED SCOPE. [[RT-038]]'s inertness is a step
+resolution artifact, not broken plumbing. The latency model works; the 1 s step
+out-resolves it.**
+Base: `a666d02faede3d40f046b11e60eb672c59386a94`, seed 607, 2 m simulated, four
+runs.
+Reproduce: run the four cells below and compare `md5sum <logdir>/greeks.json`.
+
+| cell | step | default latency | wall | `greeks.json` |
+|---|---|---|---:|---|
+| A | 1 s | 5 ms | 1 s | `fd2541239f4a` |
+| B | 1 s | **500 ms** | 1 s | `fd2541239f4a` |
+| C | 1 ms | 5 ms | 1 m 59 s | `075d1737b1b6` |
+| D | 1 ms | **500 ms** | 2 m 5 s | `945defb36c8d` |
+
+**A = B, byte for byte.** A hundredfold latency change at the campaign's 1 s step
+does nothing — reproducing E-053 at a 240× shorter horizon, so the effect is not
+duration-dependent.
+
+**C ≠ D.** The *same* hundredfold latency change at a 1 ms step changes the run.
+
+Because `step` is held fixed inside each contrast, the difference is attributable
+to latency alone. **Neither falsifier fired**: C ≠ D rules out broken plumbing,
+and A = B rules out a duration artifact.
+
+**RT-038's diagnosis is upgraded from inferred to demonstrated.** The latency
+machinery — mounts, per-role profiles, per-client sample paths — is **correct and
+functioning**. It is simply invisible at a step 200× coarser than the slowest
+configured delay. The fix is a resolution choice, not a code repair.
+
+**And the resolution choice has a price, now measured.** A 1 ms step costs
+**~120× more wall time** for the same simulated span: 2 m of sim took 1 s at the
+1 s step and 1 m 59 s at 1 ms. Extrapolating, the campaign's 8 h run would go
+from ≈4 minutes to **≈8 hours of wall time**. That is the actual trade the owner
+faces, and it explains why the coarse step was chosen. It does not change the
+conclusion that every latency-based claim is currently unexercised — it only
+prices the remedy.
+
+**The owner's options, stated neutrally.** (1) Keep the 1 s step and treat the
+per-role latency table as inactive, removing the validation at `sim.go:709`/
+`:821` that currently reads as assurance. (2) Drop the step to resolve the
+modelled delays and accept ≈120× compute. (3) Keep the coarse step for
+population-scale questions and run a separate fine-step configuration for the
+latency questions specifically. Choosing among these is not mine to do.
+
+
 ---
 
 ## F. Findings
@@ -3871,7 +3958,9 @@ See `research/red-team-findings.md` for the full records.
   `greeks.json` md5), while a seed change moves every class and a 3 s delay does
   change the run. Every configured delay is below the **1 s `step`**. The
   campaign's per-role latency heterogeneity, and the validation that refuses to
-  run without "an explicit nonzero delayed link", change nothing. Kills the
+  run without "an explicit nonzero delayed link", change nothing. **E-054 proves
+  the cause is the step, not broken plumbing**: at a 1 ms step the same latency
+  change does alter the run, at ~120x the wall time. Kills the
   latency reading of [[RT-035]] — a latency race is *impossible* here, so the
   mispricing mechanism stands.
 - **RT-037** — construction order **buys queue priority under price-time matching

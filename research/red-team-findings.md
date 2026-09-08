@@ -2203,3 +2203,35 @@ that provably changes nothing — is the one option that misleads.
 **Instrument note.** The 3 s run's closure residual is 2.2582% of gross and
 `classpnl` refused to print a ranking (exit 3), as its self-test is built to do.
 Nothing is quoted from that run beyond the fact that it differs.
+
+**UPDATE (E-054) — diagnosis upgraded from inferred to demonstrated.** A 2x2 was
+run holding `step` fixed inside each contrast, so a difference is attributable to
+latency alone:
+
+| cell | step | default latency | wall | `greeks.json` |
+|---|---|---|---:|---|
+| A | 1 s | 5 ms | 1 s | `fd2541239f4a` |
+| B | 1 s | **500 ms** | 1 s | `fd2541239f4a` |
+| C | 1 ms | 5 ms | 1 m 59 s | `075d1737b1b6` |
+| D | 1 ms | **500 ms** | 2 m 5 s | `945defb36c8d` |
+
+**A = B byte for byte** — a hundredfold latency change at the campaign's step
+does nothing, reproducing this finding at a 240x shorter horizon, so it is not
+duration-dependent. **C != D** — the same change at a 1 ms step does alter the
+run. Neither preregistered falsifier fired.
+
+So the latency machinery — mounts, per-role profiles, per-client sample paths —
+is **correct and functioning**, and merely invisible at a step 200x coarser than
+the slowest configured delay. **The fix is a resolution choice, not a code
+repair.**
+
+The choice has a measured price: a 1 ms step costs **~120x more wall time** for
+the same simulated span, which would take the campaign's 8 h run from ~4 minutes
+to **~8 hours**. That explains why the coarse step was chosen; it does not change
+the fact that every latency-based claim is currently unexercised.
+
+**Owner options, stated neutrally.** (1) Keep the 1 s step and treat the per-role
+table as inactive, removing the validation that currently reads as assurance.
+(2) Drop the step to resolve the modelled delays and accept ~120x compute.
+(3) Keep the coarse step for population-scale questions and run a separate
+fine-step configuration for latency questions. Not my choice to make.
