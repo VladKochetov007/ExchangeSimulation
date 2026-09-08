@@ -1649,3 +1649,36 @@ from strategy.
 **Next and cheap**: read `dated_carry_arb`'s trigger to see whether it requires a
 contract pair that ceases to exist, or should still be quoting the one that
 remains.
+
+## RT-027 (resolved) — the collapse is design, and the caveat has a named cause
+
+Reading `simulations/derivsim/carryarb.go` settles the open question.
+
+**Two gates bound the desk, both deliberate.**
+
+1. **Net position cap per symbol.** `MaxPosPerSym = 5 × mvBasePrecision`,
+   `LotQty = mvBasePrecision / 10` — **50 lots per contract** — and each arm of
+   the trading switch is guarded by `st.position > -MaxPosPerSym` /
+   `< MaxPosPerSym`. At the cap in the direction the basis favours, that contract
+   stops trading.
+2. **Edge scaled by time to expiry**, `edge = EdgeBps × sqrt(timeToExpiry /
+   TenorNano)`. This *lowers* the bar as expiry approaches, so it cannot cause a
+   collapse — it would cause the opposite. Ruling it out is what makes the cap the
+   explanation rather than a guess.
+
+**Verdict: design.** The cap binds against a persistently one-signed basis while
+the board thins from three contracts to one (expiries at 2 h, 4 h, 6 h against a
+5-hour run, one relisting). No ghost order, no blocked timer, no stalled loop.
+
+*Arithmetic, consistent-with rather than proof.* Saturation predicts
+2 desks × 3 contracts × 50 lots × 2 legs × 3 venues ≈ 1 800 orders; the first half
+shows 2 374. The 32% excess is churn — the cap is on *net* position, so a basis
+that changes sign lets the desk unwind and re-accumulate. Magnitudes and mechanism
+agree; the difference is explained, not ignored.
+
+**The caveat survives with a cause.** The desk earns its result early and then
+sits at its cap, so its score is front-loaded and bounded by `MaxPosPerSym` while
+an uncapped class compounds for the full run. A class-level ranking across the two
+compares different things — not because either is broken, but because the
+parameter binds one and not the other. That is now attributable to a named
+configuration value rather than to a suspicion.

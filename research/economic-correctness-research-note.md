@@ -2722,6 +2722,51 @@ from the instrument board rather than from strategy.
 it requires a contract pair that ceases to exist, or whether it should still be
 quoting the single remaining contract.
 
+**E-042 — RT-027 resolved: the collapse is design, not a stall.**
+Base: `a666d02faede3d40f046b11e60eb672c59386a94`.
+Source read: `simulations/derivsim/carryarb.go`, `simulations/multivenue/sim.go:3439`.
+
+RT-027 left open whether `dated_carry_arb`'s fall to 0.003 of its first-half
+order rate was a stalled quoting loop — the ghost-order pathology this project
+has been bitten by — or the instrument board thinning. Reading the actor settles
+it.
+
+**Two gates bound the desk's activity, both deliberate.**
+
+1. **A net position cap per symbol.** `MaxPosPerSym = 5 × mvBasePrecision` with
+   `LotQty = mvBasePrecision / 10`, so **50 lots per contract**, and each arm of
+   the switch is guarded by `st.position > -MaxPosPerSym` / `< MaxPosPerSym`.
+   Once the desk is at its cap on a contract *in the direction the basis
+   favours*, that contract stops trading.
+2. **Edge scaled by time to expiry**: `edge = EdgeBps × sqrt(timeToExpiry /
+   TenorNano)`. This **lowers** the bar as expiry approaches, so it cannot
+   produce the collapse — it would produce the opposite. Ruling it out is what
+   makes the first gate the explanation rather than a guess.
+
+**So the collapse is the cap binding against a persistently one-signed basis,
+combined with the board thinning from three contracts to one** (E-041: expiries
+at 2 h, 4 h and 6 h against a 5-hour run, with exactly one relisting). No ghost
+order, no blocked timer, no stalled loop.
+
+*Arithmetic, stated as consistent-with rather than as proof.* Saturation predicts
+2 desks × 3 contracts × 50 lots × 2 legs × 3 venues ≈ **1 800** orders; the
+first half shows **2 374**. The 32% excess is churn — the cap is on *net*
+position, so a basis that changes sign lets the desk trade back and re-accumulate.
+The figures agree in magnitude and mechanism, not exactly, and the difference is
+explained rather than ignored.
+
+**What survives from RT-027, now with a mechanism.** The desk earns its entire
+result in the first part of the run and then sits at its cap. Its score is
+therefore **front-loaded and bounded by configuration**, while an uncapped class
+keeps compounding for the full five hours. Comparing the two on a per-run basis
+compares different things — not because either is broken, but because
+`MaxPosPerSym` is a limit on one and not on the other. That is a real caveat for
+any class-level ranking and it is now attributable to a named parameter rather
+than to a suspicion.
+
+RT-027 is closed: **design**. The caveat about class-level comparison stands and
+is recorded against the parameter that causes it.
+
 ---
 
 ## F. Findings
@@ -2740,9 +2785,12 @@ See `research/red-team-findings.md` for the full records.
   rows; no unearned speed advantage. Transport only.
 - **RT-027** — no actor class is inert, but `dated_carry_arb` collapses to
   **0.003** of its first-half order rate while the dated board thins from three
-  contracts to one. Design or stall is **not established**; either way the class
-  contributes a full row to every class-level average while effectively out of
-  the market for much of the run. **Open question.**
+  contracts to one. **Resolved in E-042: design, not a stall** — a 50-lot net
+  position cap per contract binds against a one-signed basis, and the edge
+  scaling by time-to-expiry *lowers* the bar near expiry so it cannot be the
+  cause. The caveat stands with a named cause: the class's score is front-loaded
+  and bounded by `MaxPosPerSym` while uncapped classes compound for the full run,
+  so class-level rankings compare different things.
 - **RT-026** — RT-001 and RT-025 are members of a **class**: four checks whose
   only output is a log line, silenced together by one deployment flag —
   `conservation_violation`, `margin_interest_failed`,
