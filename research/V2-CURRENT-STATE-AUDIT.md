@@ -1776,3 +1776,34 @@ The candidate remains unpromoted. After the clean contract rerun, the required
 next step is one fresh independent Sol-xhigh review of the exact complete tree;
 only an accepted attestation can authorize pinned Go 1.27 binaries and the
 seed-643 activation probe.
+
+## Append-only audit update: current binary successor gate — 2026-09-08
+
+The current successor source is clean and pushed at
+`1d519c2fe08678e2fd3e16873b42ce23aaa97880` on
+`feature/r2-cdf-survival-successor`; no cherry-pick is active. Since the prior
+recorded hardening checkpoint, binary v2 attestation was closed around the
+persisted-record count, final global sequence, strict global sidecars,
+`LogEvidenceOnly` fail-closed routing, and canonical full-evidence hash
+retention. The current SV1C normalizer and provenance manifests were refreshed
+to bind the resulting source revision and were reproduced by two clean Go
+1.27 builds.
+
+The focused package gate, `go vet ./...`, shell syntax checks, targeted race
+matrix, and clean full `make test` passed. A separate full multivenue race run
+hit its pre-existing 600-second fresh-process determinism timeout without a
+race report; this is recorded as a limitation, not as a pass. No simulator
+world was produced by these checks. No capacity probe, activation, registered
+development cell, freeze, or holdout run occurred.
+
+The asynchronous performance, performance-port, and economic-red-team refs
+were fetched at `b1847ac`, `39768df`, and `e85e16c`, respectively, with no new
+commits. No auxiliary implementation was imported. Disk remained approximately
+55 GiB free with adequate available memory under the bounded test policy; no
+retained evidence was removed. Holdouts `619`, `631`, and `641` remain
+untouched.
+
+The candidate is still not promoted. The next gate is a fresh independent
+exact-tree Sol-xhigh review of the complete R2/CDF/risk/evidence/provenance
+contract. Review acceptance is required before binary capacity measurement or
+the seed-643 activation probe.

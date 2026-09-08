@@ -1951,3 +1951,53 @@ The next gate is a clean full contract run, followed by one fresh independent
 Sol-xhigh review of this exact complete successor tree. Review acceptance is
 required before pinned production binaries or the registered seed-643
 activation probe.
+
+## Append-only operational update: binary evidence attestation closure and pinned provenance — 2026-09-08
+
+The exact current scientific successor tree is clean and pushed at
+`1d519c2fe08678e2fd3e16873b42ce23aaa97880` on
+`feature/r2-cdf-survival-successor`. There is no cherry-pick in progress. The
+post-`2bd4450` sequence completed binary evidence contract closure and refreshed
+the SV1C provenance after the source revision changed. The semantic scope
+remains the accepted R2 calendar/lifecycle, finite CDF successor roster,
+strict-risk hardening, and promoted binary evidence representation; no economic
+retuning or historical evidence rewrite occurred.
+
+The final binary-evidence hardening binds the persisted-record count and final
+global ordinal in the v2 attestation, fails closed when a binary
+`LogEvidenceOnly` sink cannot allocate a global sequence, rejects malformed or
+null global sidecars with exact-number/duplicate-key validation, and retains
+the renderer's canonical full-evidence hash in extraction artifacts. The
+focused packages `evstream`, `types`, `exchange`, `simulations/feesim`, and
+`simulations/multivenue` passed; `go vet ./...`, the focused binary/evidence
+race matrix, shell syntax checks, and the clean full `make test` all passed.
+The full multivenue race invocation was also attempted with the bounded
+two-core policy: it reached the existing fresh-process determinism test's
+600-second timeout without a race report, while `feesim` passed. That timeout
+is retained as a limitation rather than misreported as a full-race pass; the
+targeted race matrix is green.
+
+Two clean Go 1.27 builds from source revision
+`f637eb53d0a3421807aa7991b464e650bcc0f5e2` reproduced the registered
+five-binary identities. The current hashes are recorded in the SV1C
+provenance manifest. All five report Go `go1.27.0`, `-trimpath=true`,
+`CGO_ENABLED=0`, the bound source revision, and `vcs.modified=false`.
+The initial full-contract normalizer mismatch was the expected stale-provenance
+diagnostic; after the manifest refresh, the clean rerun completed with
+`EXIT=0`.
+
+The asynchronous refs were fetched again without switching worktrees. No
+commit is newer than performance
+`b1847ac40e8b7483e6e8a3f94b3705b4058884b0`, performance-port
+`39768dfed4ba4a5134f0c5ccf53351a79a0b1d64`, or economic red-team
+`e85e16c5e920382e5df9aa050ac5ff9b22b51661`; no auxiliary branch was merged.
+Disk and memory remained within the declared safety budget. No capacity,
+activation, registered development, freeze, or holdout world ran; retained
+evidence was not deleted, and holdouts `619`, `631`, and `641` remain
+untouched.
+
+The next promotion boundary is one fresh independent exact-tree Sol-xhigh
+review of the complete current successor. Only an accepted review can authorize
+the current clean pinned binaries, the registered binary-capacity measurement,
+and then the seed-643 paired activation probe. Development cells and holdouts
+remain closed.
