@@ -184,6 +184,15 @@ expect_checkpoint_rejected_with_bounds() {
 v2_r2_require_checkpoint_stream "$fixture_root/treatment/checkpoints.jsonl" "$start" "$end" evstream_v3
 v2_r2_sv1b_require_checkpoint_attestation_binding \
 	"$fixture_root/treatment/checkpoints.jsonl" "$fixture_root/treatment/binary-evidence-attestation.json"
+V2_R2_CHECKPOINT_GO=/bin/true \
+	v2_r2_require_binary_checkpoint_stream_exact "$fixture_root/treatment/checkpoints.jsonl" "$start" "$end" || {
+	echo "checkpoint validation remained dependent on the removed environment-selected command" >&2
+	exit 1
+}
+if (v2_r2_checkpoint_validator_path=""; v2_r2_require_binary_checkpoint_stream_exact "$fixture_root/treatment/checkpoints.jsonl" "$start" "$end"); then
+	echo "unregistered checkpoint validator was accepted" >&2
+	exit 1
+fi
 
 sed '0,/"sim_time":1735689600000000000/s//"sim_time":1735689600000000000.5/' \
 	"$fixture_root/treatment/checkpoints.jsonl" >"$fixture_root/fractional-sim-time-checkpoint.jsonl"
