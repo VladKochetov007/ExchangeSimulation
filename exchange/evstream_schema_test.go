@@ -83,6 +83,7 @@ func TestFillEvidenceRoundTrip(t *testing.T) {
 			NewSize: math.MaxInt64, OrderID: math.MaxUint64, Price: math.MaxInt64,
 			Qty: math.MinInt64, RealizedPnL: math.MaxInt64, RemainingQty: math.MinInt64,
 			TradeID: math.MaxUint64, IsFull: false},
+		{OrderID: 12, Symbol: "ABC-PERP", Qty: 1, Forced: true},
 	}
 	for _, original := range cases {
 		frame, reader := roundTripFrame(t, original)
@@ -92,6 +93,61 @@ func TestFillEvidenceRoundTrip(t *testing.T) {
 		}
 		requireJSONPreserved(t, original, decoded)
 	}
+}
+
+func TestFillEvidenceV1DecodeDefaultsForcedMarker(t *testing.T) {
+	original := fillEvidence{OrderID: 12, Symbol: "ABC-PERP", Qty: 1}
+	var buf bytes.Buffer
+	writer := evstream.NewWriter(&buf, evstream.WriterOptions{BlockBytes: 512})
+	if err := writer.AppendInterning(1, 2, 0, legacyFillEvidenceV1(original)); err != nil {
+		t.Fatalf("append v1: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close v1: %v", err)
+	}
+	reader, err := evstream.NewReader(bytes.NewReader(buf.Bytes()), evstream.ReaderOptions{VerifyHash: true})
+	if err != nil {
+		t.Fatalf("reader: %v", err)
+	}
+	var frame evstream.Frame
+	if err := reader.Range(func(got evstream.Frame) error { frame = got; return nil }); err != nil {
+		t.Fatalf("range: %v", err)
+	}
+	var decoded fillEvidence
+	if err := DecodeFillEvidenceVersioned(frame.Payload, reader, 1, &decoded); err != nil {
+		t.Fatalf("decode v1: %v", err)
+	}
+	if decoded.Forced {
+		t.Fatal("v1 fill acquired an absent forced marker")
+	}
+}
+
+// legacyFillEvidenceV1 is a test-only value with the pre-marker schema. It
+// keeps the compatibility test independent from the current v2 appender.
+type legacyFillEvidenceV1 fillEvidence
+
+func (e legacyFillEvidenceV1) SchemaID() uint16      { return SchemaFillEvidence }
+func (e legacyFillEvidenceV1) SchemaVersion() uint16 { return 1 }
+func (e legacyFillEvidenceV1) AppendPayloadInterning(dst []byte, in evstream.Interner) ([]byte, error) {
+	dst = evstream.AppendInt64(dst, e.FeeAmount)
+	dst = evstream.AppendInt64(dst, e.FilledQty)
+	dst = evstream.AppendBool(dst, e.IsFull)
+	dst = evstream.AppendInt64(dst, e.NewEntryPrice)
+	dst = evstream.AppendInt64(dst, e.NewSize)
+	dst = evstream.AppendUint64(dst, e.OrderID)
+	dst = evstream.AppendInt64(dst, e.Price)
+	dst = evstream.AppendInt64(dst, e.Qty)
+	dst = evstream.AppendInt64(dst, e.RealizedPnL)
+	dst = evstream.AppendInt64(dst, e.RemainingQty)
+	dst = evstream.AppendUint64(dst, e.TradeID)
+	for _, value := range [...]string{e.FeeAsset, e.PositionSide, e.Role, e.Side, e.Symbol} {
+		ref, err := in.Intern(value)
+		if err != nil {
+			return nil, err
+		}
+		dst = evstream.AppendUint32(dst, ref)
+	}
+	return dst, nil
 }
 
 func TestBookDeltaEvidenceRoundTrip(t *testing.T) {

@@ -47,4 +47,5 @@ type fillEvidence struct {
 	Side          string `json:"side"`
 	Symbol        string `json:"symbol"`
 	TradeID       uint64 `json:"trade_id"`
+	Forced        bool   `json:"forced,omitempty"`
 }

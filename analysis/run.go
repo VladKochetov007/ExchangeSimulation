@@ -143,8 +143,33 @@ type Run struct {
 	Dir    string
 	Report Report
 
-	roles map[Participant]string
-	files []string
+	roles                   map[Participant]string
+	files                   []string
+	strictLifecycleIdentity bool
+}
+
+type runEvidenceDescriptor struct {
+	EvidenceFormat string `json:"evidence_format"`
+}
+
+func readEvidenceFormat(dir string) (string, error) {
+	for _, name := range []string{"run-config.json", "run-metadata.json"} {
+		raw, err := os.ReadFile(filepath.Join(dir, name))
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return "", fmt.Errorf("analysis: read %s: %w", name, err)
+		}
+		var descriptor runEvidenceDescriptor
+		if err := json.Unmarshal(raw, &descriptor); err != nil {
+			return "", fmt.Errorf("analysis: decode %s: %w", name, err)
+		}
+		if descriptor.EvidenceFormat != "" {
+			return descriptor.EvidenceFormat, nil
+		}
+	}
+	return "", nil
 }
 
 // Open reads a run's report and indexes its event logs.
@@ -157,6 +182,11 @@ func Open(dir string) (*Run, error) {
 	if err := json.Unmarshal(raw, &run.Report); err != nil {
 		return nil, fmt.Errorf("analysis: decode report: %w", err)
 	}
+	evidenceFormat, err := readEvidenceFormat(dir)
+	if err != nil {
+		return nil, err
+	}
+	run.strictLifecycleIdentity = evidenceFormat == "evstream_v3"
 	run.roles = make(map[Participant]string, len(run.Report.TerminalAccounts))
 	for _, row := range run.Report.TerminalAccounts {
 		run.roles[Participant{row.VenueID, row.ClientID}] = RoleGroup(row.Role)

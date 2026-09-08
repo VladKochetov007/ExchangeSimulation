@@ -60,6 +60,7 @@ type executionContext struct {
 	basePrecision int64
 	timestamp     int64
 	log           Logger
+	forced        bool
 }
 
 // requireParties asserts the invariant every settlement path relies on: both
@@ -163,7 +164,7 @@ type settlementOutcome struct {
 	tradeID         uint64
 }
 
-func (e *DefaultExchange) processExecutions(book *OrderBook, executions []*Execution, takerOrder *Order, plan *spotExecutionPlan) {
+func (e *DefaultExchange) processExecutions(book *OrderBook, executions []*Execution, takerOrder *Order, plan *spotExecutionPlan, forced bool) {
 	instrument := book.Instrument
 	timestamp := e.Clock.NowUnixNano()
 	basePrecision := instrument.BasePrecision()
@@ -177,7 +178,7 @@ func (e *DefaultExchange) processExecutions(book *OrderBook, executions []*Execu
 			}
 			planned = &plan.fills[i]
 		}
-		if e.handleExecution(book, exec, takerOrder, instrument, basePrecision, timestamp, log, planned) {
+		if e.handleExecution(book, exec, takerOrder, instrument, basePrecision, timestamp, log, planned, forced) {
 			positionChanged = true
 		}
 	}
@@ -192,9 +193,10 @@ func (e *DefaultExchange) processExecutions(book *OrderBook, executions []*Execu
 // Caller must hold e.mu.Lock().
 func (e *DefaultExchange) handleExecution(
 	book *OrderBook, exec *Execution, takerOrder *Order,
-	instrument Instrument, basePrecision, timestamp int64, log Logger, planned *plannedSpotExecution,
+	instrument Instrument, basePrecision, timestamp int64, log Logger, planned *plannedSpotExecution, forced bool,
 ) bool {
 	ctx := e.newExecutionContext(book, exec, takerOrder, instrument, basePrecision, timestamp, log, planned)
+	ctx.forced = forced
 	outcome := e.settleExecution(ctx)
 	outcome.tradeID = e.createTrade(ctx)
 	e.reportFill(ctx, outcome)
@@ -523,7 +525,7 @@ func logFill(ctx executionContext, tradeID uint64, side fillSide) {
 	// contract. The successor binary sink has its own typed schemas and an
 	// opaque JSON fallback, so changing the evidence representation must not
 	// change what custom Logger implementations observe.
-	ctx.log.LogEvent(ctx.timestamp, side.clientID, "OrderFill", map[string]any{
+	payload := map[string]any{
 		"order_id":        side.orderID,
 		"symbol":          ctx.book.Symbol,
 		"qty":             ctx.exec.Qty,
@@ -540,7 +542,11 @@ func logFill(ctx executionContext, tradeID uint64, side fillSide) {
 		"realized_pnl":    side.realizedPnL,
 		"new_size":        side.delta.NewSize,
 		"new_entry_price": side.delta.NewEntryPrice,
-	})
+	}
+	if ctx.forced && side.role == "taker" {
+		payload["forced"] = true
+	}
+	ctx.log.LogEvent(ctx.timestamp, side.clientID, "OrderFill", payload)
 }
 
 func sendFillNotification(gw *ClientGateway, ctx executionContext, tradeID uint64, side fillSide) {
@@ -568,7 +574,11 @@ func sendFillNotification(gw *ClientGateway, ctx executionContext, tradeID uint6
 			RealizedPnL:   side.realizedPnL,
 			NewSize:       side.delta.NewSize,
 			NewEntryPrice: side.delta.NewEntryPrice,
-			Timestamp:     ctx.exec.Timestamp,
+			// Only the synthetic liquidation taker lacks a client acceptance.
+			// The resting maker received an ordinary fill for its own accepted
+			// order and must retain the normal order-ID lifecycle.
+			Forced:    ctx.forced && side.role == "taker",
+			Timestamp: ctx.exec.Timestamp,
 		},
 	})
 }

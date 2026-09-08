@@ -2,6 +2,8 @@ package analysis
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -27,6 +29,11 @@ func lifecycleLiquidationLine(ts int64, venue string, clientID uint64, symbol st
 
 func lifecycleFillWithSymbolLine(ts int64, venue string, clientID, orderID uint64, symbol string, quantity, filled, remaining int64, full bool) string {
 	return fmt.Sprintf(`{"sim_ts":%d,"client_id":%d,"event":"OrderFill","data":{"venue_id":%q,"payload":{"symbol":%q,"order_id":%d,"qty":%d,"filled_qty":%d,"remaining_qty":%d,"is_full":%t}}}`,
+		ts, clientID, venue, symbol, orderID, quantity, filled, remaining, full)
+}
+
+func lifecycleForcedFillWithSymbolLine(ts int64, venue string, clientID, orderID uint64, symbol string, quantity, filled, remaining int64, full bool) string {
+	return fmt.Sprintf(`{"sim_ts":%d,"client_id":%d,"event":"OrderFill","data":{"venue_id":%q,"payload":{"symbol":%q,"order_id":%d,"qty":%d,"filled_qty":%d,"remaining_qty":%d,"is_full":%t,"forced":true}}}`,
 		ts, clientID, venue, symbol, orderID, quantity, filled, remaining, full)
 }
 
@@ -182,6 +189,39 @@ func TestOrderLifecycleLinksForcedCloseFills(t *testing.T) {
 	}
 	if got.UnknownFills != 1 || got.LiquidationFills != 0 || got.UnlinkedFills != 1 || len(got.Checks) != 1 {
 		t.Fatalf("unlinked forced-close mutation was not rejected: %+v", got)
+	}
+}
+
+func TestOrderLifecycleSuccessorRequiresExplicitForcedMarker(t *testing.T) {
+	const instant = int64(1_000_000_000)
+	makeRun := func(t *testing.T, fill string) *Run {
+		t.Helper()
+		dir := writeRun(t, Report{}, map[string][]string{
+			"north/derivatives/ABC-PERP.jsonl": {fill, lifecycleLiquidationLine(instant, "north", 7, "ABC-PERP")},
+		})
+		if err := os.WriteFile(filepath.Join(dir, "run-config.json"), []byte(`{"evidence_format":"evstream_v3"}`), 0o644); err != nil {
+			t.Fatalf("write successor descriptor: %v", err)
+		}
+		run, err := Open(dir)
+		if err != nil {
+			t.Fatalf("open successor: %v", err)
+		}
+		return run
+	}
+
+	forced, err := makeRun(t, lifecycleForcedFillWithSymbolLine(instant, "north", 7, 99, "ABC-PERP", 10, 10, 0, true)).MeasureOrderLifecycle()
+	if err != nil {
+		t.Fatalf("measure forced successor fill: %v", err)
+	}
+	if forced.LiquidationFills != 1 || forced.UnlinkedFills != 0 {
+		t.Fatalf("explicit forced marker was not accepted: %+v", forced)
+	}
+	ordinary, err := makeRun(t, lifecycleFillWithSymbolLine(instant, "north", 7, 99, "ABC-PERP", 10, 10, 0, true)).MeasureOrderLifecycle()
+	if err != nil {
+		t.Fatalf("measure ordinary successor fill: %v", err)
+	}
+	if ordinary.LiquidationFills != 0 || ordinary.UnlinkedFills != 1 {
+		t.Fatalf("ordinary unknown fill was rescued by liquidation row: %+v", ordinary)
 	}
 }
 

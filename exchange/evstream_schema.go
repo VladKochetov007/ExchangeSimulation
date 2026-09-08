@@ -30,7 +30,7 @@ const (
 // --- fillEvidence ---
 
 func (e fillEvidence) SchemaID() uint16      { return SchemaFillEvidence }
-func (e fillEvidence) SchemaVersion() uint16 { return 1 }
+func (e fillEvidence) SchemaVersion() uint16 { return 2 }
 
 func (e fillEvidence) AppendPayloadInterning(dst []byte, in evstream.Interner) ([]byte, error) {
 	dst = evstream.AppendInt64(dst, e.FeeAmount)
@@ -53,11 +53,22 @@ func (e fillEvidence) AppendPayloadInterning(dst []byte, in evstream.Interner) (
 		}
 		dst = evstream.AppendUint32(dst, ref)
 	}
-	return dst, nil
+	return evstream.AppendBool(dst, e.Forced), nil
 }
 
 // DecodeFillEvidence reads the payload back.
 func DecodeFillEvidence(payload []byte, resolve evstream.Resolver, into *fillEvidence) error {
+	return DecodeFillEvidenceVersioned(payload, resolve, 2, into)
+}
+
+// DecodeFillEvidenceVersioned retains the v1 wire contract. Version 2 adds an
+// explicit forced marker after the existing fields, allowing an analyzer to
+// distinguish a venue-generated liquidation fill from an ordinary unknown
+// order identity without weakening historical v1 decoding.
+func DecodeFillEvidenceVersioned(payload []byte, resolve evstream.Resolver, schemaVersion uint16, into *fillEvidence) error {
+	if schemaVersion != 1 && schemaVersion != 2 {
+		return unsupportedSchemaVersion(SchemaFillEvidence, schemaVersion)
+	}
 	cursor := evstream.NewCursor(payload)
 	into.FeeAmount = cursor.Int64()
 	into.FilledQty = cursor.Int64()
@@ -84,6 +95,10 @@ func DecodeFillEvidence(payload []byte, resolve evstream.Resolver, into *fillEvi
 			return evstream.ErrCorrupt
 		}
 		*target = value
+	}
+	into.Forced = false
+	if schemaVersion == 2 {
+		into.Forced = cursor.Bool()
 	}
 	return finishCursor(cursor)
 }
@@ -436,11 +451,11 @@ func RenderPayloadJSONVersioned(schemaID, schemaVersion uint16, payload []byte, 
 		return append(out, '}'), nil
 
 	case SchemaFillEvidence:
-		if schemaVersion != 1 {
+		if schemaVersion != 1 && schemaVersion != 2 {
 			return nil, unsupportedSchemaVersion(schemaID, schemaVersion)
 		}
 		var value fillEvidence
-		if err := DecodeFillEvidence(payload, resolve, &value); err != nil {
+		if err := DecodeFillEvidenceVersioned(payload, resolve, schemaVersion, &value); err != nil {
 			return nil, err
 		}
 		return json.Marshal(value)
@@ -509,6 +524,9 @@ func RenderPayloadJSONVersioned(schemaID, schemaVersion uint16, payload []byte, 
 
 func currentSchemaVersion(schemaID uint16) uint16 {
 	if schemaID == SchemaVenueBalance {
+		return 2
+	}
+	if schemaID == SchemaFillEvidence {
 		return 2
 	}
 	return 1

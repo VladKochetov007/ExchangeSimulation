@@ -77,6 +77,7 @@ type orderLifecycleUnknownFill struct {
 	timestamp int64
 	clientID  uint64
 	symbol    string
+	forced    *bool
 }
 
 // MeasureOrderLifecycle reconstructs accepted orders from their persisted
@@ -98,6 +99,7 @@ func (r *Run) MeasureOrderLifecycle() (*OrderLifecycleAudit, error) {
 		FilledQty    int64  `json:"filled_qty"`
 		RemainingQty int64  `json:"remaining_qty"`
 		IsFull       bool   `json:"is_full"`
+		Forced       *bool  `json:"forced"`
 	}
 	type liquidationPayload struct {
 		Symbol string `json:"symbol"`
@@ -172,6 +174,7 @@ func (r *Run) MeasureOrderLifecycle() (*OrderLifecycleAudit, error) {
 				}
 				unknownFills = append(unknownFills, orderLifecycleUnknownFill{
 					key: key, timestamp: event.SimTS, clientID: event.ClientID, symbol: symbol,
+					forced: payload.Forced,
 				})
 				return
 			}
@@ -258,7 +261,15 @@ func (r *Run) MeasureOrderLifecycle() (*OrderLifecycleAudit, error) {
 			file: unknown.key.file, timestamp: unknown.timestamp,
 			clientID: unknown.clientID, symbol: unknown.symbol,
 		}
-		if _, ok := liquidations[liquidationKey]; ok {
+		isExplicitForced := unknown.forced != nil && *unknown.forced
+		if r.strictLifecycleIdentity {
+			if isExplicitForced {
+				if _, ok := liquidations[liquidationKey]; ok {
+					result.LiquidationFills++
+					continue
+				}
+			}
+		} else if _, ok := liquidations[liquidationKey]; ok {
 			result.LiquidationFills++
 			continue
 		}
