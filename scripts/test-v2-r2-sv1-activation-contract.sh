@@ -12,6 +12,14 @@ rg -F 'cmp -s -- "$config" "$arm/run-config.json"' "$runner" >/dev/null || {
 	echo "activation runner does not enforce byte-identical registered config" >&2
 	exit 1
 }
+rg -F 'activation-provenance.pending.json' "$runner" >/dev/null || {
+	echo "activation runner does not stage provenance before final publication" >&2
+	exit 1
+}
+rg -F 'v2_r2_require_sv1b_activation_provenance "$activation_provenance_pending"' "$runner" >/dev/null || {
+	echo "activation runner does not self-validate staged provenance" >&2
+	exit 1
+}
 assert_rejected() {
 	local output_root=$1
 	local stdout_log="$temp_root/runner.stdout" stderr_log="$temp_root/runner.stderr"

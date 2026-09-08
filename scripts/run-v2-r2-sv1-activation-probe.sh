@@ -479,7 +479,9 @@ set -e
 write_pair_provenance() {
 	local pair_status=$1 activation_satisfied=$2 comparison_sha=""
 	[[ $# -ge 3 ]] && comparison_sha=$3
-	local provenance_tmp="$output_root/activation-provenance.json.tmp-$$"
+	local provenance_path="$output_root/activation-provenance.json"
+	[[ $# -ge 4 ]] && provenance_path=$4
+	local provenance_tmp="${provenance_path}.tmp-$$"
 	local treatment_terminal_status_json=null control_terminal_status_json=null
 	local treatment_status_sha256="" control_status_sha256=""
 	local treatment_terminal_outcome_sha256="" control_terminal_outcome_sha256=""
@@ -575,7 +577,7 @@ write_pair_provenance() {
 		 holdouts_consumed: false,
 		 scope: "development-only mechanism activation; not a 24-hour survival claim"}' \
 		>"$provenance_tmp" || return 1
-	mv -- "$provenance_tmp" "$output_root/activation-provenance.json"
+	mv -- "$provenance_tmp" "$provenance_path"
 }
 
 if [[ "$treatment_run_status" -ne 0 || "$control_run_status" -ne 0 ]]; then
@@ -632,11 +634,17 @@ fi
 
 comparison_sha=$(sha256sum -- "$output_root/cdf-liquidity-comparison.json" | awk '{print $1}')
 if [[ "$activation_satisfied" == true ]]; then
-	write_pair_provenance "ACTIVATION_CONTRACT_SATISFIED" true "$comparison_sha"
-	if ! v2_r2_require_sv1b_activation_provenance "$output_root/activation-provenance.json" "$head_revision" "$binary_sha256"; then
+	activation_provenance_pending="$output_root/activation-provenance.pending.json"
+	write_pair_provenance "ACTIVATION_CONTRACT_SATISFIED" true "$comparison_sha" "$activation_provenance_pending"
+	if ! v2_r2_require_sv1b_activation_provenance "$activation_provenance_pending" "$head_revision" "$binary_sha256"; then
+		mv -- "$activation_provenance_pending" "$output_root/activation-provenance.invalid.json" || true
 		echo "activation probe produced a package that failed its final provenance self-validation" >&2
 		exit 1
 	fi
+	mv -- "$activation_provenance_pending" "$output_root/activation-provenance.json" || {
+		echo "activation probe could not publish its self-validated provenance" >&2
+		exit 1
+	}
 	echo "completed V2-R2-SV1 activation probe: $output_root"
 	exit 0
 fi
