@@ -2137,3 +2137,69 @@ hitting all eight equally **cannot manufacture a strict monotone ordering**. The
 ordering claim is scale-free and stands; the magnitude claim is reported as a
 bound, not a value. Recorded because writing a level-uncertainty falsifier for an
 ordering hypothesis is a design error worth not repeating.
+
+## RT-038 — The entire latency model is inert at this step size
+
+**Classification.** REAL, and it voids a whole class of the campaign's claims.
+Discovered by an ablation that failed to ablate.
+
+**Base.** `a666d02faede3d40f046b11e60eb672c59386a94`, seed 607, 8h.
+
+**How it surfaced.** A preregistered ablation gave `abc_cdf_spot_maker` the same
+800 µs link as `triangle_arb` to test whether RT-035's 157.7 M transfer was a
+latency race. The result was **bit-identical to baseline** — 170 904 176 on
+`ABC/CDF`, 157 661 074 from the cross maker, 6 547.6 base. A 6.25× link change
+cannot leave a run bit-identical, so the instrument was tested instead of the
+result being reported.
+
+**Measured**, each row a full run compared by md5 of `greeks.json`:
+
+| change | magnitude | outcome |
+|---|---|---|
+| `abc_cdf_spot_maker` → 800 µs | 6.25× faster | **identical** (`ac3a46fd…`) |
+| `abc_cdf_spot_maker` → 500 ms | 625× slower | **identical** |
+| `noise_flow` → 1 µs | 20 000× faster | **identical** |
+| `default_latency_profile` → 500 ms | hits 15 roles | **identical** |
+| seed 607 → 608 (**positive control**) | — | every class moves |
+| `default_latency_profile` → 3 s | 3× the `step` | **changes** (`b627d78f…`) |
+
+The positive control rules out a broken measurement pipeline. Every configured
+latency is invisible; a 3 s delay is not.
+
+**Mechanism (inferred, not proven).** `"step": 1000000000` — a one-second
+simulation step. The entire per-role table spans 500 µs to 20 ms, the slowest
+capped at 500 ms. The measured boundary is in **(500 ms, 3 s]**, consistent with
+sub-step delays being quantised away. The boundary was not bisected further, so
+the step is the consistent explanation rather than a demonstrated one.
+
+**What this voids.** Per-role latency heterogeneity has no effect on any outcome:
+`triangle_arb`'s 800 µs "fastest link in the population", `noise_flow`'s 20 ms
+lognormal tail, `fixed_distance_maker`'s 1% chance of a 50 ms spike, and
+`spot_maker`'s 500 µs link versus the 5 ms default that `abc_cdf_spot_maker` and
+`cdf_spot_maker` silently inherit. Any claim about latency arbitrage, link-based
+information asymmetry, or fast-versus-slow participants is **not exercised** at
+this step size. The validation at `sim.go:709` and `:821` that refuses to run
+without "an explicit nonzero delayed link" enforces a field that changes nothing
+— worse than no check, because it reads as assurance.
+
+**Effect on earlier findings — it strengthens them.** RT-035's mechanism was that
+`triangle_arb` extracts 48.9% of notional because the cross maker quotes around a
+mid 69% from fair. The alternative was a latency race. If latency has no effect
+at all, a latency race is **impossible** here, so the mispricing mechanism stands
+on a stronger footing than the ablation would have given it.
+
+**A pattern now known to be spurious.** Extraction from the cross maker orders
+monotonically with configured link speed — `triangle_arb` (800 µs) 157.7 M,
+`fixed_distance_maker` (1 ms) 14.6 M, `imbalance_maker` (2 ms) 9.4 M. It was
+recorded as confounded when observed; it is now known to be **coincidence**,
+since those links are inert. It must not be cited as evidence of a speed
+advantage.
+
+**Owner decision.** Either `step` drops far below the modelled latencies so the
+link model bites, or the latency configuration is recognised as inactive at this
+resolution. The current state — an elaborate, validated, per-role latency table
+that provably changes nothing — is the one option that misleads.
+
+**Instrument note.** The 3 s run's closure residual is 2.2582% of gross and
+`classpnl` refused to print a ranking (exit 3), as its self-test is built to do.
+Nothing is quoted from that run beyond the fact that it differs.

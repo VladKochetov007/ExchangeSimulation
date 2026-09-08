@@ -3705,6 +3705,150 @@ magnitude larger than a queue-position edge.
 Recorded as RT-037.
 
 
+**H-048 (PREREGISTERED) — the 157.7 M transfer is driven by the −69% mispricing,
+not by the cross maker's slow link. An ablation that could overturn
+[[RT-035]].**
+
+**Structural fact, from the effective config.** 13 roles have an explicit
+`latency_profiles` entry; **15 inherit `default_latency_profile`, constant 5 ms**:
+`abc_cdf_spot_maker`, `cdf_spot_maker`, `elastic_supplier`, `latent_liquidity`,
+`metaorder_trader`, `round_trip`, `futures_maker`, `perp_exposure_hedger`,
+`liability_hedger`, `bootstrap_depth`, `funding_carry_arb`,
+`dated_execution_mandate`, `dated_term_carry_allocator`,
+`term_carry_allocator`, `remote_maker_feed`.
+
+Of the campaign's spot makers, **only `spot_maker` (ABC/USD) was given a fast
+link** — lognormal 500 µs. `abc_cdf_spot_maker` and `cdf_spot_maker` are absent
+from the table and silently take 5 ms. Meanwhile `triangle_arb` has the
+**fastest deterministic link in the population: constant 800 µs, zero jitter**.
+
+So the counterparty that pays `triangle_arb` 157.7 M ([[RT-034]]) is **6.25×
+slower than it**, purely because a role name is missing from a config table.
+
+**The suggestive pattern, POST-HOC.** Extraction from `abc_cdf_spot_maker` on
+`ABC/CDF` orders exactly with link speed:
+
+| taker | link | extracted |
+|---|---|---:|
+| triangle_arb | 800 µs constant | 157.7 M |
+| fixed_distance_maker | 1 ms spiky | 14.6 M |
+| imbalance_maker | 2 ms normal | 9.4 M |
+
+Monotone. But these are different strategies with different sizes and roles, so
+the ordering is **confounded and proves nothing on its own**. That is why an
+ablation is needed rather than another correlation.
+
+**Ablation.** Give `abc_cdf_spot_maker` the same link as `triangle_arb` —
+`{"model":"constant","delay":800000}` — and change nothing else. This is a
+config-only change in the audit worktree; no engine or economics code is touched.
+
+**Prediction.** The transfer survives. A 4.2 ms staleness edge is worth basis
+points in a book this slow; it cannot be worth **48.9% of notional** ([[RT-035]]).
+So the mispricing is the channel and I predict **more than 70% of the 157.7 M
+transfer remains**.
+
+**Falsifiers.** (a) the transfer falls below **50%** of baseline → latency was
+the dominant channel and RT-035's mechanism sentence needs revision, which would
+be the second correction to that finding; (b) `triangle_arb`'s total collapses
+while `ABC/CDF` stays −69% from bootstrap → the dislocation persists but its
+harvesting is a latency race, a materially different story.
+
+**Scope limit, stated up front.** Changing a latency profile changes the realized
+event ordering, so this is **not a marginal ablation on a fixed path** — the
+price trajectory will differ. The comparison is between regimes, not between two
+versions of the same history. A large change in the *dislocation itself* would
+therefore be a confound, so the cross book's terminal deviation from bootstrap is
+reported alongside the transfer.
+
+**Discriminating experiment E-053**, preregistered before the run: run the
+ablation config at seed 607, 8h, full logs; report `triangle_arb`'s `ABC/CDF`
+contribution, its extraction from `abc_cdf_spot_maker`, and the book's terminal
+deviation from bootstrap, against the E-049/E-050 baseline of 170.9 M / 157.7 M /
+−69.15%. Status: **INVALID** — E-053 shows latency has no effect at this step
+size, so the ablation could not test what it was designed to test. Its question
+is nonetheless answered: a latency race is impossible here.
+
+**Also recorded, a bounded negative result.** `flowSeed`
+(`sim.go:4003`) derives per-actor RNG streams by XOR-mixing venue, participant
+and flow class. XOR mixing is not obviously injective, so a collision would make
+two actors share a random stream. Brute-forced over venue 0–2, participant 0–39,
+flow class 0–23 at seed 607: **2 880 tuples, 2 880 distinct seeds, 0 collisions.**
+NOT EXERCISED beyond that box, and the nine flow classes actually used
+(1, 2, 5, 9, 11, 13, 14, 15, 16) are pairwise distinct at every call site.
+
+
+**E-053 — H-048's ablation is INVALID, and the reason is the finding: the entire
+latency model is inert. Four latency configurations spanning 1 µs to 500 ms
+produce byte-identical runs.**
+Base: `a666d02faede3d40f046b11e60eb672c59386a94`, seed 607, 8h.
+
+The preregistered ablation gave `abc_cdf_spot_maker` an 800 µs link. Result:
+`triangle_arb` 170 904 176 on `ABC/CDF`, 157 661 074 from the cross maker,
+6 547.6 base — **every digit identical to the baseline**. That is not "the
+transfer survived"; a 6.25× link change cannot leave a run bit-identical. So I
+stopped and tested the instrument instead of reporting the result.
+
+**Escalation, each a full run, compared by md5 of `greeks.json`:**
+
+| change | magnitude | greeks.json |
+|---|---|---|
+| baseline | — | `ac3a46fd…` |
+| `abc_cdf_spot_maker` → 800 µs constant | 6.25× faster | `ac3a46fd…` **identical** |
+| `abc_cdf_spot_maker` → 500 ms constant | 625× slower | **identical** |
+| `noise_flow` → 1 µs constant | 20 000× faster | `ac3a46fd…` **identical** |
+| `default_latency_profile` → 500 ms | 100× slower, hits 15 roles | `ac3a46fd…` **identical** |
+| **seed 607 → 608** (positive control) | — | **all classes move**: `noise_flow` −220.2 M → −265.6 M, `triangle_arb` +174.2 M → +184.7 M |
+| `default_latency_profile` → **3 s** | 3× the `step` | `b627d78f…` **changes** |
+
+The positive control rules out a broken pipeline: the measurement detects change
+when change exists. **Every configured latency is invisible; a delay of 3 s is
+not.**
+
+**Mechanism (inferred, not proven).** The config sets `"step": 1000000000` — a
+**one-second** simulation step. Every configured delay is far below it: the
+slowest is `noise_flow` at lognormal 20 ms capped at 500 ms, and the whole
+per-role table spans 500 µs to 20 ms. The measured boundary lies in
+**(500 ms, 3 s]**, consistent with delays being quantised away by the 1 s step.
+I did not bisect the boundary further, so "the step is the cause" is the
+consistent explanation rather than a demonstrated one.
+
+**What is void.** The campaign's per-role latency heterogeneity has **no effect
+on any outcome**: `triangle_arb`'s 800 µs "fastest link in the population",
+`noise_flow`'s 20 ms lognormal tail, `fixed_distance_maker`'s 1% chance of a
+50 ms spike, `spot_maker`'s 500 µs advantage over the two cross makers that
+inherit 5 ms — all decorative. Any claim in this campaign about latency
+arbitrage, link-based information asymmetry, or fast-versus-slow participants is
+**NOT EXERCISED** at this step size. The validation at `sim.go:709`/`:821` that
+refuses to run without "an explicit nonzero delayed link" enforces a field that
+changes nothing, which is worse than no check: it reads as assurance.
+
+**H-048 status: the experiment is INVALID as designed** — a latency ablation
+cannot be run in a configuration where latency does nothing. Its preregistered
+prediction and falsifiers are moot and are not scored.
+
+**But the null result settles H-048's question by a stronger route.** I wanted to
+know whether the 157.7 M transfer is a mispricing effect or a latency race. If
+latency has *no effect at all*, a latency race is not merely unlikely — it is
+**impossible** in this configuration. So [[RT-035]]'s mechanism stands, and the
+monotone "extraction orders with link speed" pattern recorded in H-048 is
+**refuted as causal**: `triangle_arb` 157.7 M, `fixed_distance_maker` 14.6 M,
+`imbalance_maker` 9.4 M order with configured link speed **coincidentally**,
+since those links are inert. That pattern must not be cited. I recorded it as
+confounded when I wrote it; it is now known to be spurious.
+
+**Owner decision.** Either the `step` must drop far below the modelled latencies
+for the link model to bite, or the latency configuration should be recognised as
+inactive at this resolution. Which one is the owner's call; the current state —
+an elaborate, validated, per-role latency table that provably changes nothing —
+is the one option that misleads.
+
+Recorded as RT-038.
+
+**Instrument note.** The 3 s run's closure residual is **2.2582% of gross**, and
+`classpnl` **refused to print a ranking** (exit 3), exactly as its self-test was
+built to do. No numbers from that run are quoted beyond the fact that it differs.
+
+
 ---
 
 ## F. Findings
@@ -3721,6 +3865,15 @@ See `research/red-team-findings.md` for the full records.
 - **RT-003** — bounded no-violation results (INV-2, INV-5, INV-6, identity).
 - **RT-006** — latency is delivered as configured across 225 link x channel
   rows; no unearned speed advantage. Transport only.
+- **RT-038** — **the entire latency model is inert.** Four configurations
+  spanning 1 µs to 500 ms — including a 625x change to the cross maker and a
+  20 000x change to `noise_flow` — produce **byte-identical runs** (same
+  `greeks.json` md5), while a seed change moves every class and a 3 s delay does
+  change the run. Every configured delay is below the **1 s `step`**. The
+  campaign's per-role latency heterogeneity, and the validation that refuses to
+  run without "an explicit nonzero delayed link", change nothing. Kills the
+  latency reading of [[RT-035]] — a latency race is *impossible* here, so the
+  mispricing mechanism stands.
 - **RT-037** — construction order **buys queue priority under price-time matching
   and exactly nothing under pro-rata**. Same class, same book, same venue, two
   participants differing only in build order: on `north` (price-time) every pair
