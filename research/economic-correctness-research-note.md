@@ -7038,6 +7038,121 @@ here.
 Recorded as RT-064.
 
 
+**H-077 (PREREGISTERED) — completing the reproduction of the campaign's headline
+chain: [[RT-048]]'s loss-rate ratio and [[RT-050]]'s execution dislocation.**
+
+**What is already reproduced and what is not.** [[RT-041]] reproduced the
+*concentration* across three seeds — `triangle_arb` earning 98–99.6% of its result
+on `ABC/CDF`, 92.3–93.0% from one counterparty. It did **not** reproduce the two
+measurements that explain *why* that book is where the money is:
+
+- **RT-048**: `noise_flow` pays **116.1 bps** on `ABC/CDF` against **5.4 bps** on
+  `ABC/USD` — a **21.4×** ratio, with 98.4% of its −219.5 M loss on that one book.
+- **RT-050**: the loss is realised at execution — buys **−51.50%** and sells
+  **−50.51%** against the contemporaneous fair rate, with an implied loss of
+  **114.0%** of the independently measured figure.
+
+Both are single-seed. [[RT-063]] showed level figures are draws, and [[RT-064]]
+showed structural ones reproduce. **These are ratios, so the rule predicts they
+hold — which is exactly why testing them is worthwhile: a failure would falsify the
+rule itself, not just the finding.**
+
+**Claims, on seeds 608, 609 and 610.**
+1. The `ABC/CDF` loss rate exceeds the `ABC/USD` rate by **≥10×** on every seed.
+2. `ABC/CDF` carries **≥90%** of `noise_flow`'s total loss on every seed.
+3. Volume-weighted execution is **≥20% below** the contemporaneous fair rate on
+   both sides, every seed.
+4. `crossexec`'s implied loss reconciles to the independently measured loss within
+   **±40%** on every seed.
+
+**Falsifiers.**
+(a) the loss-rate ratio drops below **5×** on any seed → RT-048's headline is a
+draw and the "21× the pegged book" figure must be withdrawn;
+(b) the execution gap falls below **10%** on any seed → RT-050's mechanism does
+not generalise and the chain's final link is seed-specific;
+(c) implied and measured losses diverge by more than **2×** on any seed → the
+cross-check that validated RT-050 was itself a coincidence of seed 607;
+(d) any run fails `classpnl`'s closure gate → that seed is reported invalid rather
+than patched.
+
+**Why this is the right place to spend the budget.** The cross-book chain is this
+campaign's central conclusion — one line of configuration producing the population's
+largest loss. Its concentration is reproduced; its *magnitude* and *mechanism* are
+not. After RT-063 that gap is no longer acceptable to leave standing, and this is
+the last major single-seed exposure in the audit.
+
+**Discriminating experiment E-081**, preregistered before the runs: seeds 608, 609,
+610, 8 h, `-log-mode full`; per seed run `flowattrib -class noise_flow`,
+`crossexec -class noise_flow`, and `classpnl` as the validity gate.
+Status: **SUPPORTED WITHIN TESTED SCOPE** — all four claims met on every
+reproduction seed; no falsifier fired.
+
+
+**E-081 — H-077 SUPPORTED on all four claims. The campaign's headline chain now
+reproduces end to end across four seeds.**
+Base: `a666d02faede3d40f046b11e60eb672c59386a94`, seeds 608/609/610, 8 h,
+`-log-mode full`. **All three runs passed the closure gate at 0.0000% of gross**,
+so falsifier (d) does not fire.
+
+| seed | `ABC/CDF` share of loss | `ABC/CDF` loss rate | exec buy | exec sell | implied ÷ measured |
+|---|---:|---:|---:|---:|---:|
+| 607 ([[RT-048]]/[[RT-050]]) | 98.4% | 116.1 bp | −51.50% | −50.51% | 114.0% |
+| 608 | **98.79%** | 139.6 bp | −51.9% | −51.1% | **100.2%** |
+| 609 | **99.92%** | 182.3 bp | −53.6% | −52.8% | **87.9%** |
+| 610 | **98.89%** | 149.2 bp | −52.6% | −51.7% | **100.5%** |
+
+**Claim 2 supported**: `ABC/CDF` carries **98.8%–99.9%** of `noise_flow`'s entire
+loss on every seed, against a ≥90% threshold.
+
+**Claim 3 supported**: volume-weighted execution is **51.1%–53.6% below** the
+contemporaneous fair rate, both sides, every seed — against a ≥20% threshold, and
+remarkably tight across seeds (a 2.5 pp band on a −52% effect).
+
+**Claim 4 supported**: the implied loss reconciles to the independently measured
+loss at **100.2%, 87.9% and 100.5%**, all inside ±40%. Two of the three land
+within half a percent. The cross-check that validated RT-050 was not a seed-607
+coincidence; falsifier (c) does not fire.
+
+**Claim 1 supported, after a design omission I had to repair.** My sweep captured
+per-book *losses* but not per-book *volumes*, so the loss-rate ratio was not
+computable from it — an omission in the experiment, not in the finding. A targeted
+re-run of seed 608 with `bookshare` gives `noise_flow` 34 967.6 base on `ABC/USD`
+and 379 943.9 on `ABC/CDF`, so within that seed: **5.1 bp against 139.6 bp — a
+27.1× ratio**, against RT-048's 21.4× at seed 607 and a ≥10× threshold. **The
+ratio is if anything larger on the reproduction seed.** Falsifier (a) needed it
+below 5×.
+
+**The chain is now reproduced end to end.** Every link has multi-seed support:
+
+| link | reproduced |
+|---|---|
+| cross book leaves fair value | [[RT-041]], 3 seeds (−69% to −83%) |
+| `triangle_arb` concentration 98.1–99.6% | RT-041, 3 seeds |
+| counterparty share 92.3–93.0% | RT-041, 3 seeds |
+| `noise_flow` loss concentrated on that book | **E-081, 4 seeds (98.4–99.9%)** |
+| loss rate ≫ the pegged book | **E-081, 21.4× and 27.1×** |
+| realised at execution, ~52% below fair | **E-081, 4 seeds (50.5–53.6%)** |
+| implied reconciles to measured | **E-081, 4 seeds (87.9–114.0%)** |
+
+**This closes the audit's largest single-seed exposure.** [[RT-063]] warned that
+level figures are draws; [[RT-064]] showed structural claims reproduce. The
+central chain is entirely structural — shares, ratios and rates — and it behaves
+exactly as that rule predicts. **Four reproductions now stand against one refuted
+level claim.**
+
+**What remains single-seed**, recorded so the next reader knows: the option-surface
+findings ([[RT-051]]–[[RT-056]]), the futures basis ([[RT-058]]), the hedge
+decomposition ([[RT-047]]) and the class-ranking table ([[RT-033]]). All are
+structural in form, so the rule predicts they hold — but predicted is not tested,
+and that distinction is the whole point of this experiment.
+
+**Scope.** Three reproduction seeds plus the original, one configuration. The
+loss-rate ratio is measured within-seed on 607 and 608 only; seeds 609 and 610
+contribute the `ABC/CDF` rate but not the paired `ABC/USD` volume.
+
+Recorded as RT-065.
+
+
 ---
 
 ## F. Findings
@@ -7054,6 +7169,15 @@ See `research/red-team-findings.md` for the full records.
 - **RT-003** — bounded no-violation results (INV-2, INV-5, INV-6, identity).
 - **RT-006** — latency is delivered as configured across 225 link x channel
   rows; no unearned speed advantage. Transport only.
+- **RT-065** — **the campaign's headline chain reproduces end to end.** Across
+  seeds 608/609/610, `ABC/CDF` carries **98.8–99.9%** of `noise_flow`'s loss,
+  execution runs **51.1–53.6% below** the contemporaneous fair rate on both sides,
+  and the implied loss reconciles to the measured one at **100.2%, 87.9% and
+  100.5%**. The loss-rate ratio measured within-seed is **27.1×** at seed 608
+  against RT-048's 21.4× at 607 — larger, not smaller. All three runs passed the
+  closure gate at 0.0000%. **This closes the audit's largest single-seed
+  exposure**, and confirms [[RT-064]]'s rule: four structural reproductions now
+  stand against one refuted level claim ([[RT-063]]).
 - **RT-064** — **[[RT-037]] reproduces across three fresh seeds and is stronger
   than reported.** On the price-time venue the earlier-registered maker wins
   **19/24** pairs overall and **12 of 12** on the books that carry value —

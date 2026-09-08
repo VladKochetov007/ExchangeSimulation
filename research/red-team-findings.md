@@ -3765,3 +3765,53 @@ absolute levels need seeds.
 via the `makerSymbol` round-robin and differ only in construction order, which is
 the identification. The queue-position mechanism itself is inferred from RT-036,
 not re-measured here.
+
+## RT-065 — The headline chain reproduces end to end
+
+**Classification.** REPRODUCTION. Closes the audit's largest remaining single-seed
+exposure.
+
+**Base.** `a666d02faede3d40f046b11e60eb672c59386a94`, seeds 608/609/610, 8 h, full
+logs. **All three passed the closure gate at 0.0000% of gross.**
+
+| seed | `ABC/CDF` share of loss | `ABC/CDF` loss rate | exec buy | exec sell | implied ÷ measured |
+|---|---:|---:|---:|---:|---:|
+| 607 (RT-048/RT-050) | 98.4% | 116.1 bp | −51.50% | −50.51% | 114.0% |
+| 608 | **98.79%** | 139.6 bp | −51.9% | −51.1% | **100.2%** |
+| 609 | **99.92%** | 182.3 bp | −53.6% | −52.8% | **87.9%** |
+| 610 | **98.89%** | 149.2 bp | −52.6% | −51.7% | **100.5%** |
+
+**Concentration**: `ABC/CDF` carries 98.8%–99.9% of `noise_flow`'s entire loss on
+every seed, against a ≥90% threshold.
+
+**Execution dislocation**: 51.1%–53.6% below the contemporaneous fair rate on both
+sides, every seed — a 2.5 pp band on a −52% effect.
+
+**Cross-check**: implied loss reconciles to the independently measured loss at
+100.2%, 87.9% and 100.5%, two of three within half a per cent. RT-050's validation
+was not a seed-607 coincidence.
+
+**Loss-rate ratio, after repairing a design omission.** The sweep captured per-book
+losses but not per-book volumes, so the ratio was not computable from it — an
+omission in my experiment, not in the finding. A targeted re-run of seed 608 with
+`bookshare` gives `noise_flow` 34 967.6 base on `ABC/USD` against 379 943.9 on
+`ABC/CDF`, so within that seed **5.1 bp versus 139.6 bp — a 27.1x ratio**, against
+RT-048's 21.4x at seed 607. Larger on the reproduction seed, not smaller.
+
+**Every link of the chain now has multi-seed support**: the cross book leaving fair
+value (RT-041, 3 seeds), `triangle_arb`'s concentration and counterparty share
+(RT-041, 3 seeds), `noise_flow`'s loss concentration, the loss-rate ratio, the
+execution dislocation and its reconciliation (this, 4 seeds).
+
+**It also confirms RT-064's reading rule.** The chain is entirely structural —
+shares, ratios, rates — and reproduces cleanly. **Four structural reproductions now
+stand against one refuted level claim (RT-063).**
+
+**What remains single-seed**, recorded for the next reader: the option-surface
+findings (RT-051–RT-056), the futures basis (RT-058), the hedge decomposition
+(RT-047), and the class-ranking table (RT-033). All are structural in form, so the
+rule predicts they hold — but predicted is not tested.
+
+**Scope.** Three reproduction seeds plus the original, one configuration. The
+loss-rate ratio is measured within-seed on 607 and 608 only; 609 and 610 contribute
+the `ABC/CDF` rate without the paired `ABC/USD` volume.
