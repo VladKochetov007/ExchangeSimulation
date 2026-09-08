@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "contract": "v2-r2-sv1c-24h-config-provenance-v1",
-  "candidate": "V2-R2-SV1C-24H-CDF-LIQUIDITY",
+  "candidate": "V2-R2-SV1C-24H-CDF-LIQUIDITY-STRICT-RISK",
   "predecessor": "V2-R2-SV1B-24H-CDF-LIQUIDITY",
   "source_configs": {
     "dev-607.json": "3fef36431a1a62d5a9b59aeda96798bff033cba8dac88fdebe2c30a73183e7bd",
@@ -9,20 +9,20 @@
   },
   "activation_roster": {
     "path": "research/configs/v2-r2-sv1c/activation-643.json",
-    "sha256": "2d3348bafc34dc7cc89024a5ad21acd3448b816591e4e86024d9ef6b52631155"
+    "sha256": "2fd15017dfab99c157cde66d6520b1cc6b93bf3a1050e95bc1aacc31d7f4d3ba"
   },
   "activation_control": {
     "path": "research/configs/v2-r2-sv1c/activation-643-control.json",
-    "sha256": "a5fa7f2e47251dbc89bb0160decaa60d1271e6e95770e3787635e05929178257"
+    "sha256": "bfa3ec41073eb803c7e9bf81e73ee0baf9a23fa05674ffc2928703289259fce1"
   },
   "registered_configs": {
-    "control-643-none.json": "a99861ef4be8b7519ddbdf965f1ab654856120e05c4a383c10c5dfe8ef5ec76d",
-    "control-643.json": "d347bdd1ef4af7bcfbaf600991e2f84e133f42b4c1e7685d5b6cc5347755c0e3",
-    "control-647.json": "18e72a4e6cf90695b8dd1e1732858d213424eb8aa267f3c1af724531177b9c6c",
-    "control-653.json": "5bf25f08877ae06c90667b157906ea01957d08541e0af4740457c5703c7dc9b4",
-    "treatment-643.json": "f2d43a8e30882d070f2c1cc75dca342af45e84e0dd65cc254f8d8c4c9c85e56a",
-    "treatment-647.json": "8a2edfa528b93f363fd64cc896041df6e4df0c564090c4bd4ec06340ce7b1032",
-    "treatment-653.json": "69fcb711ec003fb7158700a516e451120f1751e61e7b5e09352bbd76ba8f08b7"
+    "control-643-none.json": "105b8ad72154f8177fb7401f65f9a6cc606ca23354d7547217d9b43ebe63359d",
+    "control-643.json": "06861047dda547992c50bab2016d3af8a9bff85d4fd11161150164d2ad18d4e8",
+    "control-647.json": "1a05102351fa81b9b971492dbeab5b8b24388e3ef493d6eb36cb7f05e17e3552",
+    "control-653.json": "e3082112d40623945eb95d82f1a73ab876401d79455af18a95b086f857040d48",
+    "treatment-643.json": "8cf3400bd531eaed3d742d205dcdbe08143cda61670d8aa8533398f897e17de6",
+    "treatment-647.json": "93240cd42326219b28bc5f31ef2e05f06519758597cb83df3fd98f0b046fcb6c",
+    "treatment-653.json": "a6cd22d093d71a92e399ce2b9c8899fe4677910de5eb3563d8a42f108fe9c5e0"
   },
   "fresh_development_seeds": [
     643,
@@ -44,7 +44,7 @@
   },
   "generator": {
     "path": "scripts/render-v2-r2-sv1c-24h-configs.sh",
-    "sha256": "50ee455bc059bee4d4ce3af3e597d7494c03dbe55e6e25449fca7b113accf7ab"
+    "sha256": "e6b3fa4b57d98b9b237350f78e877d999c91f49c8882a49749790909fd2116c6"
   },
   "withdrawal_measurement": {
     "path": "research/v2-r2-sv1c-withdrawal-measurement-amendment-2026-09-08.md",
@@ -77,18 +77,18 @@
     "measurement_config_path": "research/configs/v2-r2-sv1c-24h/treatment-643.json",
     "launch_config_path": "research/configs/v2-r2-sv1c-24h/treatment-643.json",
     "authorized_launch_config_sha256": [
-      "a99861ef4be8b7519ddbdf965f1ab654856120e05c4a383c10c5dfe8ef5ec76d",
-      "d347bdd1ef4af7bcfbaf600991e2f84e133f42b4c1e7685d5b6cc5347755c0e3",
-      "18e72a4e6cf90695b8dd1e1732858d213424eb8aa267f3c1af724531177b9c6c",
-      "5bf25f08877ae06c90667b157906ea01957d08541e0af4740457c5703c7dc9b4",
-      "f2d43a8e30882d070f2c1cc75dca342af45e84e0dd65cc254f8d8c4c9c85e56a",
-      "8a2edfa528b93f363fd64cc896041df6e4df0c564090c4bd4ec06340ce7b1032",
-      "69fcb711ec003fb7158700a516e451120f1751e61e7b5e09352bbd76ba8f08b7"
+      "105b8ad72154f8177fb7401f65f9a6cc606ca23354d7547217d9b43ebe63359d",
+      "06861047dda547992c50bab2016d3af8a9bff85d4fd11161150164d2ad18d4e8",
+      "1a05102351fa81b9b971492dbeab5b8b24388e3ef493d6eb36cb7f05e17e3552",
+      "e3082112d40623945eb95d82f1a73ab876401d79455af18a95b086f857040d48",
+      "8cf3400bd531eaed3d742d205dcdbe08143cda61670d8aa8533398f897e17de6",
+      "93240cd42326219b28bc5f31ef2e05f06519758597cb83df3fd98f0b046fcb6c",
+      "a6cd22d093d71a92e399ce2b9c8899fe4677910de5eb3563d8a42f108fe9c5e0"
     ],
     "measurement_cases": [
       {
         "config_path": "research/configs/v2-r2-sv1c-24h/treatment-643.json",
-        "measurement_config_sha256": "f2d43a8e30882d070f2c1cc75dca342af45e84e0dd65cc254f8d8c4c9c85e56a",
+        "measurement_config_sha256": "8cf3400bd531eaed3d742d205dcdbe08143cda61670d8aa8533398f897e17de6",
         "measurement_seed": 659,
         "source_seed": 643,
         "gomaxprocs": 4,
@@ -98,7 +98,7 @@
       },
       {
         "config_path": "research/configs/v2-r2-sv1c-24h/control-643.json",
-        "measurement_config_sha256": "d347bdd1ef4af7bcfbaf600991e2f84e133f42b4c1e7685d5b6cc5347755c0e3",
+        "measurement_config_sha256": "06861047dda547992c50bab2016d3af8a9bff85d4fd11161150164d2ad18d4e8",
         "measurement_seed": 659,
         "source_seed": 643,
         "gomaxprocs": 4,
@@ -108,7 +108,7 @@
       },
       {
         "config_path": "research/configs/v2-r2-sv1c-24h/treatment-643.json",
-        "measurement_config_sha256": "f2d43a8e30882d070f2c1cc75dca342af45e84e0dd65cc254f8d8c4c9c85e56a",
+        "measurement_config_sha256": "8cf3400bd531eaed3d742d205dcdbe08143cda61670d8aa8533398f897e17de6",
         "measurement_seed": 659,
         "source_seed": 643,
         "gomaxprocs": 8,

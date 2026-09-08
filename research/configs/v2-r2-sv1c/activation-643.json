@@ -1,9 +1,9 @@
 {
   "experiment_id": "v2-r2-sv1c-activation-643",
-  "hypothesis_id": "V2-R2-SV1C-CDF-LIQUIDITY",
+  "hypothesis_id": "V2-R2-SV1C-STRICT-RISK-CDF-LIQUIDITY",
   "date": "2026-09-08",
   "status": "preregistered",
-  "description": "V2-R2-SV1C development-only activation probe: finite heterogeneous local CDF liquidity roster versus paired no-roster population; no 24h or holdout claim.",
+  "description": "V2-R2-SV1C strict-risk finite heterogeneous CDF/USD liquidity activation treatment",
   "log_mode": "full",
   "evidence_format": "evstream_v3",
   "record_market_data_receipts": true,

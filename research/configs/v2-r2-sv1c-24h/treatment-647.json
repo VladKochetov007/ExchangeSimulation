@@ -1,9 +1,9 @@
 {
   "experiment_id": "v2-r2-sv1c-24h-treatment-647",
-  "hypothesis_id": "V2-R2-SV1C-24H-CDF-LIQUIDITY",
+  "hypothesis_id": "V2-R2-SV1C-24H-CDF-LIQUIDITY-STRICT-RISK",
   "date": "2026-09-08",
   "status": "registered-development",
-  "description": "V2-R2-SV1C-24H finite heterogeneous CDF/USD liquidity treatment; development-only successor",
+  "description": "V2-R2-SV1C-24H finite heterogeneous CDF/USD liquidity treatment under the strict-risk amendment; development-only successor",
   "log_mode": "full",
   "evidence_format": "evstream_v3",
   "dated_future_delivery_fee_policy": "zero",

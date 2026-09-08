@@ -1,9 +1,9 @@
 {
   "experiment_id": "v2-r2-sv1c-24h-control-653",
-  "hypothesis_id": "V2-R2-SV1C-24H-CDF-LIQUIDITY-CONTROL",
+  "hypothesis_id": "V2-R2-SV1C-24H-CDF-LIQUIDITY-STRICT-RISK-CONTROL",
   "date": "2026-09-08",
   "status": "registered-development",
-  "description": "V2-R2-SV1C-24H matched no-CDF control; development-only successor",
+  "description": "V2-R2-SV1C-24H matched no-CDF strict-risk control; development-only successor",
   "log_mode": "full",
   "evidence_format": "evstream_v3",
   "dated_future_delivery_fee_policy": "zero",

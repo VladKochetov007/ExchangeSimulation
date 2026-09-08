@@ -24,7 +24,7 @@ selected_contract=$(v2_r2_select_sv1_contract "$root_dir")
 }
 source "$selected_contract"
 
-[[ "$v2_r2_sv1_candidate_id" == "V2-R2-SV1C-24H-CDF-LIQUIDITY" ]] || exit 1
+[[ "$v2_r2_sv1_candidate_id" == "V2-R2-SV1C-24H-CDF-LIQUIDITY-STRICT-RISK" ]] || exit 1
 [[ "$v2_r2_sv1_predecessor_id" == "V2-R2-SV1B-24H-CDF-LIQUIDITY" ]] || exit 1
 [[ "$v2_r2_sv1_generator_path" == "scripts/render-v2-r2-sv1c-24h-configs.sh" ]] || exit 1
 [[ "$v2_r2_sv1_config_dir" == "$root_dir/research/configs/v2-r2-sv1c-24h" ]] || exit 1

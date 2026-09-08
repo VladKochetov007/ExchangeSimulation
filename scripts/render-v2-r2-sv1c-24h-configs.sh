@@ -11,8 +11,8 @@ activation_config="$root_dir/research/configs/v2-r2-sv1c/activation-643.json"
 activation_control_config="$root_dir/research/configs/v2-r2-sv1c/activation-643-control.json"
 source "$root_dir/scripts/v2-r2-sv1c-24h-contract.sh"
 normalizer=${V2_R2_SV1C_CONFIG_NORMALIZER_BIN:-"$root_dir/bin/multivenue"}
-candidate="V2-R2-SV1C-24H-CDF-LIQUIDITY"
-control_hypothesis="V2-R2-SV1C-24H-CDF-LIQUIDITY-CONTROL"
+candidate="V2-R2-SV1C-24H-CDF-LIQUIDITY-STRICT-RISK"
+control_hypothesis="V2-R2-SV1C-24H-CDF-LIQUIDITY-STRICT-RISK-CONTROL"
 date="2026-09-08"
 seeds=(643 647 653)
 
@@ -53,7 +53,7 @@ write_config() {
 	local temporary normalized_dir normalized
 	temporary=$(mktemp "$output.tmp-XXXXXX")
 	if [[ "$mode" == treatment ]]; then
-		jq --arg experiment "$experiment" --arg hypothesis "$hypothesis" --arg description "V2-R2-SV1C-24H finite heterogeneous CDF/USD liquidity treatment; development-only successor" --arg date "$date" --argjson seed "$seed" --argjson roster "$cdf_roster" \
+		jq --arg experiment "$experiment" --arg hypothesis "$hypothesis" --arg description "V2-R2-SV1C-24H finite heterogeneous CDF/USD liquidity treatment under the strict-risk amendment; development-only successor" --arg date "$date" --argjson seed "$seed" --argjson roster "$cdf_roster" \
 			'.seed = $seed |
 			 .experiment_id = $experiment |
 			 .hypothesis_id = $hypothesis |
@@ -68,7 +68,7 @@ write_config() {
 			 .record_elastic_liquidity_supplier_decisions = true |
 			 .market_data_receipt_roles = ((.market_data_receipt_roles + ["cdf_elastic_supplier"]) | unique)' "$source" >"$temporary"
 	else
-		jq --arg experiment "$experiment" --arg hypothesis "$hypothesis" --arg description "V2-R2-SV1C-24H matched no-CDF control; development-only successor" --arg date "$date" --argjson seed "$seed" \
+		jq --arg experiment "$experiment" --arg hypothesis "$hypothesis" --arg description "V2-R2-SV1C-24H matched no-CDF strict-risk control; development-only successor" --arg date "$date" --argjson seed "$seed" \
 			'.seed = $seed |
 			 .experiment_id = $experiment |
 			 .hypothesis_id = $hypothesis |
