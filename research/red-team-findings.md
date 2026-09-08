@@ -3585,3 +3585,65 @@ than symptoms, since relieving the capacity constraint did not relieve them.
 **Next.** Repeat the 2x2 across four more seeds to test the variance reading, and
 ablate `funding_max_rate_bps` and `MarkPriceBandBps` the same way — paired,
 multi-seed, never single-seed.
+
+**CORRECTED BY RT-062.** "The effect is not causal" was too strong. At n=4 the
+ablation converges the basis on **three of four seeds** (−0.15%, −0.22%, −0.14%,
+clamp binding 0.0% on all three) and reverses only on seed 608. Two seeds with
+opposite signs cannot distinguish *no effect* from *an effect with one exception*,
+and I drew the stronger conclusion. The correct reading is an **unreliable
+intervention**. The variance observation recorded above is also retired: the
+baseline spread at n=4 is 3.78 pp, not tight.
+
+## RT-062 — The cap ablation works on three seeds in four, and RT-061 was too strong
+
+**Classification.** FALSIFICATION of the variance hypothesis, and a **correction of
+my own previous correction**. Neither "capacity is the fix" nor "no causal effect"
+survives contact with four seeds.
+
+**Base.** `a666d02faede3d40f046b11e60eb672c59386a94`, 8 h, full logs, seeds
+607–610 x {baseline, `carry_max_position` x10}. **All eight runs passed the
+closure self-test at 0.0000% of gross.**
+
+| seed | baseline mean | ablation mean | baseline clamp | ablation clamp |
+|---|---:|---:|---:|---:|
+| 607 | −4.90% | **−0.15%** | 32.5% | **0.0%** |
+| 608 | −4.79% | **−12.56%** | 28.5% | **48.5%** |
+| 609 | −1.12% | **−0.22%** | 9.7% | **0.0%** |
+| 610 | −4.21% | **−0.14%** | 29.5% | **0.0%** |
+
+**The variance hypothesis is dead.** I predicted a baseline spread under 1 pp; it
+is **3.783 pp** (−1.12% to −4.90%), past the 3 pp falsifier. Seed 609 binds the
+mark clamp on only **9.7%** of samples against 28–33% elsewhere. The baseline is
+not tightly stable, so "the campaign's reproducibility is manufactured by its
+constraints" is retired, and RT-061's tight-baseline contrast was a coincidence of
+the two seeds I happened to hold. The spread ratio is **3.28x**, not the >5x
+predicted.
+
+**And the fourth seed corrects RT-061.** That finding concluded from two seeds
+with opposite signs that "the effect is not causal". At n=4 that is too strong: on
+**three of four seeds the ablation converges the basis to −0.15%, −0.22% and
+−0.14% — a spread of 0.073 pp — and drives mark-clamp binding from ~30% to
+exactly 0.0%**. A treatment producing near-identical convergence in three
+independent runs has an effect. It is simply **unreliable**, reversing on seed 608.
+
+**The correct statement is narrower than either of my previous two.** Raising the
+cap converges the perpetual's basis in most runs and backfires in a minority.
+Not "capacity is the fix" — the seed-607 reading I nearly published. Not "no
+causal effect" — RT-061's over-correction. **An unreliable intervention**, which is
+more useful to an owner than either.
+
+**Seed 608 becomes the interesting case rather than the disqualifying one.** It is
+the one run where more arbitrage capacity makes the dislocation worse: mean
+−12.56% against a −4.79% baseline, clamp binding rising to 48.5%. Whatever
+distinguishes it decides whether extra capacity converges or amplifies, which is a
+sharper question than the one this started with.
+
+**Methodological note against myself.** Two seeds cannot distinguish "no effect"
+from "an effect with one exception", and I drew the stronger conclusion last
+checkpoint. RT-041's reproduce-before-promoting rule applies to **negative**
+results too: **a single contradicting seed refutes reliability, not causation.**
+
+**Next.** Isolate what makes seed 608 different — its baseline order flow,
+`noise_flow` direction, and early-run basis trajectory against 607/609/610. If one
+identifiable condition flips the treatment's sign, that condition rather than the
+cap is the perpetual's real control variable.

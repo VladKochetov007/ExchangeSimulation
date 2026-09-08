@@ -6692,6 +6692,120 @@ cap is a variance constraint, and ablate `funding_max_rate_bps` and
 Recorded as RT-061.
 
 
+**H-073 (PREREGISTERED) — the campaign's cross-seed stability is manufactured by
+its binding constraints, not by a stable market.**
+
+**The withheld observation from [[RT-061]].** At n=2 the baseline perp basis was
+tight across seeds (−4.90% vs −4.79%, **0.107 pp**) while the cap×10 ablation was
+wild (−0.15% vs −12.56%, **12.4 pp — 82× wider**). I refused to claim it at two
+seeds. This tests it at four per arm.
+
+**Why it matters beyond the perpetual.** Several findings now share a shape:
+[[RT-032]]'s peg fixes the ABC/USD level to a configured reference; [[RT-046]]'s
+caps fix the arbitrageurs' positions; [[RT-057]] found the population's closest
+approach to insolvency **stable to 0.2% across seeds** *because* it is set by a
+cap; [[RT-041]] found levels swinging 5× while structure held. If relaxing one cap
+turns a tight distribution into a wide one, then **the campaign's reproducibility
+is a property of its constraints rather than evidence that the modelled market is
+well behaved** — which changes how every cross-seed stability result in this audit
+should be read, including my own.
+
+**Design.** Four seeds (607–610) × {baseline, `carry_max_position` ×10}, measuring
+the `ABC-PERP` mean basis per run. Seeds 607 and 608 are already measured for both
+arms and are reused; 609 and 610 are new. Config-only ablation in a scratch file;
+`research/configs/` untouched.
+
+**Claims.**
+1. Baseline across-seed spread (max − min of mean basis) is **< 1 pp**.
+2. Ablation across-seed spread is **> 5 pp**.
+3. The ratio of ablation spread to baseline spread is **> 5×**.
+
+**Falsifiers.**
+(a) ablation spread is **within 2×** of baseline spread → the n=2 contrast was
+noise and there is no variance effect; the RT-061 observation is retired;
+(b) baseline spread itself exceeds **3 pp** → the baseline is not stable either,
+RT-061's contrast was a fluke of two seeds, and the "manufactured stability"
+framing collapses;
+(c) the ablation arm fails its closure self-test on any seed → that run is invalid
+and the arm is reported at reduced n rather than patched.
+
+**What a positive result would and would not mean.** It would show that a binding
+cap **suppresses dispersion** — the system is pinned, not settled. It would
+**not** show the market is unstable in any deeper sense, nor that the cap is
+wrong: suppressing variance may be exactly what the configuration intends. The
+claim is about **what cross-seed agreement is evidence of**, which is a
+methodological point about reading this campaign's results — including several of
+mine.
+
+**Discriminating experiment E-078**, preregistered before the new runs: seeds 609
+and 610 in both arms, 8 h, `-log-mode full`; `perpbasis` per run and `classpnl`'s
+closure as the validity gate.
+Status: **FALSIFIED WITHIN TESTED SCOPE** on claims 1 and 3 (baseline spread
+3.78 pp, ratio 3.28x); claim 2 supported; falsifier (b) fires.
+
+
+**E-078 — H-073 mostly FALSIFIED, and the fourth seed corrects [[RT-061]] as well.
+The cap ablation converges the basis on **three of four** seeds and reverses on
+one; neither "it works" nor "no effect" survives.**
+Base: `a666d02faede3d40f046b11e60eb672c59386a94`, 8 h, `-log-mode full`, seeds
+607–610 × {baseline, `carry_max_position` ×10}. All eight runs passed the closure
+self-test at **0.0000% of gross**, so falsifier (c) does not fire anywhere.
+
+| seed | baseline mean | ablation mean | baseline clamp | ablation clamp |
+|---|---:|---:|---:|---:|
+| 607 | −4.90% | **−0.15%** | 32.5% | **0.0%** |
+| 608 | −4.79% | **−12.56%** | 28.5% | **48.5%** |
+| 609 | −1.12% | **−0.22%** | 9.7% | **0.0%** |
+| 610 | −4.21% | **−0.14%** | 29.5% | **0.0%** |
+
+**Claim 1 FALSIFIED and falsifier (b) fires.** I predicted a baseline spread under
+1 pp; it is **3.783 pp** (−1.12% to −4.90%), above the 3 pp threshold that
+retires the framing. The baseline is **not** tightly stable across seeds — seed
+609 binds the mark clamp on only **9.7%** of samples against 28–33% elsewhere.
+**The "manufactured stability" hypothesis is dead**, and RT-061's tight
+baseline contrast was a coincidence of the two seeds I happened to have.
+
+**Claim 3 FALSIFIED.** Ablation spread over baseline spread is **3.28×**, not the
+>5× predicted. Claim 2 alone survives: ablation spread is **12.41 pp**, above 5.
+
+**But the fourth seed corrects RT-061, and this is the substantive result.**
+RT-061 concluded from n=2 with opposite signs that "the effect is not causal".
+With n=4 that is **too strong**. On **three of four seeds the ablation converges
+the basis to −0.15%, −0.22%, −0.14% — a spread of 0.073 pp — and the mark clamp
+stops binding entirely (0.0% of samples on all three)**. Only seed 608 reverses.
+A treatment that produces near-identical convergence in three independent runs and
+drives clamp binding from ~30% to zero **has an effect**; it is simply not
+reliable.
+
+**The correct statement is narrower than either of my previous two.** Raising the
+cap **converges the perpetual's basis in most runs and backfires in a minority**.
+Not "capacity is the fix" (the seed-607 reading I nearly published), not "no
+causal effect" (RT-061's over-correction from two seeds). **An unreliable
+intervention**, which is a different and more useful thing to tell an owner than
+either.
+
+**Seed 608 is now the interesting case rather than the disqualifying one.** It is
+the single run where more arbitrage capacity makes the dislocation **worse** —
+mean −12.56% against a −4.79% baseline, clamp binding rising to 48.5%. Whatever
+distinguishes it is the mechanism that decides whether extra capacity converges or
+amplifies, and that is a sharper question than the one I started with.
+
+**Methodological note, and it cuts against my own last checkpoint.** RT-061 read
+two seeds with opposite signs as evidence of no effect. Two seeds cannot
+distinguish "no effect" from "an effect with one exception", and I drew the
+stronger conclusion. The rule that catches this is the one already in the record
+from [[RT-041]] — reproduce before promoting — applied to **negative** results as
+well as positive ones. **A single contradicting seed refutes reliability, not
+causation.**
+
+**Next experiment.** Isolate what makes seed 608 different: compare its baseline
+order flow, its `noise_flow` direction, and its early-run basis trajectory against
+607/609/610. If a single identifiable condition flips the treatment's sign, that
+condition — not the cap — is the perpetual's real control variable.
+
+Recorded as RT-062.
+
+
 ---
 
 ## F. Findings
@@ -6708,6 +6822,16 @@ See `research/red-team-findings.md` for the full records.
 - **RT-003** — bounded no-violation results (INV-2, INV-5, INV-6, identity).
 - **RT-006** — latency is delivered as configured across 225 link x channel
   rows; no unearned speed advantage. Transport only.
+- **RT-062** — **the variance hypothesis is dead and [[RT-061]] was too strong.**
+  At n=4 the baseline spread is **3.78 pp** (−1.12% to −4.90%), so the baseline is
+  *not* tightly stable and the "manufactured stability" framing is retired
+  (falsifier fired). But the fourth seed also corrects RT-061's "not causal": the
+  ablation converges the basis on **three of four seeds to −0.15%, −0.22%, −0.14%
+  — a 0.073 pp spread — with the mark clamp binding 0.0% of samples on all
+  three**, and reverses only on seed 608. The honest statement is neither "the fix"
+  nor "no effect" but **an unreliable intervention**. **Two seeds cannot
+  distinguish no-effect from an-effect-with-an-exception** — [[RT-041]]'s
+  reproduce-before-promoting rule applies to negative results too.
 - **RT-061** — **[[RT-060]]'s lever is refuted by its own control.** Raising
   `carry_max_position` tenfold converges the perp basis at seed 607
   (−4.90% → **−0.15%**, clamp binding 32.5% → **0.0%**) and makes it **2.6x
