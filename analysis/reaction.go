@@ -73,6 +73,13 @@ type Reaction struct {
 	UndefinedMarkouts int `json:"undefined_markouts"`
 }
 
+func reactionBookSymbol(event Event) string {
+	if event.Symbol != "" {
+		return event.Symbol
+	}
+	return symbolFromPath(event.File)
+}
+
 // MeasureReaction computes delivered reaction lag and maker markouts.
 func (r *Run) MeasureReaction(opts ReactionOptions) (*Reaction, error) {
 	horizon := opts.HorizonSeconds
@@ -126,7 +133,7 @@ func (r *Run) MeasureReaction(opts ReactionOptions) (*Reaction, error) {
 		FilesSelected: opts.FilesSelected,
 	}
 	if err := r.Scan(scan, func(event Event) {
-		key := markKey{event.VenueID, event.Symbol}
+		key := markKey{event.VenueID, reactionBookSymbol(event)}
 		switch event.Name {
 		case "BookDelta":
 			mu.Lock()
