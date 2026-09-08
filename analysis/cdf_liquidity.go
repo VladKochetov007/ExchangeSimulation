@@ -1146,7 +1146,8 @@ func (r *Run) MeasureCDFLiquidity() (*CDFLiquidityRunAudit, error) {
 	if configErr != nil {
 		result.addCheck(CDFLiquidityCheck{Failure: "missing or malformed run configuration: " + configErr.Error()})
 	}
-	result.requirePositiveLossBudget = strings.HasPrefix(config.HypothesisID, "V2-R2-SV1B-")
+	result.requirePositiveLossBudget = strings.HasPrefix(config.HypothesisID, "V2-R2-SV1B-") ||
+		strings.HasPrefix(config.HypothesisID, "V2-R2-SV1C-")
 	if _, statErr := os.Stat(filepath.Join(r.Dir, "run-metadata.json")); statErr == nil {
 		identity, identityErr := loadCDFRunIdentity(r)
 		if identityErr != nil {
@@ -1177,7 +1178,7 @@ func (r *Run) MeasureCDFLiquidity() (*CDFLiquidityRunAudit, error) {
 		}
 		configByRole[supplier.Role] = supplier
 		if result.requirePositiveLossBudget && supplier.MaxLossQuote <= 0 {
-			result.addCheck(CDFLiquidityCheck{Role: supplier.Role, Failure: "SV1B supplier must have a positive marked-equity loss budget"})
+			result.addCheck(CDFLiquidityCheck{Role: supplier.Role, Failure: "successor supplier must have a positive marked-equity loss budget"})
 		}
 		if supplier.MinimumExecutableQty < 0 {
 			result.addCheck(CDFLiquidityCheck{Role: supplier.Role, Failure: "configured minimum executable quantity is negative"})
@@ -4340,7 +4341,7 @@ func (r *CDFLiquidityRunAudit) finalizeSuppliers(states map[cdfParticipantKey]*C
 		}
 		lossBudgetValid := !r.requirePositiveLossBudget || state.configuredMaxLossQuote > 0
 		if !lossBudgetValid {
-			r.addCheck(CDFLiquidityCheck{VenueID: key.VenueID, Role: state.Role, ClientID: key.ClientID, Failure: "SV1B supplier has no positive marked-equity loss budget"})
+			r.addCheck(CDFLiquidityCheck{VenueID: key.VenueID, Role: state.Role, ClientID: key.ClientID, Failure: "successor supplier has no positive marked-equity loss budget"})
 		}
 		// A fill without a later inventory response is a valid measured negative
 		// activation outcome. It must not be relabeled as malformed evidence.

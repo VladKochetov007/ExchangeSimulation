@@ -43,6 +43,32 @@ func TestMeasureCDFLiquidityReconstructsBoundedSupplier(t *testing.T) {
 	}
 }
 
+func TestMeasureCDFLiquidityRecognizesSV1CSuccessorLossBudget(t *testing.T) {
+	run := writeCDFLiquidityFixture(t, true, false)
+	manifestPath := filepath.Join(run.Dir, "manifest.json")
+	raw, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated := strings.ReplaceAll(string(raw), "V2-R2-SV1-CDF-LIQUIDITY", "V2-R2-SV1C-24H-CDF-LIQUIDITY-STRICT-RISK")
+	if updated == string(raw) {
+		t.Fatal("fixture hypothesis was not present in manifest")
+	}
+	if err := os.WriteFile(manifestPath, []byte(updated), 0644); err != nil {
+		t.Fatal(err)
+	}
+	audit, err := run.MeasureCDFLiquidity()
+	if err != nil {
+		t.Fatalf("MeasureCDFLiquidity: %v", err)
+	}
+	if !audit.requirePositiveLossBudget {
+		t.Fatal("SV1C hypothesis did not require a positive loss budget")
+	}
+	if !hasCDFCheck(audit.Checks, "successor supplier must have a positive marked-equity loss budget") {
+		t.Fatalf("SV1C missing-budget check = %+v", audit.Checks)
+	}
+}
+
 func TestCDFSupplierRemovalCounterfactualUsesSideSpecificResidualDepth(t *testing.T) {
 	run := &CDFLiquidityRunAudit{
 		MinimumExecutableQty:      3,
