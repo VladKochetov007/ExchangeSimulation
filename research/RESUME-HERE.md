@@ -1833,3 +1833,18 @@ SV1C R2 calendar, finite CDF supplier, strict-risk and fail-closed evidence
 contracts. Only an accepted review may authorize pinned Go 1.27 binaries and
 the registered seed-643 activation probe. Holdouts `619`, `631`, and `641`
 remain untouched.
+
+## Append-only mechanical gate update: fresh-process determinism and evidence neutrality — 2026-09-08
+
+At source HEAD `6925392` (the exact pushed tree before this documentation
+append), the bounded fresh-process gate passed in 13.1 seconds under the
+two-core affinity policy. `MULTIVENUE_DETERMINISM=1` covered the cross-process
+execution-stream test, binary evidence across GOMAXPROCS 1/4 and log modes
+`none`/`full`, and fresh-process perp-exposure evidence. Execution identities,
+binary stream identities, and evidence-neutrality assertions all passed. This
+was a regression suite with small test worlds, not a registered development,
+capacity, activation, freeze, or holdout run.
+
+No source or economic behavior changed at this checkpoint. The next boundary
+remains the fresh exact-tree independent Sol-xhigh review; holdouts `619`,
+`631`, and `641` remain untouched.

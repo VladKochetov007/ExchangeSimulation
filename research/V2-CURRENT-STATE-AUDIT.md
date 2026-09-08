@@ -1668,3 +1668,14 @@ evidence was deleted. The next promotion gate is a fresh exact-tree
 independent review, followed only on acceptance by pinned binaries and the
 registered seed-643 activation probe. Holdouts `619`, `631`, and `641` remain
 untouched.
+
+## Append-only audit update: fresh-process determinism gate — 2026-09-08
+
+The source at pushed HEAD `6925392` passed the bounded fresh-process regression
+gate in 13.1 seconds with two-core affinity. It exercised cross-process event
+stream determinism, binary evidence determinism and log-mode neutrality across
+GOMAXPROCS 1/4, and fresh-process perp-exposure evidence determinism. No
+registered development, activation, capacity, freeze, or holdout world ran;
+the test fixtures were small regression worlds. The scientific source and
+economic contract remain unchanged, and holdouts `619`, `631`, and `641` stay
+untouched pending independent review and later freeze authorization.
