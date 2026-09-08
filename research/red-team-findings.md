@@ -1607,3 +1607,45 @@ to **add a channel** — a counter, a returned error, a field in
 This is also the honest context for where this audit's findings sit: the
 arithmetic and error-handling layers have held under every sweep, and the
 findings have accumulated at the specification, reporting and valuation layers.
+
+## RT-027 — Every actor acts, but one class effectively leaves the market
+
+**Classification.** Open question, not a finding in either direction. The
+liveness result is a bounded negative; the collapse it exposed is unresolved.
+
+**Base.** `a666d02faede3d40f046b11e60eb672c59386a94`.
+`clock-control-5h-101.json`, seed 607, 5 simulated hours, full logs.
+
+All 21 role classes place orders in both halves of the run: **no class is inert
+and none stops entirely.** That was the predicted outcome and it holds.
+
+**The instrument was wrong, and it nearly hid the interesting row.** The first
+version tested only for zero and printed "active" for everything, including:
+
+| class | first half | second half | ratio |
+|---|---:|---:|---:|
+| `dated_carry_arb` | 2 374 | **6** | **0.003** |
+| `cdf_spot_maker` | 18 430 | 3 646 | 0.198 |
+| `fixed_distance_maker` | 60 438 | 36 126 | 0.598 |
+
+**A zero-test is not a liveness test.** A class down 99.7% is not "active" in any
+sense a reader would accept. The tool now reports the ratio and names a collapse.
+
+**What is and is not established.** Three dated futures list in the run, expiring
+at 2 h, 4 h and 6 h; the 5-hour run ends before the third expires, and exactly
+one relisting happens — the 4 h contract when the 2 h one expires, then nothing.
+The dated board thins from three contracts to one, and `dated_carry_arb` trades a
+relationship *between* contracts, so some decline is expected. That a decline to
+**0.003** is expected is **not** established, and this experiment cannot separate
+design from stall without reading the actor's trigger condition.
+
+**Why it matters for the campaign's numbers.** The class still contributes a full
+row to every class-level average and to E-032's venue table, where it showed one
+of the higher between-venue ratios. If it spends most of the run out of the
+market, its score measures a shorter and different period than its peers' — an
+unearned difference between actors arising from the instrument board rather than
+from strategy.
+
+**Next and cheap**: read `dated_carry_arb`'s trigger to see whether it requires a
+contract pair that ceases to exist, or should still be quoting the one that
+remains.

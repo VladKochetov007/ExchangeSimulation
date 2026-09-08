@@ -2638,6 +2638,90 @@ where this audit's findings sit: the arithmetic and error-handling layers have
 held up under every sweep, and the findings have accumulated at the
 specification, reporting and valuation layers instead.
 
+**H-040 — some configured actor classes are effectively inert.**
+E-040 established that the arithmetic and error-handling layers hold, and that
+the findings cluster at specification, reporting and valuation. This turns the
+lens onto the part of the specification no experiment here has touched: **the
+actors themselves.**
+
+Every finding so far concerns the venue. But "a fair battle of actors" also
+requires that each configured actor *fights*. An actor whose quoting loop stalls
+— the ghost-order failure this project has already been bitten by, where a late
+accept after a cancel leaves a pending entry that blocks the timer forever —
+still appears in the population, still holds its endowment, and still contributes
+a row to every class-level average. It would read as "this strategy performs
+near zero" when the truth is "this strategy stopped playing".
+
+The observable already exists: every venue log carries `OrderAccepted` per
+client, and the population artifact carries role and equity. Counting orders per
+role class over a full run, and comparing the first and second halves of the run,
+distinguishes an actor that is quiet by design from one that stopped.
+
+Two candidates are already visible in E-032's table without having been looked
+for: `round_trip` shows a between-venue spread of **45** and a within-venue
+spread of **159** where comparable classes move in the millions, and
+`metaorder_trader` shows 1 672 against 35 823. Either is consistent with a class
+that barely trades — or with one that trades in tiny size by design.
+
+Predicted observable, recorded before measuring: every class places orders in
+both halves of the run, and the small-magnitude classes are small **by design**
+(small clip sizes, long holding periods) rather than stalled. I expect H-040
+**falsified** — this project's postmortem shows the ghost-order class of bug was
+found and fixed, and the audit has repeatedly found the actor-facing paths
+hardened.
+Falsifier for my own prediction: a class with orders in the first half and none
+in the second, which is a stall rather than a design.
+Mechanism family: population validity, actor liveness.
+
+**E-041 — H-040, does every configured actor act?**
+Preregistered above. Artifact: `research/tools/actorliveness/main.go`.
+Base: `a666d02faede3d40f046b11e60eb672c59386a94`.
+Run: `clock-control-5h-101.json`, seed 607, 5 simulated hours, `-log-mode full`.
+Reproduce: `go run research/tools/actorliveness/main.go -dir <logdir>`.
+
+Result: **H-040 FALSIFIED as predicted — no class is inert and none stops
+entirely.** All 21 role classes place orders in both halves of the run.
+
+**But the prediction was right for the wrong reason, and the instrument was
+wrong.** The first version of the tool tested only for zero, and printed
+"active" for every class including this one:
+
+| class | first half | second half | ratio |
+|---|---:|---:|---:|
+| `dated_carry_arb` | 2 374 | **6** | **0.003** |
+| `cdf_spot_maker` | 18 430 | 3 646 | 0.198 |
+| `fixed_distance_maker` | 60 438 | 36 126 | 0.598 |
+| `option_dealer` | 533 065 | 369 843 | 0.694 |
+
+**A zero-test is not a liveness test.** A class that falls by 99.7% is not
+"active" in any sense a reader would accept, and calling it that would have
+turned a real signal into a clean bill of health. The tool now reports the ratio
+and names a collapse. Eleventh instrument correction.
+
+**What the collapse is, and what is not established.** Three dated futures are
+listed in the run, at expiries 2 h, 4 h and 6 h after the start; the 5-hour run
+ends before the third expires, and exactly one relisting occurs — the 4 h
+contract is listed when the 2 h one expires, and nothing is listed after that. So
+the dated board thins from three contracts to one over the run, and
+`dated_carry_arb` trades a *relationship between* contracts.
+
+That makes a decline expected. It does **not** establish that a decline to
+**0.003** is expected, and this experiment cannot tell design from stall without
+reading the actor's own logic. Recorded as an open question rather than as a
+finding in either direction.
+
+**Why it matters for the campaign's own numbers.** `dated_carry_arb` still
+contributes a full row to every class-level average and to E-032's venue-effect
+table, where it showed one of the higher between-venue ratios (120×). If the
+class spends 60% of the run effectively out of the market, its score measures a
+shorter and different period than its peers' — which is an unearned difference
+between actors of exactly the kind this campaign is meant to detect, and it comes
+from the instrument board rather than from strategy.
+
+**Next, and cheap**: read `dated_carry_arb`'s trigger condition and check whether
+it requires a contract pair that ceases to exist, or whether it should still be
+quoting the single remaining contract.
+
 ---
 
 ## F. Findings
@@ -2654,6 +2738,11 @@ See `research/red-team-findings.md` for the full records.
 - **RT-003** — bounded no-violation results (INV-2, INV-5, INV-6, identity).
 - **RT-006** — latency is delivered as configured across 225 link x channel
   rows; no unearned speed advantage. Transport only.
+- **RT-027** — no actor class is inert, but `dated_carry_arb` collapses to
+  **0.003** of its first-half order rate while the dated board thins from three
+  contracts to one. Design or stall is **not established**; either way the class
+  contributes a full row to every class-level average while effectively out of
+  the market for much of the run. **Open question.**
 - **RT-026** — RT-001 and RT-025 are members of a **class**: four checks whose
   only output is a log line, silenced together by one deployment flag —
   `conservation_violation`, `margin_interest_failed`,
