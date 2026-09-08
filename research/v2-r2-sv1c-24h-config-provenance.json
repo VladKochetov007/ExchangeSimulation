@@ -9,11 +9,11 @@
   },
   "activation_roster": {
     "path": "research/configs/v2-r2-sv1c/activation-643.json",
-    "sha256": "2fd15017dfab99c157cde66d6520b1cc6b93bf3a1050e95bc1aacc31d7f4d3ba"
+    "sha256": "f698946861c5de0fc80e1b5563284f91145848e67be2e6be372f03a4db6ccc6f"
   },
   "activation_control": {
     "path": "research/configs/v2-r2-sv1c/activation-643-control.json",
-    "sha256": "bfa3ec41073eb803c7e9bf81e73ee0baf9a23fa05674ffc2928703289259fce1"
+    "sha256": "bb75dd593a962fcbd3f52518863827c1c5010b623c564619a1d9b21a564c0850"
   },
   "registered_configs": {
     "control-643-none.json": "105b8ad72154f8177fb7401f65f9a6cc606ca23354d7547217d9b43ebe63359d",
@@ -70,12 +70,12 @@
   ],
   "normalizer_registration": {
     "path": "research/v2-r2-sv1c-24h-config-normalizer-registration.json",
-    "sha256": "3d27c1ed26a0ad7196124ae5e9104de2be6b385926659c9fb044dde3416e4d4f"
+    "sha256": "f5dac800055e727a442c601cb4214c21ce98d7880d4c74ba9b8b88bda09081e7"
   },
   "normalizer": {
     "path": "bin/multivenue",
-    "sha256": "193bdcaa9b644012afaa19dfc428603a7d15f7e20335ce4f484ac0f25a7dbb75",
-    "revision": "f637eb53d0a3421807aa7991b464e650bcc0f5e2",
+    "sha256": "c45aa01629a84f2b11a83587332ded087c2759f99caa296d48a9f3db139fdd58",
+    "revision": "e21bd4169a335a3a5fd573b2018149c0f30a7c19",
     "go_version": "go1.27.0",
     "package": "exchange_sim/cmd/multivenue"
   },

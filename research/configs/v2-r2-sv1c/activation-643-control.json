@@ -30,6 +30,8 @@
     "south"
   ],
   "strict_population_accounting": true,
+  "strict_risk_contract": true,
+  "auto_borrow_spot": false,
   "venue_rules": null,
   "cross_asset_spot_graph": true,
   "cross_asset_collateral_marks": false,
@@ -255,7 +257,5 @@
   "cross_venue_arb_tiers": null,
   "cross_venue_base_latency": 0,
   "cross_venue_arb_lot_qty": 0,
-  "cross_venue_arb_max_attempts": 0,
-  "strict_risk_contract": true,
-  "auto_borrow_spot": false
+  "cross_venue_arb_max_attempts": 0
 }
