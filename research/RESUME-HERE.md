@@ -1218,3 +1218,37 @@ tree is clean and pushed; no activation, capacity measurement, development
 cell, freeze, or holdout has run. The next gate is one fresh exact-tree
 independent Sol-xhigh review, followed by a clean pinned Go 1.27 build only if
 that review accepts the complete successor scope.
+
+## Append-only operational update: activation comparison provenance binding — 2026-09-08
+
+The exact pushed successor HEAD is `4dd15d3` on
+`feature/r2-cdf-survival-successor`. This checkpoint closes the concrete
+provenance substitution gap found in the exact-tree review of `a666d02`: the
+old activation validator checked only pair-level booleans, so a seed-607
+producer comparison could be relabeled as seed-643 activation evidence.
+
+The new activation-pair v4 contract binds both nested run identities and the
+outer activation identity to the registered source configs and exact execution
+contract: seed 643, five-minute horizon, fixed simulation start/end nanos,
+three registered venues, treatment/control experiment and hypothesis IDs,
+`evstream_v3`, full logs, reviewed revision, simulator/analyzer SHA-256,
+linux/amd64/v1, and the exact expected 12-supplier treatment population. The
+activation runner emits these fields from the registered configs. The contract
+fixture includes a real producer substitution negative, a production-shaped
+positive comparison, and nested/outer hash, metadata, venue, pair-field and
+population mutation negatives.
+
+Validation at `4dd15d3`: focused `analysis`, `types`, `exchange`, and
+`simulations/multivenue` suites passed; the activation contract passed; and
+clean `GOMAXPROCS=2 make test` passed all packages plus integrated SV1,
+capacity-archive, R2-archive, and parity fixtures. No simulator activation,
+capacity measurement, development cell, freeze, or holdout was run. The
+scientific tree is clean and pushed, but no exact-tree independent review
+attestation exists yet, so pinned Go 1.27 builds and activation remain closed.
+
+At the next checkpoint the remaining mechanical gates are `go vet ./...`, the
+bounded targeted race/evidence/determinism checks, and one fresh exact-tree
+independent Sol-xhigh review. The performance branch was fetched through
+`b1847ac`; its `f153e12` analyzer-only reaction book-key correction is recorded
+as deferred red-team input, while the VNext binary evidence line remains
+separate and unmerged. Holdouts `619`, `631`, and `641` remain untouched.

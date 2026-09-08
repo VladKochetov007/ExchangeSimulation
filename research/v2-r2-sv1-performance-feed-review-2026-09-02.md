@@ -108,3 +108,50 @@ new risk or evidence-contract reports, and independently reproduce any finding
 that could affect actor decisions, liquidation, balances, funding, settlement,
 or lifecycle. Do not inspect or consume holdouts before the separately
 authorized freeze boundary.
+
+## Append-only checkpoint: provenance-bound activation comparison — 2026-09-08
+
+The scientific successor is now at `4dd15d3` on
+`feature/r2-cdf-survival-successor`, pushed to `origin`. This is a protocol
+hardening change only. It preserves the R2 calendar/lifecycle semantics, the
+finite CDF roster, the historical ABC/USD suppliers, the predecessor negative
+boundary, and the holdout boundary.
+
+The exact-tree review of `a666d02` identified a concrete substitution gap: a
+valid seed-607, one-venue producer comparison could be placed under an outer
+seed-643 activation attestation and pass the old four-boolean check. The fix
+raises the activation-pair contract to v4 and binds the comparison to the
+registered treatment/control source-config hashes, seed, horizon, nanosecond
+endpoints, venue set, experiment and hypothesis IDs, `evstream_v3`/`full`
+mode, reviewed source revision, simulator/analyzer hashes and linux/amd64/v1
+build identity. The expected supplier population is derived from the
+registered treatment config (currently 4 suppliers × 3 venues = 12),
+rather than supplied by an unbound fixture argument. The runner emits the same
+identity fields from its effective registered configs.
+
+The activation-contract test now keeps the real analysis producer fixture as a
+negative seed/config substitution, builds a production-shaped positive
+seed-643 comparison, and rejects nested and outer mutations for seed, revision,
+binary/config/analyzer hashes, evidence/log mode, venues, experiment identity,
+time bounds, pair booleans and supplier population. Focused `analysis`,
+`types`, `exchange`, and `simulations/multivenue` tests passed. Clean
+`GOMAXPROCS=2 make test` passed all Go packages and integrated, SV1, archive and
+parity fixtures after the commit. No activation, capacity, development,
+freeze, or holdout world was run.
+
+The performance branch was fetched through `b1847ac`, reading only the delta
+after `c4434ad`. Its `f153e12` reaction analyzer fix is a confirmed analyzer
+book-key bug candidate: symbolless spot records were pooled across a venue's
+spot files, producing cross-instrument markouts. This is not simulator
+semantics and is not used by the SV1B activation predicate; it is deferred
+from the scientific tree. Any historical reaction-dependent claim would need
+its retained evidence rescored/replayed before reuse. The binary evidence,
+ordering-key, and analyzer reproducibility changes remain a separate deferred
+VNext line and were not merged.
+
+The current tree has no accepted exact-tree review attestation. The remaining
+gate is `go vet`, targeted race/evidence/determinism validation, and one fresh
+independent Sol-xhigh review of the complete exact tree before pinned binaries
+or the five-minute activation probe. Capacity, development, freeze and
+holdout execution remain closed; holdouts `619`, `631`, and `641` remain
+untouched. The next performance marker is `b1847ac`.

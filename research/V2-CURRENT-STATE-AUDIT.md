@@ -1052,3 +1052,46 @@ activation, capacity, development, freeze, or holdout run occurred. The
 performance feed was fetched through `c4434ad` with no newer commit and no
 performance code was merged. Holdouts `619`, `631`, and `641` remain
 untouched.
+
+## Append-only operational update: exact activation-comparison identity — 2026-09-08
+
+The current scientific successor is `4dd15d3` on
+`feature/r2-cdf-survival-successor`, clean and pushed. The predecessor R2
+candidate remains the preserved negative control, **NON-VIABLE AT THE 24H
+MARKET-SURVIVAL GATE**. No R2 economics, calendar semantics, finite CDF
+participant behavior, historical supplier roster, registered development
+configuration, or holdout assignment changed here.
+
+The rejected `a666d02` exact-tree review found that its activation validator
+could accept a valid seed-607/one-venue producer comparison relabeled by an
+outer seed-643 activation attestation. `4dd15d3` replaces that weak boundary
+with activation-pair contract v4. It derives the expected treatment population
+from the registered source config and binds nested treatment/control audit
+provenance plus the outer activation provenance to exact config hashes, seed,
+five-minute horizon, fixed start/end timestamps, venue set, experiment and
+hypothesis IDs, evidence/log modes, reviewed revision, simulator/analyzer
+hashes and linux/amd64/v1 build identity. The runner obtains the same fields
+from the effective registered configs.
+
+The adversarial contract fixture explicitly tests: real producer output used as
+a wrong-seed/config substitution; a 12-supplier × three-venue-shaped positive
+pair; wrong nested seed/revision/binary/config/analyzer identity; wrong
+evidence/log mode or venues; missing/false pair booleans; wrong supplier
+population; and wrong outer venue/experiment/time/evidence identity. All
+required mutations are rejected. Focused Go suites and clean full
+`GOMAXPROCS=2 make test` pass, including integrated, capacity-archive, R2
+archive and parity fixtures.
+
+This is still a pre-promotion state: no exact-tree review attestation exists,
+so no pinned binary build, activation probe, capacity run, development cell,
+freeze, or holdout execution is authorized. Next are `go vet`, bounded targeted
+race/evidence/determinism checks, and one fresh independent Sol-xhigh review.
+Holdouts `619`, `631`, and `641` remain untouched.
+
+The asynchronous performance feed was inspected through `b1847ac`. The new
+`f153e12` reaction fix is classified as an analyzer bug candidate (symbolless
+spot records were keyed without their file-derived instrument and could pool
+unrelated books); it is not in the SV1B activation path and was not imported.
+Historical reaction-dependent claims, if reused, require retained-evidence
+rescore/replay under a corrected analyzer. The binary evidence and ordering
+changes remain deferred VNext work. The next performance marker is `b1847ac`.
