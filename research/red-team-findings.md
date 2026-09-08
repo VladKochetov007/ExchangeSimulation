@@ -2849,3 +2849,54 @@ without apportioning it among the candidates.
 **Scope.** One seed, one configuration. Notional uses terminal marks for the whole
 run, so these are averages against an end-of-run valuation rather than trade-time
 rates.
+
+## RT-049 — The cross book's cost is neither its spread nor inventory drift
+
+**Classification.** ELIMINATION. Both ordinary components of a taker's result are
+excluded; the residual is named but explicitly not claimed.
+
+**Base.** `a666d02faede3d40f046b11e60eb672c59386a94`, seed 607, 8 h, full logs.
+
+**Quoted half-spreads, top of book** (`research/tools/bookspread`):
+
+| book | samples | median | mean | p90 | max | `noise_flow` loss rate |
+|---|---:|---:|---:|---:|---:|---:|
+| ABC/USD | 86 410 | **0.35 bp** | 0.34 | 0.39 | 2.56 | 5.4 bps |
+| ABC-PERP | 85 595 | 0.41 bp | 0.41 | 0.42 | 3.30 | — |
+| **ABC/CDF** | 77 814 | **1.80 bp** | 2.10 | 3.88 | 8.78 | **116.1 bps** |
+| CDF/USD | 83 573 | **4.99 bp** | 4.48 | 5.00 | 6.67 | 10.0 bps |
+
+The cross book's loss rate is **64x its own quoted half-spread**, which bounds the
+spread component at about **1.8%** of it. The preregistered falsifier required a
+half-spread of 100 bps or more to explain the loss; the measurement is 1.80 bp.
+
+**Spread and cost are not even ordered together.** `CDF/USD` carries the widest
+spread in the population and the second-lowest loss rate; `ABC/CDF` has under half
+that spread and 11.6x the loss rate. Whatever the cross book costs its takers, it
+is not what the book charges to cross it.
+
+**The inventory story is ruled out by sign.** The prediction was that
+`noise_flow` ends net long, so that a collapsing book would explain the loss as
+revaluation. Measured: **net −13 224.08 contracts, with 14 of 18 participants
+short**. A short in a book that fell 69% *gains*. The mechanism does not merely
+fail to explain the loss, it points the other way.
+
+**Status: inconclusive by design.** Falsifier (c) specified that if neither
+component dominates, the decomposition is reported inconclusive rather than split
+by assumption. Both components are eliminated, which narrows the search without
+answering it.
+
+**What remains, and how to settle it.** With spread and inventory drift excluded,
+the residual candidate is that the loss is realised **at the moment of trade** —
+ABC and CDF exchanged at a rate far from the two assets' USD values, on a book
+measured at −69% to −83% from its implied rate. The decisive measurement is a
+volume-weighted execution price: CDF received per ABC sold, converted at the CDF
+mark, against ABC's own USD mark. **That is not claimed here.** It would be the
+sixth mechanism sentence this campaign published without measuring it, and the
+previous five were wrong.
+
+**Scope.** One seed, one configuration. Half-spreads are top-of-book and ignore
+depth, so a taker sweeping levels pays more than quoted — that widens the spread
+component but nowhere near the factor of 64 required. Spot positions are
+accumulated from fills with no exchange-reported cross-check available, which the
+tool reports.

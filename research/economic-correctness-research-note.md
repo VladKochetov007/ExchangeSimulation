@@ -5115,6 +5115,124 @@ trade-time rates.
 Recorded as RT-048.
 
 
+**H-060 (PREREGISTERED) — the noise traders' 116 bps on `ABC/CDF` is not a wide
+spread; it is a directional loss from accumulating inventory in a collapsing
+book.**
+
+[[RT-048]] deliberately left 205.9 M unapportioned among "tick, depth, maker and
+dislocation". This decomposes it into the only two components a taker's result
+can have.
+
+**Decomposition.** A taker's loss is
+`spread paid` + `inventory revaluation on what it accumulates`. The first scales
+with the number and size of trades and the quoted half-spread; the second scales
+with the **net position it ends up holding** times how far the price moved. They
+are separately measurable and they predict opposite things about the book's
+quoting.
+
+**Why the spread reading is doubtful.** 116 bps of half-spread on a book quoted
+by a Stoikov maker with `maker_min_half_spread_ticks: 1` and a cross tick of
+`mvBasePrecision/1000` — 0.006% of a 1.67e9 price — would be three orders of
+magnitude above the tick floor. Possible, but it would make the cross maker's
+quoting, not the dislocation, the story.
+
+**Claims.**
+1. `ABC/CDF`'s median quoted half-spread is **< 30 bps** — too small to account
+   for a 116 bps loss rate.
+2. `noise_flow` ends **net long** `ABC/CDF`, and the directional component
+   (terminal position × price move over the run) explains **≥50%** of the
+   215.9 M.
+
+**Falsifiers.**
+(a) `ABC/CDF` half-spread **≥100 bps** → the loss *is* spread, the book is simply
+quoted very wide, and no dislocation-specific explanation is needed. This would
+relocate the finding to the maker's quoting policy;
+(b) `noise_flow`'s terminal `ABC/CDF` position ≈ 0 → there is no directional
+component and the loss is transaction-cost-like after all;
+(c) the directional component is **<25%** of the loss → neither component
+dominates, the decomposition does not explain the number, and the result is
+reported **INCONCLUSIVE** rather than split by assumption.
+
+**Note on what "directional loss" would mean.** If claim 2 holds, the noise
+traders lose because they are long an asset that fell — which is an ordinary
+market outcome *given the price path*. It would place the anomaly entirely in why
+the price fell 69% ([[RT-031]]: the book quotes around itself), and **not** in the
+transaction mechanics. That is a materially different conclusion from RT-048's
+framing and would narrow rather than widen the defect.
+
+**Instrument.** New Go tool `research/tools/bookspread`: median and mean relative
+half-spread per book from `BookSnapshot` evidence, handling both the per-book and
+nested payload shapes that have now caught three tools.
+
+**Discriminating experiment E-065**, preregistered before the run: seed 607, 8 h,
+`-log-mode full`; `bookspread` for quoted spreads, `positionpath -role-prefix
+noise_flow` per book for terminal inventory.
+Status: **MIXED / INCONCLUSIVE** — claim 1 supported (spread is 1.80 bp against a
+116.1 bps loss), claim 2 falsified with a sign reversal; the decomposition is
+reported inconclusive as falsifier (c) specified.
+
+
+**E-065 — H-060 MIXED, and the decomposition is reported INCONCLUSIVE as
+preregistered. Claim 1 supported decisively; claim 2 falsified with a sign
+reversal that rules the inventory story out affirmatively.**
+Base: `a666d02faede3d40f046b11e60eb672c59386a94`, seed 607, 8 h, `-log-mode full`.
+Reproduce: `go run research/tools/bookspread/main.go -dir <logdir>` and
+`go run research/tools/positionpath/main.go -dir <logdir> -symbol ABC/CDF -role-prefix noise_flow`.
+
+**Claim 1 SUPPORTED. Quoted spread cannot explain the loss.**
+
+| book | samples | median half-spread | mean | p90 | max | `noise_flow` loss rate |
+|---|---:|---:|---:|---:|---:|---:|
+| ABC/USD | 86 410 | **0.35 bp** | 0.34 | 0.39 | 2.56 | 5.4 bps |
+| ABC-PERP | 85 595 | 0.41 bp | 0.41 | 0.42 | 3.30 | — |
+| **ABC/CDF** | 77 814 | **1.80 bp** | 2.10 | 3.88 | 8.78 | **116.1 bps** |
+| CDF/USD | 83 573 | **4.99 bp** | 4.48 | 5.00 | 6.67 | 10.0 bps |
+
+The cross book's loss rate is **64× its own quoted half-spread**, and the quoted
+spread accounts for **at most 1.8%** of it. Predicted <30 bps; measured 1.80 bp.
+Falsifier (a), which required ≥100 bps, misses by nearly two orders of magnitude.
+
+**Spread and loss rate are not even ordered together.** `CDF/USD` has the
+**widest** spread in the population (4.99 bp) and the **second-lowest** loss rate
+(10.0 bps); `ABC/CDF` has a spread under half that and a loss rate 11.6× higher.
+Whatever drives the cross book's cost, it is not what the book charges to cross
+it.
+
+**Claim 2 FALSIFIED, and the sign is the informative part.** I predicted
+`noise_flow` ends **net long** `ABC/CDF` so that a falling book would explain the
+loss as inventory revaluation. Measured: **net −13 224.08 contracts, short**, with
+**14 of 18 participants short**. A short position in a book that fell 69%
+([[RT-031]]) **gains**. The inventory-revaluation story does not merely fail to
+explain the loss — it points the wrong way, so it is ruled out rather than left
+open.
+
+**Status: INCONCLUSIVE, exactly as falsifier (c) specified.** Both candidate
+components fail: the quoted spread bounds at ~2% of the loss rate, and the
+directional component has the opposite sign. I am not splitting the remainder by
+assumption. What the experiment did achieve is **elimination**: the two mechanisms
+a taker's result can ordinarily be decomposed into are both excluded, which
+narrows the search rather than answering it.
+
+**What remains, and the next experiment that discriminates it.** With spread and
+inventory drift both eliminated, the residual candidate is that the loss is
+**realised at the moment of trade** — the noise traders exchanging ABC and CDF at
+a rate far from the two assets' USD values, on a book [[RT-041]] measured at −69%
+to −83% from its implied rate. The decisive measurement is a **volume-weighted
+execution price**: total CDF received per ABC sold on `ABC/CDF`, converted at the
+CDF mark, against ABC's own USD mark. If noise traders systematically sell ABC for
+materially less USD-equivalent than ABC is worth, the loss is per-transaction
+dislocation. **I am not claiming that yet** — it is the sixth mechanism sentence
+this campaign would have published unmeasured, and the previous five were wrong.
+
+**Scope.** One seed, one configuration. Half-spreads are top-of-book only and
+ignore depth, so a taker consuming multiple levels pays more than the quoted
+figure; that widens the spread component but not by the factor of 64 required.
+Positions are accumulated from fills with no exchange-reported cross-check
+available on spot, which the tool states.
+
+Recorded as RT-049.
+
+
 ---
 
 ## F. Findings
@@ -5131,6 +5249,15 @@ See `research/red-team-findings.md` for the full records.
 - **RT-003** — bounded no-violation results (INV-2, INV-5, INV-6, identity).
 - **RT-006** — latency is delivered as configured across 225 link x channel
   rows; no unearned speed advantage. Transport only.
+- **RT-049** — the cross book's 116.1 bps loss rate is **not the spread and not
+  inventory drift**. Its median quoted half-spread is **1.80 bp — the loss is 64x
+  it**, and spread bounds at ~2% of the rate; `CDF/USD` has the population's
+  *widest* spread (4.99 bp) with the second-*lowest* loss rate, so the two are not
+  even ordered together. And `noise_flow` ends **net short 13 224 contracts** (14
+  of 18 participants short), so a falling book would have *gained* it money —
+  the inventory story is ruled out by sign, not merely unsupported. Both ordinary
+  components of a taker's result are eliminated; the decomposition is reported
+  **INCONCLUSIVE** rather than split by assumption.
 - **RT-048** — **`noise_flow`'s loss is not a spread payment either.** On a
   fair-value notional basis it pays **5.4 bps on `ABC/USD`, 10.0 bps on
   `CDF/USD`, and 116.1 bps on `ABC/CDF`** — **21.4x** the pegged book — with
