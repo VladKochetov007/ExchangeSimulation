@@ -79,15 +79,18 @@ type AccountValuationSpec struct {
 // their entry premium was already transferred through the wallet at each fill.
 type MarkedAccountSnapshot struct {
 	AccountSnapshot
-	ReportAsset          string `json:"report_asset"`
-	ReportPrecision      int64  `json:"report_precision"`
-	SpotEquity           int64  `json:"spot_equity"`
-	PerpCashEquity       int64  `json:"perp_cash_equity"`
-	IsolatedEquity       int64  `json:"isolated_equity"`
-	DerivativeUnrealized int64  `json:"derivative_unrealized"`
-	OptionMarketValue    int64  `json:"option_market_value"`
-	Maintenance          int64  `json:"maintenance"`
-	Equity               int64  `json:"equity"`
+	// MarginInterestRemainders exposes sub-unit financing state at the same
+	// strict valuation boundary as the account. A missing entry means zero.
+	MarginInterestRemainders map[string]int64 `json:"margin_interest_remainders,omitempty"`
+	ReportAsset              string           `json:"report_asset"`
+	ReportPrecision          int64            `json:"report_precision"`
+	SpotEquity               int64            `json:"spot_equity"`
+	PerpCashEquity           int64            `json:"perp_cash_equity"`
+	IsolatedEquity           int64            `json:"isolated_equity"`
+	DerivativeUnrealized     int64            `json:"derivative_unrealized"`
+	OptionMarketValue        int64            `json:"option_market_value"`
+	Maintenance              int64            `json:"maintenance"`
+	Equity                   int64            `json:"equity"`
 }
 
 type IsolatedPosition struct {
@@ -102,6 +105,9 @@ type BorrowingConfig struct {
 	AutoBorrowPerp    bool
 	DefaultMarginMode MarginMode
 
+	// BorrowRates is the authoritative annual interest-rate schedule in basis
+	// points for enabled loans. An asset-specific entry wins over "default";
+	// an omitted schedule uses the manager's documented default.
 	BorrowRates       map[string]int64
 	CollateralFactors map[string]float64
 	MaxBorrowPerAsset map[string]int64

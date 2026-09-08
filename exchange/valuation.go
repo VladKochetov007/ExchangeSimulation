@@ -23,6 +23,10 @@ func (e *DefaultExchange) MarkedAccount(clientID uint64, spec etypes.AccountValu
 	if client == nil {
 		return etypes.MarkedAccountSnapshot{}, fmt.Errorf("exchange: marked account unknown client %d", clientID)
 	}
+	interestRemainders := make(map[string]int64)
+	for asset, remainder := range e.collateralInterestRemainders[clientID] {
+		interestRemainders[asset] = remainder
+	}
 
 	timestamp := e.Clock.NowUnixNano()
 	balance := client.GetBalanceSnapshot(timestamp)
@@ -131,16 +135,17 @@ func (e *DefaultExchange) MarkedAccount(clientID uint64, spec etypes.AccountValu
 		return etypes.MarkedAccountSnapshot{}, fmt.Errorf("exchange: marked option value overflows reporting asset")
 	}
 	return etypes.MarkedAccountSnapshot{
-		AccountSnapshot:      etypes.AccountSnapshot{BalanceSnapshot: *balance, Positions: positionSnapshots},
-		ReportAsset:          spec.ReportAsset,
-		ReportPrecision:      spec.ReportPrecision,
-		SpotEquity:           spotEquity,
-		PerpCashEquity:       perpEquity,
-		IsolatedEquity:       isolateEquity,
-		DerivativeUnrealized: derivativeUPnL,
-		OptionMarketValue:    optionMarketValue,
-		Maintenance:          maintenance,
-		Equity:               equity,
+		AccountSnapshot:          etypes.AccountSnapshot{BalanceSnapshot: *balance, Positions: positionSnapshots},
+		MarginInterestRemainders: interestRemainders,
+		ReportAsset:              spec.ReportAsset,
+		ReportPrecision:          spec.ReportPrecision,
+		SpotEquity:               spotEquity,
+		PerpCashEquity:           perpEquity,
+		IsolatedEquity:           isolateEquity,
+		DerivativeUnrealized:     derivativeUPnL,
+		OptionMarketValue:        optionMarketValue,
+		Maintenance:              maintenance,
+		Equity:                   equity,
 	}, nil
 }
 

@@ -37,6 +37,39 @@ type MarginInterestEvent struct {
 	Amount int64  `json:"amount"`
 }
 
+// MarginInterestAccrualEvent records the fixed-point state transition behind
+// one declared interest interval. Interest may be zero while the bounded
+// remainder is nonzero; retaining that state makes repeated small debts
+// auditable rather than silently free of financing cost.
+type MarginInterestAccrualEvent struct {
+	Timestamp       int64  `json:"timestamp"`
+	ClientID        uint64 `json:"client_id"`
+	Asset           string `json:"asset"`
+	IntervalSeconds int64  `json:"interval_seconds"`
+	Principal       int64  `json:"principal"`
+	RateBps         int64  `json:"rate_bps"`
+	Interest        int64  `json:"interest"`
+	SpotInterest    int64  `json:"spot_interest"`
+	PerpInterest    int64  `json:"perp_interest"`
+	RemainderBefore int64  `json:"remainder_before"`
+	RemainderAfter  int64  `json:"remainder_after"`
+	Denominator     int64  `json:"denominator"`
+}
+
+// MarginInterestRemainderClosedEvent records the explicit terminal policy for
+// sub-unit interest when a debt is fully repaid or liquidated. The current
+// fixed-point contract writes the fraction off because it cannot be posted as
+// an integer asset unit; it must never disappear without an audit record.
+type MarginInterestRemainderClosedEvent struct {
+	Timestamp       int64  `json:"timestamp"`
+	ClientID        uint64 `json:"client_id"`
+	Asset           string `json:"asset"`
+	RemainderBefore int64  `json:"remainder_before"`
+	RemainderAfter  int64  `json:"remainder_after"`
+	Denominator     int64  `json:"denominator"`
+	Reason          string `json:"reason"`
+}
+
 type TransferEvent struct {
 	Timestamp  int64  `json:"timestamp"`
 	ClientID   uint64 `json:"client_id"`

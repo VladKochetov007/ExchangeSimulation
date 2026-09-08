@@ -254,6 +254,9 @@ func (bm *BorrowingManager) getRate(asset string) int64 {
 	if rate, ok := bm.Config.BorrowRates["default"]; ok {
 		return rate
 	}
+	// Keep the historical borrowing default explicit. Collateral accrual calls
+	// this same resolver when borrowing is enabled, so the rate in a borrow
+	// receipt and the rate in every later accrual record share one authority.
 	return 500
 }
 

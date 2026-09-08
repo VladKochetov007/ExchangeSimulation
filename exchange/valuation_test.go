@@ -50,6 +50,30 @@ func TestMarkedAccountIncludesLockedCashAndDebtOnce(t *testing.T) {
 	}
 }
 
+func TestMarkedAccountExposesCollateralInterestRemainderState(t *testing.T) {
+	ex := NewExchange(1, &RealClock{})
+	defer ex.Shutdown()
+	ex.ConnectNewClient(1, nil, &FixedFee{})
+	ex.collateralInterestRemainders[1] = map[string]int64{"USD": collateralInterestDenominator / 2}
+
+	report, err := ex.MarkedAccount(1, etypes.AccountValuationSpec{
+		ReportAsset: "USD", ReportPrecision: valuationQuotePrecision,
+		AssetMarks: map[string]etypes.AssetValuationMark{
+			"USD": {Price: valuationQuotePrecision, Precision: valuationQuotePrecision},
+		},
+	})
+	if err != nil {
+		t.Fatalf("MarkedAccount: %v", err)
+	}
+	if got := report.MarginInterestRemainders["USD"]; got != collateralInterestDenominator/2 {
+		t.Fatalf("marked remainder = %d want %d", got, collateralInterestDenominator/2)
+	}
+	delete(report.MarginInterestRemainders, "USD")
+	if got := ex.collateralInterestRemainders[1]["USD"]; got == 0 {
+		t.Fatal("marked account exposed mutable remainder state")
+	}
+}
+
 func TestMarkedAccountUsesOptionRiskMarkInsteadOfBookPrice(t *testing.T) {
 	ex := NewExchange(2, &RealClock{})
 	option := NewEuropeanOption(

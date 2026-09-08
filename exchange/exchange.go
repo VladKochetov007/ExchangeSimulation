@@ -59,7 +59,10 @@ type AutomationConfig struct {
 	// PriceUpdateInterval is how often to update funding rates (default: 3s)
 	PriceUpdateInterval time.Duration
 
-	// CollateralRate is annual interest rate on borrowed amounts in bps (default: 500 = 5%)
+	// CollateralRate is the legacy fallback annual interest rate on directly
+	// injected debt in bps. Once BorrowingMgr is enabled, BorrowingConfig's
+	// BorrowRates (including its default fallback) is authoritative so the
+	// borrow receipt and later accrual records cannot disagree.
 	CollateralRate int64
 
 	// LiquidationFeeBps is the clearance fee charged on a liquidation's closed
@@ -153,24 +156,33 @@ type DefaultExchange struct {
 	venueBalanceSequence uint64
 	// RequestPolicy meters and admits incoming requests. Nil leaves the venue
 	// unmetered, which is what scenarios without a published budget expect.
-	RequestPolicy                RequestPolicy
-	NextOrderID                  uint64
-	Matcher                      MatchingEngine
-	MDPublisher                  *MDPublisher
-	Clock                        Clock
-	Loggers                      map[string]Logger
-	instrumentLogFallback        Logger
-	BorrowingMgr                 *BorrowingManager
-	CollateralRate               int64
-	LiquidationFeeBps            int64
-	requireExactLinearAccounting bool
-	autoAnchorMarks              bool
-	deterministicIngress         bool
-	deterministicPhases          bool
-	markEMAWindow                int
-	markBandBps                  int64
-	autoAnchoredSymbols          map[string]bool
-	requestsInFlight             atomic.Int64
+	RequestPolicy         RequestPolicy
+	NextOrderID           uint64
+	Matcher               MatchingEngine
+	MDPublisher           *MDPublisher
+	Clock                 Clock
+	Loggers               map[string]Logger
+	instrumentLogFallback Logger
+	BorrowingMgr          *BorrowingManager
+	// collateralInterestRemainders carries sub-quote-unit financing state
+	// per debt. It is exchange state, not client-visible cash, and is committed
+	// atomically with each collateral-interest sweep.
+	collateralInterestRemainders map[uint64]map[string]int64
+	// collateralInterestLastTimestamps prevents charging the same declared
+	// interval twice when a scheduler retries an already-consumed timestamp.
+	// Entries survive debt closure so a repay/reborrow at one timestamp cannot
+	// replay the old period.
+	collateralInterestLastTimestamps map[uint64]map[string]int64
+	CollateralRate                   int64
+	LiquidationFeeBps                int64
+	requireExactLinearAccounting     bool
+	autoAnchorMarks                  bool
+	deterministicIngress             bool
+	deterministicPhases              bool
+	markEMAWindow                    int
+	markBandBps                      int64
+	autoAnchoredSymbols              map[string]bool
+	requestsInFlight                 atomic.Int64
 	// automInFlight counts automation-loop work (mark prices, funding,
 	// expiry) in progress. These loops react to the same clock the runner
 	// advances, so a barrier that ignored them would move time while the
@@ -299,24 +311,26 @@ func NewExchangeWithConfig(config ExchangeConfig) *DefaultExchange {
 			FeeRevenue:    make(map[string]int64),
 			InsuranceFund: make(map[string]int64),
 		},
-		conservation:                 newConservationTracker(),
-		NextOrderID:                  1,
-		Matcher:                      matcher,
-		MDPublisher:                  NewMDPublisher(),
-		Clock:                        config.Clock,
-		Loggers:                      make(map[string]Logger),
-		settlementPending:            make(map[string]expirySettlementPending),
-		tickerFactory:                config.TickerFactory,
-		deterministicIngress:         config.DeterministicIngress,
-		deterministicPhases:          config.DeterministicPhases,
-		requireExactLinearAccounting: config.RequireExactLinearPositionAccounting,
-		running:                      false,
-		shutdownCh:                   make(chan struct{}),
-		snapshotStopCh:               make(chan struct{}),
-		snapshotInterval:             config.SnapshotInterval,
-		snapshotPollInterval:         config.SnapshotPollInterval,
-		balanceSnapshotStopCh:        make(chan struct{}),
-		balanceSnapshotInterval:      config.BalanceSnapshotInterval,
+		conservation:                     newConservationTracker(),
+		NextOrderID:                      1,
+		Matcher:                          matcher,
+		MDPublisher:                      NewMDPublisher(),
+		Clock:                            config.Clock,
+		Loggers:                          make(map[string]Logger),
+		collateralInterestRemainders:     make(map[uint64]map[string]int64),
+		collateralInterestLastTimestamps: make(map[uint64]map[string]int64),
+		settlementPending:                make(map[string]expirySettlementPending),
+		tickerFactory:                    config.TickerFactory,
+		deterministicIngress:             config.DeterministicIngress,
+		deterministicPhases:              config.DeterministicPhases,
+		requireExactLinearAccounting:     config.RequireExactLinearPositionAccounting,
+		running:                          false,
+		shutdownCh:                       make(chan struct{}),
+		snapshotStopCh:                   make(chan struct{}),
+		snapshotInterval:                 config.SnapshotInterval,
+		snapshotPollInterval:             config.SnapshotPollInterval,
+		balanceSnapshotStopCh:            make(chan struct{}),
+		balanceSnapshotInterval:          config.BalanceSnapshotInterval,
 	}
 	if policy, ok := ex.Positions.(interface{ SetRequireExactLinearPositionAccounting(bool) }); ok {
 		policy.SetRequireExactLinearPositionAccounting(config.RequireExactLinearPositionAccounting)
@@ -2215,6 +2229,9 @@ func (e *DefaultExchange) liquidate(clientID uint64, client *Client, symbol stri
 					client.BorrowedSpot[inst.QuoteAsset()],
 					client.Borrowed[inst.QuoteAsset()],
 				)
+				if client.Borrowed[inst.QuoteAsset()] <= 0 {
+					e.closeCollateralInterestRemainderLocked(clientID, inst.QuoteAsset(), timestamp, "liquidation")
+				}
 				client.PerpBalances[inst.QuoteAsset()] -= repayAmount
 
 				logBalanceChange(e, timestamp, clientID, symbol, "liquidation_repay", []BalanceDelta{
@@ -2464,5 +2481,9 @@ func (e *DefaultExchange) RepayMargin(clientID uint64, asset string, amount int6
 	defer e.mu.Unlock()
 	client := e.Clients[clientID]
 	ctx := buildBorrowContext(e, client, clientID)
-	return e.BorrowingMgr.RepayMargin(ctx, asset, amount)
+	err := e.BorrowingMgr.RepayMargin(ctx, asset, amount)
+	if err == nil && client != nil && client.Borrowed[asset] <= 0 {
+		e.closeCollateralInterestRemainderLocked(clientID, asset, ctx.Timestamp, "debt_repaid")
+	}
+	return err
 }
