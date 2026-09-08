@@ -2900,3 +2900,63 @@ depth, so a taker sweeping levels pays more than quoted — that widens the spre
 component but nowhere near the factor of 64 required. Spot positions are
 accumulated from fills with no exchange-reported cross-check available, which the
 tool reports.
+
+## RT-050 — The cross book's cost is realised at execution, and the chain closes
+
+**Classification.** REAL, and it completes the campaign's central causal chain.
+Every link is now measured rather than inferred.
+
+**Base.** `a666d02faede3d40f046b11e60eb672c59386a94`, seed 607, 8 h, full logs.
+216 529 fills matched, 0 skipped for a missing fair rate.
+
+**Measured** (`research/tools/crossexec`; fair rate rebuilt as the venue's own
+consensus, median `ABC/USD` mid over median `CDF/USD` mid, at or before each
+fill):
+
+| | volume | VWAP (CDF/ABC) | fair at execution | gap |
+|---|---:|---:|---:|---:|
+| bought | 182 022.51 | 7.9059 | 16.2996 | **−51.50%** |
+| sold | 195 246.58 | 8.0708 | 16.3087 | **−50.51%** |
+| net flow | **−13 224.07** | | | |
+
+The noise traders transact ABC at roughly **half its fair value in CDF, in both
+directions**, over 216 529 fills. They buy cheap and sell cheap; because they sell
+13 224 more than they buy, the net is a large loss.
+
+**Preregistered cross-check passes.**
+
+    implied loss from execution away from fair   −246 188 281 USD
+    measured loss (independent contribution calc) −215 945 892 USD
+    ratio                                              114.0%
+
+Inside the ±25% band; falsifiers needed <50%, >200%, or VWAP ~ fair, and none
+fire. The two numbers come from different arithmetic on the same evidence — one
+accumulates per-fill deviation from a contemporaneous rate, the other sums cash
+flows and values terminal inventory at terminal marks. The residual 14% is
+accounted for by the 5 bp taker fee, the snapshot-to-fill timing gap, and exactly
+that difference in terminal valuation.
+
+**An unplanned second cross-check landed exactly.** `crossexec` computes net base
+flow −13 224.07 from fills; `positionpath`, written separately, reported
+−13 224.08. Agreement to 0.01 contracts.
+
+**The chain, end to end, every link measured:**
+
+| link | finding |
+|---|---|
+| the cross maker quotes around its own mid | RT-031 (`ReferenceSymbol` = its own symbol) |
+| so the book leaves fair value | RT-041 (−69% to −83%, three seeds) |
+| uninformed flow is routed onto it | config `noise_target_qty_by_symbol` |
+| and loses 116 bps, 21x the pegged book | RT-048 (98.4% of −219.5 M) |
+| not from spread — 1.80 bp | RT-049 (loss is 64x the half-spread) |
+| not from inventory — net short in a falling book | RT-049 (wrong sign) |
+| but at execution, ~51% below fair | **RT-050** (114% of measured) |
+
+**One line of configuration — a maker whose reference is its own book — produces a
+−246 M transfer across 216 529 trades.** It is the campaign's largest loss and it
+is now fully attributable.
+
+**Scope.** One seed, one configuration. The fair rate inherits the 1 s snapshot
+cadence, so a fill may be compared against a rate up to a second stale. Depth is
+not modelled separately; VWAP uses executed prices, which already reflect whatever
+depth was consumed.

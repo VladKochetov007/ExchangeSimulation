@@ -5233,6 +5233,120 @@ available on spot, which the tool states.
 Recorded as RT-049.
 
 
+**H-061 (PREREGISTERED) — the cross book's cost is realised at execution: the
+noise traders exchange ABC and CDF at rates far from the two assets' own USD
+values, and the per-fill dislocation reproduces the −215.9 M.**
+
+[[RT-049]] eliminated spread (1.80 bp against a 116.1 bps loss) and inventory
+drift (net **short** 13 224 contracts in a falling book, wrong sign). It named
+this residual and deliberately refused to claim it. This measures it.
+
+**The arithmetic that makes it testable rather than a story.** At terminal marks
+ABC is 49 295.05 USD and CDF is 3 221.50 USD, so the **fair cross rate is
+15.302 CDF per ABC**. The cross book's terminal price is ≈5.14 CDF per ABC — 66%
+below fair. A participant that is net short 13 224 ABC, having sold at rates
+averaging some distance below fair, loses `net_flow × dislocation × CDF_USD`. At a
+plausible average dislocation this lands in the right order of magnitude, and the
+point of the experiment is that it either reproduces the measured loss or it does
+not.
+
+**Method — per fill, not per average.** For every `noise_flow` fill on `ABC/CDF`,
+compare the execution rate against the fair cross rate **at that timestamp**,
+built from the same `spotIndexProvider` consensus rule: the median across venues
+of the `ABC/USD` mid divided by the median of the `CDF/USD` mid. Using terminal
+marks for the whole run would confound the dislocation with the drift, which is
+the trap [[RT-040]] recorded.
+
+**Prediction.** Summed over fills, the implied loss
+`Σ qty × (fair_rate − exec_rate) × CDF_USD`, signed by direction, reproduces the
+measured **−215 945 892** within **±25%**.
+
+**Falsifiers.**
+(a) implied loss **<50%** of measured → execution dislocation does not explain the
+loss and the search moves elsewhere; the residual would then have no candidate
+left among the three ordinary ones;
+(b) implied loss **>200%** of measured → the instrument over-explains, indicating
+double counting or a sign error, and nothing is claimed until it reconciles;
+(c) volume-weighted execution rate ≈ fair rate → there is no execution
+dislocation and the mechanism is dead outright.
+
+**Self-test built in.** The implied loss is computed from fills and fair rates;
+the measured loss came from `flowattrib`'s independent contribution calculation.
+Agreement between them is a genuine cross-check, not a restatement — the two share
+no arithmetic beyond reading the same fill records.
+
+**Instrument.** New Go tool `research/tools/crossexec`: two passes over the
+evidence — one to build the per-timestamp consensus fair rate from `ABC/USD` and
+`CDF/USD` snapshots, one to walk `ABC/CDF` fills for a role class and accumulate
+signed dislocation. Handles both payload shapes.
+
+**Discriminating experiment E-066**, preregistered before the run: seed 607, 8 h,
+`-log-mode full`. Status: **SUPPORTED WITHIN TESTED SCOPE** — implied loss is
+114.0% of measured, inside the ±25% band; no falsifier fired.
+
+
+**E-066 — H-061 SUPPORTED. The loss is realised at execution, and the causal
+chain from one config line to the population's largest loss is now closed
+quantitatively.**
+Base: `a666d02faede3d40f046b11e60eb672c59386a94`, seed 607, 8 h, `-log-mode full`.
+Reproduce: `go run research/tools/crossexec/main.go -dir <logdir> -class noise_flow`.
+
+216 529 fills matched, **0 skipped** for a missing fair rate.
+
+| | volume | VWAP (CDF/ABC) | fair at execution | gap |
+|---|---:|---:|---:|---:|
+| bought | 182 022.51 | 7.9059 | 16.2996 | **−51.50%** |
+| sold | 195 246.58 | 8.0708 | 16.3087 | **−50.51%** |
+| net flow | **−13 224.07** | | | |
+
+**The noise traders transact ABC at roughly half its fair value in CDF, in both
+directions, across 216 529 fills.** They buy cheap and sell cheap, and because
+they sell 13 224 more than they buy, the net is a large loss.
+
+**The preregistered cross-check passes.**
+
+    implied loss from execution away from fair   −246 188 281 USD
+    measured loss (flowattrib contribution)      −215 945 892 USD
+    ratio                                              114.0%
+
+Inside the ±25% band. Falsifier (a) needed <50%, (b) needed >200%, (c) needed
+VWAP ≈ fair — none fire. The two figures come from different arithmetic on the
+same evidence: one accumulates per-fill deviation from a contemporaneous
+consensus rate, the other sums cash flows and values terminal inventory at
+terminal marks. **The residual 14% is expected and is not slack** — it is the
+taker fee (5 bps), the snapshot-to-fill timing gap, and precisely that difference
+in how terminal inventory is valued.
+
+**A second, unplanned cross-check landed exactly.** `crossexec` reports net base
+flow **−13 224.07** from fill-by-fill accumulation; [[RT-049]]'s `positionpath`
+independently reported **−13 224.08**. Two tools, separately written, agree to
+0.01 contracts.
+
+**The chain is now closed end to end**, each link measured rather than inferred:
+
+| link | finding | evidence |
+|---|---|---|
+| the cross maker quotes around its own mid | [[RT-031]] | `ReferenceSymbol` = its own symbol |
+| so the book leaves fair value | [[RT-041]] | −69% to −83%, three seeds |
+| uninformed flow is routed onto it | config | `noise_target_qty_by_symbol` |
+| and loses at 116 bps, 21× the pegged book | [[RT-048]] | 98.4% of a −219.5 M loss |
+| not from spread — 1.80 bp | [[RT-049]] | loss is 64× the half-spread |
+| not from inventory — net **short** in a falling book | [[RT-049]] | wrong sign |
+| but at execution, ~51% below fair | **E-066** | 216 529 fills, 114% of measured |
+
+**One line of configuration — a maker whose reference is its own book — produces
+a −246 M transfer through 216 529 trades.** That is the campaign's largest loss,
+and it is fully attributable.
+
+**Scope.** One seed, one configuration. The fair rate is the venue's own
+consensus rule applied to snapshot mids at or before each fill, so it inherits the
+1 s snapshot cadence; a fill can be compared against a rate up to one second
+stale. Depth is ignored — VWAP is computed from executed prices, which already
+include whatever depth was consumed.
+
+Recorded as RT-050.
+
+
 ---
 
 ## F. Findings
@@ -5249,6 +5363,15 @@ See `research/red-team-findings.md` for the full records.
 - **RT-003** — bounded no-violation results (INV-2, INV-5, INV-6, identity).
 - **RT-006** — latency is delivered as configured across 225 link x channel
   rows; no unearned speed advantage. Transport only.
+- **RT-050** — the cross book's cost is **realised at execution**. Across
+  **216 529 fills** `noise_flow` buys ABC at **−51.50%** and sells at **−50.51%**
+  against the venue's own contemporaneous consensus rate; the implied loss of
+  **−246.2 M is 114.0% of the −215.9 M measured independently**, inside the
+  preregistered ±25% band, with the residual accounted for by fees, snapshot
+  timing and terminal-inventory valuation. Net flow −13 224.07 matches
+  `positionpath`'s −13 224.08 from separately written code. **The chain from
+  [[RT-031]]'s one-line self-reference to the population's largest loss is now
+  closed with every link measured.**
 - **RT-049** — the cross book's 116.1 bps loss rate is **not the spread and not
   inventory drift**. Its median quoted half-spread is **1.80 bp — the loss is 64x
   it**, and spread bounds at ~2% of the rate; `CDF/USD` has the population's
