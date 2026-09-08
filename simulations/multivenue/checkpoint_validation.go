@@ -1,6 +1,7 @@
 package multivenue
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -234,6 +235,24 @@ func decodeStrictJSONObjects(reader io.Reader, description string) ([]map[string
 		}
 		objects = append(objects, object)
 	}
+}
+
+func decodeStrictJSONDocument(raw []byte, target any, description string) error {
+	objects, err := decodeStrictJSONObjects(bytes.NewReader(raw), description)
+	if err != nil {
+		return err
+	}
+	if len(objects) != 1 {
+		return fmt.Errorf("decode %s: expected one top-level object, got %d", description, len(objects))
+	}
+	normalized, err := json.Marshal(objects[0])
+	if err != nil {
+		return fmt.Errorf("decode %s: normalize object: %w", description, err)
+	}
+	if err := json.Unmarshal(normalized, target); err != nil {
+		return fmt.Errorf("decode %s: %w", description, err)
+	}
+	return nil
 }
 
 func decodeStrictJSONValue(decoder *json.Decoder) (any, error) {

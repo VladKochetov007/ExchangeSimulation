@@ -207,8 +207,8 @@ func readRenderRunContract(inputDir string) (renderRunContract, error) {
 		return renderRunContract{}, err
 	}
 	var contract renderRunContract
-	if err := json.Unmarshal(raw, &contract); err != nil {
-		return renderRunContract{}, fmt.Errorf("multivenue: decode binary run manifest: %w", err)
+	if err := decodeStrictJSONDocument(raw, &contract, "binary run manifest"); err != nil {
+		return renderRunContract{}, fmt.Errorf("multivenue: %w", err)
 	}
 	if contract.SchemaVersion < 2 || contract.Config.EvidenceFormat != binaryRepresentation {
 		return renderRunContract{}, fmt.Errorf("multivenue: manifest does not declare %s evidence", binaryRepresentation)
@@ -225,8 +225,8 @@ func readBinaryAttestation(inputDir string) (binaryEvidenceArtifactRecord, error
 		return binaryEvidenceArtifactRecord{}, err
 	}
 	var attestation binaryEvidenceArtifactRecord
-	if err := json.Unmarshal(raw, &attestation); err != nil {
-		return binaryEvidenceArtifactRecord{}, fmt.Errorf("multivenue: decode binary evidence attestation: %w", err)
+	if err := decodeStrictJSONDocument(raw, &attestation, "binary evidence attestation"); err != nil {
+		return binaryEvidenceArtifactRecord{}, fmt.Errorf("multivenue: %w", err)
 	}
 	return attestation, nil
 }
@@ -270,8 +270,8 @@ func validateBinaryAttestation(inputDir string, attestation binaryEvidenceArtifa
 			return err
 		}
 		var artifact evidenceArtifactRecord
-		if err := json.Unmarshal(raw, &artifact); err != nil {
-			return fmt.Errorf("multivenue: decode evidence-only attestation: %w", err)
+		if err := decodeStrictJSONDocument(raw, &artifact, "evidence-only attestation"); err != nil {
+			return fmt.Errorf("multivenue: %w", err)
 		}
 		if artifact.Domain != "persisted_json_log_evidence_only" || artifact.Ordering != "unordered_multiset" ||
 			artifact.Events != sidecarDigest.events || artifact.Digest != sidecarDigest.hex() {

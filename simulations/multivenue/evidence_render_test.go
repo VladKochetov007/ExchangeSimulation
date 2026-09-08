@@ -257,6 +257,111 @@ func TestRenderBinaryEvidenceRejectsUnterminatedStream(t *testing.T) {
 	}
 }
 
+func TestRenderBinaryEvidenceRejectsDuplicateProvenanceKeys(t *testing.T) {
+	t.Run("manifest", func(t *testing.T) {
+		inputDir := t.TempDir()
+		manifest := []byte(`{"schema_version":2,"schema_version":2,"config":{"log_mode":"none","evidence_format":"evstream_v3"}}`)
+		if err := os.WriteFile(filepath.Join(inputDir, "manifest.json"), append(manifest, '\n'), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := RenderBinaryEvidence(inputDir, filepath.Join(t.TempDir(), "rendered")); err == nil || !strings.Contains(err.Error(), "duplicate object key") {
+			t.Fatalf("duplicate manifest key was accepted or misclassified: %v", err)
+		}
+	})
+
+	t.Run("binary attestation", func(t *testing.T) {
+		inputDir := minimalRenderInput(t, "none", nil)
+		path := filepath.Join(inputDir, "binary-evidence-attestation.json")
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		duplicate, err := duplicateJSONField(raw, "domain")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, duplicate, 0644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := RenderBinaryEvidence(inputDir, filepath.Join(t.TempDir(), "rendered")); err == nil || !strings.Contains(err.Error(), "duplicate object key") {
+			t.Fatalf("duplicate binary attestation key was accepted or misclassified: %v", err)
+		}
+	})
+
+	t.Run("evidence-only attestation", func(t *testing.T) {
+		sidecar := []byte(`{"client_id":7,"data":{"venue_id":"north","sequence":2,"payload":{"value":1}},"event":"evidence_only","sim_ts":2}`)
+		inputDir := minimalRenderInput(t, "full", sidecar)
+		path := filepath.Join(inputDir, "evidence-only-artifact-hash.json")
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		duplicate, err := duplicateJSONField(raw, "domain")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, duplicate, 0644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := RenderBinaryEvidence(inputDir, filepath.Join(t.TempDir(), "rendered")); err == nil || !strings.Contains(err.Error(), "duplicate object key") {
+			t.Fatalf("duplicate evidence-only attestation key was accepted or misclassified: %v", err)
+		}
+	})
+}
+
+func minimalRenderInput(t *testing.T, logMode string, sidecar []byte) string {
+	t.Helper()
+	inputDir := t.TempDir()
+	venueDir := filepath.Join(inputDir, "venues", "north")
+	if err := os.MkdirAll(venueDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	eventsFile, err := os.Create(filepath.Join(inputDir, "events.evs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sink := newNeutralBinaryEvidence(eventsFile)
+	if err := sink.record(1, 7, "event", "north", map[string]int{"value": 1}, "general.jsonl", 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := sink.finish(); err != nil {
+		t.Fatal(err)
+	}
+	if err := eventsFile.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if logMode == "full" {
+		if err := os.WriteFile(filepath.Join(venueDir, "general.jsonl"), append(sidecar, '\n'), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeRenderMetadata(t, inputDir, sink, logMode, sidecar)
+	return inputDir
+}
+
+func duplicateJSONField(raw []byte, field string) ([]byte, error) {
+	marker := []byte(`"` + field + `"`)
+	fieldStart := bytes.Index(raw, marker)
+	if fieldStart < 0 {
+		return nil, fmt.Errorf("JSON field %q not found", field)
+	}
+	lineStart := bytes.LastIndex(raw[:fieldStart], []byte{'\n'}) + 1
+	lineEndOffset := bytes.IndexByte(raw[fieldStart:], '\n')
+	if lineEndOffset < 0 {
+		return nil, fmt.Errorf("JSON field %q is not pretty-printed", field)
+	}
+	lineEnd := fieldStart + lineEndOffset
+	line := append([]byte(nil), raw[lineStart:lineEnd]...)
+	if !bytes.HasSuffix(bytes.TrimSpace(line), []byte{','}) {
+		line = append(line, ',')
+	}
+	result := append([]byte(nil), raw[:lineStart]...)
+	result = append(result, line...)
+	result = append(result, '\n')
+	result = append(result, raw[lineStart:]...)
+	return result, nil
+}
+
 func TestBinaryEvidenceFormatIsExplicitAndAttested(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "run")
 	sim, err := NewSim(time.Second, Config{
