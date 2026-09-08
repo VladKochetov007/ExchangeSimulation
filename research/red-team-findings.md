@@ -3520,10 +3520,68 @@ central conclusion about capacity.
 
 **For the owner.** The perpetual's convergence force is configured at 3 000
 contracts across six participants, reaches that limit whenever the basis exceeds
-5%, and holds it while the basis runs to 29%. **`carry_max_position` is the single
-parameter that would make the convergence question answerable**; at its current
-value the answer is bounded by configuration rather than by market behaviour.
+5%, and holds it while the basis runs to 29%.
+
+**REFUTED BY RT-061.** I wrote here that "`carry_max_position` is the single
+parameter that would make the convergence question answerable". It is not.
+Raising it tenfold converges the basis at seed 607 and makes it **2.6x worse** at
+seed 608 — opposite signs, so the cap binds without being causal. The measurement
+in this finding stands; the lever it proposed does not.
 
 **Scope.** One seed, one configuration. Position is the exchange's post-fill
 position per contract summed across the class; basis is the top-of-book perp mid
 against the consensus index at matching timestamps.
+
+## RT-061 — The capacity lever is refuted by its own control
+
+**Classification.** FALSIFICATION of RT-060's proposed remedy, caught by a paired
+multi-seed control **before** publication rather than after.
+
+**Base.** `a666d02faede3d40f046b11e60eb672c59386a94`, 8 h, full logs, seeds
+607/608 x {baseline, `carry_max_position` x10}. `research/configs/` untouched.
+
+| seed | config | mean basis | worst | beyond ±3% clamp | final-quarter |
+|---|---|---:|---:|---:|---:|
+| 607 | baseline | −4.90% | −28.85% | 32.5% | −17.19% |
+| 607 | **cap x10** | **−0.15%** | −2.63% | **0.0%** | −0.09% |
+| 608 | baseline | −4.79% | −26.19% | 28.5% | −16.84% |
+| 608 | **cap x10** | **−12.56%** | −35.64% | **48.5%** | −28.92% |
+
+**At seed 607 the treatment looks decisive**: basis collapses from −4.90% to
+−0.15% and the mark clamp stops binding entirely, 32.5% to **0.0%** of samples.
+**At seed 608 the identical treatment makes it 2.6x worse**, clamp binding rising
+from 28.5% to 48.5%. **Opposite signs. The effect is not causal.**
+
+**The arbitrageur did use the capacity** — maximum aggregate position **3 855.2**
+contracts against the old 3 000 limit — so RT-060's measurement that the cap binds
+stands. **Binding is not causal**, and that distinction is the finding.
+
+**RT-060's lever is refuted in its own terms.** "The single parameter that would
+make the convergence question answerable" gives opposite answers at two seeds. The
+"under-resourced by design" reading built across RT-059 and RT-060 does not
+survive: the arbitrageur is capped, and un-capping it does not converge the
+market.
+
+**The single-seed result would have been a false headline.** Seed 607 alone reads
+as the most actionable result of the campaign — one parameter, a 32x reduction in
+basis, a clamp that stops binding. It is one path's coincidence. RT-041's lesson,
+applied before publication this time.
+
+**The runs are valid.** `classpnl` closure on the seed-607 ablation: Σ
+carry-adjusted −10 315 086, take +10 315 086, **residual −0, 0.0000% of gross**.
+The ablation produced sound runs that simply do not support the claim.
+
+**Not claimed, at n=2.** The baseline is **tight** across seeds (−4.90% vs
+−4.79%, a 0.107 pp spread) while the ablation is **wild** (−0.15% vs −12.56%, a
+12.4 pp spread, **82x wider**). Consistent with the cap constraining **variance**
+rather than blocking convergence. Two seeds cannot support it; recorded as the
+next experiment.
+
+**Where the perpetual stands.** Its basis is not explained by arbitrageur capacity.
+The remaining candidates are the maker's quoting, the mark clamp (RT-044) and the
+saturated funding (RT-043) — and those two are now **more** likely causes rather
+than symptoms, since relieving the capacity constraint did not relieve them.
+
+**Next.** Repeat the 2x2 across four more seeds to test the variance reading, and
+ablate `funding_max_rate_bps` and `MarkPriceBandBps` the same way — paired,
+multi-seed, never single-seed.

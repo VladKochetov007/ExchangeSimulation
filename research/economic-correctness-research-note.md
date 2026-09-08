@@ -6572,6 +6572,126 @@ against the consensus index at matching timestamps.
 Recorded as RT-060.
 
 
+**H-072 (PREREGISTERED) — the decisive ablation [[RT-060]] named: raise the
+arbitrageur's position cap tenfold and see whether the perpetual's basis
+converges.**
+
+**Why this one is worth running when the latency ablation was not.** [[RT-038]]'s
+ablation failed because the parameter it moved was provably inert. This parameter
+is provably **binding**: RT-060 measured `carry_arb` at **exactly 100% of its
+3 000-contract cap in all 8 780 samples where the basis exceeds 5%**. Moving it
+must change the arbitrageur's behaviour, so the experiment can only fail to
+inform if convergence is prevented by something else — which is itself the
+finding.
+
+**Change.** `carry_max_position` from **50 000 000 000** (500 contracts each,
+3 000 across the class) to **500 000 000 000** (5 000 each, **30 000** class-wide).
+Config-only, in a scratch copy; `research/configs/` is untouched.
+
+**Baseline** is [[RT-044]]'s measurement at the same base revision, seed and
+config, with the same tool: `ABC-PERP` mean basis **−4.90%**, final-quarter mean
+**−17.19%**, worst **−28.85%**, **32.5%** of samples beyond the ±3% mark clamp.
+The simulator has been byte-deterministic across every configuration compared in
+this campaign, so the baseline is reused rather than re-run.
+
+**Claims.**
+1. The arbitrageur **uses** the new capacity: aggregate position exceeds 3 000
+   contracts, i.e. RT-060's cap really was the limit.
+2. The basis **converges materially**: median |basis| in the high-dislocation
+   bands falls by **≥50%** against baseline.
+
+**Falsifiers, and both outcomes are informative.**
+(a) the basis is **essentially unchanged** (<10% reduction) despite a tenfold
+capacity increase → **capacity is not what prevents convergence**, and the cause
+lies in the mechanisms already measured: the maker's self-anchoring, the mark
+clamp ([[RT-044]]), or the saturated funding ([[RT-043]]). This would overturn the
+"under-resourced by design" reading that RT-059 and RT-060 built, and it is the
+outcome I consider most likely to be interesting;
+(b) the position does **not** exceed 3 000 → the cap was not binding after all and
+RT-060 is contradicted, which would be a direct self-refutation;
+(c) the basis converges but the population's conservation breaks (closure residual
+above the 1% tolerance) → the ablation has produced an invalid run and nothing is
+read from it.
+
+**What I am not claiming.** A converged basis under a raised cap would **not**
+mean the campaign's configuration is wrong — it would mean the campaign's
+convergence question has an answer that its own parameters hide. Whether to raise
+the cap is the owner's call; whether the current value determines the result is
+measurement.
+
+**Discriminating experiment E-077**, preregistered before the run: seed 607, 8 h,
+`-log-mode full`, cap ×10; compare `perpbasis` and `arbresponse` against baseline,
+with `classpnl`'s closure self-test as the validity gate.
+Status: **FALSIFIED WITHIN TESTED SCOPE** — the treatment converges the basis at
+seed 607 and worsens it 2.6x at seed 608; claim 1 supported but not causal.
+
+
+**E-077 — H-072's headline claim FALSIFIED by its own control, and with it
+[[RT-060]]'s proposed lever. Raising the cap converged the basis at one seed and
+made it 2.6× worse at another.**
+Base: `a666d02faede3d40f046b11e60eb672c59386a94`, 8 h, `-log-mode full`, seeds
+607/608 × {baseline, cap ×10}. `research/configs/` untouched; the ablation lives
+in a scratch config.
+Reproduce: `go run research/tools/perpbasis/main.go -dir <logdir>` on each cell.
+
+| seed | config | mean basis | worst | beyond ±3% clamp | final-quarter |
+|---|---|---:|---:|---:|---:|
+| 607 | baseline | −4.90% | −28.85% | 32.5% | −17.19% |
+| 607 | **cap ×10** | **−0.15%** | −2.63% | **0.0%** | −0.09% |
+| 608 | baseline | −4.79% | −26.19% | 28.5% | −16.84% |
+| 608 | **cap ×10** | **−12.56%** | −35.64% | **48.5%** | −28.92% |
+
+**At seed 607 the treatment looks decisive** — the basis collapses from −4.90% to
+−0.15%, the mark clamp stops binding entirely (32.5% → **0.0%** of samples), and
+the perpetual tracks its index. **At seed 608 the identical treatment makes the
+basis 2.6× worse**, pushing samples beyond the clamp from 28.5% to 48.5%.
+**Opposite signs.** Claim 2 is falsified and the effect is not causal.
+
+**Claim 1 is supported and is now beside the point.** The arbitrageur did use the
+new capacity — maximum aggregate position **3 855.2** contracts against the old
+3 000 limit — so RT-060's measurement that the cap binds stands. **Binding is not
+the same as causal**, and the difference is the whole finding.
+
+**[[RT-060]]'s lever is refuted, in my own words.** I wrote that
+"`carry_max_position` is the single parameter that would make the convergence
+question answerable". It does not: raising it gives **opposite answers at two
+seeds**. The under-resourced-by-design reading that [[RT-059]] and RT-060 built
+toward is **not supported** — the arbitrageur is capped, and un-capping it does
+not converge the market.
+
+**The single-seed result would have been a false headline, and the control is the
+only reason it is not.** Seed 607 alone reads as the campaign's most actionable
+finding: one parameter, a 32× reduction in basis, a clamp that stops binding.
+It is a coincidence of one path. This is [[RT-041]]'s lesson applied *before*
+publication rather than four checkpoints after it.
+
+**Validity gate passed, so the runs themselves are sound.** `classpnl`'s closure
+self-test on the seed-607 ablation: `Σ carry-adjusted −10 315 086`, take
+`+10 315 086`, **residual −0, 0.0000% of gross**. Falsifier (c) does not fire; the
+ablation produced valid runs that simply do not support the claim.
+
+**An observation I am explicitly not claiming, at n=2.** The **baseline is tight
+across seeds** — mean basis −4.90% vs −4.79%, a 0.107 pp spread — while the
+**ablation is wild** — −0.15% vs −12.56%, a **12.4 pp spread, 82× wider**. That is
+consistent with the cap acting as a **variance constraint** rather than a
+convergence obstacle: removing it lets outcomes diverge instead of converge. Two
+seeds cannot support that, and it is recorded as the next experiment rather than a
+result.
+
+**Where this leaves the perpetual.** The basis is not explained by arbitrageur
+capacity. The mechanisms that remain on the table are the ones already measured
+and not yet ablated: the maker's own quoting, the mark clamp ([[RT-044]]), and the
+saturated funding ([[RT-043]]) — and RT-043/RT-044 are now **more** likely to be
+causes rather than symptoms, since removing the capacity constraint did not
+relieve them.
+
+**Next experiment.** Repeat the 2×2 at four more seeds to establish whether the
+cap is a variance constraint, and ablate `funding_max_rate_bps` and
+`MarkPriceBandBps` the same way — paired, multi-seed, never single-seed.
+
+Recorded as RT-061.
+
+
 ---
 
 ## F. Findings
@@ -6588,6 +6708,18 @@ See `research/red-team-findings.md` for the full records.
 - **RT-003** — bounded no-violation results (INV-2, INV-5, INV-6, identity).
 - **RT-006** — latency is delivered as configured across 225 link x channel
   rows; no unearned speed advantage. Transport only.
+- **RT-061** — **[[RT-060]]'s lever is refuted by its own control.** Raising
+  `carry_max_position` tenfold converges the perp basis at seed 607
+  (−4.90% → **−0.15%**, clamp binding 32.5% → **0.0%**) and makes it **2.6x
+  worse** at seed 608 (−4.79% → **−12.56%**, clamp 28.5% → 48.5%). **Opposite
+  signs — the effect is not causal.** The arbitrageur does use the new capacity
+  (max 3 855 vs the old 3 000 cap), so [[RT-059]]/RT-060's measurement that the
+  cap **binds** stands, but **binding is not causal** and the
+  "under-resourced by design" reading does not survive. The seed-607 result alone
+  would have been the campaign's most actionable false headline; the paired
+  control is the only reason it is not. Not claimed at n=2: baseline spread across
+  seeds is **0.107 pp** against the ablation's **12.4 pp**, hinting the cap
+  constrains **variance** rather than blocking convergence.
 - **RT-060** — **[[RT-059]]'s asserted mechanism verified.** `carry_arb`'s
   aggregate position is at **exactly 100% of its 3 000-contract cap in all 8 780
   samples where the perp basis exceeds 5%** (mean and max both 3 000.0), and at
