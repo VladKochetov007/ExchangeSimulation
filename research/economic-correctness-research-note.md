@@ -4303,6 +4303,121 @@ and I published three findings' worth of percentages from a single seed first.
 The reproduction happened to support them; that is luck, not process.
 
 
+**H-053 (PREREGISTERED) — the funding rate is not scaled by the settlement
+interval, so identical perp positions bear ~8× the funding drag on the 1 h venue
+as on the 8 h venue.**
+
+**New mechanism family: the derivative side.** `flowattrib`'s gap column showed
+`futures_maker` (+7.06 M), `perp_maker` (+2.48 M), `option_dealer`, `option_flow`,
+`future_flow`, `option_value_taker` and `vanna_volga_desk` earning **nothing** in
+a spot order book — their entire result comes from books my instruments have
+never touched. This is the first hypothesis in that family.
+
+**Mechanism, from inspection.** `SimpleFundingCalc.Calculate(indexPrice,
+markPrice)` (`instrument/funding.go:20`) takes **no interval argument**: the rate
+is `BaseRate + Damping × premium`, clamped to `±MaxRate`, where the premium is
+purely `(mark − index)/index`. The settlement then applies it directly
+(`exchange/funding.go:753`):
+
+    funding, ok := etypes.TryMulDiv(positionValue, fundingRate.Rate, 10000)
+
+**No interval term anywhere.** `fundingRate.Interval` appears only in
+`nextFundingTimestamp`, which schedules the *next* settlement — it never scales
+the *amount*.
+
+**Consequence.** RT-022's deliberate venue heterogeneity sets funding intervals of
+1 h (`central`), 2 h (`south`) and 8 h (`north`). Over an 8 h run the same
+position is charged the same per-settlement rate **8, 4 and 1 times**
+respectively. That is a funding cost that differs by **8× purely from a
+scheduling parameter**, not from any market condition. Real venues quote funding
+per interval and prorate; this model charges a full interval's rate however often
+it is asked.
+
+**Prediction.** Per venue, the **mean absolute rate per settlement** is
+comparable (same formula, similar books), while the **cumulative Σ|rate| over
+the run** differs in approximately the ratio of settlement counts, ≈**8 : 4 : 1**
+for central : south : north.
+
+**Falsifiers.** (a) cumulative Σ|rate| is comparable across venues (all within
+2× of each other) → some scaling exists that inspection missed, H-053 falsified;
+(b) settlement counts are not 8/4/1 → the interval is not doing what the config
+says and the finding is about scheduling instead; (c) mean per-settlement rate
+differs by ≈8× in the opposite direction → the premium itself is
+interval-sensitive and the effect cancels, which would be a different and much
+subtler mechanism.
+
+**What this is not.** Whether funding *should* be time-scaled is a modelling
+choice and the owner's to make — `BaseRate` and `MaxRate` are configurable per
+venue and could in principle be set to compensate. The finding is that the
+current configuration does **not** compensate, so cross-venue perp results are
+not comparable.
+
+**Discriminating experiment E-058**, preregistered before the run: 8 h,
+`-log-mode full`, seed 607; parse `funding_settlement` events per venue and
+report settlement count, mean |rate|, and cumulative Σ|rate|.
+Status: **SUPPORTED WITHIN TESTED SCOPE** on the primary claim; auxiliary
+falsifier (b) fired on a mis-derived count prediction that was never the claim.
+
+
+**E-058 — H-053 SUPPORTED, and more extreme than predicted: funding is not
+interval-scaled, and the 8 h venue settles funding **zero times** in an 8 h run.**
+Base: `a666d02faede3d40f046b11e60eb672c59386a94`, seed 607, 8 h, `-log-mode full`.
+Reproduce: count `funding_settlement` events per venue in the log tree.
+
+| venue | configured interval | settlements | mean \|rate\| | cumulative \|rate\| | ABC-PERP fills |
+|---|---:|---:|---:|---:|---:|
+| central | 3 600 s | 7 | 38.57 bps | **270 bps** | 61 694 |
+| south | 7 200 s | 3 | 28.00 bps | **84 bps** | 60 210 |
+| north | 28 800 s | **0** | — | **0 bps** | 59 572 |
+
+The `interval` field in the settlement events reads 3600 and 7200, exactly as
+`venue_rules` configures, so the scheduler is doing what it is told.
+
+**The primary claim is supported.** Mean per-settlement rate is comparable across
+venues (38.6 vs 28.0 bps, within 1.4×), while cumulative funding differs by
+**270 : 84 : 0**. Falsifier (a) — cumulative rates comparable within 2× — does not
+fire. An identical perp position bears a **2.7% funding drag on `central` and
+exactly none on `north`**, decided entirely by a scheduling parameter.
+
+**The larger result was not predicted: `north`'s perpetual has no funding at
+all.** Its first settlement would fall at t = 8 h, the horizon itself, and does
+not fire. Yet the book trades **59 572 fills** — comparable to the other two
+venues. So for the whole campaign, `north` runs a "perpetual" with **no funding
+mechanism whatsoever**: the one economic device that tethers a perp's mark to its
+index is absent, leaving an instrument with no convergence force. This is the
+same shape as [[RT-031]] — an instrument with nothing anchoring it — reached by a
+completely different route.
+
+**Falsifier (b) fired as written, and I am recording that rather than reading
+past it.** I predicted settlement counts of 8 / 4 / 1; the observed counts are
+**7 / 3 / 0**, because settlements land at strict multiples of the interval
+inside the horizon — 1 h…7 h on `central`, 2 h/4 h/6 h on `south`, and never on
+`north`. My falsifier said such a mismatch would mean "the interval is not doing
+what the config says and the finding is about scheduling instead". That
+inference is **wrong on the evidence**: the logged `interval` values match the
+config exactly, so the scheduler is correct and my arithmetic about boundary
+conventions was what failed. The falsifier fired on a prediction I had no need to
+make — settlement *counts* were never the claim, cumulative *rate* was — and it
+does not touch the mechanism. Recorded as a badly-chosen auxiliary prediction,
+the third preregistration-design error in this campaign after E-051's
+level-uncertainty falsifier and E-053's untestable ablation.
+
+**What is the owner's decision.** Whether funding should be time-scaled is a
+modelling choice, and `BaseRate`/`MaxRate` are per-venue configurable, so a
+compensating configuration is possible. What is not a choice: the current
+configuration does **not** compensate, so **cross-venue perp results are not
+comparable**, and any conclusion drawn from comparing perp behaviour on `north`
+against the other two venues is comparing a funded instrument with an unfunded
+one.
+
+**Scope.** One seed, one configuration, one horizon. The `north` zero-settlement
+result is a horizon boundary effect and would change with a longer run — at 16 h
+it would settle once. That does not soften the finding for **this** campaign,
+whose every published run is 8 h.
+
+Recorded as RT-042.
+
+
 ---
 
 ## F. Findings
@@ -4319,6 +4434,14 @@ See `research/red-team-findings.md` for the full records.
 - **RT-003** — bounded no-violation results (INV-2, INV-5, INV-6, identity).
 - **RT-006** — latency is delivered as configured across 225 link x channel
   rows; no unearned speed advantage. Transport only.
+- **RT-042** — funding is **not scaled by the settlement interval**
+  (`SimpleFundingCalc.Calculate` takes no interval; `funding.go:753` applies the
+  rate directly), so cumulative funding over 8 h is **270 : 84 : 0 bps** on
+  central : south : north for comparable per-settlement rates. **`north`'s
+  perpetual settles funding zero times while trading 59 572 fills** — its first
+  settlement falls at the horizon — so the campaign runs a perp with **no
+  convergence mechanism at all** on one venue. Same shape as [[RT-031]], reached
+  by another route. Cross-venue perp results are not comparable.
 - **RT-041** — [[RT-031]]/[[RT-034]]/[[RT-035]] **reproduce on three independent
   seeds**. Levels swing 5.4x (the cross maker's net is +6.88 M at seed 607 and
   +36.92 M at 608) while the structure barely moves: book share **98.1-99.6%**,

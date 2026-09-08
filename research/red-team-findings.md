@@ -2425,3 +2425,66 @@ seed-sensitive. The promotion is to "structural within this configuration", not
 checkpoints after. The protocol requires a fresh run before promoting a result,
 and three findings' worth of percentages were published from a single seed first.
 The reproduction happened to support them, which is luck rather than process.
+
+## RT-042 — Funding is not interval-scaled, and one venue's perp never funds
+
+**Classification.** REAL. First finding on the derivative side, which this
+audit's instruments had not touched.
+
+**Base.** `a666d02faede3d40f046b11e60eb672c59386a94`, seed 607, 8 h, full logs.
+
+**Mechanism.** `SimpleFundingCalc.Calculate(indexPrice, markPrice)`
+(`instrument/funding.go:20`) takes **no interval argument** — the rate is
+`BaseRate + Damping x premium`, clamped at `±MaxRate`, from the mark/index
+premium alone. Settlement applies it directly (`exchange/funding.go:753`):
+
+```go
+funding, ok := etypes.TryMulDiv(positionValue, fundingRate.Rate, 10000)
+```
+
+`fundingRate.Interval` appears only in `nextFundingTimestamp`, which schedules the
+next settlement. It never scales the amount, so a full interval's rate is charged
+however often it is asked.
+
+**Measured.**
+
+| venue | interval | settlements | mean \|rate\| | cumulative \|rate\| | ABC-PERP fills |
+|---|---:|---:|---:|---:|---:|
+| central | 3 600 s | 7 | 38.57 bps | **270 bps** | 61 694 |
+| south | 7 200 s | 3 | 28.00 bps | **84 bps** | 60 210 |
+| north | 28 800 s | **0** | — | **0 bps** | 59 572 |
+
+Logged `interval` values are 3600 and 7200, matching `venue_rules` exactly, so
+the scheduler is correct. Mean per-settlement rates are comparable (within 1.4x)
+while cumulative funding differs 270 : 84 : 0. **An identical perp position bears
+a 2.7% funding drag on `central` and none at all on `north`**, decided by a
+scheduling parameter rather than a market condition.
+
+**The larger, unpredicted result: `north` has no funding mechanism.** Its first
+settlement would land at t = 8 h, the horizon itself, and never fires — while the
+book trades 59 572 fills, comparable to the other venues. The campaign therefore
+runs a "perpetual" on one venue with **no device tethering its mark to its
+index**. That is the same shape as RT-031's self-referential cross book, reached
+by a completely different route.
+
+**Consequence.** Cross-venue perp comparisons are invalid in this campaign: they
+compare a funded instrument against an unfunded one. Whether funding *should* be
+time-scaled is the owner's modelling choice, and `BaseRate`/`MaxRate` are
+per-venue configurable so a compensating configuration exists. The current one
+does not compensate.
+
+**Scope.** One seed, one configuration, one horizon. `north`'s zero-settlement
+result is a horizon boundary effect and would change at a longer run — at 16 h it
+settles once. That does not soften it for this campaign, whose every published
+run is 8 h.
+
+**Instrument note against myself.** The preregistration predicted settlement
+counts of 8 / 4 / 1; observed is 7 / 3 / 0, because settlements land at strict
+interval multiples inside the horizon. Falsifier (b) fired on that mismatch and
+said it would mean "the interval is not doing what the config says". That
+inference is wrong on the evidence — the logged intervals match the config — so
+what failed was my boundary arithmetic in an auxiliary prediction that was never
+the claim. Cumulative rate was the claim and it is supported. This is the third
+preregistration-design error in the campaign, after a level-uncertainty falsifier
+written for an ordering hypothesis (RT-036) and an ablation that could not
+ablate (RT-038).
