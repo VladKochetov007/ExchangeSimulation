@@ -280,3 +280,25 @@ validation, final-row/attestation binding, integer binary frame validation,
 and effective mutation coverage while preserving legacy JSON callers. Clean
 focused/full gates passed; no activation, capacity, development, freeze, or
 holdout run occurred. Another exact-tree independent review remains required.
+
+## Append-only feed checkpoint: no new commits; exact checkpoint precision repair — 2026-09-08
+
+`origin/autoresearch/v2-performance-research` was fetched again with
+`b1847ac` as the last-reviewed marker. There are no newer commits; the
+performance branch remains an asynchronous red-team feed only. Its deferred
+`f153e12` analyzer correction and VNext binary-evidence work were not merged.
+
+At the scientific promotion boundary, independent Sol-xhigh reviewer
+`Aristotle` rejected exact scientific tree `efeaaf7` because jq's floating-point
+`floor` check could accept a fractional production-epoch checkpoint timestamp.
+This was independently reasoned as a protocol verifier defect, not a
+performance or simulator-semantic change. `cc71a49` moves strict checkpoint
+number and duplicate-key validation into a Go library/adapter using exact JSON
+number lexemes, binds strict terminal checkpoints to binary attestation, and
+adds the effective production-epoch fractional regression. Clean full tests,
+vet, terminal contract, and targeted race/evidence checks passed. No scientific
+or holdout run occurred and no historical artifact was rewritten.
+
+The current successor remains closed at the fresh-review boundary: obtain one
+new exact-tree Sol-xhigh review of R2/CDF semantics, correctness hardening, and
+the binary evidence contract before pinned builds or activation.

@@ -1307,3 +1307,33 @@ the same exact code revision. The expected parse diagnostic is produced only
 by the intentionally truncated negative fixture. The performance branch is
 unchanged after `b1847ac` and remains unmerged. A new exact-tree independent
 review is required before any external acceptance attestation or activation.
+
+## Append-only operational update: exact JSON-number checkpoint repair — 2026-09-08
+
+The fresh independent Sol-xhigh review of exact tree
+`efeaaf7dcf4ee071b2a5052b01aff3cd2dd24be0` by `Aristotle` rejected the
+promotion boundary for a remaining fail-closed protocol defect. The strict
+`evstream_v3` checkpoint predicate relied on jq's IEEE-754 number conversion
+for its integer test. At the registered epoch, jq can represent
+`1735689600000000000.5` as the same value as the valid integer, allowing a
+fractional timestamp mutation to pass. This was a verifier defect; it did not
+occur in a simulator run and did not alter any historical result.
+
+Scientific commit `cc71a49` adds the library-level Go validator
+`ValidateBinaryCheckpointStream`, the `cmd/checkpointvalidate` adapter, and
+direct lexical-number regression tests. It rejects non-decimal integers,
+overflow, duplicate JSON keys, malformed streams, invalid optional fields,
+nonzero unencodable payloads, mismatched rolling hashes, and terminal state or
+attestation mismatches. The SV1B shell binding invokes it for strict checkpoint
+streams and for the binary-attestation count/hash bind; the terminal fixture now
+uses a raw production-epoch fractional lexeme. Legacy three-argument JSON
+checkpoint callers remain unchanged.
+
+The clean terminal contract, full `GOMAXPROCS=2 make test`, vet, focused
+packages, and bounded targeted race/evidence tests passed at `cc71a49`. The
+review rejection and repair are protocol-only. No SV1B activation, capacity,
+development, freeze, or holdout world has run; holdouts `619`, `631`, and `641`
+remain untouched and predecessor R2 remains the archived negative control. The
+performance branch was fetched at this checkpoint and still has no commit
+after `b1847ac`; its binary prototype and `f153e12` analyzer work remain
+deferred. One fresh exact-tree Sol-xhigh review is required next.

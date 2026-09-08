@@ -1455,3 +1455,33 @@ No SV1B activation, capacity, development, freeze, or holdout world has run,
 so no historical rerun is required and predecessor R2 remains untouched. The
 performance feed remains unchanged after `b1847ac`; no performance code was
 imported. Another exact-tree independent Sol-xhigh review is required.
+
+## Append-only operational update: exact JSON-number checkpoint repair — 2026-09-08
+
+Independent Sol-xhigh reviewer `Aristotle` reviewed exact clean tree
+`efeaaf7dcf4ee071b2a5052b01aff3cd2dd24be0` and **REJECTED** promotion for one
+remaining protocol-only precision hole. The strict shell predicate used jq's
+binary floating-point `floor` check, so a production-epoch value such as
+`1735689600000000000.5` could be rounded to the same jq number as the valid
+integer and accepted. The existing small-horizon mutation did not exercise that
+precision boundary.
+
+Commit `cc71a49` repairs the gate without changing R2 economics, calendar
+semantics, CDF behavior, evidence production, or historical JSON contracts. It
+adds a reusable Go checkpoint validator and thin `checkpointvalidate` command
+adapter. The validator parses JSON tokens with `UseNumber`, rejects fractional,
+exponent, overflow, duplicate-key, malformed, and non-boolean optional values,
+checks the repeated terminal state exactly, and optionally binds the terminal
+event count/hash to `binary-evidence-attestation.json`. SV1B strict validation
+and attestation binding now invoke this exact validator; the regression inserts
+the production-epoch `.5` lexeme as raw text so jq cannot erase the mutation.
+
+At `cc71a49`, the focused Go package suite, clean terminal activation contract,
+clean `GOMAXPROCS=2 make test`, `GOMAXPROCS=2 go vet ./...`, and targeted race
+suite passed. The expected validator diagnostics in the terminal contract are
+only intentional negative mutations. No SV1B activation, capacity probe,
+registered development cell, freeze authorization, or holdout execution/read
+occurred, so no historical simulator rerun is indicated. The performance feed
+was fetched again and remains unchanged after last-reviewed `b1847ac`; no
+performance code was imported. A fresh exact-tree independent Sol-xhigh review
+is required before pinned builds or seed-643 activation.
