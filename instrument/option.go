@@ -2,6 +2,7 @@ package instrument
 
 import (
 	"fmt"
+	"math"
 	"sync/atomic"
 
 	etypes "exchange_sim/types"
@@ -182,40 +183,97 @@ func (o *EuropeanOption) SettlementPrice() (int64, error) {
 
 // intrinsicValue is the exercise value per base unit at the given underlying
 // settlement price, in quote precision units.
-func (o *EuropeanOption) intrinsicValue(settlementPrice int64) int64 {
-	var v int64
+func (o *EuropeanOption) tryIntrinsicValue(settlementPrice int64) (int64, bool) {
+	var value int64
+	var ok bool
 	if o.IsCall {
-		v = settlementPrice - o.Strike
+		value, ok = etypes.TrySub(settlementPrice, o.Strike)
 	} else {
-		v = o.Strike - settlementPrice
+		value, ok = etypes.TrySub(o.Strike, settlementPrice)
 	}
-	if v < 0 {
-		return 0
+	if !ok {
+		return 0, false
 	}
-	return v
+	if value < 0 {
+		return 0, true
+	}
+	return value, true
+}
+
+func (o *EuropeanOption) intrinsicValue(settlementPrice int64) int64 {
+	value, ok := o.tryIntrinsicValue(settlementPrice)
+	if !ok {
+		panic("option intrinsic value overflows int64")
+	}
+	return value
 }
 
 // ExpiryCashFlow auto-exercises: longs receive intrinsic × size, shorts pay.
 // The premium was exchanged at trade time, so intrinsic settlement completes
 // the P&L without double counting.
-func (o *EuropeanOption) ExpiryCashFlow(size, entryPrice, settlementPrice, basePrecision int64) int64 {
-	return etypes.MulDiv(size, o.intrinsicValue(settlementPrice), basePrecision)
+func (o *EuropeanOption) TryExpiryCashFlow(size, entryPrice, settlementPrice, basePrecision int64) (int64, bool) {
+	intrinsic, ok := o.tryIntrinsicValue(settlementPrice)
+	if !ok {
+		return 0, false
+	}
+	return etypes.TryMulDiv(size, intrinsic, basePrecision)
 }
 
-func (o *EuropeanOption) DeliveryFee(size, settlementPrice, basePrecision int64) int64 {
+func (o *EuropeanOption) ExpiryCashFlow(size, entryPrice, settlementPrice, basePrecision int64) int64 {
+	cash, ok := o.TryExpiryCashFlow(size, entryPrice, settlementPrice, basePrecision)
+	if !ok {
+		panic("option expiry cash flow overflows int64")
+	}
+	return cash
+}
+
+func (o *EuropeanOption) TryDeliveryFee(size, settlementPrice, basePrecision int64) (int64, bool) {
 	if o.DeliveryFeeBps <= 0 {
-		return 0
+		return 0, true
+	}
+	if settlementPrice < 0 || size == math.MinInt64 {
+		return 0, false
 	}
 	if size < 0 {
 		size = -size
 	}
-	fee := etypes.MulDiv(size, settlementPrice, basePrecision) * o.DeliveryFeeBps / 10000
+	notional, ok := etypes.TryMulDiv(size, settlementPrice, basePrecision)
+	if !ok {
+		return 0, false
+	}
+	fee, ok := etypes.TryMulBps(notional, o.DeliveryFeeBps)
+	if !ok {
+		return 0, false
+	}
 	capBps := o.DeliveryFeeCapBps
 	if capBps == 0 {
 		capBps = 1250
 	}
-	if cap := etypes.MulDiv(size, o.intrinsicValue(settlementPrice), basePrecision) * capBps / 10000; fee > cap {
+	if capBps < 0 {
+		return 0, false
+	}
+	intrinsic, ok := o.tryIntrinsicValue(settlementPrice)
+	if !ok {
+		return 0, false
+	}
+	exerciseValue, ok := etypes.TryMulDiv(size, intrinsic, basePrecision)
+	if !ok {
+		return 0, false
+	}
+	cap, ok := etypes.TryMulBps(exerciseValue, capBps)
+	if !ok {
+		return 0, false
+	}
+	if fee > cap {
 		fee = cap
+	}
+	return fee, true
+}
+
+func (o *EuropeanOption) DeliveryFee(size, settlementPrice, basePrecision int64) int64 {
+	fee, ok := o.TryDeliveryFee(size, settlementPrice, basePrecision)
+	if !ok {
+		panic("option delivery fee overflows int64")
 	}
 	return fee
 }

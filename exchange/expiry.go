@@ -3,6 +3,7 @@ package exchange
 import (
 	"errors"
 	"fmt"
+	"math"
 	"slices"
 	"sort"
 	"strings"
@@ -70,6 +71,161 @@ type expirySettlementPending struct {
 	Attempts        uint64
 	LastReason      string
 	Policy          string
+}
+
+type expiringPosition struct {
+	clientID uint64
+	pos      Position
+}
+
+type optionExpiryPositionPlan struct {
+	clientID uint64
+	pos      Position
+	cash     int64
+	fee      int64
+	netCash  int64
+}
+
+type optionExpiryPlan struct {
+	positions          []optionExpiryPositionPlan
+	netSize            int64
+	grossCashFlow      int64
+	expectedCashFlow   int64
+	roundingResidual   int64
+	venueRoundingDelta int64
+	deliveryFeeTotal   int64
+}
+
+// deferExpiredSettlementLocked is the common fail-closed lifecycle transition
+// for unavailable or economically unresolved expiry settlement. It must be
+// called with e.mu held and releases that lock before reporting diagnostics.
+func (e *DefaultExchange) deferExpiredSettlementLocked(symbol string, now int64, inst Instrument, book *OrderBook, reason string, unavailable error) {
+	pending, alreadyPending := e.settlementPending[symbol]
+	if !alreadyPending {
+		pending = expirySettlementPending{
+			State:           expiryStateSettlementPending,
+			ExpiryReachedAt: now,
+			Policy:          expiryUnavailableRetryForever,
+		}
+		clientIDs := make([]uint64, 0, len(e.Clients))
+		for clientID := range e.Clients {
+			clientIDs = append(clientIDs, clientID)
+		}
+		slices.Sort(clientIDs)
+		for _, clientID := range clientIDs {
+			e.cancelClientOrdersOnBook(e.Clients[clientID], book, inst)
+		}
+	}
+	pending.Attempts++
+	if reason == "" && unavailable != nil {
+		reason = unavailable.Error()
+	}
+	if reason == "" {
+		reason = "settlement unresolved"
+	}
+	pending.LastReason = reason
+	e.settlementPending[symbol] = pending
+	if perp := marginCore(inst); perp != nil {
+		perp.ClearMarkReferences()
+	}
+	if opt, ok := inst.(*einstrument.EuropeanOption); ok {
+		opt.ClearMarks()
+	}
+	log := e.getLogger(symbol)
+	e.mu.Unlock()
+	if unavailable != nil {
+		e.reportPriceUnavailable(now, symbol, "expiry_settlement", unavailable)
+	}
+	if log != nil {
+		log.LogEvent(now, 0, "expiry_settlement_pending", ExpirySettlementPendingEvent{
+			Timestamp: now, Symbol: symbol, State: string(expiryStateSettlementPending),
+			Policy: pending.Policy, Attempts: pending.Attempts,
+			ExpiryReachedAt: pending.ExpiryReachedAt, Reason: pending.LastReason,
+		})
+	}
+}
+
+// previewOptionExpiryLocked validates every option expiry input and resulting
+// cash balance before the book, positions, or venue ledger are mutated. Options
+// are one net contract in the closed simulation; a nonzero residual position is
+// therefore unresolved rather than an implicit external counterparty.
+func (e *DefaultExchange) previewOptionExpiryLocked(option *einstrument.EuropeanOption, settlementPrice int64, positions []expiringPosition) (optionExpiryPlan, error) {
+	plan := optionExpiryPlan{positions: make([]optionExpiryPositionPlan, 0, len(positions))}
+	quote := option.QuoteAsset()
+	precision := option.BasePrecision()
+	simulatedBalances := make(map[uint64]int64)
+	for _, expiring := range positions {
+		if expiring.pos.Size == 0 {
+			continue
+		}
+		client := e.Clients[expiring.clientID]
+		if client == nil {
+			return optionExpiryPlan{}, fmt.Errorf("option %s settlement recipient %d is unavailable", option.Symbol(), expiring.clientID)
+		}
+		if expiring.pos.Size == math.MinInt64 {
+			return optionExpiryPlan{}, fmt.Errorf("option %s position size is not representable", option.Symbol())
+		}
+		cash, ok := option.TryExpiryCashFlow(expiring.pos.Size, expiring.pos.EntryPrice, settlementPrice, precision)
+		if !ok {
+			return optionExpiryPlan{}, fmt.Errorf("option %s expiry cash flow overflows", option.Symbol())
+		}
+		fee, ok := option.TryDeliveryFee(expiring.pos.Size, settlementPrice, precision)
+		if !ok {
+			return optionExpiryPlan{}, fmt.Errorf("option %s delivery fee overflows", option.Symbol())
+		}
+		netCash, ok := etypes.TrySub(cash, fee)
+		if !ok {
+			return optionExpiryPlan{}, fmt.Errorf("option %s net settlement cash overflows", option.Symbol())
+		}
+		plan.netSize, ok = etypes.TryAdd(plan.netSize, expiring.pos.Size)
+		if !ok {
+			return optionExpiryPlan{}, fmt.Errorf("option %s aggregate position size overflows", option.Symbol())
+		}
+		plan.grossCashFlow, ok = etypes.TryAdd(plan.grossCashFlow, cash)
+		if !ok {
+			return optionExpiryPlan{}, fmt.Errorf("option %s aggregate cash flow overflows", option.Symbol())
+		}
+		plan.deliveryFeeTotal, ok = etypes.TryAdd(plan.deliveryFeeTotal, fee)
+		if !ok {
+			return optionExpiryPlan{}, fmt.Errorf("option %s delivery fees overflow", option.Symbol())
+		}
+		simulatedBalance, seen := simulatedBalances[expiring.clientID]
+		if !seen {
+			simulatedBalance = client.PerpBalances[quote]
+		}
+		simulatedBalance, ok = etypes.TryAdd(simulatedBalance, netCash)
+		if !ok {
+			return optionExpiryPlan{}, fmt.Errorf("option %s client %d balance overflows", option.Symbol(), expiring.clientID)
+		}
+		simulatedBalances[expiring.clientID] = simulatedBalance
+		plan.positions = append(plan.positions, optionExpiryPositionPlan{
+			clientID: expiring.clientID, pos: expiring.pos, cash: cash, fee: fee, netCash: netCash,
+		})
+	}
+	if plan.netSize != 0 {
+		return optionExpiryPlan{}, fmt.Errorf("option %s has unmatched net position size %d", option.Symbol(), plan.netSize)
+	}
+	var ok bool
+	plan.expectedCashFlow, ok = option.TryExpiryCashFlow(plan.netSize, 0, settlementPrice, precision)
+	if !ok {
+		return optionExpiryPlan{}, fmt.Errorf("option %s net expiry cash flow overflows", option.Symbol())
+	}
+	plan.roundingResidual, ok = etypes.TrySub(plan.grossCashFlow, plan.expectedCashFlow)
+	if !ok {
+		return optionExpiryPlan{}, fmt.Errorf("option %s expiry rounding residual overflows", option.Symbol())
+	}
+	plan.venueRoundingDelta, ok = etypes.TrySub(0, plan.roundingResidual)
+	if !ok {
+		return optionExpiryPlan{}, fmt.Errorf("option %s expiry rounding ledger delta overflows", option.Symbol())
+	}
+	simulatedRevenue := e.ExchangeBalance.FeeRevenue[quote]
+	if simulatedRevenue, ok = etypes.TryAdd(simulatedRevenue, plan.venueRoundingDelta); !ok {
+		return optionExpiryPlan{}, fmt.Errorf("option %s expiry rounding ledger overflows", option.Symbol())
+	}
+	if _, ok = etypes.TryAdd(simulatedRevenue, plan.deliveryFeeTotal); !ok {
+		return optionExpiryPlan{}, fmt.Errorf("option %s delivery fee ledger overflows", option.Symbol())
+	}
+	return plan, nil
 }
 
 // reportPriceUnavailable makes an intentional periodic deferral observable.
@@ -424,44 +580,7 @@ func (e *DefaultExchange) settleExpiredInstrument(symbol string, now int64) {
 		// orders once and retain positions until a declared settlement source
 		// becomes available; allowing a post-expiry fill would be worse than a
 		// visible lifecycle deferral.
-		pending, alreadyPending := e.settlementPending[symbol]
-		if !alreadyPending {
-			pending = expirySettlementPending{
-				State:           expiryStateSettlementPending,
-				ExpiryReachedAt: now,
-				Policy:          expiryUnavailableRetryForever,
-			}
-			clientIDs := make([]uint64, 0, len(e.Clients))
-			for clientID := range e.Clients {
-				clientIDs = append(clientIDs, clientID)
-			}
-			slices.Sort(clientIDs)
-			for _, clientID := range clientIDs {
-				e.cancelClientOrdersOnBook(e.Clients[clientID], book, inst)
-			}
-		}
-		pending.Attempts++
-		pending.LastReason = err.Error()
-		e.settlementPending[symbol] = pending
-		if perp := marginCore(inst); perp != nil {
-			// A mark sweep may have collected this contract before expiry won
-			// the exchange lock. Clear availability at the lifecycle boundary so
-			// pending exposure cannot be observed as a live marked contract.
-			perp.ClearMarkReferences()
-		}
-		if opt, ok := inst.(*einstrument.EuropeanOption); ok {
-			opt.ClearMarks()
-		}
-		log := e.getLogger(symbol)
-		e.mu.Unlock()
-		e.reportPriceUnavailable(now, symbol, "expiry_settlement", fmt.Errorf("expiry settlement: %w", err))
-		if log != nil {
-			log.LogEvent(now, 0, "expiry_settlement_pending", ExpirySettlementPendingEvent{
-				Timestamp: now, Symbol: symbol, State: string(expiryStateSettlementPending),
-				Policy: pending.Policy, Attempts: pending.Attempts,
-				ExpiryReachedAt: pending.ExpiryReachedAt, Reason: pending.LastReason,
-			})
-		}
+		e.deferExpiredSettlementLocked(symbol, now, inst, book, err.Error(), fmt.Errorf("expiry settlement: %w", err))
 		return
 	}
 	quote := inst.QuoteAsset()
@@ -472,15 +591,20 @@ func (e *DefaultExchange) settleExpiredInstrument(symbol string, now int64) {
 		panic("exchange: exact linear position store required for expiry")
 	}
 
-	type expiringPos struct {
-		clientID uint64
-		pos      Position
-	}
-	var positions []expiringPos
+	var positions []expiringPosition
 	e.Positions.PositionsForFunding(symbol, func(clientID uint64, pos Position) {
-		positions = append(positions, expiringPos{clientID: clientID, pos: pos})
+		positions = append(positions, expiringPosition{clientID: clientID, pos: pos})
 	})
 	_, hasMarginLedger := e.Positions.(etypes.MarginLedger)
+	var optionPlan *optionExpiryPlan
+	if option, ok := inst.(*einstrument.EuropeanOption); ok {
+		plan, previewErr := e.previewOptionExpiryLocked(option, settlementPrice, positions)
+		if previewErr != nil {
+			e.deferExpiredSettlementLocked(symbol, now, inst, book, previewErr.Error(), nil)
+			return
+		}
+		optionPlan = &plan
+	}
 
 	var expectedRounding []PositionAccountingRounding
 	if e.requireExactLinearAccounting && isMargined {
@@ -569,10 +693,9 @@ func (e *DefaultExchange) settleExpiredInstrument(symbol string, now int64) {
 	ledger, hasLedger := e.Positions.(etypes.MarginLedger)
 	log := e.getLogger(symbol)
 	_, isCashSettledOption := inst.(*einstrument.EuropeanOption)
-	var optionNetSize int64
-	var optionCashFlowTotal int64
 
 	var feeTotal int64
+	optionPlanIndex := 0
 	for _, ep := range positions {
 		pos := ep.pos
 		client := e.Clients[ep.clientID]
@@ -615,6 +738,12 @@ func (e *DefaultExchange) settleExpiredInstrument(symbol string, now int64) {
 			}
 		}
 		fee := exp.DeliveryFee(pos.Size, settlementPrice, precision)
+		if optionPlan != nil {
+			planned := optionPlan.positions[optionPlanIndex]
+			cash = planned.cash
+			fee = planned.fee
+			optionPlanIndex++
+		}
 		oldBal := client.PerpBalances[quote]
 		netCash, ok := etypes.TrySub(cash, fee)
 		if !ok {
@@ -623,18 +752,6 @@ func (e *DefaultExchange) settleExpiredInstrument(symbol string, now int64) {
 		newBal := etypes.AddAmount(oldBal, netCash)
 		client.PerpBalances[quote] = newBal
 		feeTotal = etypes.AddAmount(feeTotal, fee)
-		if isCashSettledOption {
-			var ok bool
-			optionNetSize, ok = etypes.TryAdd(optionNetSize, pos.Size)
-			if !ok {
-				panic("exchange: option expiry position size overflows aggregate")
-			}
-			optionCashFlowTotal, ok = etypes.TryAdd(optionCashFlowTotal, cash)
-			if !ok {
-				panic("exchange: option expiry cash flow overflows aggregate")
-			}
-		}
-
 		closeSide := Sell
 		if pos.Size < 0 {
 			closeSide = Buy
@@ -669,20 +786,8 @@ func (e *DefaultExchange) settleExpiredInstrument(symbol string, now int64) {
 		// cash flow for the net position. A nonzero net position therefore
 		// remains visible as an unmatched contract instead of being relabelled
 		// as rounding.
-		expectedCashFlow := exp.ExpiryCashFlow(optionNetSize, 0, settlementPrice, precision)
-		roundingResidual, ok := etypes.TrySub(optionCashFlowTotal, expectedCashFlow)
-		if !ok {
-			panic("exchange: option expiry rounding residual overflows")
-		}
-		if roundingResidual != 0 {
-			venueDelta, ok := etypes.TrySub(0, roundingResidual)
-			if !ok {
-				panic("exchange: option expiry rounding ledger delta overflows")
-			}
-			if _, ok := etypes.TryAdd(e.ExchangeBalance.FeeRevenue[quote], venueDelta); !ok {
-				panic("exchange: option expiry rounding ledger overflows venue balance")
-			}
-			e.moveVenueBalance(VenueFeeRevenue, quote, venueDelta, now, symbol, "option_expiry_rounding")
+		if optionPlan.roundingResidual != 0 {
+			e.moveVenueBalance(VenueFeeRevenue, quote, optionPlan.venueRoundingDelta, now, symbol, "option_expiry_rounding")
 		}
 	}
 

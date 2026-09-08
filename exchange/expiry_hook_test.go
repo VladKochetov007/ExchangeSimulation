@@ -18,9 +18,15 @@ func TestPreExpiryHookObservesPositionBeforeSettlement(t *testing.T) {
 	// cached mark pair alone.
 	option.ObserveSettlement(100*valuationQuotePrecision, clock.NowUnixNano())
 	ex.AddInstrument(option)
-	ex.ConnectNewClient(1, nil, &FixedFee{})
-	ex.AddPerpBalance(1, "USD", 100*valuationQuotePrecision)
+	for _, clientID := range []uint64{1, 2} {
+		ex.ConnectNewClient(clientID, nil, &FixedFee{})
+		ex.AddPerpBalance(clientID, "USD", 100*valuationQuotePrecision)
+	}
 	ex.Positions.UpdatePosition(1, option.Symbol(), valuationBasePrecision, 10*valuationQuotePrecision, Buy, PositionBoth)
+	// The closed simulation settles one net option book. Keep the hook's
+	// single-account observation while supplying the matching short required
+	// for a terminal zero-net settlement.
+	ex.Positions.UpdatePosition(2, option.Symbol(), valuationBasePrecision, 10*valuationQuotePrecision, Sell, PositionBoth)
 
 	called := false
 	ex.ConfigureAutomation(AutomationConfig{PreExpiryHook: func() {
