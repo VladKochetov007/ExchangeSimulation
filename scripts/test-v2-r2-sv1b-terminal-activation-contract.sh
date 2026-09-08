@@ -175,9 +175,9 @@ v2_r2_require_checkpoint_stream "$fixture_root/treatment/checkpoints.jsonl" "$st
 v2_r2_sv1b_require_checkpoint_attestation_binding \
 	"$fixture_root/treatment/checkpoints.jsonl" "$fixture_root/treatment/binary-evidence-attestation.json"
 
-jq -c 'if .event_count == 0 then .sim_time = 0.5 else .sim_time = 10 end' \
+sed '0,/"sim_time":1735689600000000000/s//"sim_time":1735689600000000000.5/' \
 	"$fixture_root/treatment/checkpoints.jsonl" >"$fixture_root/fractional-sim-time-checkpoint.jsonl"
-expect_checkpoint_rejected_with_bounds fractional-sim-time-checkpoint.jsonl 0 10
+expect_checkpoint_rejected fractional-sim-time-checkpoint.jsonl
 jq -c 'if .event_count == 0 then .event_count = 0.5 else . end' \
 	"$fixture_root/treatment/checkpoints.jsonl" >"$fixture_root/fractional-event-count-checkpoint.jsonl"
 expect_checkpoint_rejected fractional-event-count-checkpoint.jsonl

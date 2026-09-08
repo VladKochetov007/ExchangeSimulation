@@ -440,6 +440,37 @@ v2_r2_require_current_source_revision() {
 # explicit without allowing an arbitrary duplicate in the ordered stream. The
 # optional representation argument adds binary-evidence invariants without
 # changing the historical JSON checkpoint contract.
+v2_r2_require_binary_checkpoint_stream_exact() {
+	[[ $# -eq 3 || $# -eq 4 ]] || return 1
+	local checkpoints=$1
+	local simulation_start_nano=$2
+	local simulation_end_nano=$3
+	local attestation=${4:-}
+	local repository_root=${root_dir:-$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)}
+	local go_command=${V2_R2_CHECKPOINT_GO:-}
+	[[ "$checkpoints" == /* && "$checkpoints" != */ && "$checkpoints" != *$'\n'* && "$checkpoints" != *$'\t'* ]] || return 1
+	[[ "$simulation_start_nano" =~ ^-?[0-9]+$ && "$simulation_end_nano" =~ ^-?[0-9]+$ ]] || return 1
+	if [[ -z "$go_command" ]]; then
+		if [[ -x /usr/local/go/bin/go ]]; then
+			go_command=/usr/local/go/bin/go
+		else
+			go_command=$(command -v go) || return 1
+		fi
+	fi
+	[[ "$go_command" == /* && -x "$go_command" ]] || return 1
+	[[ -d "$repository_root" && ! -L "$repository_root" ]] || return 1
+	local -a validator_args=(run ./cmd/checkpointvalidate
+		-checkpoints "$checkpoints" -start "$simulation_start_nano" -end "$simulation_end_nano")
+	if [[ -n "$attestation" ]]; then
+		[[ "$attestation" == /* && "$attestation" != */ && "$attestation" != *$'\n'* && "$attestation" != *$'\t'* ]] || return 1
+		validator_args+=( -attestation "$attestation" )
+	fi
+	(
+		cd -- "$repository_root" || exit 1
+		"$go_command" "${validator_args[@]}"
+	)
+}
+
 v2_r2_require_checkpoint_stream() {
 	[[ $# -eq 3 || $# -eq 4 ]] || return 1
 	local checkpoints=$1
@@ -447,6 +478,9 @@ v2_r2_require_checkpoint_stream() {
 	local simulation_end_nano=$3
 	local expected_representation=${4:-}
 	[[ -z "$expected_representation" || "$expected_representation" == "evstream_v3" ]] || return 1
+	if [[ "$expected_representation" == "evstream_v3" ]]; then
+		v2_r2_require_binary_checkpoint_stream_exact "$checkpoints" "$simulation_start_nano" "$simulation_end_nano" || return 1
+	fi
 	jq -e -s --argjson simulation_start_nano "$simulation_start_nano" --argjson simulation_end_nano "$simulation_end_nano" \
 		--arg expected_representation "$expected_representation" \
 		'. as $checkpoints |

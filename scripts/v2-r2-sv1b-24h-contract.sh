@@ -390,12 +390,9 @@ v2_r2_sv1b_require_checkpoint_attestation_binding() {
 	[[ $# -eq 2 ]] || return 1
 	local checkpoints=$1 attestation=$2
 	[[ -s "$checkpoints" && ! -L "$checkpoints" && -s "$attestation" && ! -L "$attestation" ]] || return 1
-	jq -e -s --slurpfile attestation "$attestation" '
-		($attestation | length) == 1 and
-		length >= 2 and .[-1].final == true and
-		(.[-1].event_count == $attestation[0].event_frames) and
-		(.[-1].execution_stream_hash == $attestation[0].execution_stream_hash)' \
-		"$checkpoints" >/dev/null
+	v2_r2_require_binary_checkpoint_stream_exact \
+		"$checkpoints" "$v2_r2_sv1_activation_simulation_start_nano" \
+		"$v2_r2_sv1_activation_simulation_end_nano" "$attestation"
 }
 
 v2_r2_sv1b_require_terminal_arm_reconstruction() {
