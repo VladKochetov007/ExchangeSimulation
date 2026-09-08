@@ -31,6 +31,30 @@ type placement struct {
 	Price int64  `json:"price"`
 }
 
+type level struct {
+	Price int64 `json:"price"`
+}
+
+// snapshot carries only what a midpoint needs. Moneyness has to be evaluated at
+// the instant a quote is placed: options relist through the run, so a contract
+// classified by terminal spot may have been on the other side of the strike when
+// it was actually being quoted. RT-052 recorded that confound.
+type snapshot struct {
+	Bids []level `json:"bids"`
+	Asks []level `json:"asks"`
+}
+
+func (sn snapshot) mid() (int64, bool) {
+	if len(sn.Bids) == 0 || len(sn.Asks) == 0 {
+		return 0, false
+	}
+	bid, ask := sn.Bids[0].Price, sn.Asks[0].Price
+	if bid <= 0 || ask <= 0 || ask < bid {
+		return 0, false
+	}
+	return (bid + ask) / 2, true
+}
+
 type record struct {
 	ClientID uint64 `json:"client_id"`
 	Event    string `json:"event"`
@@ -38,10 +62,13 @@ type record struct {
 	Data     struct {
 		VenueID string `json:"venue_id"`
 		Payload struct {
-			Symbol  string `json:"symbol"`
-			Side    string `json:"side"`
+			Symbol  string  `json:"symbol"`
+			Side    string  `json:"side"`
+			Bids    []level `json:"bids"`
+			Asks    []level `json:"asks"`
 			Payload struct {
 				placement
+				snapshot
 			} `json:"payload"`
 		} `json:"payload"`
 	} `json:"data"`
@@ -77,21 +104,46 @@ func class(role string) string {
 
 var optionPattern = regexp.MustCompile(`^ABC-\d+-(\d+)-([CP])$`)
 
-// moneyness reports whether an option symbol is in the money at the given spot,
-// and whether the symbol is an option at all.
-func moneyness(symbol string, spot float64) (inTheMoney, isOption bool) {
+// contract returns an option's strike and whether it is a call.
+func contract(symbol string) (strike float64, isCall, isOption bool) {
 	m := optionPattern.FindStringSubmatch(symbol)
 	if m == nil {
-		return false, false
+		return 0, false, false
 	}
-	strike, err := strconv.ParseFloat(m[1], 64)
+	value, err := strconv.ParseFloat(m[1], 64)
 	if err != nil {
-		return false, false
+		return 0, false, false
 	}
-	if m[2] == "C" {
-		return strike < spot, true
+	return value, m[2] == "C", true
+}
+
+// signedMoneyness is positive when the contract is in the money, for both calls
+// and puts, so one scale orders the whole surface.
+func signedMoneyness(spot, strike float64, isCall bool) float64 {
+	if spot <= 0 {
+		return 0
 	}
-	return strike > spot, true
+	if isCall {
+		return (spot - strike) / spot
+	}
+	return (strike - spot) / spot
+}
+
+// bucketOf names a moneyness band. The bands are wider away from the money
+// because that is where contracts are sparse.
+func bucketOf(m float64) (int, string) {
+	switch {
+	case m > 0.05:
+		return 0, "deep ITM  (>+5%)"
+	case m > 0.01:
+		return 1, "ITM  (+1..+5%)"
+	case m >= -0.01:
+		return 2, "at the money (±1%)"
+	case m >= -0.05:
+		return 3, "OTM  (-1..-5%)"
+	default:
+		return 4, "deep OTM  (<-5%)"
+	}
 }
 
 type tally struct {
@@ -101,7 +153,7 @@ type tally struct {
 func main() {
 	logDir := flag.String("dir", "", "log directory of a full-log run")
 	greeksPath := flag.String("greeks", "", "greeks.json (default <dir>/greeks.json)")
-	spot := flag.Float64("spot", 49295.05, "terminal spot used to classify moneyness")
+	focus := flag.String("class", "option_dealer", "participant class to attribute")
 	flag.Parse()
 	if *logDir == "" {
 		fmt.Fprintln(os.Stderr, "-dir is required")
@@ -171,73 +223,132 @@ func main() {
 		os.Exit(1)
 	}
 
-	byGroup := map[string]map[string]*tally{"in the money": {}, "out of the money": {}}
+	// Pass 2: contemporaneous ABC/USD consensus mid per timestamp, built with the
+	// venue's own median-across-venues rule.
+	spotByTS := map[int64]map[string]int64{}
+	snapMarker := []byte(`"BookSnapshot"`)
+	for _, path := range files {
+		if !strings.Contains(path, "ABC-USD") {
+			continue
+		}
+		handle, err := os.Open(path)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "open:", err)
+			os.Exit(1)
+		}
+		scanner := bufio.NewScanner(handle)
+		scanner.Buffer(make([]byte, 0, 1<<20), 1<<24)
+		for scanner.Scan() {
+			line := scanner.Bytes()
+			if !bytes.Contains(line, snapMarker) {
+				continue
+			}
+			var rec record
+			if err := json.Unmarshal(line, &rec); err != nil || rec.Event != "BookSnapshot" {
+				continue
+			}
+			shot := snapshot{Bids: rec.Data.Payload.Bids, Asks: rec.Data.Payload.Asks}
+			mid, ok := shot.mid()
+			if !ok {
+				continue
+			}
+			if spotByTS[rec.SimTS] == nil {
+				spotByTS[rec.SimTS] = map[string]int64{}
+			}
+			spotByTS[rec.SimTS][rec.Data.VenueID] = mid
+		}
+		handle.Close()
+	}
+	consensus := make(map[int64]float64, len(spotByTS))
+	stamps := make([]int64, 0, len(spotByTS))
+	for ts, byVenue := range spotByTS {
+		values := make([]int64, 0, len(byVenue))
+		for _, mid := range byVenue {
+			values = append(values, mid)
+		}
+		sort.Slice(values, func(i, j int) bool { return values[i] < values[j] })
+		n := len(values)
+		med := values[n/2]
+		if n%2 == 0 {
+			med = (values[n/2-1] + values[n/2]) / 2
+		}
+		consensus[ts] = float64(med) / 100000
+		stamps = append(stamps, ts)
+	}
+	sort.Slice(stamps, func(i, j int) bool { return stamps[i] < stamps[j] })
+	if len(stamps) == 0 {
+		fmt.Fprintln(os.Stderr, "no ABC/USD snapshot is two-sided")
+		os.Exit(1)
+	}
+	spotAt := func(ts int64) (float64, bool) {
+		i := sort.Search(len(stamps), func(i int) bool { return stamps[i] > ts })
+		if i == 0 {
+			return 0, false
+		}
+		return consensus[stamps[i-1]], true
+	}
+
+	// Pass 3: bucket dealer placements by quote-time moneyness.
+	buckets := make([]tally, 5)
+	names := make([]string, 5)
+	unpriced := 0
 	scan(func(rec record) {
 		symbol := rec.Data.Payload.Symbol
-		inMoney, isOption := moneyness(symbol, *spot)
+		strike, isCall, isOption := contract(symbol)
 		if !isOption {
 			return
 		}
+		if roleOf[key{rec.Data.VenueID, rec.ClientID}] != *focus {
+			return
+		}
+		spot, ok := spotAt(rec.SimTS)
+		if !ok {
+			unpriced++
+			return
+		}
+		idx, label := bucketOf(signedMoneyness(spot, strike, isCall))
+		names[idx] = label
 		side := rec.Data.Payload.Side
 		if side == "" {
 			side = rec.Data.Payload.Payload.Side
-		}
-		name := roleOf[key{rec.Data.VenueID, rec.ClientID}]
-		if name == "" {
-			return
-		}
-		group := "out of the money"
-		if inMoney {
-			group = "in the money"
-		}
-		if byGroup[group][name] == nil {
-			byGroup[group][name] = &tally{}
 		}
 		quarter := int((rec.SimTS - first) * 4 / span)
 		if quarter > 3 {
 			quarter = 3
 		}
 		if side == "BUY" {
-			byGroup[group][name].bid[quarter]++
+			buckets[idx].bid[quarter]++
 		} else {
-			byGroup[group][name].ask[quarter]++
+			buckets[idx].ask[quarter]++
 		}
 	})
 
-	for _, group := range []string{"in the money", "out of the money"} {
-		fmt.Printf("\n%s option books — placements by class\n", group)
-		fmt.Printf("%-24s %10s %10s %8s   %s\n", "class", "bids", "asks", "bid/ask", "bid/ask by quarter")
-		names := make([]string, 0, len(byGroup[group]))
-		for name := range byGroup[group] {
-			names = append(names, name)
+	fmt.Printf("%s placements by moneyness AT QUOTE TIME (spot = median ABC/USD mid)\n", *focus)
+	if unpriced > 0 {
+		fmt.Printf("  placements with no prior spot: %d\n", unpriced)
+	}
+	fmt.Printf("%-22s %10s %10s %9s   %s\n", "bucket", "bids", "asks", "bid/ask", "bid/ask by quarter")
+	for i := 0; i < 5; i++ {
+		bids, asks := sum(buckets[i].bid), sum(buckets[i].ask)
+		if bids+asks == 0 {
+			continue
 		}
-		sort.Slice(names, func(i, j int) bool {
-			a, b := byGroup[group][names[i]], byGroup[group][names[j]]
-			return sum(a.ask)+sum(a.bid) > sum(b.ask)+sum(b.bid)
-		})
-		for _, name := range names {
-			t := byGroup[group][name]
-			bids, asks := sum(t.bid), sum(t.ask)
-			ratio := "-"
-			if asks > 0 {
-				ratio = fmt.Sprintf("%.1f%%", float64(bids)/float64(asks)*100)
-			}
-			quarters := make([]string, 4)
-			for q := 0; q < 4; q++ {
-				// Print the counts alongside the ratio: a ratio computed on a
-				// handful of placements reads the same as one computed on
-				// hundreds of thousands, and only the counts show the difference.
-				if t.ask[q] > 0 {
-					quarters[q] = fmt.Sprintf("%.0f%%(%d/%d)", float64(t.bid[q])/float64(t.ask[q])*100, t.bid[q], t.ask[q])
-				} else if t.bid[q] > 0 {
-					quarters[q] = fmt.Sprintf("inf(%d/0)", t.bid[q])
-				} else {
-					quarters[q] = "-(0/0)"
-				}
-			}
-			fmt.Printf("%-24s %10d %10d %8s   %s\n",
-				name, bids, asks, ratio, strings.Join(quarters, " "))
+		ratio := "-"
+		if asks > 0 {
+			ratio = fmt.Sprintf("%.1f%%", float64(bids)/float64(asks)*100)
 		}
+		quarters := make([]string, 4)
+		for q := 0; q < 4; q++ {
+			if buckets[i].ask[q] > 0 {
+				quarters[q] = fmt.Sprintf("%.0f%%", float64(buckets[i].bid[q])/float64(buckets[i].ask[q])*100)
+			} else if buckets[i].bid[q] > 0 {
+				quarters[q] = "inf"
+			} else {
+				quarters[q] = "-"
+			}
+		}
+		fmt.Printf("%-22s %10d %10d %9s   %s\n",
+			names[i], bids, asks, ratio, strings.Join(quarters, " "))
 	}
 }
 

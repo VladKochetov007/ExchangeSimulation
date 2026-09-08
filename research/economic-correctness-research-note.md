@@ -5586,6 +5586,119 @@ orders outweighs one that rests a single quote.
 Recorded as RT-052.
 
 
+**H-064 (PREREGISTERED) — the dealer's bid depends on moneyness *at the moment it
+quotes*, and [[RT-052]]'s symmetric third quarter is a classification artifact of
+using terminal spot.**
+
+**Representation change.** RT-051 and RT-052 both bucketed *books* by their
+moneyness at the **end** of the run. Options expire and relist across five listing
+timestamps with 2 h and 6 h tenors, so a contract labelled out-of-the-money at the
+end may have been in the money while it was being quoted. The fix is to stop
+classifying books and start classifying **placements**: for every
+`OrderAccepted`, compute the contract's moneyness against the **contemporaneous**
+`ABC/USD` consensus mid, using the same median-across-venues rule the venue's own
+index uses.
+
+Define signed moneyness `m = (S − K)/S` for calls and `(K − S)/S` for puts, so
+**positive is in the money** for both.
+
+**Claims.**
+1. The dealer's bid/ask placement ratio is a **monotone function of quote-time
+   moneyness** — near 100% for in-the-money buckets, low for out-of-the-money
+   ones, with the transition at the money.
+2. [[RT-052]]'s Q3 anomaly **disappears**: within each moneyness bucket the ratio
+   varies by less than **2×** across the four quarters.
+
+**Falsifiers.**
+(a) the Q3 excursion **persists within buckets** → the dealer genuinely changes
+behaviour mid-run, the classification artifact explanation is wrong, and RT-052's
+open question stays open with one more candidate eliminated;
+(b) **no monotone relation** with quote-time moneyness → moneyness is not the
+driver at all, and the framing of both RT-051 and RT-052 needs rebuilding rather
+than refining;
+(c) the ratio is low **even for deep in-the-money** placements → the asymmetry is
+not about moneyness but about the dealer's inventory or direction, a different
+mechanism.
+
+**What makes this decisive rather than another correlation.** If claim 1 holds and
+claim 2 holds, the whole picture reduces to one rule — *the dealer does not bid
+for options it prices near zero* — and RT-052's anomaly was my own measurement
+choice, not the simulator's behaviour. If claim 2 fails, the anomaly is real and
+belongs to the dealer.
+
+**Instrument.** Extend `quoteside` to bucket each placement by quote-time
+moneyness, reusing the per-timestamp consensus machinery already written for
+`crossexec`, and report bid/ask ratio per bucket per quarter with the underlying
+counts.
+
+**Discriminating experiment E-069**, preregistered before the run: seed 607, 8 h,
+`-log-mode full`.
+Status: **MIXED** — claim 1 falsified as stated but supported across the 1.31 M
+placements that carry the volume; claim 2 falsified and falsifier (a) fires.
+
+
+**E-069 — H-064 MIXED, and my proposed explanation is REFUTED. Falsifier (a)
+fires: the third-quarter symmetry survives reclassification, so it is the
+dealer's behaviour and not my measurement choice.**
+Base: `a666d02faede3d40f046b11e60eb672c59386a94`, seed 607, 8 h, `-log-mode full`.
+Reproduce: `go run research/tools/quoteside/main.go -dir <logdir>`.
+
+`option_dealer` placements bucketed by moneyness **at the instant of the quote**,
+against the contemporaneous median `ABC/USD` mid:
+
+| bucket | bids | asks | bid/ask | by quarter |
+|---|---:|---:|---:|---|
+| deep ITM (>+5%) | 7 778 | 7 778 | 100.0% | – – **100%** 100% |
+| ITM (+1…+5%) | 262 427 | 262 427 | **100.0%** | 100% 100% 100% 100% |
+| at the money (±1%) | 107 281 | 143 299 | **74.9%** | 78% 79% **100%** 59% |
+| OTM (−1…−5%) | 77 049 | 462 417 | **16.7%** | 14% 17% **100%** 12% |
+| deep OTM (<−5%) | 3 884 | 3 884 | 100.0% | – – **100%** – |
+
+**Claim 2 FALSIFIED and falsifier (a) fires.** I predicted the Q3 excursion would
+disappear once contracts were classified by what they were when quoted. It does
+not: within the OTM bucket the ratio runs **14%, 17%, 100%, 12%** — a spread of
+**8.3×**, where the falsifier required under 2×. **In Q3 every bucket is exactly
+100%.** The symmetric quarter is real dealer behaviour. My explanation was wrong,
+and [[RT-052]]'s open question stays open with the classification-artifact
+candidate now eliminated.
+
+**Claim 1 FALSIFIED as stated, supported where the volume is.** The relation is
+not monotone across all five buckets: the two tails read 100%. But those tails
+hold **23 324 placements, 1.7% of the total**, and appear only in the quarters
+where Q3 dominates. Across the three buckets carrying **1 314 900 placements** the
+relation is clean and monotone — **100.0% → 74.9% → 16.7%** as contracts move from
+in the money through at the money to out of it. The threshold-shaped claim failed;
+the shape it was reaching for is there.
+
+**The in-the-money exactness is the sharpest single number.** 262 427 bids against
+262 427 asks — **equal to the unit** across 8 simulated hours and every quarter.
+The dealer runs a strictly paired two-sided loop for in-the-money contracts and
+abandons it for out-of-the-money ones, and in Q3 abandons the abandonment.
+
+**What Q3 now looks like, stated as an observation rather than a mechanism.**
+Every bucket at exactly 100% is not a gradual shift — it is the signature of a
+**different quoting path**, one that emits strictly paired quotes. The deep-ITM
+and deep-OTM buckets exist almost only in Q3, and [[RT-052]] measured total
+placements collapsing there (OTM 50 185 against 216 535 in Q1). Something changes
+regime for a quarter. **I am not naming it.** Two candidates have now been
+eliminated by measurement — risk-limit withdrawal (RT-052) and classification
+artifact (here) — and the count of wrong mechanism sentences in this campaign is
+the reason the third is not being guessed.
+
+**Next experiment, cheap and discriminating.** Tally Q3 placements by **listing
+epoch** — the timestamp embedded in each option symbol. Options relist across five
+epochs with 2 h and 6 h tenors. If Q3's paired quoting is confined to
+freshly-listed contracts, the regime is a listing-bootstrap path; if it is spread
+across all live expiries, it is a change in the dealer itself. One pass over
+evidence already collected.
+
+**Scope.** One seed, one configuration. Placements count accepted orders, not
+resting depth or time-weighted presence. The quote-time spot is the consensus mid
+at or before each placement, inheriting the 1 s snapshot cadence.
+
+Recorded as RT-053.
+
+
 ---
 
 ## F. Findings
@@ -5602,6 +5715,15 @@ See `research/red-team-findings.md` for the full records.
 - **RT-003** — bounded no-violation results (INV-2, INV-5, INV-6, identity).
 - **RT-006** — latency is delivered as configured across 225 link x channel
   rows; no unearned speed advantage. Transport only.
+- **RT-053** — bucketing the dealer's quotes by **moneyness at quote time** gives a
+  clean monotone rule over the 1.31 M placements that carry the volume —
+  **100.0% in the money, 74.9% at the money, 16.7% out of it** — with the ITM
+  books quoted **262 427 bids against 262 427 asks, equal to the unit**. But it
+  **refutes my explanation of [[RT-052]]'s Q3**: the excursion survives
+  reclassification (OTM quarters 14%, 17%, **100%**, 12%, an 8.3x spread), so the
+  symmetric quarter is real dealer behaviour, not a terminal-spot artifact. Every
+  bucket reads exactly 100% in Q3 — the signature of a different quoting path.
+  Two candidate mechanisms now eliminated; the third is not being guessed.
 - **RT-052** — the option dealer quotes **in-the-money books with exactly one bid
   per ask, every quarter, to the unit** (97 767/97 767, 103 384/103 384,
   51 189/51 189, 83 952/83 952) and out-of-the-money books at **4.45 asks per
