@@ -273,10 +273,12 @@ v2_r2_sv1b_verify_artifact_records() {
 }
 
 v2_r2_sv1b_require_activation_arm_artifacts() {
-	[[ $# -eq 5 ]] || return 1
+	[[ $# -eq 5 || $# -eq 6 ]] || return 1
 	local arm_dir=$1 arm_name=$2 expected_revision=$3 expected_config_sha256=$4 expected_binary_sha256=$5
+	local expected_outcome=${6:-completed}
 	local expected_config expected_venue_ids expected_experiment expected_hypothesis
 	local expected_root_files actual_root_files required_file status_field file_path expected_hash actual_hash
+	[[ "$expected_outcome" == completed || "$expected_outcome" == terminal_failure ]] || return 1
 	case "$arm_name" in
 		treatment) expected_config="$v2_r2_sv1_activation_config" ;;
 		control) expected_config="$v2_r2_sv1_activation_control_config" ;;
@@ -334,14 +336,25 @@ v2_r2_sv1b_require_activation_arm_artifacts() {
 		.build.goarch == "amd64" and .build.goamd64 == "v1" and .venue_ids == $venue_ids and
 		.config.seed == $seed and .config.log_mode == $log_mode and .config.evidence_format == $evidence_format and
 		.config.record_market_data_receipts == true' "$arm_dir/manifest.json" >/dev/null || return 1
-	jq -e --arg arm_name "$arm_name" '
-		type == "object" and .schema_version == 2 and .contract == "v2-r2-sv1b-activation-arm-status-v1" and
-		.arm == $arm_name and .exit_status == 0 and .completion_verified == true and
-		.terminal_failure_verified == false and .terminal_outcome_status == "completed" and
-		.resource_guard_failed == false and
-		all([.terminal_outcome_sha256, .run_metadata_sha256, .manifest_sha256, .greeks_sha256,
-			.checkpoints_sha256, .binary_attestation_sha256, .evidence_manifest_sha256][];
-			type == "string" and test("^[0-9a-f]{64}$"))' "$arm_dir/run-status.json" >/dev/null || return 1
+	if [[ "$expected_outcome" == completed ]]; then
+		jq -e --arg arm_name "$arm_name" '
+			type == "object" and .schema_version == 2 and .contract == "v2-r2-sv1b-activation-arm-status-v1" and
+			.arm == $arm_name and .exit_status == 0 and .completion_verified == true and
+			.terminal_failure_verified == false and .terminal_outcome_status == "completed" and
+			.resource_guard_failed == false and
+			all([.terminal_outcome_sha256, .run_metadata_sha256, .manifest_sha256, .greeks_sha256,
+				.checkpoints_sha256, .binary_attestation_sha256, .evidence_manifest_sha256][];
+				type == "string" and test("^[0-9a-f]{64}$"))' "$arm_dir/run-status.json" >/dev/null || return 1
+	else
+		jq -e --arg arm_name "$arm_name" '
+			type == "object" and .schema_version == 2 and .contract == "v2-r2-sv1b-activation-arm-status-v1" and
+			.arm == $arm_name and (.exit_status | type == "number" and floor == . and . > 0 and . <= 255) and
+			.completion_verified == false and .terminal_failure_verified == true and
+			.terminal_outcome_status == "terminal_failure" and .resource_guard_failed == false and
+			all([.terminal_outcome_sha256, .run_metadata_sha256, .manifest_sha256, .greeks_sha256,
+				.checkpoints_sha256, .binary_attestation_sha256, .evidence_manifest_sha256][];
+				type == "string" and test("^[0-9a-f]{64}$"))' "$arm_dir/run-status.json" >/dev/null || return 1
+	fi
 	while IFS=$'\t' read -r status_field file_path; do
 		expected_hash=$(jq -er --arg field "$status_field" '.[$field] | select(type == "string" and test("^[0-9a-f]{64}$"))' "$arm_dir/run-status.json") || return 1
 		actual_hash=$(sha256sum -- "$arm_dir/$file_path" | awk '{print $1}') || return 1
@@ -355,8 +368,11 @@ v2_r2_sv1b_require_activation_arm_artifacts() {
 		$'checkpoints_sha256\tcheckpoints.jsonl' \
 		$'binary_attestation_sha256\tbinary-evidence-attestation.json' \
 		$'evidence_manifest_sha256\tevidence-manifest.json')
-	jq -e --argjson start_nano "$v2_r2_sv1_activation_simulation_start_nano" --argjson end_nano "$v2_r2_sv1_activation_simulation_end_nano" \
-		-f "$root_dir/scripts/v2-r2-sv1-terminal-outcome.jq" "$arm_dir/terminal-outcome.json" >/dev/null || return 1
+	if [[ "$expected_outcome" == completed ]]; then
+		v2_r2_terminal_completed_outcome_present "$arm_dir" || return 1
+	else
+		v2_r2_terminal_failure_outcome_present "$arm_dir" || return 1
+	fi
 	jq -e '
 		type == "object" and .domain == "canonical_binary_execution_frames" and .ordering == "ordered_stream" and
 		.hashing == "route_sequence_neutral_v1" and (.event_frames | type) == "number" and .event_frames > 0 and
@@ -365,6 +381,69 @@ v2_r2_sv1b_require_activation_arm_artifacts() {
 		(.canonical_execution_stream_hash | type) == "string" and (.canonical_execution_stream_hash | test("^[0-9a-f]{64}$")) and
 		((.unencodable_payloads // 0) | type) == "number" and ((.unencodable_payloads // 0) | . == 0)' \
 		"$arm_dir/binary-evidence-attestation.json" >/dev/null || return 1
+}
+
+v2_r2_sv1b_require_terminal_failure_pair_provenance() {
+	[[ $# -eq 3 ]] || return 1
+	local provenance_path=$1 expected_revision=$2 expected_binary_sha256=$3
+	local output_root treatment_dir control_dir comparison_path
+	local treatment_status control_status arm expected_outcome arm_dir arm_config arm_config_sha256
+	local artifacts actual_sha256 expected_sha256 path
+	[[ "$provenance_path" == /* && "$provenance_path" != */ && "$provenance_path" != *$'\n'* && "$provenance_path" != *$'\t'* ]] || return 1
+	[[ "$expected_revision" =~ ^[0-9a-f]{40}$ && "$expected_binary_sha256" =~ ^[0-9a-f]{64}$ ]] || return 1
+	[[ -f "$provenance_path" && ! -L "$provenance_path" && "$(realpath -e -- "$provenance_path")" == "$provenance_path" ]] || return 1
+	output_root=$(jq -er '.output_root | select(type == "string")' "$provenance_path") || return 1
+	treatment_dir=$(jq -er '.treatment_dir | select(type == "string")' "$provenance_path") || return 1
+	control_dir=$(jq -er '.control_dir | select(type == "string")' "$provenance_path") || return 1
+	comparison_path=$(jq -er '.comparison_path | select(type == "string")' "$provenance_path") || return 1
+	for path in "$output_root" "$treatment_dir" "$control_dir" "$comparison_path"; do
+		[[ "$path" == /* && "$path" != */ && "$path" != *$'\n'* && "$path" != *$'\t'* ]] || return 1
+	done
+	[[ -d "$output_root" && ! -L "$output_root" && "$(realpath -e -- "$output_root")" == "$output_root" ]] || return 1
+	[[ -d "$treatment_dir" && ! -L "$treatment_dir" && "$(realpath -e -- "$treatment_dir")" == "$treatment_dir" ]] || return 1
+	[[ -d "$control_dir" && ! -L "$control_dir" && "$(realpath -e -- "$control_dir")" == "$control_dir" ]] || return 1
+	[[ "$treatment_dir" == "$output_root/treatment" && "$control_dir" == "$output_root/control" ]] || return 1
+	[[ "$comparison_path" == "$output_root/cdf-liquidity-comparison.json" && -f "$comparison_path" && ! -L "$comparison_path" ]] || return 1
+	jq -e --arg contract "$v2_r2_sv1_activation_pair_contract" --arg revision "$expected_revision" \
+		--arg binary_sha256 "$expected_binary_sha256" '
+		type == "object" and .schema_version == 3 and .contract == $contract and
+		.candidate_revision == $revision and .simulator_binary_sha256 == $binary_sha256 and
+		.status == "UNAVAILABLE_TERMINAL_FAILURE" and .activation_satisfied == false and
+		.holdouts_consumed == false and .treatment_runner_status == 0 and .control_runner_status == 0 and
+		(.treatment_terminal_status == "completed" or .treatment_terminal_status == "terminal_failure") and
+		(.control_terminal_status == "completed" or .control_terminal_status == "terminal_failure") and
+		(.treatment_terminal_status == "terminal_failure" or .control_terminal_status == "terminal_failure") and
+		all([.treatment_run_status_sha256, .control_run_status_sha256,
+			.treatment_terminal_outcome_sha256, .control_terminal_outcome_sha256][];
+			type == "string" and test("^[0-9a-f]{64}$"))' "$provenance_path" >/dev/null || return 1
+	treatment_status=$(jq -er '.treatment_terminal_status' "$provenance_path") || return 1
+	control_status=$(jq -er '.control_terminal_status' "$provenance_path") || return 1
+	jq -e --arg contract "$v2_r2_sv1_activation_contract" --arg treatment_status "$treatment_status" \
+		--arg control_status "$control_status" '
+		type == "object" and .schema_version == 2 and .contract == $contract and
+		.status == "UNAVAILABLE_TERMINAL_FAILURE" and .valid == false and .evidence_valid == true and
+		.activation_satisfied == false and .anti_cheating_satisfied == false and .measurement_valid == true and
+		.treatment_terminal_status == $treatment_status and .control_terminal_status == $control_status' \
+		"$comparison_path" >/dev/null || return 1
+	for arm in treatment control; do
+		arm_dir=$([[ "$arm" == treatment ]] && printf '%s' "$treatment_dir" || printf '%s' "$control_dir")
+		arm_config=$([[ "$arm" == treatment ]] && printf '%s' "$v2_r2_sv1_activation_config" || printf '%s' "$v2_r2_sv1_activation_control_config")
+		arm_config_sha256=$(sha256sum -- "$arm_config" | awk '{print $1}') || return 1
+		arm_status=$(jq -er --arg arm "$arm" '.[$arm + "_terminal_status"]' "$provenance_path") || return 1
+		expected_outcome=completed
+		if [[ "$arm_status" == terminal_failure ]]; then
+			expected_outcome=terminal_failure
+		fi
+		v2_r2_sv1b_require_activation_arm_artifacts "$arm_dir" "$arm" "$expected_revision" "$arm_config_sha256" "$expected_binary_sha256" "$expected_outcome" || return 1
+		actual_sha256=$(sha256sum -- "$arm_dir/run-status.json" | awk '{print $1}') || return 1
+		expected_sha256=$(jq -er --arg arm "$arm" '.[$arm + "_run_status_sha256"] | select(type == "string" and test("^[0-9a-f]{64}$"))' "$provenance_path") || return 1
+		[[ "$actual_sha256" == "$expected_sha256" ]] || return 1
+		actual_sha256=$(sha256sum -- "$arm_dir/terminal-outcome.json" | awk '{print $1}') || return 1
+		expected_sha256=$(jq -er --arg arm "$arm" '.[$arm + "_terminal_outcome_sha256"] | select(type == "string" and test("^[0-9a-f]{64}$"))' "$provenance_path") || return 1
+		[[ "$actual_sha256" == "$expected_sha256" ]] || return 1
+		artifacts=$(jq -c --arg arm "$arm" '.[$arm + "_artifacts"]' "$provenance_path") || return 1
+		v2_r2_sv1b_verify_artifact_records "$arm_dir" "$artifacts" || return 1
+	done
 }
 
 v2_r2_sv1b_require_produced_activation_comparison() {

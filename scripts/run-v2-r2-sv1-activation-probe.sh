@@ -460,8 +460,12 @@ run_arm() {
 			  initial_available_free_bytes: $initial_free_bytes, final_available_free_bytes: $final_free_bytes,
 			  resource_guard_failed: $resource_guard_failed, resource_guard_reason: $resource_guard_reason}' >"$run_status_tmp" || return 1
 	mv -- "$run_status_tmp" "$arm/run-status.json" || return 1
+	local expected_arm_outcome=completed
+	if [[ "$terminal_failure" == true ]]; then
+		expected_arm_outcome=terminal_failure
+	fi
 	v2_r2_sv1b_require_activation_arm_artifacts "$arm" "$(basename -- "$arm")" "$head_revision" \
-		"$(sha256sum -- "$arm/run-config.json" | awk '{print $1}')" "$binary_sha256" || {
+		"$(sha256sum -- "$arm/run-config.json" | awk '{print $1}')" "$binary_sha256" "$expected_arm_outcome" || {
 		echo "activation arm failed the complete producer-artifact contract: $arm" >&2
 		return 1
 	}
@@ -605,7 +609,17 @@ if [[ "$treatment_terminal_status" != completed || "$control_terminal_status" !=
 		>"$comparison_tmp"
 	mv -- "$comparison_tmp" "$output_root/cdf-liquidity-comparison.json"
 	comparison_sha=$(sha256sum -- "$output_root/cdf-liquidity-comparison.json" | awk '{print $1}')
-	write_pair_provenance "UNAVAILABLE_TERMINAL_FAILURE" false "$comparison_sha"
+	activation_provenance_pending="$output_root/activation-provenance.pending.json"
+	write_pair_provenance "UNAVAILABLE_TERMINAL_FAILURE" false "$comparison_sha" "$activation_provenance_pending"
+	if ! v2_r2_sv1b_require_terminal_failure_pair_provenance "$activation_provenance_pending" "$head_revision" "$binary_sha256"; then
+		mv -- "$activation_provenance_pending" "$output_root/activation-provenance.invalid.json" || true
+		echo "activation probe produced a terminal diagnostic that failed its provenance self-validation" >&2
+		exit 1
+	fi
+	mv -- "$activation_provenance_pending" "$output_root/activation-provenance.json" || {
+		echo "activation probe could not publish its self-validated terminal diagnostic" >&2
+		exit 1
+	}
 	echo "activation probe recorded typed terminal failure; no economic activation verdict: $output_root"
 	# A typed terminal failure is retained evidence, but it is not a successful
 	# activation probe. Propagate failure so callers cannot promote it by exit
