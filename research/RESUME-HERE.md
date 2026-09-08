@@ -1862,3 +1862,55 @@ capacity, activation, freeze, or holdout run.
 No source or economic behavior changed at this checkpoint. The next boundary
 remains the fresh exact-tree independent Sol-xhigh review; holdouts `619`,
 `631`, and `641` remain untouched.
+
+## Append-only operational update: exact SV1C provenance gate — 2026-09-08
+
+The exact scientific source checkpoint for this update is clean and pushed at
+`7d91d141ad5a9f33155afd7a0508286487efdc07` on
+`feature/r2-cdf-survival-successor`. There is no cherry-pick in progress.
+The focused suite started at this exact revision completed normally with
+`FOCUSED_STATUS=0`: `evstream`, `types`, `exchange`, and
+`simulations/multivenue` passed; the multivenue package took approximately
+230 seconds under the bounded two-core policy.
+
+The complete mechanical status at this exact source tree is green: clean
+bounded `make test` (`MAKE_TEST_STATUS=0`), `go vet ./...`
+(`GO_VET_STATUS=0`), the targeted exchange/analysis/multivenue race matrix
+(`RACE_STATUS=0`), and the focused package, binary-evidence, calendar, and
+fresh-process determinism contract tests. These were test fixtures only; no
+simulator world was produced.
+
+Two fresh read-only Sol-xhigh-style reviews of the earlier provenance
+checkpoint `8f03546` both rejected promotion. Their findings were limited to
+the provenance/activation boundary rather than a newly observed simulator
+trajectory: incomplete normalizer build-input closure, self-enrolled
+normalizer digest/revision, a pathname time-of-check/time-of-use window,
+unvalidated normalizer manifest fields, an unbound inherited terminal-outcome
+dependency, and unchecked activation-status hash assignments. The successor
+addressed these findings in `f239b8e`, `3b2f4e0`, and `7d91d14`; the details
+and activation classification are recorded in
+`research/v2-r2-sv1c-provenance-activation-triage-2026-09-08.md`. These older
+rejections are not acceptance of the current tree; a new exact-tree review is
+still required.
+
+The registered normalizer remains a clean Go 1.27 build from source revision
+`c2a752f3bb5d6b38c8ad8ee066ad91bbf355aae0`, package
+`exchange_sim/cmd/multivenue`, with digest
+`dde13e4eda920b874eadba81a360ece3ff0951d2ef907acd1ddff24b800f5c87`.
+Two clean builds reproduced that digest. The current renderer snapshots and
+rehashes the registered binary before normalization, and the manifest binds the
+normalizer registration, source revision, Go version, package, dependency
+hashes, and terminal-outcome script. Registered effective configs remain
+byte-identical to their previously recorded hashes.
+
+At this checkpoint the asynchronous refs were fetched without switching
+worktrees. No commit is newer than performance-port `39768df`, binary/perf
+feed `b1847ac`, or economic red-team `e85e16c`; no branch implementation was
+merged. Disk reported approximately 58 GiB free and memory approximately
+25 GiB available. No activation, capacity, development, freeze, or holdout
+world ran; retained evidence was not deleted, and holdouts `619`, `631`, and
+`641` remain untouched.
+
+The next promotion boundary is one fresh independent exact-tree review of the
+complete SV1C candidate. Only an accepted review can authorize clean pinned
+Go 1.27 production binaries and the registered seed-643 activation probe.

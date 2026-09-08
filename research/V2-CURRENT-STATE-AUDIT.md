@@ -1691,3 +1691,56 @@ reported. This supplements the preceding fresh-process and clean-archive
 checks. No registered world, activation, capacity, freeze, or holdout ran;
 holdouts `619`, `631`, and `641` remain untouched. The next gate is independent
 review of the exact final tree.
+
+## Append-only audit update: SV1C exact focused completion and provenance triage — 2026-09-08
+
+This update supersedes neither historical state nor any previous verdict. The
+current scientific worktree is clean at pushed HEAD
+`7d91d141ad5a9f33155afd7a0508286487efdc07`, branch
+`feature/r2-cdf-survival-successor`; no cherry-pick is in progress. The exact
+focused command
+
+    taskset --cpu-list 0-1 env GOMAXPROCS=2 go test ./evstream ./types ./exchange ./simulations/multivenue -count=1 -timeout=35m
+
+completed with `FOCUSED_STATUS=0`; all four packages passed and
+`simulations/multivenue` took 229.981 seconds. The preceding clean full
+`make test`, `go vet ./...`, targeted race matrix, binary-evidence/rendering,
+calendar, and fresh-process determinism gates also passed at this source
+checkpoint. No simulator world was produced by any of these tests.
+
+Two independent read-only Sol-xhigh-style critics rejected the earlier
+`8f03546` provenance candidate. The rejection items were: source-input closure
+that did not bind all relevant Go/build inputs; normalizer provenance that could
+be self-enrolled by the renderer; a normalizer pathname TOCTOU; unchecked
+`.normalizer.go_version` and `.normalizer.package`; an inherited terminal JQ
+dependency absent from the declared closure; alternate normalizer flags or
+replacements not excluded; and activation-status hash assignments that could
+mask `sha256sum` failure. These were treated as contract defects, not as
+simulator findings. They were repaired and tested through `f239b8e`,
+`3b2f4e0`, and `7d91d14`. The full classification, invariant, and evidence
+search are in
+`research/v2-r2-sv1c-provenance-activation-triage-2026-09-08.md`.
+
+The normalizer registration is now precommitted and independently reproduced:
+two clean Go 1.27 builds from registered source revision
+`c2a752f3bb5d6b38c8ad8ee066ad91bbf355aae0` produced the identical digest
+`dde13e4eda920b874eadba81a360ece3ff0951d2ef907acd1ddff24b800f5c87`.
+The SV1C manifest binds the registration file, normalizer metadata, declared
+contract dependencies, and all seven effective-config hashes. The effective
+configs remained byte-identical across the provenance repairs; no economic
+configuration was retuned.
+
+The asynchronous refs were fetched read-only at this checkpoint. They remain
+at `origin/perf/r2-cdf-survival-port` `39768df`,
+`origin/autoresearch/v2-performance-research` `b1847ac`, and
+`origin/redteam/economic-audit` `e85e16c`; there were no newer commits, and no
+performance or red-team implementation was merged. Disk was approximately
+58 GiB free and available memory approximately 25 GiB, with no evidence
+deletion. No activation, capacity, development, freeze, or holdout world ran;
+holdouts `619`, `631`, and `641` remain untouched.
+
+The candidate is not yet promoted. The next gate is a fresh exact-tree
+independent review of R2 calendar semantics, finite CDF economics, strict-risk
+and liquidation invariants, evidence/provenance fail-closed behavior, and
+historical-boundary compliance. Only accepted review may authorize pinned
+binaries and seed-643 activation.
