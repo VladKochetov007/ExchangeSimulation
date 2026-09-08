@@ -1718,3 +1718,11 @@ clean. The next gate is clean full tests/vet/targeted race, followed by one
 fresh exact-tree Sol-xhigh review; only an accepted review permits a pinned
 Go 1.27 build and the paired seed-643 activation probe. Holdouts remain
 forbidden before explicit freeze authorization.
+
+## Append-only operational update: RT-014 remainder lifecycle checkpoint and asynchronous feed `801e10a` — 2026-09-08
+
+The exact scientific successor tree is now `ad4c2bf176442700ebf4d4e264d0e7b2ce7ecf90` (`fix: audit collateral interest remainder lifecycle`), with a clean worktree and the RT-014 recurrence/atomicity/closure repair committed and pushed. The post-commit focused suites and clean bounded two-core `make test` passed. The earlier dirty-tree full-test attempt is retained only as a source-dirty validator guard failure; it produced no scientific world and is not a run result.
+
+At the next remote-feed checkpoint, `origin/redteam/economic-audit` advanced from `aa1de8d` to `801e10a`. Its RT-061 paired multi-seed cap ablation is based on the old `a666d02` 8-hour campaign, not the current SV1B tree or registered 24-hour candidate. It refutes the proposed causal interpretation of RT-060: a tenfold `carry_max_position` increase produces opposite basis responses at seeds 607 and 608, despite using the added capacity. This is a valid historical red-team result and a falsification of a proposed remedy, not an authorization to retune the current CDF successor. No code or configs were imported; no current SV1B trajectory is invalidated or rerun.
+
+The asynchronous binary-evidence feed remains unchanged at `b1847ac`; no performance implementation was imported. Holdouts `619`, `631`, and `641` remain untouched. The next active gate is the rejected-review repair sequence: complete RT-002 option-expiry fail-closed/accounting hardening, then address or explicitly guard RT-011, RT-015, RT-016, and RT-018 with focused regressions and fresh exact-tree independent review. No pinned build, activation probe, capacity run, development cell, freeze, or holdout run is authorized at this checkpoint.

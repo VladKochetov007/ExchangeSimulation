@@ -1555,3 +1555,11 @@ It is not acceptance of the current tree. No activation, capacity,
 development, freeze, or holdout world ran at this checkpoint. The next
 promotion gate is a clean mechanical suite and a new exact-tree independent
 review before any pinned build or seed-643 retry.
+
+## Append-only operational update: RT-014 repair and remote red-team refresh — 2026-09-08
+
+Exact current scientific HEAD: `ad4c2bf176442700ebf4d4e264d0e7b2ce7ecf90`, branch `feature/r2-cdf-survival-successor`, clean and pushed. RT-014 now carries fractional collateral-interest remainders with checked arithmetic, atomic commit behavior, explicit terminal write-off on full repayment/liquidation, and analyzer reconstruction of the exact remainder transition. The focused suites and clean bounded two-core `make test` passed after the commit. No world was produced by the source-dirty validator guard failure that preceded the commit.
+
+The economic red-team feed was fetched read-only through `801e10a6347b82842841f4d3ef92e20bbe002d19`; only `801e10a` was new since the prior `aa1de8d` checkpoint. RT-061 is a paired seed-607/608, old-base (`a666d02`) ablation of `carry_max_position`, and refutes RT-060's proposed capacity remedy because the treatment moves the basis in opposite directions across seeds. It does not alter the current SV1B economics, registered configuration, or historical evidence, and no branch code was merged. The performance feed remains at `b1847ac` with no new binary-evidence revision.
+
+The exact current candidate remains blocked at the semantic promotion gate by the independent RT-002/RT-011/RT-015/RT-016/RT-018 review findings. RT-014 is repaired but still needs fresh exact-tree independent acceptance together with the remaining repairs. No pinned build, activation, development, freeze, or holdout run has occurred at this checkpoint; holdouts `619`, `631`, and `641` remain untouched.

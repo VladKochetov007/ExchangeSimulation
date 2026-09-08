@@ -298,3 +298,18 @@ with SHA-256
 The rejection is historical evidence for the repair, not an acceptance of the
 current `498a476` tree. A new exact-tree review is required after the clean
 post-repair mechanical gate.
+
+## Asynchronous red-team refresh: RT-061 and exact RT-014 repair — 2026-09-08
+
+The scientific branch was fetched without switching worktrees. The last reviewed performance revision remains `b1847ac40e8b7483e6e8a3f94b3705b4058884b`; there are no newer commits on `origin/autoresearch/v2-performance-research`. The economic red-team branch advanced from `aa1de8d` to `801e10a6347b82842841f4d3ef92e20bbe002d19`.
+
+`801e10a` records RT-061, a valid paired multi-seed historical ablation on old base `a666d02`: seeds 607 and 608 crossed baseline versus a tenfold `carry_max_position` treatment. The treatment used the extra capacity (maximum aggregate position 3,855.2 versus the former 3,000-contract class cap), but the basis moved from −4.90% to −0.15% at seed 607 and from −4.79% to −12.56% at seed 608; clamp binding moved in opposite directions as well. The result falsifies the proposed causal remedy in RT-060 while preserving the narrower observation that the old cap binds under material dislocation. This is classified as `HISTORICAL RED-TEAM RESULT / PROPOSED REMEDY FALSIFIED`, not as a current simulator defect. Its activation condition is specific to the old perpetual campaign; no current SV1B trajectory exists that could be affected, and no rerun or config change is justified.
+
+The exact scientific tree is now `ad4c2bf176442700ebf4d4e264d0e7b2ce7ecf90`. RT-014 was implemented as a semantic accounting repair: fixed-point remainder state is carried per client/asset, checked 128-bit arithmetic rejects invalid transitions and overflow, state changes are atomic across the affected ledgers, full debt closure emits an explicit write-off/terminal event, and the analyzer reconstructs the recurrence and closure. Focused tests and clean bounded two-core `make test` passed. Independent reviewer Turing's exact-tree RT-014 verdict is still pending; the prior Gibbs review remains a rejection of the incomplete pre-commit tree, so this commit is not yet promoted.
+
+| new item | current classification | current action |
+| --- | --- | --- |
+| RT-061 tenfold carry-cap ablation | historical causal-remedy falsification; not a current SV1B defect | preserve remote report; do not retune or rerun current candidate |
+| RT-014 carried remainder repair | semantic successor repair awaiting exact-tree review | retain commit; run RT-002 and remaining risk-policy gates before promotion |
+
+No branch implementation from the economic red-team or performance branches was merged. No pinned build, activation, capacity, development, freeze, or holdout world ran at this checkpoint; holdouts `619`, `631`, and `641` remain untouched.
