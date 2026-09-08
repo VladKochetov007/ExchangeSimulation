@@ -1512,3 +1512,22 @@ pass at `66206cb`. The performance feed remains unchanged after `b1847ac`; no
 performance implementation was imported. A fresh exact-tree independent
 Sol-xhigh review is required before any pinned scientific build or seed-643
 activation.
+
+## Append-only operational update: SV1B capacity-contract identity alignment — 2026-09-08
+
+Read-only inspection of exact pushed HEAD `5766dff2ab48c902f6b6f5c6ff22da92e8c0403e`
+found that the successor contract script had advanced its binary-capacity
+contract to `v5`, while the committed SV1B provenance manifest still declared
+`v4`. The first checker run after aligning that contract also exposed the
+expected stale generator digest. This was a provenance-consistency defect at
+the promotion boundary, not an economic or simulator change.
+
+Commit `235babf` records the v5 capacity contract and the exact SHA-256 of the
+current renderer in the committed manifest. Registered configuration bytes,
+R2 calendar semantics, CDF roster/economics, historical evidence, and holdout
+policy were not changed. Both the generic SV1 24-hour checker and the SV1B
+checker pass at this revision. No activation, capacity, development, freeze,
+or holdout world ran; no historical rerun is indicated. The performance feed
+was fetched again and remains unchanged after `b1847ac`, with no performance
+implementation imported. A fresh exact-tree independent Sol-xhigh review is
+still required before pinned builds or seed-643 activation.

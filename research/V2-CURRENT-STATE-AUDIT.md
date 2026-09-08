@@ -1361,3 +1361,22 @@ bounded targeted race suite pass at `66206cb`. No economic or historical
 artifact was changed. The performance branch remains reviewed through
 `b1847ac` with no new commit and no imported implementation. One fresh exact
 tree Sol-xhigh review is required before pinned builds or activation.
+
+## Append-only operational update: SV1B capacity-contract identity alignment — 2026-09-08
+
+At exact clean tree `5766dff2ab48c902f6b6f5c6ff22da92e8c0403e`, the successor
+capacity contract had been advanced in the shell contract to v5 by the pinned
+checkpoint-validator repair, but the committed provenance manifest still
+declared v4. After the contract field was aligned, the checker correctly
+detected that the manifest's renderer hash was stale. This was independently
+classified as a fail-closed provenance mismatch; it did not affect simulator
+semantics or any historical result.
+
+Scientific commit `235babf` updates the manifest to the exact current renderer
+SHA-256 and retains the v5 capacity identity. The registered SV1B config bytes,
+economic calendar, CDF supplier roster, historical artifacts, and holdout
+boundary are unchanged. The generic and SV1B-specific 24-hour config checkers
+pass at `235babf`. No activation, capacity, development, freeze, or holdout
+run occurred. The performance branch remains reviewed through `b1847ac`, and
+its implementation remains unmerged. Fresh exact-tree independent Sol-xhigh
+review is still the next promotion gate.

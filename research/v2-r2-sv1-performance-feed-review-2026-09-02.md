@@ -322,3 +322,19 @@ and arm/pair/capacity/run provenance binds the validator identity. `66206cb`
 adds the direct override/unregistered-validator regression. Clean full tests,
 vet, focused suites, and targeted race checks pass at `66206cb`. No SV1B or
 holdout run occurred; a new exact-tree Sol-xhigh review remains required.
+
+## Append-only feed checkpoint: no new performance commits; SV1B capacity identity repair — 2026-09-08
+
+The performance branch was fetched with `b1847ac40e8b7483e6e8a3f94b3705b4058884b0`
+as the last-reviewed marker. There are no newer commits, so no new report or
+diff was imported. The deferred analyzer correction and VNext binary-evidence
+prototype remain outside the scientific branch.
+
+Exact scientific HEAD `5766dff` exposed a local successor-manifest mismatch:
+the pinned-validator contract script required capacity contract v5 while the
+committed manifest still named v4. Aligning the field then revealed the
+renderer SHA-256 also needed refreshing. Commit `235babf` records the exact
+renderer digest and v5 identity; registered config bytes and economics are
+unchanged. Both SV1 24-hour configuration checkers pass. This is a protocol
+provenance repair only, with no activation/capacity/development/freeze/holdout
+run. A fresh exact-tree Sol-xhigh review remains required before promotion.
