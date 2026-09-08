@@ -121,13 +121,30 @@
   "imbalance_maker_count": 0,
   "latency_profiles": {
     "cdf_elastic_supplier": {
+      "cap": 0,
       "delay": 10000000,
-      "model": "constant"
+      "market_data_scale": 0,
+      "max": 0,
+      "min": 0,
+      "model": "constant",
+      "response_scale": 0,
+      "sigma": 0,
+      "spike_delay": 0,
+      "spike_probability": 0,
+      "std_dev": 0
     },
     "liability_hedger": {
+      "cap": 0,
       "delay": 20000000,
+      "max": 0,
+      "min": 0,
       "market_data_scale": 2,
-      "model": "constant"
+      "model": "constant",
+      "response_scale": 0,
+      "sigma": 0,
+      "spike_delay": 0,
+      "spike_probability": 0,
+      "std_dev": 0
     }
   },
   "long_future_tenor": 43200000000000,

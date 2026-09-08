@@ -42,6 +42,19 @@ build_pinned_fixture_binary "$fixture_root/cdf-liquidity-audit" ./cmd/cdf-liquid
 build_pinned_fixture_binary "$fixture_root/evsrender" ./cmd/evsrender
 build_pinned_fixture_binary "$fixture_root/checkpointvalidate" ./cmd/checkpointvalidate
 build_pinned_fixture_binary "$fixture_root/evsfixture" ./cmd/evsfixture
+
+for activation_config in "$v2_r2_sv1_activation_config" "$v2_r2_sv1_activation_control_config"; do
+	normalized_config_dir="$fixture_root/normalized-$(basename -- "$activation_config" .json)"
+	mkdir -- "$normalized_config_dir"
+	"$fixture_root/multivenue" -config "$activation_config" -logdir "$normalized_config_dir" \
+		-log-mode full -evidence-format evstream_v3 \
+		-write-effective-config "$normalized_config_dir/run-config.json" >/dev/null 2>&1
+	cmp -s -- "$activation_config" "$normalized_config_dir/run-config.json" || {
+		echo "registered activation config is not already the pinned simulator effective config: $activation_config" >&2
+		exit 1
+	}
+done
+
 binary_sha256=$(sha256sum -- "$fixture_root/multivenue" | awk '{print $1}')
 analyzer_sha256=$(sha256sum -- "$fixture_root/cdf-liquidity-audit" | awk '{print $1}')
 renderer_sha256=$(sha256sum -- "$fixture_root/evsrender" | awk '{print $1}')
