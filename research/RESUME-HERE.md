@@ -1548,6 +1548,20 @@ the authorized seed-643 paired activation probe only; capacity and registered
 development cells remain gated on that activation result. Holdouts `619`,
 `631`, and `641` remain untouched.
 
+## Append-only mechanical gate update: full test, vet, and targeted race — 2026-09-08
+
+At source `0565b56` the clean bounded two-core `make test` passed all Go
+packages and the integrated long-run, SV1, SV1C, archive, parity, activation,
+terminal, survival, and score contracts. `go vet ./...` passed. The targeted
+race matrix passed for `exchange` (1.069s), `analysis` (1.092s), and
+`simulations/multivenue` (88.133s), including cross-margin, expiry,
+liquidation, CDF supplier, binary evidence, renderer, and strict-risk tests.
+
+Together with the preceding fresh-process and clean-archive gates, this closes
+the current mechanical validation checkpoint. No source or economic behavior
+changed; no activation, capacity, development, freeze, or holdout world ran.
+The exact-tree independent Sol-xhigh review remains the next promotion gate.
+
 ## Append-only operational update: activation preflight caught noncanonical configs — 2026-09-08
 
 The first correctly parameterized seed-643 activation attempt on exact tree

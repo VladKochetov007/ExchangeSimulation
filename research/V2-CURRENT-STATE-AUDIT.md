@@ -1679,3 +1679,15 @@ registered development, activation, capacity, freeze, or holdout world ran;
 the test fixtures were small regression worlds. The scientific source and
 economic contract remain unchanged, and holdouts `619`, `631`, and `641` stay
 untouched pending independent review and later freeze authorization.
+
+## Append-only audit update: complete mechanical gate — 2026-09-08
+
+At source `0565b56`, clean bounded two-core `make test` passed all Go packages
+and the integrated/SV1/SV1C/archive/parity/activation/terminal/survival/score
+contracts. `go vet ./...` passed. The targeted race matrix passed for exchange,
+analysis, and multivenue (including cross-margin, expiry, liquidation, CDF
+supplier, binary-evidence, renderer, and strict-risk paths); no race was
+reported. This supplements the preceding fresh-process and clean-archive
+checks. No registered world, activation, capacity, freeze, or holdout ran;
+holdouts `619`, `631`, and `641` remain untouched. The next gate is independent
+review of the exact final tree.
