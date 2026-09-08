@@ -2604,6 +2604,13 @@ func (e *DefaultExchange) hasOpenAccountLiquidationPositionLocked(clientID uint6
 // Caller must hold e.mu.Lock().
 func (e *DefaultExchange) liquidateAccount(clientID uint64, client *Client, quote string, timestamp int64) {
 	positions := e.collectAccountLiquidationPositionsLocked(clientID, quote, timestamp)
+	if len(positions) == 0 {
+		return
+	}
+	// Cancel sibling orders before closing positions or finalizing a deficit.
+	// They are part of the same cross-margin account even when the account has
+	// no current position on those books.
+	e.cancelClientOrdersAcrossQuoteBooksLocked(client, quote)
 	fills := make([]liquidationFill, 0, len(positions))
 	for _, target := range positions {
 		fill, ok := e.liquidatePosition(clientID, client, target.symbol, &target.position, target.instrument, timestamp)

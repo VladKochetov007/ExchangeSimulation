@@ -147,6 +147,37 @@ func TestCrossMarginLiquidationDefersDeficitDuringPartialPortfolioClose(t *testi
 	}
 }
 
+func TestAccountLiquidationCancelsRestingOrdersOnSiblingSameQuoteBooks(t *testing.T) {
+	ex, a, _ := seedCrossMarginLiquidationCase(t)
+	defer ex.Shutdown()
+	c := NewPerpFutures("C-PERP", "C", "USD", 1, 1, 1, 1)
+	ex.AddInstrument(c)
+	ex.AddPerpBalance(1, "USD", 1_000)
+	response := ex.PlaceOrder(1, &OrderRequest{
+		RequestID: 100, Symbol: c.Symbol(), Side: Buy, Type: LimitOrder,
+		Price: 1, Qty: 1, TimeInForce: GTC, PositionSide: PositionBoth,
+	})
+	if !response.Success {
+		t.Fatalf("sibling order rejected: %s", response.Error)
+	}
+	if len(ex.Books[c.Symbol()].Bids.Orders) != 1 {
+		t.Fatalf("sibling order was not resting: %#v", ex.Books[c.Symbol()].Bids.Orders)
+	}
+
+	// Make the already-admitted account unambiguously maintenance-deficient.
+	// The order reservation remains live, which is the state a liquidation
+	// sweep must close rather than trusting the current position set alone.
+	ex.Clients[1].PerpBalances["USD"] = -1_000
+	ex.checkLiquidationsAtEpoch(a.Symbol(), a, 50, ex.markEpoch)
+
+	if got := len(ex.Books[c.Symbol()].Bids.Orders); got != 0 {
+		t.Fatalf("sibling same-quote orders survived account liquidation: %d", got)
+	}
+	if len(ex.Clients[1].OrderIDs) != 0 {
+		t.Fatalf("client retains cancelled sibling orders: %#v", ex.Clients[1].OrderIDs)
+	}
+}
+
 func TestPublicCrossMarginLiquidationFailsClosedWithoutCoherentMarkEpoch(t *testing.T) {
 	ex, a, b := seedCrossMarginLiquidationCase(t)
 	defer ex.Shutdown()

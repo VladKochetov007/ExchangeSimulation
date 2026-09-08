@@ -149,6 +149,16 @@ func (e *DefaultExchange) cancelClientOrdersOnBook(client *Client, book *OrderBo
 // of its positions has become unpriceable and permanently halted.
 // Caller must hold e.mu.Lock().
 func (e *DefaultExchange) cancelClientOrdersAcrossBooksLocked(client *Client) {
+	e.cancelClientOrdersAcrossQuoteBooksLocked(client, "")
+}
+
+// cancelClientOrdersAcrossQuoteBooksLocked cancels every resting order for a
+// client in the selected quote-asset books. Liquidation is account-scoped
+// within one cross-margin quote wallet: an order on a sibling book can reopen
+// exposure after the deficit has been finalized even when that book held no
+// position for the account.
+// Caller must hold e.mu.Lock().
+func (e *DefaultExchange) cancelClientOrdersAcrossQuoteBooksLocked(client *Client, quote string) {
 	symbols := make([]string, 0, len(e.Books))
 	for symbol := range e.Books {
 		symbols = append(symbols, symbol)
@@ -156,6 +166,9 @@ func (e *DefaultExchange) cancelClientOrdersAcrossBooksLocked(client *Client) {
 	slices.Sort(symbols)
 	for _, symbol := range symbols {
 		book := e.Books[symbol]
+		if quote != "" && book.Instrument.QuoteAsset() != quote {
+			continue
+		}
 		e.cancelClientOrdersOnBook(client, book, book.Instrument)
 	}
 }
