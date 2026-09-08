@@ -142,6 +142,7 @@ type OptionLiabilityTaker struct {
 	quotes     map[string]liabilityOptionTouch
 	spot       liabilitySpotObservation
 	position   int64
+	positions  map[string]int64
 	pending    bool
 	pendingReq uint64
 	pendingSym string
@@ -155,6 +156,7 @@ func NewOptionLiabilityTaker(id uint64, gw actor.Gateway, cfg OptionLiabilityTak
 		cfg:       cfg,
 		set:       newContractSet(cfg.Underlying),
 		quotes:    make(map[string]liabilityOptionTouch),
+		positions: make(map[string]int64),
 		active:    make(map[uint64]string),
 	}
 	u.set.onList = func(c *Contract) {
@@ -164,6 +166,16 @@ func NewOptionLiabilityTaker(id uint64, gw actor.Gateway, cfg OptionLiabilityTak
 	}
 	u.set.onSettle = func(c *Contract, _ int64) {
 		delete(u.quotes, c.Symbol)
+		settledPosition, ok := u.positions[c.Symbol]
+		if !ok || settledPosition == 0 {
+			return
+		}
+		remainingPosition, ok := etypes.TrySub(u.position, settledPosition)
+		if !ok {
+			return
+		}
+		u.position = remainingPosition
+		delete(u.positions, c.Symbol)
 	}
 	u.set.onAccept = func(sym string, reqID, orderID uint64) {
 		if reqID == u.pendingReq {
@@ -235,23 +247,36 @@ func (u *OptionLiabilityTaker) receivedAt() int64 {
 }
 
 func (u *OptionLiabilityTaker) onFill(sym string, e actor.OrderFillEvent) {
-	if _, ok := u.active[e.OrderID]; !ok {
+	if e.Qty <= 0 {
+		return
+	}
+	acceptedOrder, accepted := u.active[e.OrderID]
+	if !e.Forced {
+		if !accepted {
+			return
+		}
+	}
+	if sym == "" {
+		return
+	}
+	if accepted && acceptedOrder != sym {
 		return
 	}
 	pre := u.position
-	if e.Side == exchange.Buy {
-		next, ok := etypes.TryAdd(u.position, e.Qty)
-		if !ok {
-			return
-		}
-		u.position = next
-	} else {
-		next, ok := etypes.TrySub(u.position, e.Qty)
-		if !ok {
-			return
-		}
-		u.position = next
+	positionDelta := e.Qty
+	if e.Side != exchange.Buy {
+		positionDelta = -e.Qty
 	}
+	nextPosition, ok := etypes.TryAdd(u.position, positionDelta)
+	if !ok {
+		return
+	}
+	contractPosition, ok := etypes.TryAdd(u.positions[sym], positionDelta)
+	if !ok {
+		return
+	}
+	u.position = nextPosition
+	u.positions[sym] = contractPosition
 	if u.cfg.FillObserver != nil {
 		u.cfg.FillObserver(OptionLiabilityFill{
 			VenueID: u.cfg.VenueID, User: u.cfg.User, ClientID: u.cfg.ClientID,
@@ -260,7 +285,7 @@ func (u *OptionLiabilityTaker) onFill(sym string, e actor.OrderFillEvent) {
 			FeeAsset: e.FeeAsset, PrePosition: pre, PostPosition: u.position,
 		})
 	}
-	if e.IsFull {
+	if e.IsFull && accepted {
 		delete(u.active, e.OrderID)
 		u.pending, u.pendingReq, u.pendingSym = false, 0, ""
 	}

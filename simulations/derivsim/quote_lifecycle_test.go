@@ -182,6 +182,24 @@ func TestFuturesMMRequoteLifecycle(t *testing.T) {
 	}
 }
 
+func TestFuturesMMCancellationClearsQuoteLifecycle(t *testing.T) {
+	gw := newStubGateway()
+	mm := NewFuturesMarketMaker(1, gw, FuturesMMConfig{Underlying: "ABC/USD", QuoteInterval: time.Hour})
+	mm.HandleEvent(context.Background(), &actor.Event{Type: actor.EventInstrument, Data: actor.InstrumentEvent{Announcement: &etypes.InstrumentAnnouncement{
+		Action: "listed", Symbol: "ABC-FUT-1", InstrumentType: "FUTURE", Underlying: "ABC/USD", ExpiryNano: time.Hour.Nanoseconds(),
+	}}})
+	quote := mm.quotes["ABC-FUT-1"]
+	quote.bidID, quote.askID = 41, 42
+	quote.pendingBid, quote.pendingAsk = true, true
+	mm.HandleEvent(context.Background(), &actor.Event{Type: actor.EventOrderCancelled, Data: actor.OrderCancelledEvent{OrderID: 41}})
+	if quote.bidID != 0 || quote.pendingBid {
+		t.Fatalf("bid cancellation left stale lifecycle: id=%d pending=%v", quote.bidID, quote.pendingBid)
+	}
+	if quote.askID != 42 || !quote.pendingAsk {
+		t.Fatalf("bid cancellation changed ask lifecycle: id=%d pending=%v", quote.askID, quote.pendingAsk)
+	}
+}
+
 func TestOptionMMGreekProfileUsesFilledInventoryAndHedge(t *testing.T) {
 	gw := newStubGateway()
 	mm := NewOptionMarketMaker(1, gw, OptionMMConfig{
@@ -250,5 +268,31 @@ func TestOptionMMHedgePendingPreventsRepeatedCorrection(t *testing.T) {
 	})
 	if mm.hedgePending != 0 {
 		t.Fatalf("cancelled hedge left pending delta %d", mm.hedgePending)
+	}
+}
+
+func TestOptionMMAppliesForcedRiskStateAndClearsForcedQuoteCancellation(t *testing.T) {
+	gw := newStubGateway()
+	mm := NewOptionMarketMaker(1, gw, OptionMMConfig{Underlying: "ABC/USD", QuoteInterval: time.Hour})
+	listOption(mm, "ABC-C-100", exchange.USDAmount(100), time.Now().Add(time.Hour).UnixNano())
+	quote := mm.quotes["ABC-C-100"]
+	quote.bidID, quote.askID = 10, 11
+
+	mm.HandleEvent(context.Background(), &actor.Event{Type: actor.EventOrderCancelled, Data: actor.OrderCancelledEvent{OrderID: 10, RemainingQty: 100}})
+	if quote.bidID != 0 || quote.askID != 11 {
+		t.Fatalf("forced quote cancellation state = bid %d ask %d, want 0/11", quote.bidID, quote.askID)
+	}
+
+	mm.HandleEvent(context.Background(), &actor.Event{Type: actor.EventOrderFilled, Data: actor.OrderFillEvent{
+		OrderID: 999, Symbol: "ABC-C-100", Qty: 3, Side: exchange.Sell, IsFull: true, Forced: true,
+	}})
+	if got := quote.inventory; got != -3 {
+		t.Fatalf("forced option liquidation inventory = %d, want -3", got)
+	}
+	mm.HandleEvent(context.Background(), &actor.Event{Type: actor.EventOrderFilled, Data: actor.OrderFillEvent{
+		OrderID: 1000, Symbol: "ABC/USD", Qty: 2, Side: exchange.Buy, IsFull: true, Forced: true,
+	}})
+	if got := mm.HedgePosition(); got != 2 {
+		t.Fatalf("forced underlying liquidation hedge position = %d, want 2", got)
 	}
 }

@@ -103,9 +103,23 @@ func NewFuturesMarketMaker(id uint64, gw actor.Gateway, cfg FuturesMMConfig) *Fu
 			}
 		}
 	}
+	mm.set.onCancel = mm.onQuoteCancelled
 	mm.SetHandler(mm)
 	mm.AddTicker(cfg.QuoteInterval, mm.onTick)
 	return mm
+}
+
+func (mm *FuturesMarketMaker) onQuoteCancelled(e actor.OrderCancelledEvent) {
+	for _, quote := range mm.quotes {
+		if quote.bidID == e.OrderID {
+			quote.bidID = 0
+			quote.pendingBid = false
+		}
+		if quote.askID == e.OrderID {
+			quote.askID = 0
+			quote.pendingAsk = false
+		}
+	}
 }
 
 func (mm *FuturesMarketMaker) HandleEvent(_ context.Context, evt *actor.Event) {

@@ -92,3 +92,65 @@ func TestOptionLiabilityUserRejectsInvalidPolicy(t *testing.T) {
 		t.Fatal("accepted target strike at 10000 bps")
 	}
 }
+
+func TestOptionLiabilityUserAppliesForcedFillWithoutSyntheticOrder(t *testing.T) {
+	gw := newStubGateway()
+	u := NewOptionLiabilityTaker(9, gw, OptionLiabilityTakerConfig{
+		Underlying: "ABC/USD", TargetQty: 10, LotQty: 10,
+		TargetStrikeBps: 9_500, MaxPremium: 1, Interval: time.Second, BasePrecision: 1,
+	})
+	listPut(u, "ABC-P-95", 95, int64(time.Hour))
+	u.HandleEvent(context.Background(), &actor.Event{Type: actor.EventOrderFilled, Data: actor.OrderFillEvent{
+		OrderID: 1001, Symbol: "ABC-P-95", Qty: 4, Side: exchange.Buy, IsFull: true, Forced: true,
+	}})
+	if got := u.Position(); got != 4 {
+		t.Fatalf("forced liability position = %d, want 4", got)
+	}
+}
+
+func TestOptionLiabilityForcedFillPreservesUnrelatedPendingRequest(t *testing.T) {
+	gw := newStubGateway()
+	u := NewOptionLiabilityTaker(10, gw, OptionLiabilityTakerConfig{
+		Underlying: "ABC/USD", TargetQty: 10, LotQty: 10,
+		TargetStrikeBps: 9_500, MaxPremium: 1, Interval: time.Second, BasePrecision: 1,
+	})
+	listPut(u, "ABC-P-95", 95, int64(time.Hour))
+	u.pending, u.pendingReq, u.pendingSym = true, 77, "ABC-P-95"
+	u.HandleEvent(context.Background(), &actor.Event{Type: actor.EventOrderFilled, Data: actor.OrderFillEvent{
+		OrderID: 1001, Symbol: "ABC-P-95", Qty: 4, Side: exchange.Sell, IsFull: true, Forced: true,
+	}})
+	if u.pending != true || u.pendingReq != 77 || u.pendingSym != "ABC-P-95" {
+		t.Fatalf("forced fill cleared unrelated pending request: pending=%v req=%d sym=%q", u.pending, u.pendingReq, u.pendingSym)
+	}
+	if got := u.Position(); got != -4 {
+		t.Fatalf("forced liability position = %d, want -4", got)
+	}
+}
+
+func TestOptionLiabilitySettlementRemovesOnlyExpiredProtection(t *testing.T) {
+	gw := newStubGateway()
+	u := NewOptionLiabilityTaker(11, gw, OptionLiabilityTakerConfig{
+		Underlying: "ABC/USD", TargetQty: 10, LotQty: 10,
+		TargetStrikeBps: 9_500, MaxPremium: 1, Interval: time.Second, BasePrecision: 1,
+	})
+	listPut(u, "ABC-P-95-A", 95, int64(time.Hour))
+	listPut(u, "ABC-P-95-B", 95, int64(2*time.Hour))
+	u.onFill("ABC-P-95-A", actor.OrderFillEvent{OrderID: 1, Symbol: "ABC-P-95-A", Qty: 3, Side: exchange.Buy, IsFull: true, Forced: true})
+	u.onFill("ABC-P-95-B", actor.OrderFillEvent{OrderID: 2, Symbol: "ABC-P-95-B", Qty: 4, Side: exchange.Buy, IsFull: true, Forced: true})
+	if got := u.Position(); got != 7 {
+		t.Fatalf("active liability position = %d, want 7", got)
+	}
+	settlementPrice := int64(95)
+	u.set.handle(&actor.Event{Type: actor.EventInstrument, Data: actor.InstrumentEvent{Timestamp: int64(time.Hour), Announcement: &etypes.InstrumentAnnouncement{
+		Action: "settled", Symbol: "ABC-P-95-A", InstrumentType: "OPTION", Underlying: "ABC/USD", SettlementPrice: &settlementPrice,
+	}}})
+	if got := u.Position(); got != 4 {
+		t.Fatalf("post-settlement liability position = %d, want 4", got)
+	}
+	if _, ok := u.positions["ABC-P-95-A"]; ok {
+		t.Fatal("settled protection remains in per-contract positions")
+	}
+	if got := u.positions["ABC-P-95-B"]; got != 4 {
+		t.Fatalf("unexpired protection position = %d, want 4", got)
+	}
+}
