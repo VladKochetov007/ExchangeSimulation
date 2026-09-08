@@ -144,6 +144,22 @@ v2_r2_sv1c_binary_metadata_value() {
 		}' <<<"$metadata"
 }
 
+v2_r2_sv1c_require_normalizer_source_revision() {
+	[[ $# -eq 2 ]] || return 1
+	local root_dir=$1 normalizer_revision=$2 current_revision
+	[[ -e "$root_dir/.git" && "$normalizer_revision" =~ ^[0-9a-f]{40}$ ]] || return 1
+	current_revision=$(git -C "$root_dir" rev-parse HEAD) || return 1
+	[[ "$current_revision" =~ ^[0-9a-f]{40}$ ]] || return 1
+	git -C "$root_dir" cat-file -e "$normalizer_revision^{commit}" || return 1
+	git -C "$root_dir" merge-base --is-ancestor "$normalizer_revision" "$current_revision" || return 1
+	# A normalizer built from an ancestor remains valid only when no Go or
+	# module input changed between that build and the manifest's current tree.
+	git -C "$root_dir" diff --quiet "$normalizer_revision" "$current_revision" -- '*.go' 'go.mod' 'go.sum' || return 1
+	git -C "$root_dir" diff --quiet "$current_revision" -- '*.go' 'go.mod' 'go.sum' || return 1
+	git -C "$root_dir" diff --cached --quiet -- '*.go' 'go.mod' 'go.sum' || return 1
+	[[ -z "$(git -C "$root_dir" status --porcelain --untracked-files=all -- '*.go' 'go.mod' 'go.sum')" ]] || return 1
+}
+
 v2_r2_sv1c_require_pinned_binary() {
 	[[ $# -eq 4 ]] || return 1
 	local binary=$1 expected_revision=$2 expected_sha256=$3 expected_package=$4

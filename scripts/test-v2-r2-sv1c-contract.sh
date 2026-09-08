@@ -33,6 +33,14 @@ source "$selected_contract"
 [[ "$v2_r2_sv1_activation_arm_status_contract" == "v2-r2-sv1c-activation-arm-status-v1" ]] || exit 1
 [[ "$v2_r2_sv1_review_contract" == "v2-r2-sv1c-independent-review-v1" ]] || exit 1
 [[ "$v2_r2_sv1_predecessor_id" != "V2-R2-SV1" ]] || exit 1
+declare -F v2_r2_sv1c_require_normalizer_source_revision >/dev/null || {
+	echo "SV1C normalizer source-revision helper is missing" >&2
+	exit 1
+}
+v2_r2_sv1c_require_normalizer_source_revision "$root_dir" "$(git -C "$root_dir" rev-parse HEAD)" || {
+	echo "SV1C current Go input tree was not accepted as a normalizer source" >&2
+	exit 1
+}
 jq -e --arg contract_path "$v2_r2_sv1_contract_path" --arg loader_path "$v2_r2_sv1_contract_loader_path" '
 	(.contract_definition.path == $contract_path and
 	 (.contract_definition.sha256 | test("^[0-9a-f]{64}$"))) and

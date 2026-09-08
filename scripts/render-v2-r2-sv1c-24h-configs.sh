@@ -20,12 +20,20 @@ normalizer=$(realpath -e -- "$normalizer_input") || {
 	exit 1
 }
 normalizer_sha256=$(sha256sum -- "$normalizer" | awk '{print $1}')
-normalizer_revision=$(git -C "$root_dir" rev-parse HEAD) || {
-	echo "could not resolve the config normalizer source revision" >&2
+normalizer_metadata=$(go version -m -- "$normalizer") || {
+	echo "could not read config normalizer build metadata" >&2
+	exit 1
+}
+normalizer_revision=$(v2_r2_sv1c_binary_metadata_value "$normalizer_metadata" "vcs.revision") || {
+	echo "config normalizer does not expose exactly one VCS revision" >&2
+	exit 1
+}
+v2_r2_sv1c_require_normalizer_source_revision "$root_dir" "$normalizer_revision" || {
+	echo "config normalizer source revision is not an unchanged registered Go input tree" >&2
 	exit 1
 }
 v2_r2_sv1c_require_pinned_binary "$normalizer" "$normalizer_revision" "$normalizer_sha256" "$v2_r2_sv1_config_normalizer_package" || {
-	echo "config normalizer is not a pinned Go 1.27 build of the current tree" >&2
+	echo "config normalizer is not a pinned Go 1.27 build of its registered source tree" >&2
 	exit 1
 }
 normalizer_go_version=$(go version -m -- "$normalizer" | sed -n '1s/.*: //p')
