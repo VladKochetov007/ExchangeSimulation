@@ -1380,3 +1380,18 @@ pass at `235babf`. No activation, capacity, development, freeze, or holdout
 run occurred. The performance branch remains reviewed through `b1847ac`, and
 its implementation remains unmerged. Fresh exact-tree independent Sol-xhigh
 review is still the next promotion gate.
+
+## Append-only promotion checkpoint: Gauss exact-tree review accepted — 2026-09-08
+
+Fresh independent Sol-xhigh reviewer `Gauss` inspected exact clean HEAD
+`67924ed3d87cbdc1cd66e4bfb51489a0b68b581d` across the registered successor
+semantics and protocol surfaces. The returned verdict was **ACCEPT WITH
+NONBLOCKING NOTES**; no blocker was verified and no real experiment rerun was
+required. The reviewer ran no simulator, capacity, development, freeze, or
+holdout world.
+
+This closes the current exact-tree review gate and permits the next
+provenance-pinned Go 1.27 build. The activation boundary remains explicit:
+run only the paired seed-643 activation probe after the clean build, then
+review its evidence before any capacity or registered development cell.
+Holdouts `619`, `631`, and `641` remain untouched.

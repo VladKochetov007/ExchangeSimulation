@@ -338,3 +338,13 @@ renderer digest and v5 identity; registered config bytes and economics are
 unchanged. Both SV1 24-hour configuration checkers pass. This is a protocol
 provenance repair only, with no activation/capacity/development/freeze/holdout
 run. A fresh exact-tree Sol-xhigh review remains required before promotion.
+
+## Append-only feed checkpoint: no new performance commits; Gauss accepted scientific tree — 2026-09-08
+
+The performance feed remains unchanged after reviewed commit `b1847ac`; no
+performance implementation was imported. Fresh independent Sol-xhigh reviewer
+`Gauss` inspected exact scientific HEAD `67924ed` and returned **ACCEPT WITH
+NONBLOCKING NOTES**, with no verified blocker and no experiment rerun required.
+The review ran no simulator or holdout. The scientific successor is now at the
+pinned-build boundary; the next permitted world is the paired seed-643
+activation probe, subject to its own evidence review.

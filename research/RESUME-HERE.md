@@ -1531,3 +1531,19 @@ or holdout world ran; no historical rerun is indicated. The performance feed
 was fetched again and remains unchanged after `b1847ac`, with no performance
 implementation imported. A fresh exact-tree independent Sol-xhigh review is
 still required before pinned builds or seed-643 activation.
+
+## Append-only promotion checkpoint: Gauss exact-tree review accepted — 2026-09-08
+
+Fresh independent Sol-xhigh reviewer `Gauss` inspected exact clean HEAD
+`67924ed3d87cbdc1cd66e4bfb51489a0b68b581d` across the successor contract,
+calendar/CDF surfaces, risk/lifecycle hardening, binary evidence, checkpoint
+validation, provenance, and runner wiring. The reviewer returned
+**ACCEPT WITH NONBLOCKING NOTES**, with no verified blocker and no required
+experiment rerun. The review session ran no simulator, capacity, development,
+freeze, or holdout world.
+
+The exact tree is therefore mechanically promoted to the pinned-build boundary.
+The next allowed action is a clean provenance-pinned Go 1.27 build followed by
+the authorized seed-643 paired activation probe only; capacity and registered
+development cells remain gated on that activation result. Holdouts `619`,
+`631`, and `641` remain untouched.
