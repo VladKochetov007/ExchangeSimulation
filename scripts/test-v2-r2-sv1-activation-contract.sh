@@ -20,6 +20,20 @@ rg -F 'v2_r2_require_sv1b_activation_provenance "$activation_provenance_pending"
 	echo "activation runner does not self-validate staged provenance" >&2
 	exit 1
 }
+for required_binding in \
+	'--argjson activation_gomaxprocs "$activation_gomaxprocs"' \
+	'--argjson activation_memory_limit_bytes "$activation_memory_limit_bytes"' \
+	'--argjson activation_gomemlimit_bytes "$activation_gomemlimit_bytes"' \
+	'--argjson activation_host_cpu_count "$activation_host_cpu_count"' \
+	'--argjson activation_allowed_cpu_count "$activation_allowed_cpu_count"' \
+	'--argjson v2_r2_sv1_cpu_limit_percent "$v2_r2_sv1_cpu_limit_percent"' \
+	'--arg activation_cpu_affinity "$activation_cpu_affinity"' \
+	'--argjson activation_minimum_free_bytes "$activation_minimum_free_bytes"'; do
+	rg -F -- "$required_binding" "$runner" >/dev/null || {
+		echo "activation pair provenance jq binding is missing: $required_binding" >&2
+		exit 1
+	}
+done
 rg -F 'renderer_binary_path' "$root_dir/scripts/v2-r2-sv1b-24h-contract.sh" >/dev/null || {
 	echo "SV1B activation contract does not carry renderer identity" >&2
 	exit 1

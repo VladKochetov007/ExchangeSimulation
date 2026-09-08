@@ -570,6 +570,14 @@ write_pair_provenance() {
 			--argjson treatment_artifacts "$treatment_artifacts" --argjson control_artifacts "$control_artifacts" \
 			--arg treatment_source_config_path "$treatment_source_config_path" --arg control_source_config_path "$control_source_config_path" \
 			--arg treatment_source_config_sha256 "$treatment_source_config_sha256" --arg control_source_config_sha256 "$control_source_config_sha256" \
+			--argjson activation_gomaxprocs "$activation_gomaxprocs" \
+			--argjson activation_memory_limit_bytes "$activation_memory_limit_bytes" \
+			--argjson activation_gomemlimit_bytes "$activation_gomemlimit_bytes" \
+			--argjson activation_host_cpu_count "$activation_host_cpu_count" \
+			--argjson activation_allowed_cpu_count "$activation_allowed_cpu_count" \
+			--argjson v2_r2_sv1_cpu_limit_percent "$v2_r2_sv1_cpu_limit_percent" \
+			--arg activation_cpu_affinity "$activation_cpu_affinity" \
+			--argjson activation_minimum_free_bytes "$activation_minimum_free_bytes" \
 			'{schema_version: 3, contract: $contract, candidate_revision: $candidate,
 		 seed: $seed, simulated_horizon: $horizon, simulation_start_nano: $simulation_start_nano,
 		 simulation_end_nano: $simulation_end_nano, evidence_format: $evidence_format, log_mode: $log_mode,
