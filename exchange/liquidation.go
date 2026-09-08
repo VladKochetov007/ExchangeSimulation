@@ -1,6 +1,19 @@
 package exchange
 
-import "slices"
+import (
+	"slices"
+
+	etypes "exchange_sim/types"
+)
+
+type liquidationExecutionStats struct {
+	fillPrice      int64
+	filledQty      int64
+	remainingQty   int64
+	filledNotional int64
+	vwapPrice      int64
+	filled         bool
+}
 
 // ForcedCancelNotification is sent to a client's gateway when the exchange
 // cancels an order on its behalf (e.g. during liquidation) without a client
@@ -18,6 +31,16 @@ type ForcedCancelNotification struct {
 // attempted.
 // Caller must hold e.mu.Lock().
 func (e *DefaultExchange) forceClose(clientID uint64, client *Client, book *OrderBook, instrument Instrument, side Side, posSide PositionSide, qty, timestamp int64) (fillPrice, filledQty int64, filled bool) {
+	stats := e.forceCloseWithStats(clientID, client, book, instrument, side, posSide, qty, timestamp)
+	return stats.fillPrice, stats.filledQty, stats.filled
+}
+
+// forceCloseWithStats is the liquidation-specific execution path. The public
+// compatibility helper above retains its historical three-value return shape;
+// account-scope liquidation additionally needs the complete execution summary
+// for auditable partial fills and weighted pricing.
+func (e *DefaultExchange) forceCloseWithStats(clientID uint64, client *Client, book *OrderBook, instrument Instrument, side Side, posSide PositionSide, qty, timestamp int64) liquidationExecutionStats {
+	var stats liquidationExecutionStats
 	// Same allocation pattern as PlaceOrder (increment, then use): taking the
 	// value first would reuse the most recently placed order's ID.
 	e.NextOrderID++
@@ -47,7 +70,7 @@ func (e *DefaultExchange) forceClose(clientID uint64, client *Client, book *Orde
 		if failure.err != nil {
 			e.reportPriceUnavailable(timestamp, book.Symbol, "liquidation_fee_preflight", failure.err)
 			putOrder(order)
-			return 0, 0, false
+			return stats
 		}
 		panic("matching engine could not produce liquidation fee preflight")
 	}
@@ -57,16 +80,28 @@ func (e *DefaultExchange) forceClose(clientID uint64, client *Client, book *Orde
 		panic("matching engine violated liquidation fee preflight")
 	}
 	if len(result.Executions) > 0 {
-		fillPrice = result.Executions[len(result.Executions)-1].Price
+		stats.fillPrice = result.Executions[len(result.Executions)-1].Price
+		for _, execution := range result.Executions {
+			notional := etypes.MulDiv(execution.Qty, execution.Price, instrument.BasePrecision())
+			var ok bool
+			stats.filledNotional, ok = etypes.TryAdd(stats.filledNotional, notional)
+			if !ok {
+				panic("liquidation execution notional overflow")
+			}
+		}
 	}
-	filledQty = order.FilledQty
-	filled = filledQty > 0
+	stats.filledQty = order.FilledQty
+	stats.remainingQty = order.Qty - order.FilledQty
+	stats.filled = stats.filledQty > 0
+	if stats.filled {
+		stats.vwapPrice = etypes.MulDiv(stats.filledNotional, instrument.BasePrecision(), stats.filledQty)
+	}
 	levels := collectAffectedLevels(book, result.Executions)
 	e.processExecutions(book, result.Executions, order, plan)
 	e.removeMakerOrders(book, result.Executions)
 	e.publishLevels(book, levels)
 	putOrder(order)
-	return fillPrice, filledQty, filled
+	return stats
 }
 
 // cancelClientOrdersOnBook cancels all open orders for client on the given book,

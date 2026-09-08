@@ -11,8 +11,15 @@ type MarginCallEvent struct {
 type LiquidationEvent struct {
 	Timestamp     int64  `json:"timestamp"`
 	ClientID      uint64 `json:"client_id"`
+	LiquidationID uint64 `json:"liquidation_id"`
 	Symbol        string `json:"symbol"`
+	PositionSide  string `json:"position_side"`
 	PositionSize  int64  `json:"position_size"`
+	AttemptedQty  int64  `json:"attempted_qty"`
+	FilledQty     int64  `json:"filled_qty"`
+	RemainingQty  int64  `json:"remaining_qty"`
+	FillNotional  int64  `json:"filled_notional"`
+	VWAPPrice     int64  `json:"vwap_price"`
 	FillPrice     int64  `json:"fill_price"`
 	RemainingDebt int64  `json:"remaining_debt"`
 }

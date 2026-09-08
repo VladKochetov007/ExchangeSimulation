@@ -158,6 +158,7 @@ type DefaultExchange struct {
 	// unmetered, which is what scenarios without a published budget expect.
 	RequestPolicy         RequestPolicy
 	NextOrderID           uint64
+	nextLiquidationID     uint64
 	Matcher               MatchingEngine
 	MDPublisher           *MDPublisher
 	Clock                 Clock
@@ -2495,9 +2496,15 @@ type liquidationPosition struct {
 }
 
 type liquidationFill struct {
-	symbol       string
-	positionSize int64
-	fillPrice    int64
+	symbol         string
+	positionSide   string
+	positionSize   int64
+	attemptedQty   int64
+	filledQty      int64
+	remainingQty   int64
+	filledNotional int64
+	vwapPrice      int64
+	fillPrice      int64
 }
 
 // collectAccountLiquidationPositionsLocked returns every same-quote margined
@@ -2579,7 +2586,8 @@ func (e *DefaultExchange) liquidateAccount(clientID uint64, client *Client, quot
 		}
 	}
 	if len(fills) > 0 {
-		e.finalizeAccountLiquidation(clientID, client, quote, timestamp, fills)
+		e.nextLiquidationID++
+		e.finalizeAccountLiquidation(clientID, client, quote, timestamp, e.nextLiquidationID, fills)
 	}
 }
 
@@ -2597,8 +2605,9 @@ func (e *DefaultExchange) liquidatePosition(clientID uint64, client *Client, sym
 	if pos.Size < 0 {
 		closeSide = Buy
 	}
-	fillPrice, filledQty, filled := e.forceClose(clientID, client, book, book.Instrument, closeSide, pos.PositionSide, abs(pos.Size), timestamp)
-	if !filled {
+	attemptedQty := abs(pos.Size)
+	stats := e.forceCloseWithStats(clientID, client, book, book.Instrument, closeSide, pos.PositionSide, attemptedQty, timestamp)
+	if !stats.filled {
 		// No liquidity in the book; position stays open for retry on next mark price update.
 		return liquidationFill{}, false
 	}
@@ -2606,11 +2615,15 @@ func (e *DefaultExchange) liquidatePosition(clientID uint64, client *Client, sym
 	// Fee on the quantity that actually closed: a thin book can absorb only
 	// part of the position, and billing the full attempted size would
 	// overcharge every partial liquidation.
-	e.chargeClearanceFee(clientID, client, symbol, inst, filledQty, fillPrice, timestamp)
-	return liquidationFill{symbol: symbol, positionSize: pos.Size, fillPrice: fillPrice}, true
+	e.chargeClearanceFee(clientID, client, symbol, inst, stats.filledNotional, timestamp)
+	return liquidationFill{
+		symbol: symbol, positionSide: pos.PositionSide.String(), positionSize: pos.Size,
+		attemptedQty: attemptedQty, filledQty: stats.filledQty, remainingQty: stats.remainingQty,
+		filledNotional: stats.filledNotional, vwapPrice: stats.vwapPrice, fillPrice: stats.fillPrice,
+	}, true
 }
 
-func (e *DefaultExchange) finalizeAccountLiquidation(clientID uint64, client *Client, quote string, timestamp int64, fills []liquidationFill) {
+func (e *DefaultExchange) finalizeAccountLiquidation(clientID uint64, client *Client, quote string, timestamp int64, liquidationID uint64, fills []liquidationFill) {
 	if e.BorrowingMgr != nil {
 		borrowed := client.Borrowed[quote]
 		if borrowed > 0 {
@@ -2662,20 +2675,33 @@ func (e *DefaultExchange) finalizeAccountLiquidation(clientID uint64, client *Cl
 		}
 	}
 
-	// Emit every position fill after account-level finalization so each
-	// liquidation receipt carries the same terminal deficit, if any.
-	for _, fill := range fills {
+	// Emit every position fill after account-level finalization. The account
+	// deficit is attached to the first canonical receipt only; repeating one
+	// account-level transfer on every position fill would make downstream
+	// reconstruction overstate the insurance movement.
+	for index, fill := range fills {
+		remainingDebt := int64(0)
+		if index == 0 {
+			remainingDebt = debt
+		}
 		if log := e.getLogger(fill.symbol); log != nil {
 			log.LogEvent(timestamp, clientID, "liquidation", map[string]any{
-				"symbol": fill.symbol, "position_size": fill.positionSize,
-				"fill_price": fill.fillPrice, "remaining_debt": debt,
+				"symbol": fill.symbol, "position_side": fill.positionSide,
+				"liquidation_id": liquidationID, "position_size": fill.positionSize,
+				"attempted_qty": fill.attemptedQty, "filled_qty": fill.filledQty,
+				"remaining_qty": fill.remainingQty, "filled_notional": fill.filledNotional,
+				"vwap_price": fill.vwapPrice, "fill_price": fill.fillPrice,
+				"remaining_debt": remainingDebt,
 			})
 		}
 		if e.LiquidationHandler != nil {
 			e.LiquidationHandler.OnLiquidation(&LiquidationEvent{
-				Timestamp: timestamp, ClientID: clientID, Symbol: fill.symbol,
-				PositionSize: fill.positionSize, FillPrice: fill.fillPrice,
-				RemainingDebt: debt,
+				Timestamp: timestamp, ClientID: clientID, LiquidationID: liquidationID,
+				Symbol: fill.symbol, PositionSide: fill.positionSide,
+				PositionSize: fill.positionSize, AttemptedQty: fill.attemptedQty,
+				FilledQty: fill.filledQty, RemainingQty: fill.remainingQty,
+				FillNotional: fill.filledNotional, VWAPPrice: fill.vwapPrice,
+				FillPrice: fill.fillPrice, RemainingDebt: remainingDebt,
 			})
 		}
 	}
@@ -2701,7 +2727,7 @@ func (e *DefaultExchange) finalizeAccountLiquidation(clientID uint64, client *Cl
 // fund grow in calm regimes and absorb deficits in cascades. Clamped to the
 // account's available balance: the fee must not create fresh debt or invade
 // reservations backing other books. Caller must hold e.mu.Lock().
-func (e *DefaultExchange) chargeClearanceFee(clientID uint64, client *Client, symbol string, inst Instrument, closedSize, fillPrice, timestamp int64) {
+func (e *DefaultExchange) chargeClearanceFee(clientID uint64, client *Client, symbol string, inst Instrument, closedNotional, timestamp int64) {
 	if e.LiquidationFeeBps <= 0 {
 		return
 	}
@@ -2709,7 +2735,7 @@ func (e *DefaultExchange) chargeClearanceFee(clientID uint64, client *Client, sy
 	// A liquidation fee is a non-negative service/risk charge. It is based on
 	// exposure magnitude, not signed futures cash-flow direction; a negative
 	// price must not turn it into a rebate or numeric no-price sentinel.
-	fee := etypes.AbsMulDiv(closedSize, fillPrice, inst.BasePrecision()) * e.LiquidationFeeBps / 10000
+	fee := etypes.AbsMulDiv(closedNotional, e.LiquidationFeeBps, 10000)
 	if available := client.PerpAvailable(quote); fee > available {
 		fee = available
 	}
