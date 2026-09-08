@@ -741,6 +741,9 @@ type CDFLiquidityComparison struct {
 	Provenance                  CDFLiquidityComparisonProvenance `json:"provenance"`
 	Treatment                   *CDFLiquidityRunAudit            `json:"treatment"`
 	Control                     *CDFLiquidityRunAudit            `json:"control"`
+	TreatmentLiquidations       *LiquidationAudit                `json:"treatment_liquidations"`
+	ControlLiquidations         *LiquidationAudit                `json:"control_liquidations"`
+	LiquidationEvidenceValid    bool                             `json:"liquidation_evidence_valid"`
 	ControlBidAbsenceFraction   float64                          `json:"control_bid_absence_fraction"`
 	ControlAskAbsenceFraction   float64                          `json:"control_ask_absence_fraction"`
 	TreatmentBidAbsenceFraction float64                          `json:"treatment_bid_absence_fraction"`
@@ -1519,6 +1522,14 @@ func CompareCDFLiquidityRuns(treatment, control *Run) (*CDFLiquidityComparison, 
 	if err != nil {
 		return nil, err
 	}
+	treatmentLiquidations, err := treatment.MeasureLiquidations()
+	if err != nil {
+		return nil, fmt.Errorf("treatment liquidation audit: %w", err)
+	}
+	controlLiquidations, err := control.MeasureLiquidations()
+	if err != nil {
+		return nil, fmt.Errorf("control liquidation audit: %w", err)
+	}
 	treatmentIdentity, err := loadCDFRunIdentity(treatment)
 	if err != nil {
 		return nil, fmt.Errorf("treatment provenance: %w", err)
@@ -1533,6 +1544,7 @@ func CompareCDFLiquidityRuns(treatment, control *Run) (*CDFLiquidityComparison, 
 			Control:   &controlIdentity.provenance,
 		},
 		Treatment: treatmentAudit, Control: controlAudit,
+		TreatmentLiquidations: treatmentLiquidations, ControlLiquidations: controlLiquidations,
 		ControlBidAbsenceFraction:   controlAudit.BidAbsenceFraction,
 		ControlAskAbsenceFraction:   controlAudit.AskAbsenceFraction,
 		TreatmentBidAbsenceFraction: treatmentAudit.BidAbsenceFraction,
@@ -1547,11 +1559,35 @@ func CompareCDFLiquidityRuns(treatment, control *Run) (*CDFLiquidityComparison, 
 		comparison.Provenance.Valid = false
 		comparison.Provenance.Failure = "treatment/control execution provenance is not paired"
 	}
-	comparison.EvidenceValid = comparison.Provenance.Valid && treatmentAudit.EvidenceValid && controlAudit.EvidenceValid
+	comparison.LiquidationEvidenceValid = liquidationAuditEvidenceValid(treatmentLiquidations) && liquidationAuditEvidenceValid(controlLiquidations)
+	comparison.EvidenceValid = comparison.Provenance.Valid && treatmentAudit.EvidenceValid && controlAudit.EvidenceValid && comparison.LiquidationEvidenceValid
 	comparison.Valid = comparison.EvidenceValid && treatmentAudit.Valid && controlAudit.Valid && treatmentAudit.SupplierCount > 0 && controlAudit.SupplierCount == 0
 	comparison.ActivationSatisfied = comparison.Valid && treatmentAudit.ActivationSatisfied
 	comparison.AntiCheatingSatisfied = comparison.Valid && treatmentAudit.AntiCheatingSatisfied && controlAudit.AntiCheatingSatisfied
 	return comparison, nil
+}
+
+// liquidationAuditEvidenceValid is the strict successor contract. A run with
+// no liquidation events is valid; a run that emits them must carry complete,
+// account-bound receipts and reconciled deficit postings.
+func liquidationAuditEvidenceValid(audit *LiquidationAudit) bool {
+	if audit == nil {
+		return false
+	}
+	return audit.InvalidLiquidations == 0 &&
+		audit.ExecutionSummaryFailures == 0 &&
+		audit.DuplicateExecutionSummaryRecords == 0 &&
+		audit.DuplicateDeficitRecords == 0 &&
+		audit.MissingLiquidationIDs == 0 &&
+		audit.PositionPathMissing == 0 &&
+		audit.PositionPathOrphaned == 0 &&
+		audit.PositionPathFailures == 0 &&
+		audit.PositionConservationMissing == 0 &&
+		audit.PositionConservationFailures == 0 &&
+		audit.DeficitMismatchInstants == 0 &&
+		audit.DeficitBalanceMismatchAccounts == 0 &&
+		audit.UnboundDeficitRecords == 0 &&
+		audit.BalanceIdentityFailures == 0
 }
 
 func (r *CDFLiquidityRunAudit) addCheck(check CDFLiquidityCheck) {

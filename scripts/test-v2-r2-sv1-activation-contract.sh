@@ -451,6 +451,7 @@ jq -n \
 	--argjson treatment "$(jq '.result' "$cdf_audit_fixture")" \
 	--argjson control "$(jq '.result' "$temp_root/control-cdfliquidity.json")" \
 	'{valid: true, evidence_valid: true, activation_satisfied: true, anti_cheating_satisfied: true,
+	 liquidation_evidence_valid: true,
 	 provenance: {valid: true}, treatment: $treatment, control: $control}' \
 	>"$temp_root/comparison-cdfliquidity.json"
 v2_r2_require_cdf_supplier_comparison "$temp_root/comparison-cdfliquidity.json" 2 || {
@@ -672,7 +673,7 @@ jq -n \
 			 seed:$seed,horizon:$horizon,simulation_start_nano:$start_nano,simulation_end_nano:$end_nano,
 			 venue_ids:$venue_ids,experiment_id:$experiment_id,hypothesis_id:$hypothesis_id,
 			 evidence_format:$evidence_format,log_mode:$log_mode,valid:true};
-		 {valid:true,evidence_valid:true,activation_satisfied:true,anti_cheating_satisfied:true,
+	 {valid:true,evidence_valid:true,activation_satisfied:true,anti_cheating_satisfied:true,liquidation_evidence_valid:true,
 		  provenance:{treatment:run_provenance($treatment_config_sha256; $treatment_experiment_id; $treatment_hypothesis_id),
 			 control:run_provenance($control_config_sha256; $control_experiment_id; $control_hypothesis_id),
 			 analyzer_sha256:$analyzer_sha256,analyzer_source_revision:$revision,

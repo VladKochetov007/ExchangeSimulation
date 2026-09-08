@@ -235,6 +235,7 @@ v2_r2_require_cdf_supplier_comparison() {
 		(.treatment | type) == "object" and (.control | type) == "object" and
 		.treatment.valid == true and .treatment.evidence_valid == true and
 		.treatment.activation_satisfied == true and .treatment.anti_cheating_satisfied == true and
+		.liquidation_evidence_valid == true and
 		.control.valid == true and .control.evidence_valid == true and .control.anti_cheating_satisfied == true and
 		.treatment.supplier_count == $expected_supplier_count and .control.supplier_count == 0 and
 		.control.decision_count == 0 and .control.fill_count == 0 and
@@ -351,6 +352,7 @@ v2_r2_require_cdf_supplier_comparison_measurement() {
 		(.treatment | type) == "object" and (.control | type) == "object" and
 		.treatment.valid == true and .treatment.evidence_valid == true and
 		.treatment.activation_satisfied == false and .treatment.anti_cheating_satisfied == true and
+		.liquidation_evidence_valid == true and
 		.control.valid == true and .control.evidence_valid == true and
 		.control.anti_cheating_satisfied == true and
 		(.treatment.supplier_count | type) == "number" and .treatment.supplier_count == $expected_supplier_count and
