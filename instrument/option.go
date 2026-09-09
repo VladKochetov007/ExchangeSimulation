@@ -146,14 +146,25 @@ func (o *EuropeanOption) MaintenanceForPosition(size, precision int64) int64 {
 	if size >= 0 {
 		return 0
 	}
-	short := -size
 	m, marked := o.loadMarks()
 	if !marked {
 		return 0
 	}
-	mm := etypes.MulDiv(short, m.underlying, precision) * o.Margin.MMBps / 10000
-	return mm + etypes.MulDiv(short, m.premium, precision)
+	return o.MaintenanceForPositionAtMark(size, precision, m.underlying, m.premium)
 }
+
+// MaintenanceForPositionAtMark evaluates option maintenance from the exact
+// mark pair committed for one cross-margin epoch.
+func (o *EuropeanOption) MaintenanceForPositionAtMark(size, precision, underlyingMark, positionMark int64) int64 {
+	if size >= 0 || precision <= 0 || underlyingMark < 0 || positionMark < 0 || o.Margin.MMBps < 0 {
+		return 0
+	}
+	short := -size
+	mm := etypes.MulDiv(short, underlyingMark, precision) * o.Margin.MMBps / 10000
+	return mm + etypes.MulDiv(short, positionMark, precision)
+}
+
+var _ etypes.PositionMarginSnapshotter = (*EuropeanOption)(nil)
 
 // --- Expirable ---
 

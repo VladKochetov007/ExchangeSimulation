@@ -274,10 +274,13 @@ func (e *DefaultExchange) CheckListings() {
 	}
 }
 
-// UpdateDerivativeMarks feeds settlement observations to every live Expirable
-// and refreshes option marks (underlying mid + Black-76 premium) used by the
-// seller margin formula.
+// UpdateDerivativeMarks feeds settlement observations to every live Expirable,
+// refreshes option marks (underlying mid + Black-76 premium), and commits one
+// complete available risk-mark epoch for the following liquidation sweep.
 func (e *DefaultExchange) UpdateDerivativeMarks() {
+	e.markPassMu.Lock()
+	defer e.markPassMu.Unlock()
+
 	now := e.Clock.NowUnixNano()
 
 	type expirableData struct {
@@ -308,6 +311,8 @@ func (e *DefaultExchange) UpdateDerivativeMarks() {
 				if opt, ok := inst.(*einstrument.EuropeanOption); ok {
 					opt.ClearMarks()
 				}
+				delete(e.markEpochBySymbol, data.symbol)
+				delete(e.riskMarkSnapshots, data.symbol)
 			}
 			e.mu.Unlock()
 			e.reportPriceUnavailable(now, inst.Symbol(), "derivative_mark", err)
@@ -330,9 +335,15 @@ func (e *DefaultExchange) UpdateDerivativeMarks() {
 				mark := eprice.Black76Premium(underlyingPrice, opt.Strike, opt.IV, yearsLeft, opt.IsCall)
 				opt.SetMarks(underlyingPrice, mark)
 			}
+		} else {
+			delete(e.markEpochBySymbol, data.symbol)
+			delete(e.riskMarkSnapshots, data.symbol)
 		}
 		e.mu.Unlock()
 	}
+	e.mu.Lock()
+	e.commitAvailableRiskMarkEpochLocked(now)
+	e.mu.Unlock()
 	e.publishIndexFeeds(now)
 	if e.postDerivativeMarkHook != nil {
 		// The hook sees a complete fresh mark set and precedes any same-timestamp
@@ -452,6 +463,8 @@ func (e *DefaultExchange) settleExpiredInstrument(symbol string, now int64) {
 		if opt, ok := inst.(*einstrument.EuropeanOption); ok {
 			opt.ClearMarks()
 		}
+		delete(e.markEpochBySymbol, symbol)
+		delete(e.riskMarkSnapshots, symbol)
 		log := e.getLogger(symbol)
 		e.mu.Unlock()
 		e.reportPriceUnavailable(now, symbol, "expiry_settlement", fmt.Errorf("expiry settlement: %w", err))
@@ -703,6 +716,8 @@ func (e *DefaultExchange) settleExpiredInstrument(symbol string, now int64) {
 	delete(e.Instruments, symbol)
 	delete(e.instrumentListedAt, symbol)
 	delete(e.settlementPending, symbol)
+	delete(e.markEpochBySymbol, symbol)
+	delete(e.riskMarkSnapshots, symbol)
 	// The AUTO-anchored mark calculator dies with the instrument: the map is
 	// keyed by symbol, and a relisting under the same symbol must seed a
 	// FRESH basis EMA — inheriting the dead contract's seeded state marks

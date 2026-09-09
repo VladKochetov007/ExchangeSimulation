@@ -1,6 +1,7 @@
 package exchange_test
 
 import (
+	"errors"
 	"testing"
 
 	. "exchange_sim/exchange"
@@ -89,6 +90,13 @@ type semanticConstantMark struct{ price int64 }
 
 func (m *semanticConstantMark) Calculate(*OrderBook) (int64, error) { return m.price, nil }
 
+type semanticToggleMark struct {
+	price int64
+	err   error
+}
+
+func (m *semanticToggleMark) Calculate(*OrderBook) (int64, error) { return m.price, m.err }
+
 func crossMarginOrderingCase(t *testing.T, riserSymbol, fallerSymbol string) bool {
 	t.Helper()
 	ex := NewExchange(4, &RealClock{})
@@ -145,5 +153,104 @@ func TestCrossMarginRiskUsesOneCoherentMarkSetPerTick(t *testing.T) {
 	}
 	if riserFirst {
 		t.Fatal("both mark orderings liquidated an account solvent at the refreshed mark set")
+	}
+}
+
+func TestCrossMarginRiskFailsClosedWhenSiblingMarkIsUnavailable(t *testing.T) {
+	ex := NewExchange(4, &RealClock{})
+	defer ex.Shutdown()
+
+	first := NewPerpFutures("AAA-PERP", "AAA", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1)
+	second := NewPerpFutures("BBB-PERP", "BBB", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1)
+	ex.AddInstrument(first)
+	ex.AddInstrument(second)
+	firstMark := &semanticToggleMark{price: USDAmount(100)}
+	secondMark := &semanticToggleMark{price: USDAmount(100)}
+	recorder := &riskSemanticLiquidationRecorder{}
+	ex.ConfigureAutomation(AutomationConfig{
+		MarkPriceCalcs: map[string]MarkPriceCalculator{
+			first.Symbol():  firstMark,
+			second.Symbol(): secondMark,
+		},
+		LiquidationHandler: recorder,
+	})
+	ex.ConnectNewClient(1, map[string]int64{}, &FixedFee{})
+	ex.ConnectNewClient(2, map[string]int64{}, &FixedFee{})
+	ex.AddPerpBalance(1, "USD", USDAmount(101))
+	ex.AddPerpBalance(2, "USD", USDAmount(10_000_000))
+
+	positions := ex.Positions.(*PositionManager)
+	positions.Lock()
+	for _, symbol := range []string{first.Symbol(), second.Symbol()} {
+		positions.InjectPosition(1, symbol, &Position{
+			ClientID: 1, Symbol: symbol, PositionSide: PositionBoth,
+			Size: BTCAmount(10), EntryPrice: USDAmount(100),
+		})
+	}
+	positions.Unlock()
+	if _, reject := InjectLimitOrder(ex, 2, first.Symbol(), Buy, USDAmount(50), BTCAmount(50)); reject != "" {
+		t.Fatalf("first covering bid rejected: %s", reject)
+	}
+	if _, reject := InjectLimitOrder(ex, 2, second.Symbol(), Buy, USDAmount(100), BTCAmount(50)); reject != "" {
+		t.Fatalf("second covering bid rejected: %s", reject)
+	}
+
+	ex.UpdatePerpPrices()
+	firstMark.price = USDAmount(50)
+	secondMark.err = errors.New("declared sibling mark unavailable")
+	ex.UpdatePerpPrices()
+
+	if len(recorder.liquidations) != 0 {
+		t.Fatalf("cross-margin risk used a stale sibling book after its mark failed: %v", recorder.liquidations)
+	}
+}
+
+func TestCrossMarginRiskRequiresRecommitAfterDirectMarkMutation(t *testing.T) {
+	ex := NewExchange(4, &RealClock{})
+	defer ex.Shutdown()
+
+	first := NewPerpFutures("AAA-PERP", "AAA", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1)
+	second := NewPerpFutures("BBB-PERP", "BBB", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1)
+	ex.AddInstrument(first)
+	ex.AddInstrument(second)
+	recorder := &riskSemanticLiquidationRecorder{}
+	ex.ConfigureAutomation(AutomationConfig{
+		MarkPriceCalcs: map[string]MarkPriceCalculator{
+			first.Symbol():  &semanticConstantMark{price: USDAmount(100)},
+			second.Symbol(): &semanticConstantMark{price: USDAmount(100)},
+		},
+		LiquidationHandler: recorder,
+	})
+	ex.ConnectNewClient(1, map[string]int64{}, &FixedFee{})
+	ex.ConnectNewClient(2, map[string]int64{}, &FixedFee{})
+	ex.AddPerpBalance(1, "USD", USDAmount(101))
+	ex.AddPerpBalance(2, "USD", USDAmount(10_000_000))
+
+	positions := ex.Positions.(*PositionManager)
+	positions.Lock()
+	for _, symbol := range []string{first.Symbol(), second.Symbol()} {
+		positions.InjectPosition(1, symbol, &Position{
+			ClientID: 1, Symbol: symbol, PositionSide: PositionBoth,
+			Size: BTCAmount(10), EntryPrice: USDAmount(100),
+		})
+	}
+	positions.Unlock()
+	if _, reject := InjectLimitOrder(ex, 2, first.Symbol(), Buy, USDAmount(50), BTCAmount(50)); reject != "" {
+		t.Fatalf("covering bid rejected: %s", reject)
+	}
+
+	ex.UpdatePerpPrices()
+	first.UpdateMarkReferences(USDAmount(50), USDAmount(50))
+	ex.CheckLiquidations(first.Symbol(), first, USDAmount(50))
+	if len(recorder.liquidations) != 0 {
+		t.Fatal("directly mutated mark was used before a new coherent epoch was committed")
+	}
+
+	if _, err := ex.CommitMarkEpoch([]string{first.Symbol(), second.Symbol()}); err != nil {
+		t.Fatalf("recommitting mutated marks failed: %v", err)
+	}
+	ex.CheckLiquidations(first.Symbol(), first, USDAmount(50))
+	if len(recorder.liquidations) != 1 {
+		t.Fatalf("recommitted mark set did not permit the expected liquidation: %v", recorder.liquidations)
 	}
 }

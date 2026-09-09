@@ -53,6 +53,17 @@ func injectOptionRiskPositions(ex *Exchange, perpSize, optionSize, optionEntry i
 	ex.AddPerpBalance(1, "USD", -MulDiv(optionSize, optionEntry, BTC_PRECISION))
 }
 
+func commitOptionRiskEpoch(t *testing.T, ex *Exchange, perp *PerpFutures, opt *EuropeanOption) {
+	t.Helper()
+	mark := PriceUSD(50_000, DOLLAR_TICK)
+	if err := perp.UpdateFundingRate(mark, mark); err != nil {
+		t.Fatalf("perp mark update failed: %v", err)
+	}
+	if _, err := ex.CommitMarkEpoch([]string{perp.Symbol(), opt.Symbol()}); err != nil {
+		t.Fatalf("coherent option risk mark epoch failed: %v", err)
+	}
+}
+
 func TestRegressionShortOptionMaintenanceTriggersLiquidation(t *testing.T) {
 	ex, perp, opt, handler := optionRiskExchange(t)
 
@@ -60,6 +71,7 @@ func TestRegressionShortOptionMaintenanceTriggersLiquidation(t *testing.T) {
 	// against $5,000 equity. The tiny perp leg alone needs only $250.
 	injectOptionRiskPositions(ex, BTCAmount(0.1), -BTCAmount(1), USDAmount(3_000))
 	opt.SetMarks(USDAmount(50_000), USDAmount(3_000))
+	commitOptionRiskEpoch(t, ex, perp, opt)
 
 	if _, reject := InjectLimitOrder(ex, 2, "BTC-PERP", Buy, PriceUSD(50_000, DOLLAR_TICK), BTCAmount(1)); reject != "" {
 		t.Fatalf("liquidity order rejected: %s", reject)
@@ -78,6 +90,7 @@ func TestRegressionLongOptionCarriesNoMaintenance(t *testing.T) {
 	// the perp's $250 requirement stands against $5,000 equity.
 	injectOptionRiskPositions(ex, BTCAmount(0.1), BTCAmount(1), USDAmount(3_000))
 	opt.SetMarks(USDAmount(50_000), USDAmount(3_000))
+	commitOptionRiskEpoch(t, ex, perp, opt)
 
 	if _, reject := InjectLimitOrder(ex, 2, "BTC-PERP", Buy, PriceUSD(50_000, DOLLAR_TICK), BTCAmount(1)); reject != "" {
 		t.Fatalf("liquidity order rejected: %s", reject)
@@ -96,6 +109,7 @@ func TestRegressionOptionMarkToMarketMovesEquity(t *testing.T) {
 	// drops equity to $2,100, below the 1-BTC perp's $2,500 maintenance.
 	injectOptionRiskPositions(ex, BTCAmount(1), BTCAmount(1), USDAmount(3_000))
 	opt.SetMarks(USDAmount(50_000), USDAmount(100))
+	commitOptionRiskEpoch(t, ex, perp, opt)
 
 	if _, reject := InjectLimitOrder(ex, 2, "BTC-PERP", Buy, PriceUSD(50_000, DOLLAR_TICK), BTCAmount(1)); reject != "" {
 		t.Fatalf("liquidity order rejected: %s", reject)

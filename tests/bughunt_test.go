@@ -215,6 +215,12 @@ func TestCrossSymbolMaintenanceAggregation(t *testing.T) {
 
 	// Liquidity so client 1's forced close can fill at entry (uPnL stays 0).
 	InjectLimitOrder(ex, 2, "BTC-PERP", Buy, entry100(), BTCAmount(2.0))
+	if err := btcPerp.UpdateFundingRate(entry100(), entry100()); err != nil {
+		t.Fatalf("BTC mark update failed: %v", err)
+	}
+	if _, err := ex.CommitMarkEpoch([]string{"BTC-PERP", "ETH-PERP"}); err != nil {
+		t.Fatalf("coherent cross-symbol mark epoch failed: %v", err)
+	}
 
 	ex.CheckLiquidations("BTC-PERP", btcPerp, entry100())
 
