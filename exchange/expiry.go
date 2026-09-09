@@ -618,6 +618,8 @@ func (e *DefaultExchange) settleExpiredInstrument(symbol string, now int64) {
 			panic("expiry settlement cash overflows balance")
 		}
 		newBal := etypes.AddAmount(oldBal, netCash)
+		settlementChanges := []BalanceDelta{{Asset: quote, Wallet: "perp", OldBalance: oldBal, NewBalance: newBal, Delta: netCash}}
+		e.conservation.record(settlementChanges)
 		client.PerpBalances[quote] = newBal
 		feeTotal = etypes.AddAmount(feeTotal, fee)
 
@@ -640,7 +642,7 @@ func (e *DefaultExchange) settleExpiredInstrument(symbol string, now int64) {
 			log.LogEvent(now, ep.clientID, "balance_change", BalanceChangeEvent{
 				Timestamp: now, ClientID: ep.clientID, Symbol: symbol,
 				PositionSide: pos.PositionSide.String(), Reason: "expiry_settlement",
-				Changes: []BalanceDelta{{Asset: quote, Wallet: "perp", OldBalance: oldBal, NewBalance: newBal, Delta: netCash}},
+				Changes: settlementChanges,
 			})
 		}
 	}
