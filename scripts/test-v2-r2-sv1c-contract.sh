@@ -4,7 +4,6 @@ set -euo pipefail
 root_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 loader="$root_dir/scripts/v2-r2-sv1-contract-loader.sh"
 contract="$root_dir/scripts/v2-r2-sv1c-24h-contract.sh"
-checker="$root_dir/scripts/check-v2-r2-sv1c-24h-configs.sh"
 
 source "$loader"
 default_contract=$(v2_r2_select_sv1_contract "$root_dir")
@@ -59,6 +58,57 @@ v2_r2_sv1c_require_normalizer_registration "$root_dir" "$normalizer_registration
 	echo "SV1C normalizer registration is invalid" >&2
 	exit 1
 }
+
+# SV1C is a retained predecessor. Its provenance intentionally names the
+# contract tree and normalizer source revision that produced those configs;
+# validating it against the active SV1D checkout would conflate two scientific
+# candidates and would reject the predecessor merely because newer scripts
+# exist. Reconstruct the exact registered contract tree and build its pinned
+# normalizer in an isolated worktree instead.
+historical_contract_revision=$(git -C "$root_dir" log -1 --format=%H -- "$v2_r2_sv1_config_normalizer_registration_path")
+historical_normalizer_revision=$(jq -er '.source_revision | select(type == "string" and test("^[0-9a-f]{40}$"))' "$normalizer_registration_file")
+[[ "$historical_contract_revision" =~ ^[0-9a-f]{40}$ && "$historical_normalizer_revision" =~ ^[0-9a-f]{40}$ ]] || {
+	echo "SV1C historical provenance revisions are malformed" >&2
+	exit 1
+}
+git -C "$root_dir" merge-base --is-ancestor "$historical_contract_revision" HEAD || {
+	echo "SV1C historical contract revision is not an ancestor of the active candidate" >&2
+	exit 1
+}
+for retained_path in \
+	"research/configs/v2-r2-sv1c-24h" \
+	"research/v2-r2-sv1c-24h-config-provenance.json" \
+	"research/v2-r2-sv1c-24h-config-normalizer-registration.json"; do
+	git -C "$root_dir" diff --quiet "$historical_contract_revision" HEAD -- "$retained_path" || {
+		echo "SV1C retained artifact changed after its registered contract revision: $retained_path" >&2
+		exit 1
+	}
+done
+
+historical_validation_root=$(mktemp -d)
+historical_contract_worktree="$historical_validation_root/contract"
+historical_source_worktree="$historical_validation_root/source"
+historical_checker="$historical_contract_worktree/scripts/check-v2-r2-sv1c-24h-configs.sh"
+historical_manifest="$historical_contract_worktree/${v2_r2_sv1_config_provenance_manifest#"$root_dir/"}"
+cleanup_historical_worktrees() {
+	git -C "$root_dir" worktree remove --force "$historical_source_worktree" >/dev/null 2>&1 || true
+	git -C "$root_dir" worktree remove --force "$historical_contract_worktree" >/dev/null 2>&1 || true
+	rmdir "$historical_validation_root" 2>/dev/null || true
+}
+trap cleanup_historical_worktrees EXIT
+git -C "$root_dir" worktree add --detach "$historical_contract_worktree" "$historical_contract_revision" >/dev/null
+git -C "$root_dir" worktree add --detach "$historical_source_worktree" "$historical_normalizer_revision" >/dev/null
+mkdir -p "$historical_contract_worktree/bin"
+(
+	cd "$historical_source_worktree"
+	PATH=/usr/local/go/bin:$PATH GOMAXPROCS=2 GOMEMLIMIT=4GiB \
+		CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOAMD64=v1 GOTOOLCHAIN=local \
+		go build -trimpath -buildvcs=true -o "$historical_contract_worktree/bin/multivenue" ./cmd/multivenue
+)
+(
+	cd "$historical_contract_worktree"
+	"$historical_checker"
+)
 (
 	registration_backup=$(mktemp)
 	registration_mutation=$(mktemp)
@@ -92,26 +142,31 @@ for unknown_candidate in "" "V2-R2-SV1C-UNREGISTERED" "V2-R2-SV1B-24H-CDF-LIQUID
 done
 v2_r2_sv1_candidate_id="$registered_candidate"
 
-"$checker"
+(cd "$historical_contract_worktree" && "$historical_checker")
 
 manifest_backup=$(mktemp)
 manifest_mutation_fixture=$(mktemp)
-cp -- "$v2_r2_sv1_config_provenance_manifest" "$manifest_backup"
+cp -- "$historical_manifest" "$manifest_backup"
 restore_manifest() {
-	cp -- "$manifest_backup" "$v2_r2_sv1_config_provenance_manifest"
+	cp -- "$manifest_backup" "$historical_manifest"
 	rm -f -- "$manifest_backup" "$manifest_mutation_fixture"
 }
-trap restore_manifest EXIT
+cleanup_all() {
+	restore_manifest
+	cleanup_historical_worktrees
+}
+trap cleanup_all EXIT
 for mutation in '.contract_dependencies[2].sha256 = ("0" * 64)' '.normalizer.go_version = "tampered"' '.normalizer.package = "tampered"' '.normalizer_registration.sha256 = ("0" * 64)'; do
 	jq "$mutation" "$manifest_backup" >"$manifest_mutation_fixture"
-	cp -- "$manifest_mutation_fixture" "$v2_r2_sv1_config_provenance_manifest"
-	if V2_R2_SV1_CONTRACT_SCRIPT="$contract" "$checker"; then
+	cp -- "$manifest_mutation_fixture" "$historical_manifest"
+	if (cd "$historical_contract_worktree" && "$historical_checker"); then
 		echo "SV1C accepted mutated normalizer provenance: $mutation" >&2
 		exit 1
 	fi
-	cp -- "$manifest_backup" "$v2_r2_sv1_config_provenance_manifest"
+	cp -- "$manifest_backup" "$historical_manifest"
 done
 rm -f -- "$manifest_backup" "$manifest_mutation_fixture"
+cleanup_historical_worktrees
 trap - EXIT
 
 strict_config_valid() {
