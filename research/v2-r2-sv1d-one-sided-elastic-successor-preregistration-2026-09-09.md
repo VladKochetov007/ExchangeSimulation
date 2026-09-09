@@ -72,14 +72,43 @@ reached, the supplier withdraws or waits. A cancellation is not automatically
 replaced. The supplier has no obligation to quote either side, and no code
 path replenishes capital, inventory, or a withdrawn order.
 
-The one-sided missing-side price is deterministic integer arithmetic. Let `T`
-be the positive local touch, `R` the current private reference, and `tick` the
-configured positive tick. The blended reference is `floor((R+T)/2)` using
-overflow-safe fixed-point arithmetic. For a missing ask above a bid, the
-candidate is `max(blended_reference, bid+tick)`; for a missing bid below an
-ask, it is `min(blended_reference, ask-tick)`. A nonpositive or overflowed
-candidate fails closed. The candidate is not a target or convergence rule: it
-is a participant's local belief plus its inventory constraint.
+The one-sided missing-side quote price is deterministic integer arithmetic. The
+`tick` is read from the registered `CDF/USD` instrument and is not an
+independent supplier parameter; the configuration and normalized manifest must
+carry the same value. The grid origin is zero, and an admissible positive price
+is an integer multiple of `tick`. Let `T` be the positive local touch and `R`
+the current private reference. First compute `sum = checked_add(R, T)` and
+`B = floor(sum / 2)`. For bid-only data, compute
+`lower = checked_add(T, tick)`, `candidate = max(B, lower)`, then
+`quote = ceil_to_tick(candidate)`. For ask-only data, compute
+`upper = checked_sub(T, tick)`, `candidate = min(B, upper)`, then
+`quote = floor_to_tick(candidate)`. For positive operands,
+`floor_to_tick(x) = (x / tick) * tick`; `ceil_to_tick(x)` adds one to the
+quotient exactly when `x % tick != 0`, with checked multiplication. Every
+intermediate addition, subtraction, quotient increment, and multiplication is
+checked; a nonpositive, overflowed, or exchange-invalid result fails closed.
+This fixed-point statement applies only to the one-sided quote-price
+construction. The existing exponential private-reference update and
+inventory-target calculation retain their registered floating-point form and
+are covered by pinned-toolchain determinism tests. The candidate is not a
+target or convergence rule: it is a participant's local belief plus its
+inventory constraint.
+
+### One-sided supplier risk mark
+
+The supplier's loss-budget mark is a top-of-book policy mark; it does not claim
+that the entire gross inventory can be liquidated at the displayed quantity.
+With both sides present, marked equity uses the midpoint, as in the
+predecessor. With bid-only data, positive gross CDF inventory is valued at the
+bid; with ask-only data, because the supplier's positive gross inventory has no
+displayed bid at which it could be reduced, marked equity is unavailable and
+the supplier withdraws. The supplier's gross CDF inventory is always
+nonnegative under the registered inventory limits. A zero-inventory diagnostic
+may record the touch but cannot initialize a positive loss budget from it. If a
+future roster permits net short inventory, its buy-to-close risk mark must
+analogously require an ask and use that ask. Missing required policy marks
+therefore fail closed; they never become zero, entry price, private reference,
+or a fabricated midpoint.
 
 ## Information and economic constraints
 
@@ -97,6 +126,28 @@ exchange path. It may cancel, reprice, or permanently withdraw when its local
 observation, inventory target, or risk budget changes. The existing eight
 ABC/USD suppliers remain byte-identical in the treatment and controls.
 
+The evidence must also make touch provenance auditable. For every one-sided
+decision, the decision record is joined to the public snapshot at the delayed
+observation's `source_sequence` and global `event_seq`, not to the public state
+at decision time. The analyzer records whether the present touch was public,
+whether a registered successor-supplier order occupied that price level, the
+successor-supplier displayed depth at the touch, and the public displayed depth
+at the touch. It reconstructs independent depth by removing all configured
+SV1D orders from that same globally ordered snapshot. A restoration is the
+first later public snapshot, in global event order, where the previously
+missing side has at least `minimum_executable_qty` displayed quantity. It is
+self-referential when the restored side has at least that much successor depth
+but less than that much residual non-SV1D depth. Let `N_self` be the number of
+self-referential restorations and `N_restore` the number of all qualifying
+restorations; the preregistered self-reference fraction is
+`N_self / N_restore`, and SV1D is killed when it exceeds `0.50`; `N_restore = 0`
+also fails the activation requirement. A qualifying restoration is not rejected
+merely because a supplier order is present: the reconstruction tests whether
+the roster supplied the missing executable side primarily by itself. This
+objective rule rejects a roster that collectively manufactures technical
+two-sidedness by observing one another, while leaving the actor unable to see
+the reconstruction.
+
 ## Activation criteria
 
 The strict SV1C supplier activation predicate is retained rather than relaxed:
@@ -110,7 +161,15 @@ inventory, risk, or unavailable-side reason.
 
 The activation evidence must prove finite-capital accounting, inventory and
 position bounds, delayed-information provenance, ordinary fill/PnL
-reconciliation, and complete supplier-removal reconstruction. If any
+reconciliation, and complete supplier-removal reconstruction over all public
+venue snapshots. Client-specific market-data snapshots are not public-book
+observations and are excluded from that denominator; the analyzer must report
+both counts explicitly and fail if any public snapshot is not reconstructible.
+The causal chain must include at least one delayed one-sided observation that
+produces an inventory-selected missing-side quote, that quote is submitted and
+accepted, and the public snapshot afterward shows that side restored. The
+evidence must then show whether the quote rested or filled and whether a later
+inventory-responsive decision followed. If any
 supplier fails the registered predicate or the counterfactual coverage is
 incomplete, SV1D is a negative/invalid activation gate and cannot advance to a
 24-hour campaign.
@@ -126,7 +185,19 @@ loss limit is exceeded or ignored.
 
 Retain the preregistered concentration limits: supplier CDF volume share above
 75%, or more than 75% of displayed CDF depth for more than half of measured
-active intervals in any venue, is a kill condition. Persistent one-sided CDF
+active intervals in any venue, is a kill condition. Apply the same threshold
+separately to aggregate supplier bid depth and aggregate supplier ask depth,
+including time-weighted and executable-quantity-qualified shares. The
+registered SV1D roster sets `minimum_executable_qty = 100000` base units. A
+one-sided restoration qualifies only when the supplier's accepted resting
+quantity is at least that value and its price is between one and twenty
+`CDF/USD` ticks from the independent present-side touch. The current registered
+instrument has `tick = 100000` quote units; the normalized manifest must bind
+both values to the instrument rather than duplicate them as actor economics.
+The analyzer reports quote distance, displayed and executable depth, and
+whether the previously missing side was supplier-only. A tiny or far-away
+quote that merely makes a book technically two-sided cannot satisfy the
+survival predicate. Persistent one-sided CDF
 books, strict valuation failure, missing risk/PnL transitions, or unbounded
 replenishment also kill the candidate. The candidate fails qualitatively if
 the new mode acts as a structural two-sided market-making obligation even if
@@ -150,7 +221,16 @@ roster selection may rescue it.
 
 ## Fixed promotion sequence
 
-1. hash this preregistration and the exact SV1D configs before measurement;
+1. hash this preregistration and the exact SV1D treatment, same-roster
+   mode-off control, and no-roster control configs before measurement. Freeze
+   seed `659` for the five-minute interval
+   `2025-01-01T00:00:00Z` through `2025-01-01T00:05:00Z` (terminal boundary
+   exclusive), with no warm-up exclusion, one-second simulation/snapshot/
+   automation steps, deterministic scheduler phases, supplier offsets of
+   `0s`, `0.5s`, `1s`, and `1.5s`, and the registered liability-hedger phase.
+   The immutable launch manifest must then record the actual normalized config
+   hashes, source revision, pinned binary hashes, evstream schema/hash
+   contract, and the thresholds above before seed 659 is started;
 2. implement the behavior as an opt-in configuration with unit tests for
    two-sided parity, one-sided bid/ask pricing, tick boundaries, overflow,
    stale observations, withdrawal, delayed-information provenance, finite
