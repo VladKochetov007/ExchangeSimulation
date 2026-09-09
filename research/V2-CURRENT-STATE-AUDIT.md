@@ -1891,3 +1891,48 @@ activation binaries and only the registered seed-643 activation probe. No
 simulator world or holdout has run; holdouts `619`, `631`, and `641` remain
 untouched. Async refs remain performance `b1847ac`, performance-port `39768df`,
 and economic red-team `e85e16c`, with no newer commits.
+
+## Append-only audit update: corrected retained activation replay — 2026-09-09
+
+The exact current successor source checkpoint before this note is clean and
+pushed at `85f9deafee700dadb7277de19688f5e0e0d10fe8`. The clean full
+`make test` at that checkpoint passed status zero after the normalizer was
+rebuilt and registered from the exact `d2bba43` Go input closure. No Go source,
+economic configuration, R2 calendar rule, supplier roster, or historical
+evidence was changed by the normalizer rebinding.
+
+The retained seed-643 activation pair at source
+`7ca80ac65067400bbfa2b8ab53fc7793257a77de` completed both simulator arms with
+status zero, but its original audit was invalid. Hypatia's independent P1
+reproduction showed that the analyzer used per-file `Event.Ordinal` values to
+compare records routed to `general.jsonl` and `spot/CDF-USD.jsonl`; those
+ordinals are not a global causal order. The raw evidence is sufficient for
+analyzer correction, so the trajectory was not rerun. `bacda62` reconstructs
+rest decisions by global event sequence, `a37b86b` adds an explicit
+analysis-only replay provenance mode, and `d2bba43` makes the false
+analyzer-modified flag serialize explicitly.
+
+Two independent clean analyzer builds from `85f9dea` are byte-identical at
+`b0c3da3aaed20d9b223149d21de642ff25058222e6a511804d0a7ec737f4f0a8`. Two
+analysis-only replays are byte-identical at output hash
+`cff2e149c6ea3794281eeaafb904f2c8005a2915afb7a666a905759ab094976f`.
+The replay reports `valid=true`, `evidence_valid=true`,
+`liquidation_evidence_valid=true`, `activation_satisfied=false`, and
+`anti_cheating_satisfied=false`; it has no `checks` field, so no unsupported
+zero-check claim is made. Treatment evidence contains 12 suppliers, 1,791
+decisions, 203 accepted quotes, 95 fills, 174 cancels, and 7
+inventory-responsive decisions. Five supplier/venue instances fail the
+positive inventory-response activation condition despite having fills and
+PnL. Supplier removal has 900/939 snapshots, making its counterfactual
+coverage invalid; this is why anti-cheating is not satisfied. All raw hashes,
+the old invalid output, the replay, and the attestation are retained outside
+the repository.
+
+This is classified as an analyzer defect with immutable evidence sufficient
+for rescore/replay, followed by a genuine negative activation outcome. It does
+not justify offline repair of the simulator trajectory, a relaxed activation
+predicate, or a full development run. No capacity, registered development,
+freeze, or holdout world ran; holdouts `619`, `631`, and `641` remain
+untouched. The async refs were fetched at the checkpoint and had no new
+commits beyond performance `b1847ac`, performance-port `39768df`, and
+economic red-team `e85e16c`.

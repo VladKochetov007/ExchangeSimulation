@@ -2087,3 +2087,44 @@ cell, freeze, or holdout ran; retained evidence was not removed and holdouts
 `619`, `631`, and `641` remain untouched. The async refs remain performance
 `b1847ac`, performance-port `39768df`, and economic-red-team `e85e16c` with no
 new commits.
+
+## Append-only operational update: SV1C analyzer rescore boundary — 2026-09-09
+
+The successor code/provenance checkpoint is clean and pushed at `85f9dea` on
+`feature/r2-cdf-survival-successor`. `d2bba43` contains the isolated analyzer
+provenance-mode fix and explicit `analyzer_source_modified` rendering;
+`85f9dea` rebases the registered SV1C Go 1.27 normalizer after that source
+change. A clean bounded full `make test` passed with status zero at this
+checkpoint. The preceding dirty-tree and stale-registration failures are
+retained as expected contract diagnostics, not source failures.
+
+The retained paired seed-643, five-minute activation world at source
+`7ca80ac` was not rerun. Its first audit output remains immutable and invalid
+because the analyzer compared routed lifecycle records using file-local
+ordinals. The global-order analyzer repair in `bacda62`, replay provenance
+mode in `a37b86b`, and explicit provenance boolean fix in `d2bba43` allow a
+legitimate analysis-only replay. Two independent Go 1.27 analyzer builds from
+`85f9dea` match at
+`b0c3da3aaed20d9b223149d21de642ff25058222e6a511804d0a7ec737f4f0a8`. The
+replay output is deterministic at
+`cff2e149c6ea3794281eeaafb904f2c8005a2915afb7a666a905759ab094976f` and is
+attested outside the repository at
+`/home/vlad/external-scratch/v2-r2-sv1c-activation-rescore-643-85f9dea/`.
+
+The corrected replay is valid, evidence-valid, and liquidation-evidence-valid,
+but activation-negative: the treatment has 12 suppliers, 95 fills, 1,791
+decisions, 7 inventory-responsive decisions in aggregate, and five
+supplier/venue instances with no inventory-responsive decision. Its supplier
+volume share is 0.095785 and time-weighted resting-depth share is 0.149823;
+trading PnL is -882 with a -15 fixed-point decomposition residual and zero
+balance/PnL reconciliation residual. The supplier-removal counterfactual
+covers 900 of 939 snapshots and is therefore invalid for anti-cheating
+promotion. This is a valid negative activation result, not a reason to relax
+the preregistered all-supplier predicate or rerun the same trajectory.
+
+No simulator rerun, capacity measurement, registered development cell, freeze,
+or holdout run occurred. The original invalid comparison and prior replay are
+preserved, and holdouts `619`, `631`, and `641` remain untouched. The next
+promotion boundary is a fresh exact-tree independent Sol-xhigh review of the
+post-documentation candidate and this rescore decision; absent an accepted
+activation path, seed `659` and full SV1C development remain closed.

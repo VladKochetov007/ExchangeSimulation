@@ -560,3 +560,101 @@ retained as historical review evidence but is not treated as an attestation of
 the current candidate. No simulator world, capacity probe, development cell,
 freeze, or holdout ran. The next action is a fresh exact-tree review of
 `4c9d826`.
+
+## SV1C analyzer correction and retained activation rescore — 2026-09-09
+
+### Exact revisions and independent feed status
+
+The exact scientific successor source used for the corrected replay is
+`85f9deafee700dadb7277de19688f5e0e0d10fe8` (`85f9dea`), clean and pushed on
+`feature/r2-cdf-survival-successor`. The preceding source fix is `d2bba43`;
+the current normalizer registration is the separate provenance-only commit
+`85f9dea`. The asynchronous performance, performance-port, and economic
+red-team refs were fetched immediately before this checkpoint. They remain
+`b1847ac40e8b7483e6e8a3f94b3705b4058884b`,
+`39768dfed4ba4a5134f0c5ccf53351a79a0b1d64`, and
+`e85e16c5e920382e5df9aa050ac5ff9b22b51661`; no new commits or implementation
+were imported.
+
+### Finding: routed-record order in CDF rest validation
+
+The first registered seed-643 paired activation run was produced by source
+`7ca80ac65067400bbfa2b8ab53fc7793257a77de`, with both simulator arms
+completing successfully. The original analyzer returned malformed audit
+evidence because it decided whether a rest order was live by comparing
+file-local ordinals from separate routed evidence files. Hypatia's independent
+Sol-xhigh review identified this as a promotion blocker; the concrete
+reproduction found an order accepted at global sequence 3885 and a rest
+decision at global sequence 4922 incorrectly treated as pre-acceptance.
+
+Invariant: when production evidence supplies a canonical nonzero global event
+sequence, lifecycle reconstruction must compare that sequence across every
+routed evidence file. A file-local ordinal may only break ties within the same
+file after timestamps/global sequence are otherwise equal; it must never create
+cross-file causality. If no canonical cross-file order exists, the analyzer
+must fail closed rather than invent one.
+
+Classification: `ANALYZER BUG`. The condition activated in the retained
+activation evidence and made the original audit artifact invalid, but the
+immutable raw evidence is sufficient for correction. Therefore the proper
+action is analyzer fix plus analysis-only rescore, not a simulator rerun and
+not an offline trajectory repair. `bacda62` implements the global-order
+reconstruction and its focused regression; `a37b86b` permits a clean descendant
+analyzer to replay paired raw evidence while retaining the raw source revision;
+`d2bba43` makes `analyzer_source_modified=false` explicit in JSON provenance.
+
+### Rescore evidence and result
+
+Two clean Go 1.27 builds of `cmd/cdf-liquidity-audit` from `85f9dea`, using
+isolated caches, are byte-identical:
+
+    b0c3da3aaed20d9b223149d21de642ff25058222e6a511804d0a7ec737f4f0a8
+
+The retained pair was replayed twice with `-analysis-only-replay`; both output
+JSON files are byte-identical at
+`cff2e149c6ea3794281eeaafb904f2c8005a2915afb7a666a905759ab094976f`. The
+analysis-only attestation and raw/output hash manifest are retained at
+`/home/vlad/external-scratch/v2-r2-sv1c-activation-rescore-643-85f9dea/`.
+The original invalid JSON and its hash remain at the activation root and were
+not overwritten.
+
+The corrected comparison has `valid=true`, `evidence_valid=true`, and
+`liquidation_evidence_valid=true`; the explicit provenance contains
+`analyzer_source_modified=false`, `source_revision_mode=analysis_only_replay`,
+raw source `7ca80ac`, and analyzer source `85f9dea`. The treatment contains:
+
+* 12 supplier instances, 1,791 decisions, 204 submissions, 203 accepted
+  quotes, 1,374 rest decisions, 95 fills, and 174 cancels;
+* 7 inventory-responsive decisions in aggregate, with five negative
+  supplier/venue instances: `(24,central)`, `(26,central)`, `(26,north)`,
+  `(24,south)`, and `(26,south)`;
+* supplier volume share `0.095785`, time-weighted resting-depth share
+  `0.149823`, trading PnL `-882`, trading decomposition residual `-15`, and
+  zero balance/PnL reconciliation residuals; and
+* supplier-removal coverage of 900/939 snapshots, so the removal
+  counterfactual is invalid and aggregate anti-cheating is false. The
+  comparison schema does not expose a `checks` field; validity is reported
+  from its explicit validity flags only.
+
+This is a valid negative activation result. It does not meet the registered
+all-supplier activation predicate and does not authorize seed-659 capacity,
+full development, freeze, or holdouts. In particular, no predicate was
+relaxed to rescue the candidate, no supplier was added or retuned, and no
+economic conclusion was inferred from the invalid pre-fix audit.
+
+### Historical-impact and next-gate decision
+
+The original simulator trajectory is not rescored as a corrected simulator
+trajectory: the defect was in the analyzer, and the raw event streams are
+unchanged. The historical invalid-audit status remains preserved; the new
+analysis-only output is a separately identified corrected measurement. No
+other historical experiment is affected by this routed-order analyzer defect,
+and no R2 predecessor, signed-price, P4/P5, P6, P7d, or mixed-timing claim is
+reopened. No capacity, development, freeze, or holdout world ran. Holdouts
+`619`, `631`, and `641` remain untouched.
+
+The next gate is one fresh independent Sol-xhigh review of the final
+post-documentation successor tree, the replay protocol, and the negative
+activation decision. Unless that review establishes a separately justified
+registered path, the SV1C successor stops at this activation boundary rather
+than proceeding to full development.
