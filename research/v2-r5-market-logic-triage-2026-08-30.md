@@ -682,3 +682,33 @@ silently merged. Before any new cell, reconcile the binary-evidence successor
 promotion state, obtain any required exact-tree review, build the pinned
 provenance artifact, and use the registered development-only sequence. Holdout
 seeds `619/631/641` remain untouched behind explicit freeze authorization.
+
+## Asynchronous CDF successor checkpoint — SV1C closure (2026-09-09)
+
+The separate branch `origin/feature/r2-cdf-survival-successor` advanced to
+`1fda96039e684d51e176e0cef2bcff145f2a6c8a` and was inspected read-only. Its
+latest independent review report is
+`research/reviews/v2-r2-sv1c-independent-review-2026-09-09.md`, reviewing
+the exact prior source `7aa9fe27f2fb1b40435bfbba98cd4f6c10fa4d72` and the
+retained seed-643 activation pair. The branch was not merged into the
+scientific worktree.
+
+The reviewer accepts the routed-record global-order correction as
+analysis-only/rescore-only and accepts the corrected replay as valid negative
+activation evidence, but **REJECTS SV1C FOR SCIENTIFIC PROMOTION**. Seven of
+twelve supplier/venue instances activated; five had fills and PnL but no
+post-fill inventory-responsive decision. Supplier-removal reconstruction
+covered 900/939 snapshots, so the removal counterfactual and aggregate
+anti-cheating predicate were invalid. No predicate was relaxed, no supplier
+was retuned, and no trajectory was repaired. The branch therefore does not
+authorize capacity seed 659, full development, freeze, or holdouts
+`619/631/641`.
+
+This is a valid negative activation boundary, not a reason to reinterpret the
+R2 predecessor or to select only the successful supplier instances. Any next
+CDF experiment must be a separately named candidate with an independently
+motivated roster and activation contract written before measurement. It must
+preserve finite capital, delayed local information, explicit inventory/PnL
+risk, withdrawal ability, and no forced two-sided quoting or hidden anchor.
+The current scientific branch remains at `90d0ffb` for simulator correctness;
+SV1C source changes are not part of that candidate.

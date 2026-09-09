@@ -778,3 +778,25 @@ successor; no performance-branch code was imported by `90d0ffb`. The next
 promotion boundary is binary-evidence successor reconciliation, exact review
 where required, pinned build, and development-only execution. Freeze
 authorization is still absent.
+
+## Append-only checkpoint: SV1C asynchronous closure — 2026-09-09
+
+The separate `feature/r2-cdf-survival-successor` branch was fetched and
+inspected at `1fda960`. Its exact-tree Lovelace Sol-xhigh report
+(`research/reviews/v2-r2-sv1c-independent-review-2026-09-09.md`) rejects SV1C
+for scientific promotion, while accepting its corrected global-order replay
+as a valid analysis-only negative activation result. Seven of twelve
+supplier/venue instances activated, but five lacked a post-fill
+inventory-responsive decision; supplier-removal reconstruction covered only
+900 of 939 snapshots. Consequently the preregistered activation and
+anti-cheating gates are not satisfied.
+
+The rejection is preserved as a negative result. No predicate was relaxed, no
+supplier was selected or retuned after the fact, no capacity seed 659 or
+24-hour development was run, and no freeze or holdout authorization exists.
+The active scientific branch remains the independent F3-corrected tree
+`90d0ffb`/`2dc7acd`; SV1C implementation changes remain off-branch. A future
+CDF successor, if scientifically justified, requires a new name, an
+independently motivated finite roster and preregistration, fresh exact-tree
+review, and a new development-only activation probe. Holdouts `619/631/641`
+remain untouched.

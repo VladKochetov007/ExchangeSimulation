@@ -955,3 +955,21 @@ finish and their contracts pass.
   Before any new cell, finish the binary-evidence successor promotion/review
   boundary, build the pinned candidate, and use development cells only. Holdout
   seeds `619/631/641` remain behind explicit freeze authorization.
+
+## Append-only operational update: SV1C asynchronous closure — 2026-09-09
+
+- The separate CDF successor branch is now at `1fda960` and was inspected
+  without switching or merging it. Its Lovelace Sol-xhigh review rejects SV1C
+  for scientific promotion while accepting the corrected global-order replay
+  as valid analysis-only negative evidence.
+- The rejection is substantive: only 7/12 supplier–venue instances had the
+  required post-fill inventory-responsive decision, and supplier-removal
+  reconstruction covered 900/939 snapshots. No activation predicate was
+  relaxed, no supplier was retuned, and no historical trajectory was repaired.
+  SV1C therefore does not authorize capacity seed 659, full development,
+  freeze, or holdouts `619/631/641`.
+- This branch remains the corrected scientific baseline at `90d0ffb` plus its
+  F3 documentation commit. Any further CDF work must be a separately named,
+  independently motivated preregistered successor; selecting the seven
+  successful instances or weakening the all-roster criterion would be post hoc
+  rescue. No new CDF code is being imported here.
