@@ -827,6 +827,7 @@ jq -n --arg contract "$v2_r2_sv1_activation_pair_contract" --arg candidate "$v2_
 	   gomemlimit_bytes: $gomemlimit_bytes, host_cpu_count: $host_cpu_count,
 	   allowed_cpu_count: $allowed_cpu_count, cpu_limit_percent: $cpu_limit_percent,
 	   cpu_affinity: $cpu_affinity, minimum_free_bytes: $minimum_free_bytes,
+	   host_memory_total_bytes: $comparison_host_memory_total,
 	   minimum_memory_available_bytes: $minimum_memory_available_bytes,
 	   max_wall_seconds: $max_wall_seconds, analyzer_max_wall_seconds: $analyzer_max_wall_seconds},
 	 scope: "development-only five-minute mechanism activation; not a 24-hour survival claim"}' \

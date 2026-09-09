@@ -37,6 +37,8 @@ rg -F 'max_inventory_utilization' "$contract" "$root_dir/analysis/cdf_liquidity.
 rg -F 'filled_qty >= .configured_minimum_qualifying_qty' "$contract" >/dev/null
 rg -F 'v2_r2_sv1d_require_activation_capacity' "$contract" "$checker" "$generator" >/dev/null
 rg -F 'host_memory_total_bytes' "$contract" "$root_dir/scripts/run-v2-r2-sv1d-activation-probe.sh" "$root_dir/scripts/score-v2-r2-sv1d-activation.sh" >/dev/null
+rg -F 'host_memory_total_bytes: $comparison_host_memory_total' "$root_dir/scripts/run-v2-r2-sv1d-activation-probe.sh" >/dev/null
+rg -F 'comparison_valid" == true' "$root_dir/scripts/score-v2-r2-sv1d-activation.sh" >/dev/null
 rg -F 'v2_r2_sv1d_require_arm_record_matches' "$contract" "$root_dir/scripts/score-v2-r2-sv1d-activation.sh" >/dev/null
 rg -F 'arm_artifacts_valid' "$contract" "$root_dir/scripts/run-v2-r2-sv1d-activation-probe.sh" >/dev/null
 rg -F 'mode-off' "$root_dir/scripts/score-v2-r2-sv1d-activation.sh" >/dev/null

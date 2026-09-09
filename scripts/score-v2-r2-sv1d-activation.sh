@@ -149,7 +149,7 @@ comparison_provenance_valid=$(jq -er '(.provenance == null or .provenance.valid 
 comparison_terminal_negative=$(jq -er '.status == "UNAVAILABLE_TERMINAL_FAILURE"' "$comparison_path" 2>/dev/null || true)
 score_status="SV1D_ACTIVATION_INVALID_EVIDENCE"
 score_reason="comparison was not a valid reconstructed same-roster pair"
-if [[ "$comparison_evidence_valid" == true && "$comparison_provenance_valid" == true ]]; then
+if [[ "$comparison_valid" == true && "$comparison_evidence_valid" == true && "$comparison_provenance_valid" == true ]]; then
 	if [[ "$comparison_terminal_negative" == true ]]; then
 		score_status="SV1D_ACTIVATION_NOT_SATISFIED_TERMINAL_FAILURE"
 		score_reason="the registered treatment/control pair reached a valid terminal valuation failure; no activation claim is made"
