@@ -167,6 +167,7 @@ func NewMetaorderTrader(id uint64, gw actor.Gateway, venueID string, cfg Metaord
 		rng:       rand.New(rand.NewSource(cfg.Seed)),
 	}
 	m.SetHandler(m)
+	m.SetDeterministicPhasePending(nil)
 	m.AddTicker(cfg.ChildInterval, m.onTick)
 	return m
 }

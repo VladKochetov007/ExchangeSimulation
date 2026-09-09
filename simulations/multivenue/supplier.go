@@ -75,6 +75,7 @@ type ElasticSupplier struct {
 func NewElasticSupplier(id uint64, gw actor.Gateway, cfg ElasticSupplierConfig) *ElasticSupplier {
 	s := &ElasticSupplier{BaseActor: actor.NewBaseActor(id, gw), cfg: cfg, reference: cfg.ReferencePrice}
 	s.SetHandler(s)
+	s.SetDeterministicPhasePending(nil)
 	s.AddTicker(cfg.Interval, s.onTick)
 	return s
 }

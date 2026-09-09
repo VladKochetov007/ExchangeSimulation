@@ -155,6 +155,7 @@ func NewDatedExecutionMandate(id uint64, gateway actor.Gateway, cfg DatedExecuti
 		contracts: make(map[string]*datedMandateContract), requestSym: make(map[uint64]string), orderSym: make(map[uint64]string),
 	}
 	m.SetHandler(m)
+	m.SetDeterministicPhasePending(nil)
 	m.AddTickerWithOffset(cfg.DecisionPeriod, cfg.DecisionPhase, m.onTick)
 	return m
 }

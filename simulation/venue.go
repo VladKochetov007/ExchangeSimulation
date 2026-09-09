@@ -33,9 +33,12 @@ type Mount struct {
 	phaseMode bool
 }
 
-// NewMount creates a Mount backed by an *exchange.Exchange.
-func NewMount(ex *exchange.Exchange, latency LatencyConfig) *Mount {
-	return &Mount{Market: ex, Latency: latency}
+// NewMount creates a Mount backed by any venue implementing the minimal
+// types.Venue contract. Concrete exchange users remain source-compatible,
+// while extensions can supply a deterministic venue without depending on the
+// built-in exchange implementation.
+func NewMount(venue types.Venue, latency LatencyConfig) *Mount {
+	return &Mount{Market: venue, Latency: latency}
 }
 
 // ConnectNewClient registers clientID on the venue and wraps the resulting gateway
@@ -99,6 +102,27 @@ func (m *Mount) Idle() bool {
 	if idler, ok := m.Market.(interface{ Idle() bool }); ok {
 		return idler.Idle()
 	}
+	return true
+}
+
+// DeterministicPhasePending is the mount-level fast path for the scheduler
+// timestamp hook. It avoids the fixed-point drain when no venue, courier, or
+// actor-facing message became ready at the just-processed timestamp.
+func (m *Mount) DeterministicPhasePending() bool {
+	m.mu.Lock()
+	for _, gateway := range m.delayed {
+		if gateway.DeterministicPhasePending() {
+			m.mu.Unlock()
+			return true
+		}
+	}
+	m.mu.Unlock()
+	if pending, ok := m.Market.(interface{ DeterministicPhasePending() bool }); ok {
+		return pending.DeterministicPhasePending()
+	}
+	// A deterministic venue may be supplied by an extension and own queues
+	// that the framework cannot inspect. Force the conservative pump rather
+	// than allowing an unreported venue transition to cross a timestamp.
 	return true
 }
 

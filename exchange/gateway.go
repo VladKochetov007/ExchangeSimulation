@@ -170,6 +170,18 @@ func (g *ClientGateway) Idle() bool {
 	return len(g.outbox) == 0 && !g.delivering
 }
 
+// DeterministicPhasePending is the cheap phase-runtime readiness check. It
+// intentionally excludes state that is waiting for a future scheduler event.
+func (g *ClientGateway) DeterministicPhasePending() bool {
+	if len(g.RequestCh) != 0 || len(g.ResponseCh) != 0 || len(g.MarketData) != 0 {
+		return true
+	}
+	g.outMu.Lock()
+	pending := len(g.outbox) != 0
+	g.outMu.Unlock()
+	return pending
+}
+
 func (g *ClientGateway) Responses() <-chan Response          { return g.ResponseCh }
 func (g *ClientGateway) MarketDataCh() <-chan *MarketDataMsg { return g.MarketData }
 func (g *ClientGateway) MarketDataChan() chan *MarketDataMsg { return g.MarketData }

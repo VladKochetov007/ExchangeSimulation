@@ -92,6 +92,7 @@ func NewRandomTaker(id uint64, gw actor.Gateway, cfg TakerConfig) *RandomTaker {
 		decay:     math.Exp(-cfg.ExciteBetaPerSec * cfg.TakeInterval.Seconds()),
 	}
 	t.SetHandler(t)
+	t.SetDeterministicPhasePending(nil)
 	t.AddTickerWithOffset(cfg.TakeInterval, cfg.DecisionPhaseOffset, t.onTick)
 	return t
 }

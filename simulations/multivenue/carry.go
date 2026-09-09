@@ -67,6 +67,7 @@ func (b bookTouch) mid() (int64, bool) { return positiveDomainTwoSidedMidpoint(b
 func NewCarryArbitrageur(id uint64, gw actor.Gateway, cfg CarryArbitrageurConfig) *CarryArbitrageur {
 	c := &CarryArbitrageur{BaseActor: actor.NewBaseActor(id, gw), cfg: cfg}
 	c.SetHandler(c)
+	c.SetDeterministicPhasePending(nil)
 	c.AddTicker(cfg.Interval, c.onTick)
 	return c
 }

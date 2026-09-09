@@ -87,6 +87,7 @@ func newRaceActor(name string, clientID uint64, gw actor.Gateway, clock exchange
 		nextRequestID: 100,
 	}
 	r.SetHandler(r)
+	r.SetDeterministicPhasePending(nil)
 	return r
 }
 
@@ -184,6 +185,7 @@ type signalActor struct {
 func newSignalActor(clientID uint64, gw actor.Gateway) *signalActor {
 	s := &signalActor{BaseActor: actor.NewBaseActor(clientID, gw), symbol: signalSymbol}
 	s.SetHandler(s)
+	s.SetDeterministicPhasePending(nil)
 	s.AddTicker(20*time.Millisecond, s.onTick)
 	return s
 }
@@ -203,6 +205,7 @@ type passiveActor struct{ *actor.BaseActor }
 func newPassiveActor(clientID uint64, gw actor.Gateway) *passiveActor {
 	p := &passiveActor{BaseActor: actor.NewBaseActor(clientID, gw)}
 	p.SetHandler(p)
+	p.SetDeterministicPhasePending(nil)
 	return p
 }
 

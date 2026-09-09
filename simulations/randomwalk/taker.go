@@ -33,6 +33,7 @@ func NewRandomTaker(id uint64, gw actor.Gateway, cfg TakerConfig) *RandomTaker {
 		midPrices: make(map[string]int64, len(cfg.Symbols)),
 	}
 	t.SetHandler(t)
+	t.SetDeterministicPhasePending(nil)
 	t.AddTicker(cfg.TakeInterval, t.onTick)
 	return t
 }

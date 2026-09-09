@@ -241,6 +241,7 @@ type FundingCarryArbitrageur struct {
 func NewFundingCarryArbitrageur(id uint64, gateway actor.Gateway, cfg FundingCarryArbitrageurConfig) *FundingCarryArbitrageur {
 	desk := &FundingCarryArbitrageur{BaseActor: actor.NewBaseActor(id, gateway), cfg: cfg}
 	desk.SetHandler(desk)
+	desk.SetDeterministicPhasePending(nil)
 	desk.AddTicker(cfg.DecisionPeriod, desk.onTick)
 	return desk
 }

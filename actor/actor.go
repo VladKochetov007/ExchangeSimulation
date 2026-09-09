@@ -67,6 +67,7 @@ type BaseActor struct {
 	stopCh        chan struct{}
 	stopOnce      sync.Once
 	running       atomic.Bool
+	started       atomic.Bool
 	requestSeq    uint64
 	tickerFactory exchange.TickerFactory
 
@@ -86,6 +87,14 @@ type BaseActor struct {
 	// It is configured before Start and never changed while running.
 	phaseMode    bool
 	phaseTickers []phaseTicker
+	// deterministicPhasePendingHook lets an actor that embeds BaseActor expose
+	// additional extension-owned phase queues to the runner. Built-in inboxes
+	// remain on the zero-cost path; extensions must install this before Start
+	// when their PumpDeterministicPhase consumes any other queue. A nil hook is
+	// an explicit declaration that the actor owns no extension queue; without
+	// that declaration readiness is conservative and the runner pumps it.
+	deterministicPhasePendingHook       func() bool
+	deterministicPhasePendingConfigured bool
 
 	activeOrders   sync.Map // orderID -> *OrderInfo
 	requestToOrder sync.Map // requestID -> orderID
@@ -129,6 +138,53 @@ func (a *BaseActor) Idle() bool {
 		}
 	}
 	return true
+}
+
+// DeterministicPhasePending reports whether the runner has work that can be
+// consumed without advancing simulation time. It is intentionally cheaper
+// than Idle: the timestamp hook calls it after every scheduler timestamp, so
+// it must not walk actor state or perform a fixed-point probe when no inbox is
+// ready.
+func (a *BaseActor) DeterministicPhasePending() bool {
+	if !a.phaseMode || !a.running.Load() {
+		return false
+	}
+	if !a.deterministicPhasePendingConfigured {
+		// An embedding actor may override PumpDeterministicPhase and own a
+		// queue that BaseActor cannot inspect. Without an explicit readiness
+		// callback, the only safe answer is to run the pump; skipping it could
+		// move simulated time past extension-owned work.
+		return true
+	}
+	if a.deterministicPhasePendingHook != nil && a.deterministicPhasePendingHook() {
+		return true
+	}
+	if a.gateway != nil && (len(a.gateway.Responses()) != 0 || len(a.gateway.MarketDataCh()) != 0) {
+		return true
+	}
+	for _, feed := range a.marketDataFeeds {
+		if len(feed.gateway.Responses()) != 0 || len(feed.gateway.MarketDataCh()) != 0 {
+			return true
+		}
+	}
+	for _, ticker := range a.phaseTickers {
+		if len(ticker.ticker.C()) != 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// SetDeterministicPhasePending installs a readiness callback for extension
+// work consumed by an embedding actor's deterministic pump. It is a setup
+// contract and must be called before Start.
+func (a *BaseActor) SetDeterministicPhasePending(fn func() bool) error {
+	if a.started.Load() {
+		return errors.New("actor: deterministic phase readiness must be configured before Start")
+	}
+	a.deterministicPhasePendingHook = fn
+	a.deterministicPhasePendingConfigured = true
+	return nil
 }
 
 type OrderInfo struct {
@@ -230,6 +286,7 @@ func (a *BaseActor) Start(ctx context.Context) error {
 	}
 	if a.phaseMode {
 		a.startPhaseTickers()
+		a.started.Store(true)
 		return nil
 	}
 	if len(a.marketDataFeeds) != 0 {
@@ -241,6 +298,7 @@ func (a *BaseActor) Start(ctx context.Context) error {
 	// equal-time scheduler sequence IDs depend on Go scheduling.
 	tickCh := a.startTickers(ctx)
 	go a.run(ctx, tickCh)
+	a.started.Store(true)
 	return nil
 }
 

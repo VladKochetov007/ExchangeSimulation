@@ -111,6 +111,7 @@ func NewFuturesMarketMaker(id uint64, gw actor.Gateway, cfg FuturesMMConfig) *Fu
 	}
 	mm.set.onCancel = mm.onQuoteCancelled
 	mm.SetHandler(mm)
+	mm.SetDeterministicPhasePending(nil)
 	mm.AddTicker(cfg.QuoteInterval, mm.onTick)
 	return mm
 }

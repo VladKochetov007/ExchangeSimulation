@@ -1,6 +1,7 @@
 package simulation
 
 import (
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -58,6 +59,19 @@ func TestRegressionConcurrentAdvanceIsAdditive(t *testing.T) {
 	sched := NewEventScheduler(clk)
 	clk.SetScheduler(sched)
 
+	var observedMu sync.Mutex
+	var observed []int64
+	sched.Schedule(int64(10*time.Millisecond), func() {
+		observedMu.Lock()
+		observed = append(observed, clk.NowUnixNano())
+		observedMu.Unlock()
+	})
+	sched.Schedule(int64(20*time.Millisecond), func() {
+		observedMu.Lock()
+		observed = append(observed, clk.NowUnixNano())
+		observedMu.Unlock()
+	})
+
 	var wg sync.WaitGroup
 	for range 2 {
 		wg.Add(1)
@@ -70,6 +84,11 @@ func TestRegressionConcurrentAdvanceIsAdditive(t *testing.T) {
 
 	if got := clk.NowUnixNano(); got != int64(20*time.Millisecond) {
 		t.Fatalf("two concurrent Advance(10ms) ended at %dns, want %dns", got, int64(20*time.Millisecond))
+	}
+	observedMu.Lock()
+	defer observedMu.Unlock()
+	if got, want := observed, []int64{int64(10 * time.Millisecond), int64(20 * time.Millisecond)}; !equalInt64s(got, want) {
+		t.Fatalf("concurrent advance callback times = %v, want %v", got, want)
 	}
 }
 
@@ -156,4 +175,121 @@ func TestRegressionNewTickerPanicsOnNonPositiveInterval(t *testing.T) {
 		}
 	}()
 	factory.NewTicker(0)
+}
+
+func TestTimestampHookDrainsSameTimestampInsertionsBeforeReturning(t *testing.T) {
+	clock := NewSimulatedClock(0)
+	scheduler := NewEventScheduler(clock)
+	clock.SetScheduler(scheduler)
+	var fired []string
+	hookCalls := 0
+	scheduler.Schedule(500, func() {
+		fired = append(fired, "outer")
+		scheduler.Schedule(500, func() { fired = append(fired, "inserted") })
+	})
+	if err := clock.AdvanceWithTimestampHook(time.Second, func() error {
+		hookCalls++
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := fired, []string{"outer", "inserted"}; !equalStrings(got, want) {
+		t.Fatalf("same-timestamp events = %v, want %v", got, want)
+	}
+	if hookCalls != 1 {
+		t.Fatalf("timestamp hook calls = %d, want 1", hookCalls)
+	}
+}
+
+func TestTimestampHookInvokesAtAdvanceEndpoint(t *testing.T) {
+	clock := NewSimulatedClock(0)
+	scheduler := NewEventScheduler(clock)
+	clock.SetScheduler(scheduler)
+	var fired []string
+	hookCalls := 0
+	scheduler.Schedule(int64(time.Second), func() { fired = append(fired, "scheduled") })
+	if err := clock.AdvanceWithTimestampHook(time.Second, func() error {
+		hookCalls++
+		if hookCalls == 1 {
+			scheduler.Schedule(int64(time.Second), func() { fired = append(fired, "hook-inserted") })
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := fired, []string{"scheduled", "hook-inserted"}; !equalStrings(got, want) {
+		t.Fatalf("endpoint events = %v, want %v", got, want)
+	}
+	if hookCalls != 2 {
+		t.Fatalf("timestamp hook calls at step endpoint = %d, want 2", hookCalls)
+	}
+	if got := clock.NowUnixNano(); got != int64(time.Second) {
+		t.Fatalf("clock after endpoint hook = %d, want %d", got, int64(time.Second))
+	}
+}
+
+func TestTimestampHookErrorLeavesClockAtFailingTimestamp(t *testing.T) {
+	clock := NewSimulatedClock(0)
+	scheduler := NewEventScheduler(clock)
+	clock.SetScheduler(scheduler)
+	var observed int64
+	scheduler.Schedule(500, func() { return })
+	scheduler.Schedule(600, func() { observed = clock.NowUnixNano() })
+	wantErr := errors.New("phase failure")
+	if err := clock.AdvanceWithTimestampHook(time.Second, func() error { return wantErr }); !errors.Is(err, wantErr) {
+		t.Fatalf("AdvanceWithTimestampHook error = %v, want %v", err, wantErr)
+	}
+	if got := clock.NowUnixNano(); got != 500 {
+		t.Fatalf("clock after hook error = %d, want 500", got)
+	}
+	clock.Advance(100)
+	if observed != 600 {
+		t.Fatalf("retried event observed at %d, want 600", observed)
+	}
+}
+
+func TestTimestampHookRejectsPastDueEventInsertion(t *testing.T) {
+	clock := NewSimulatedClock(0)
+	scheduler := NewEventScheduler(clock)
+	clock.SetScheduler(scheduler)
+	scheduler.Schedule(500, func() {
+		scheduler.Schedule(400, func() {})
+	})
+	hookCalls := 0
+	if err := clock.AdvanceWithTimestampHook(time.Second, func() error {
+		hookCalls++
+		return nil
+	}); err == nil {
+		t.Fatal("past-due scheduler insertion was accepted")
+	}
+	if got := clock.NowUnixNano(); got != 500 {
+		t.Fatalf("clock after past-due rejection = %d, want 500", got)
+	}
+	if hookCalls != 0 {
+		t.Fatalf("timestamp hook ran after past-due insertion %d times, want 0", hookCalls)
+	}
+}
+
+func equalStrings(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
+}
+
+func equalInt64s(left, right []int64) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
 }

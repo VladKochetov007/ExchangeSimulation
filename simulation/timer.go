@@ -34,6 +34,20 @@ func (f *SimTimerFactory) PendingTicks() int {
 // Idle implements the runner's quiescence contract.
 func (f *SimTimerFactory) Idle() bool { return f.PendingTicks() == 0 }
 
+// DeterministicPhasePending is the timestamp-hook fast path. A scheduler
+// callback accounts for a tick before publishing it, so pending also covers
+// the short hand-off interval before a channel receive.
+func (f *SimTimerFactory) DeterministicPhasePending() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, timer := range f.timers {
+		if timer.pending.Load() != 0 || len(timer.ch) != 0 {
+			return true
+		}
+	}
+	return false
+}
+
 // EnableDeterministicPhases turns otherwise tolerated ticker coalescing into
 // a hard runtime error. A phase run may not claim reproducibility after it
 // has skipped a model callback.

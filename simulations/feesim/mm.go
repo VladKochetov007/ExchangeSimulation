@@ -93,6 +93,7 @@ func NewMarketMaker(id uint64, gw actor.Gateway, cfg MMConfig) *MarketMaker {
 		mid:       cfg.BootstrapPrice,
 	}
 	mm.SetHandler(mm)
+	mm.SetDeterministicPhasePending(nil)
 
 	if cfg.isAdaptive() {
 		mm.levels = make([]levelState, cfg.Levels)

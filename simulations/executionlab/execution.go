@@ -139,6 +139,7 @@ func newExecutionAgent(id uint64, gateway actor.Gateway, cfg ParentOrderConfig) 
 		},
 	}
 	a.SetHandler(a)
+	a.SetDeterministicPhasePending(nil)
 	a.AddTicker(cfg.PollInterval, a.onTick)
 	return a, nil
 }

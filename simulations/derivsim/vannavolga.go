@@ -77,6 +77,7 @@ func NewVannaVolgaHedger(id uint64, gw actor.Gateway, cfg VannaVolgaHedgerConfig
 	hedger.set.onFill = hedger.onFill
 	hedger.set.onSettle = func(c *Contract, _ int64) { delete(hedger.positions, c.Symbol) }
 	hedger.SetHandler(hedger)
+	hedger.SetDeterministicPhasePending(nil)
 	hedger.AddTicker(cfg.Interval, hedger.onTick)
 	return hedger
 }

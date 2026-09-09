@@ -2,6 +2,7 @@ package simulation
 
 import (
 	"container/heap"
+	"fmt"
 	"sync"
 )
 
@@ -115,42 +116,92 @@ func (es *EventScheduler) Cancel(id uint64) {
 	es.cancelled[id] = struct{}{}
 }
 
-// ProcessUntil fires all events up to and including the given time
-// Called by SimulatedClock.Advance()
+// ProcessUntil fires all events up to and including the given time.
+// Called by SimulatedClock.Advance().
 func (es *EventScheduler) ProcessUntil(untilTime int64) {
+	_ = es.processUntil(untilTime, nil)
+}
+
+// ProcessUntilWithTimestampHook fires all events up to and including the
+// given time, invoking hook once after the complete same-timestamp batch has
+// fired. Grouping equal timestamps preserves the scheduler's event ordering
+// while giving deterministic phase runtimes a chance to drain courier and
+// actor work before simulation time advances past that batch.
+func (es *EventScheduler) ProcessUntilWithTimestampHook(untilTime int64, hook func() error) error {
+	return es.processUntil(untilTime, hook)
+}
+
+func (es *EventScheduler) processUntil(untilTime int64, hook func() error) error {
 	for {
 		es.mu.Lock()
 		if len(es.events) == 0 || es.events[0].Time > untilTime {
 			es.mu.Unlock()
-			return
+			return nil
+		}
+		timestamp := es.events[0].Time
+		if hook != nil && es.clock != nil && timestamp < es.clock.NowUnixNano() {
+			es.mu.Unlock()
+			return fmt.Errorf("simulation: scheduler event at %d is earlier than current time %d", timestamp, es.clock.NowUnixNano())
 		}
 
-		event := heap.Pop(&es.events).(*ScheduledEvent)
+		for len(es.events) > 0 && es.events[0].Time == timestamp {
+			event := heap.Pop(&es.events).(*ScheduledEvent)
+			es.mu.Unlock()
+
+			// Advance the simulation clock to this event's scheduled time before
+			// firing, so the callback sees its own instant rather than the end of
+			// the enclosing Advance() jump. Events pop in non-decreasing time order,
+			// so the guard only ever moves the clock forward; a past-due event fires
+			// at the current time instead of rewinding it.
+			if es.clock != nil && event.Time > es.clock.NowUnixNano() {
+				es.clock.SetTime(event.Time)
+			}
+
+			// Fire callback (unlocked to prevent deadlock if callback schedules events)
+			event.Callback()
+
+			// Reschedule if repeating — unless a Cancel landed while the event was
+			// mid-fire (it was not in the heap, so Cancel could only flag it).
+			es.mu.Lock()
+			if _, wasCancelled := es.cancelled[event.id]; wasCancelled {
+				delete(es.cancelled, event.id)
+			} else if event.Repeating {
+				event.Time += event.Interval
+				heap.Push(&es.events, event)
+			}
+		}
 		es.mu.Unlock()
-
-		// Advance the simulation clock to this event's scheduled time before
-		// firing, so the callback sees its own instant rather than the end of
-		// the enclosing Advance() jump. Events pop in non-decreasing time order,
-		// so the guard only ever moves the clock forward; a past-due event fires
-		// at the current time instead of rewinding it.
-		if es.clock != nil && event.Time > es.clock.NowUnixNano() {
-			es.clock.SetTime(event.Time)
+		// A callback may have inserted an event earlier than the timestamp just
+		// completed. Reject that invariant violation before invoking the phase
+		// hook: running economic reactions after a past-due insertion would make
+		// the same timestamp observable under two different phase states.
+		if hook != nil {
+			if err := es.rejectPastDueEvent(); err != nil {
+				return err
+			}
 		}
-
-		// Fire callback (unlocked to prevent deadlock if callback schedules events)
-		event.Callback()
-
-		// Reschedule if repeating — unless a Cancel landed while the event was
-		// mid-fire (it was not in the heap, so Cancel could only flag it).
-		es.mu.Lock()
-		if _, wasCancelled := es.cancelled[event.id]; wasCancelled {
-			delete(es.cancelled, event.id)
-		} else if event.Repeating {
-			event.Time += event.Interval
-			heap.Push(&es.events, event)
+		// The hook is part of the timestamp boundary contract, including the
+		// enclosing advance endpoint. A hook may schedule another event at the
+		// same endpoint; the outer loop must observe it before returning.
+		if hook != nil {
+			if err := hook(); err != nil {
+				return err
+			}
 		}
-		es.mu.Unlock()
 	}
+}
+
+func (es *EventScheduler) rejectPastDueEvent() error {
+	if es.clock == nil {
+		return nil
+	}
+	currentTime := es.clock.NowUnixNano()
+	es.mu.Lock()
+	defer es.mu.Unlock()
+	if len(es.events) == 0 || es.events[0].Time >= currentTime {
+		return nil
+	}
+	return fmt.Errorf("simulation: scheduler event at %d is earlier than current time %d", es.events[0].Time, currentTime)
 }
 
 // eventHeap implements heap.Interface for priority queue of events

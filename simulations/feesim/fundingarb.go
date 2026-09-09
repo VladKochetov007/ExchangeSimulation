@@ -33,6 +33,7 @@ func NewFeeAwareFundingArb(id uint64, gw actor.Gateway, cfg FundingArbConfig) *F
 		cfg:       cfg,
 	}
 	a.SetHandler(a)
+	a.SetDeterministicPhasePending(nil)
 	return a
 }
 

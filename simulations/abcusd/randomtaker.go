@@ -38,6 +38,7 @@ func NewRandomTaker(id uint64, gw actor.Gateway, cfg RandomTakerConfig) *RandomT
 		t.bestQty[sym] = [2]int64{cfg.LevelSize, cfg.LevelSize}
 	}
 	t.SetHandler(t)
+	t.SetDeterministicPhasePending(nil)
 	t.AddTicker(cfg.TakeInterval, t.onTick)
 	return t
 }

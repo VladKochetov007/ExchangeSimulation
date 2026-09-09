@@ -222,6 +222,7 @@ func NewFeeAwareBasisArb(id uint64, gw actor.Gateway, cfg BasisArbConfig) *FeeAw
 		report:      BasisArbReport{ClientID: id},
 	}
 	a.SetHandler(a)
+	a.SetDeterministicPhasePending(nil)
 	a.AddTicker(cfg.CheckInterval, a.onTick)
 	return a
 }

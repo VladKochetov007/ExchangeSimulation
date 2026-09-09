@@ -548,6 +548,7 @@ func TestElasticLiquiditySupplierRealGatewayStaleWithdrawalIntegration(t *testin
 	cfg := Config{
 		LogDir: dir, LogMode: "full", Seed: 101, StrictPopulationAccounting: true, CrossAssetSpotGraph: true,
 		SnapshotInterval:         2 * time.Second,
+		EvidenceFormat:           binaryRepresentation,
 		RecordMarketDataReceipts: true, MarketDataReceiptRoles: []string{"cdf_elastic_supplier"},
 		RecordElasticLiquiditySupplierDecisions: true,
 		ElasticLiquiditySuppliers:               []ElasticLiquiditySupplierSpec{spec},
@@ -578,12 +579,16 @@ func TestElasticLiquiditySupplierRealGatewayStaleWithdrawalIntegration(t *testin
 	if err := sim.Close(); err != nil {
 		t.Fatal(err)
 	}
-	general, err := os.ReadFile(filepath.Join(dir, "venues", "north", "general.jsonl"))
+	renderedDir := filepath.Join(t.TempDir(), "rendered")
+	if _, err := RenderBinaryEvidence(dir, renderedDir); err != nil {
+		t.Fatal(err)
+	}
+	general, err := os.ReadFile(filepath.Join(renderedDir, "venues", "north", "general.jsonl"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	generalText := string(general)
-	book, err := os.ReadFile(filepath.Join(dir, "venues", "north", "spot", "CDF-USD.jsonl"))
+	book, err := os.ReadFile(filepath.Join(renderedDir, "venues", "north", "spot", "CDF-USD.jsonl"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -618,7 +623,7 @@ func TestElasticLiquiditySupplierRealGatewayStaleWithdrawalIntegration(t *testin
 	if err := os.WriteFile(filepath.Join(dir, "greeks.json"), greeks, 0644); err != nil {
 		t.Fatal(err)
 	}
-	auditRun, err := analysis.Open(dir)
+	auditRun, err := analysis.OpenRenderedRun(dir, renderedDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -632,6 +637,9 @@ func TestElasticLiquiditySupplierRealGatewayStaleWithdrawalIntegration(t *testin
 	}
 	if audit.SupplierCount != 3 || audit.AcceptedQuoteCount == 0 || audit.CompletedQuoteCount == 0 || audit.WithdrawCount == 0 {
 		t.Fatalf("real delayed-gateway stale lifecycle = %+v", audit)
+	}
+	if !audit.Valid {
+		t.Fatalf("real delayed-gateway audit is invalid: %+v", audit.Checks)
 	}
 	for _, check := range audit.Checks {
 		if strings.HasPrefix(check.Failure, "stale withdrawal") {
@@ -651,7 +659,7 @@ func TestElasticLiquiditySupplierRealGatewayStaleWithdrawalIntegration(t *testin
 	if !removed {
 		t.Fatal("real gateway fixture has no cancellation matching a stale withdrawal")
 	}
-	if err := os.WriteFile(filepath.Join(dir, "venues", "north", "spot", "CDF-USD.jsonl"), mutatedBook, 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(renderedDir, "venues", "north", "spot", "CDF-USD.jsonl"), mutatedBook, 0644); err != nil {
 		t.Fatal(err)
 	}
 	mutatedAudit, err := auditRun.MeasureCDFLiquidity()
@@ -661,7 +669,7 @@ func TestElasticLiquiditySupplierRealGatewayStaleWithdrawalIntegration(t *testin
 	if !hasCDFFailurePrefix(mutatedAudit.Checks, "stale withdrawal has no later matching exchange cancellation outcome") {
 		t.Fatalf("missing exchange cancellation was not rejected: %+v", mutatedAudit.Checks)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "venues", "north", "spot", "CDF-USD.jsonl"), book, 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(renderedDir, "venues", "north", "spot", "CDF-USD.jsonl"), book, 0644); err != nil {
 		t.Fatal(err)
 	}
 	t.Logf("real gateway stale lifecycle: suppliers=%d accepted=%d completed=%d withdrawals=%d fills=%d receipt_decisions=%d mutation_rejected=true", audit.SupplierCount, audit.AcceptedQuoteCount, audit.CompletedQuoteCount, audit.WithdrawCount, audit.FillCount, receiptAudit.Decisions)

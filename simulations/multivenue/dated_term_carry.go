@@ -252,6 +252,7 @@ type DatedTermCarryAllocator struct {
 func NewDatedTermCarryAllocator(id uint64, gateway actor.Gateway, cfg DatedTermCarryAllocatorConfig) *DatedTermCarryAllocator {
 	a := &DatedTermCarryAllocator{BaseActor: actor.NewBaseActor(id, gateway), cfg: cfg, contracts: make(map[string]*datedCarryContract)}
 	a.SetHandler(a)
+	a.SetDeterministicPhasePending(nil)
 	a.AddTickerWithOffset(cfg.DecisionPeriod, cfg.DecisionPhase, a.onTick)
 	return a
 }

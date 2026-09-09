@@ -98,6 +98,7 @@ func NewLatentLiquidity(id uint64, gw actor.Gateway, cfg LatentLiquidityConfig) 
 		rng:       rand.New(rand.NewSource(cfg.Seed)),
 	}
 	l.SetHandler(l)
+	l.SetDeterministicPhasePending(nil)
 	l.AddTicker(cfg.Interval, l.onTick)
 	return l
 }

@@ -542,6 +542,7 @@ func NewStoikovMarketMaker(id uint64, gw actor.Gateway, cfg StoikovMMConfig) *St
 		mm.localReference = NewLocalBookCache(cfg.LocalReferenceSourceVenue, cfg.ReferenceSymbol)
 	}
 	mm.SetHandler(mm)
+	mm.SetDeterministicPhasePending(nil)
 	mm.AddTicker(cfg.QuoteInterval, mm.onTick)
 	if cfg.HedgeInterval > 0 {
 		mm.AddTicker(cfg.HedgeInterval, mm.onHedgeTick)

@@ -89,6 +89,26 @@ func (d *DelayedGateway) Idle() bool {
 	return true
 }
 
+// DeterministicPhasePending reports ready courier work without inspecting the
+// underlying exchange. The runner uses it as a cheap timestamp-hook guard;
+// future scheduled deliveries are deliberately not pending until their
+// scheduler callback fires.
+func (d *DelayedGateway) DeterministicPhasePending() bool {
+	if !d.deterministicPhasesEnabled() || !d.running.Load() {
+		return false
+	}
+	if len(d.responseCh) != 0 || len(d.marketDataCh) != 0 {
+		return true
+	}
+	if len(d.inner.Responses()) != 0 || len(d.inner.MarketDataCh()) != 0 {
+		return true
+	}
+	d.phaseMu.Lock()
+	pending := len(d.phaseResp) != 0 || len(d.phaseMD) != 0
+	d.phaseMu.Unlock()
+	return pending
+}
+
 func NewDelayedGateway(inner actor.Gateway, reqLat, respLat, mdLat LatencyProvider) *DelayedGateway {
 	return &DelayedGateway{
 		RequestLatency:    reqLat,

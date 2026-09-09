@@ -215,6 +215,7 @@ func NewLiabilityHedger(id uint64, gateway actor.Gateway, cfg LiabilityHedgerCon
 		activeOrders: make(map[uint64]struct{}),
 	}
 	h.SetHandler(h)
+	h.SetDeterministicPhasePending(nil)
 	h.AddTickerWithOffset(cfg.DecisionInterval, cfg.DecisionPhaseOffset, h.onTick)
 	return h
 }

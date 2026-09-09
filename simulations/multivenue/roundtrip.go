@@ -54,6 +54,7 @@ func NewRoundTripTrader(id uint64, gw actor.Gateway, cfg RoundTripTraderConfig) 
 		rng:       rand.New(rand.NewSource(cfg.Seed)),
 	}
 	t.SetHandler(t)
+	t.SetDeterministicPhasePending(nil)
 	t.AddTicker(cfg.Interval, t.onTick)
 	return t
 }

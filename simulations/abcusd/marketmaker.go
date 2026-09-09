@@ -46,6 +46,7 @@ func NewPureMarketMaker(id uint64, gw actor.Gateway, cfg MarketMakerConfig) *Pur
 		mm.pending[sym] = make(map[uint64]bool)
 	}
 	mm.SetHandler(mm)
+	mm.SetDeterministicPhasePending(nil)
 	mm.AddTicker(cfg.RefreshInterval, mm.onTick)
 	return mm
 }

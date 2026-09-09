@@ -280,6 +280,7 @@ type TermCarryAllocator struct {
 func NewTermCarryAllocator(id uint64, gateway actor.Gateway, cfg TermCarryAllocatorConfig) *TermCarryAllocator {
 	allocator := &TermCarryAllocator{BaseActor: actor.NewBaseActor(id, gateway), cfg: cfg, state: termCarryIdle}
 	allocator.SetHandler(allocator)
+	allocator.SetDeterministicPhasePending(nil)
 	allocator.AddTicker(cfg.DecisionPeriod, allocator.onTick)
 	return allocator
 }

@@ -234,6 +234,7 @@ func NewPerpExposureHedger(id uint64, gateway actor.Gateway, cfg PerpExposureHed
 		h.targetPerpPosition = cfg.InitialTargetPerpPosition
 	}
 	h.SetHandler(h)
+	h.SetDeterministicPhasePending(nil)
 	h.AddTicker(cfg.DecisionInterval, h.onTick)
 	return h
 }

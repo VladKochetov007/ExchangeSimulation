@@ -262,6 +262,7 @@ func NewElasticLiquiditySupplier(id uint64, gw actor.Gateway, cfg ElasticLiquidi
 	}
 	supplier.initializeMarkedEquity()
 	supplier.SetHandler(supplier)
+	supplier.SetDeterministicPhasePending(nil)
 	supplier.AddTickerWithOffset(cfg.Interval, cfg.DecisionPhaseOffset, supplier.onTick)
 	return supplier
 }

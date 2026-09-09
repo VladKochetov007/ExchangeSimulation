@@ -35,6 +35,7 @@ func NewValueTrader(id uint64, gw actor.Gateway, cfg ValueTraderConfig) *ValueTr
 		cfg:       cfg,
 	}
 	vt.SetHandler(vt)
+	vt.SetDeterministicPhasePending(nil)
 	vt.AddTicker(cfg.Interval, vt.onTick)
 	return vt
 }

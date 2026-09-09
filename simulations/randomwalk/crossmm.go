@@ -56,6 +56,7 @@ func NewCrossPairMM(id uint64, gw actor.Gateway, cfg CrossPairMMConfig) *CrossPa
 		}
 	}
 	mm.SetHandler(mm)
+	mm.SetDeterministicPhasePending(nil)
 	mm.AddTicker(cfg.RefreshInterval, mm.onTick)
 	return mm
 }

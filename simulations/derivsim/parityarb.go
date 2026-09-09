@@ -61,6 +61,7 @@ func NewParityArb(id uint64, gw actor.Gateway, cfg ParityArbConfig) *ParityArb {
 	}
 	a.set.onSettle = func(c *Contract, _ int64) { delete(a.tops, c.Symbol) }
 	a.SetHandler(a)
+	a.SetDeterministicPhasePending(nil)
 	a.AddTicker(cfg.CheckInterval, a.onTick)
 	return a
 }

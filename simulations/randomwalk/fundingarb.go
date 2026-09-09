@@ -44,6 +44,7 @@ func NewFundingArbActor(id uint64, gw actor.Gateway, cfg FundingArbConfig) *Fund
 		cfg:       cfg,
 	}
 	a.SetHandler(a)
+	a.SetDeterministicPhasePending(nil)
 	return a
 }
 

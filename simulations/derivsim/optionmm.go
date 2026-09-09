@@ -163,6 +163,7 @@ func NewOptionMarketMaker(id uint64, gw actor.Gateway, cfg OptionMMConfig) *Opti
 	mm.set.onReject = mm.onQuoteRejected
 	mm.set.onCancel = mm.onQuoteCancelled
 	mm.SetHandler(mm)
+	mm.SetDeterministicPhasePending(nil)
 	mm.AddTicker(cfg.QuoteInterval, mm.onQuoteTick)
 	if cfg.HedgeEnabled {
 		mm.AddTicker(cfg.HedgeInterval, mm.onHedgeTick)

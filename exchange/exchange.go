@@ -153,11 +153,20 @@ func (l scopedInstrumentLogger) LogTypedEvent(simTime int64, clientID uint64, ev
 }
 
 type DefaultExchange struct {
-	ID          string
-	Clients     map[uint64]*Client
-	Gateways    map[uint64]*ClientGateway
-	Books       map[string]*OrderBook
-	Instruments map[string]Instrument
+	ID       string
+	Clients  map[uint64]*Client
+	Gateways map[uint64]*ClientGateway
+	// deterministicGatewayIDs is only a validated ordering hint for the
+	// deterministic ingress/egress paths. Gateways remains authoritative: the
+	// hint is reconciled against its exact key set before every snapshot, so
+	// direct map edits cannot silently omit a client.
+	deterministicGatewayIDs []uint64
+	// deterministicGatewaySnapshotCache is a derived allocation cache only. It
+	// is returned after exact key-and-pointer validation against Gateways, so a
+	// direct map replacement cannot make the cache authoritative by accident.
+	deterministicGatewaySnapshotCache []*ClientGateway
+	Books                             map[string]*OrderBook
+	Instruments                       map[string]Instrument
 	// instrumentListedAt retains the original public listing time. Reference-
 	// data replays must not rewrite contract tenor as subscription time.
 	instrumentListedAt map[string]int64
@@ -342,13 +351,14 @@ func NewExchangeWithConfig(config ExchangeConfig) *DefaultExchange {
 
 	matcher := ematching.NewPriceTimeMatcher(config.Clock)
 	ex := &DefaultExchange{
-		ID:                 config.ID,
-		Clients:            make(map[uint64]*Client, config.EstimatedClients),
-		Gateways:           make(map[uint64]*ClientGateway, config.EstimatedClients),
-		Books:              make(map[string]*OrderBook, 16),
-		Instruments:        make(map[string]Instrument, 16),
-		instrumentListedAt: make(map[string]int64, 16),
-		Positions:          NewPositionManager(config.Clock),
+		ID:                      config.ID,
+		Clients:                 make(map[uint64]*Client, config.EstimatedClients),
+		Gateways:                make(map[uint64]*ClientGateway, config.EstimatedClients),
+		deterministicGatewayIDs: make([]uint64, 0, config.EstimatedClients),
+		Books:                   make(map[string]*OrderBook, 16),
+		Instruments:             make(map[string]Instrument, 16),
+		instrumentListedAt:      make(map[string]int64, 16),
+		Positions:               NewPositionManager(config.Clock),
 		ExchangeBalance: &ExchangeBalance{
 			FeeRevenue:    make(map[string]int64),
 			InsuranceFund: make(map[string]int64),
@@ -941,6 +951,41 @@ func (e *DefaultExchange) ConnectNewClient(clientID uint64, initialBalances map[
 	return gateway
 }
 
+func gatewaySnapshotMatches(gatewayIDs []uint64, snapshot []*ClientGateway, gateways map[uint64]*ClientGateway) bool {
+	if len(gatewayIDs) != len(gateways) || len(snapshot) != len(gatewayIDs) {
+		return false
+	}
+	for index, clientID := range gatewayIDs {
+		gateway, ok := gateways[clientID]
+		if !ok || snapshot[index] != gateway {
+			return false
+		}
+	}
+	return true
+}
+
+// deterministicGatewaySnapshot returns gateways in client-ID order while
+// keeping Gateways as the sole source of truth. The returned slice is local;
+// reconnects and direct map edits are observed on the next snapshot.
+func (e *DefaultExchange) deterministicGatewaySnapshot() []*ClientGateway {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if !gatewaySnapshotMatches(e.deterministicGatewayIDs, e.deterministicGatewaySnapshotCache, e.Gateways) {
+		gatewayIDs := make([]uint64, 0, len(e.Gateways))
+		for clientID := range e.Gateways {
+			gatewayIDs = append(gatewayIDs, clientID)
+		}
+		slices.Sort(gatewayIDs)
+		e.deterministicGatewayIDs = gatewayIDs
+		gateways := make([]*ClientGateway, 0, len(gatewayIDs))
+		for _, clientID := range gatewayIDs {
+			gateways = append(gateways, e.Gateways[clientID])
+		}
+		e.deterministicGatewaySnapshotCache = gateways
+	}
+	return e.deterministicGatewaySnapshotCache
+}
+
 // AddPerpBalance adds initial perp wallet balance for a client.
 func (e *DefaultExchange) AddPerpBalance(clientID uint64, asset string, amount int64) {
 	e.mu.Lock()
@@ -1062,6 +1107,40 @@ func (e *DefaultExchange) Idle() bool {
 	return true
 }
 
+// deterministicGatewayPending checks gateway readiness without duplicating the
+// exported Gateways map as a second source of truth.
+func (e *DefaultExchange) deterministicGatewayPending() bool {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	for _, gateway := range e.Gateways {
+		if gateway.DeterministicPhasePending() {
+			return true
+		}
+	}
+	return false
+}
+
+func (e *DefaultExchange) deterministicPhaseJobsPending() bool {
+	if e.deterministicPhases {
+		e.phaseMu.Lock()
+		defer e.phaseMu.Unlock()
+		for _, job := range e.phaseJobs {
+			if len(job.ticker.C()) != 0 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// DeterministicPhasePending is the low-cost readiness predicate used by the
+// runner's scheduler timestamp hook. It covers request ingress, exchange
+// response outboxes, and due automation ticks without performing the full
+// cross-gateway Idle check.
+func (e *DefaultExchange) DeterministicPhasePending() bool {
+	return e.deterministicGatewayPending() || e.deterministicPhaseJobsPending()
+}
+
 func (e *DefaultExchange) HandleClientRequests(gateway *ClientGateway) {
 	if e.deterministicIngress {
 		return
@@ -1081,19 +1160,10 @@ func (e *DefaultExchange) DrainIngress() bool {
 
 	processed := false
 	for {
-		e.mu.RLock()
-		clientIDs := make([]uint64, 0, len(e.Gateways))
-		gateways := make(map[uint64]*ClientGateway, len(e.Gateways))
-		for clientID, gateway := range e.Gateways {
-			clientIDs = append(clientIDs, clientID)
-			gateways[clientID] = gateway
-		}
-		e.mu.RUnlock()
-		slices.Sort(clientIDs)
+		gateways := e.deterministicGatewaySnapshot()
 
 		passProcessed := false
-		for _, clientID := range clientIDs {
-			gateway := gateways[clientID]
+		for _, gateway := range gateways {
 			if gateway == nil {
 				continue
 			}
@@ -1121,19 +1191,14 @@ func (e *DefaultExchange) DrainDeterministicEgress() bool {
 	if !e.deterministicPhases {
 		return false
 	}
-	e.mu.RLock()
-	clientIDs := make([]uint64, 0, len(e.Gateways))
-	gateways := make(map[uint64]*ClientGateway, len(e.Gateways))
-	for clientID, gateway := range e.Gateways {
-		clientIDs = append(clientIDs, clientID)
-		gateways[clientID] = gateway
-	}
-	e.mu.RUnlock()
-	slices.Sort(clientIDs)
+	gateways := e.deterministicGatewaySnapshot()
 
 	processed := false
-	for _, clientID := range clientIDs {
-		if gateways[clientID].DrainDeterministicEgress() {
+	for _, gateway := range gateways {
+		if gateway == nil {
+			continue
+		}
+		if gateway.DrainDeterministicEgress() {
 			processed = true
 		}
 	}

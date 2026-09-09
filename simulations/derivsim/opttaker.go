@@ -50,6 +50,7 @@ func NewOptionTaker(id uint64, gw actor.Gateway, cfg OptionTakerConfig) *OptionT
 		rng:       rand.New(rand.NewSource(cfg.Seed)),
 	}
 	t.SetHandler(t)
+	t.SetDeterministicPhasePending(nil)
 	t.AddTicker(cfg.Interval, t.onTick)
 	return t
 }

@@ -60,6 +60,7 @@ type FixedDistanceMaker struct {
 func NewFixedDistanceMaker(id uint64, gw actor.Gateway, cfg FixedDistanceMakerConfig) *FixedDistanceMaker {
 	m := newFixedDistanceCore(id, gw, cfg)
 	m.SetHandler(m)
+	m.SetDeterministicPhasePending(nil)
 	m.AddTicker(cfg.QuoteInterval, m.onTick)
 	return m
 }
@@ -262,6 +263,7 @@ type ImbalanceMaker struct {
 func NewImbalanceMaker(id uint64, gw actor.Gateway, cfg ImbalanceMakerConfig) *ImbalanceMaker {
 	m := &ImbalanceMaker{FixedDistanceMaker: newFixedDistanceCore(id, gw, cfg.FixedDistanceMakerConfig), cfg: cfg}
 	m.SetHandler(m)
+	m.SetDeterministicPhasePending(nil)
 	m.AddTicker(cfg.QuoteInterval, m.onImbalanceTick)
 	return m
 }
@@ -371,6 +373,7 @@ func NewTriangleArbTaker(id uint64, gw actor.Gateway, cfg TriangleArbConfig) *Tr
 		cfg.BaseQuote: {}, cfg.CrossQuote: {}, cfg.BaseCross: {},
 	}}
 	t.SetHandler(t)
+	t.SetDeterministicPhasePending(nil)
 	t.AddTicker(cfg.CheckInterval, t.onTick)
 	return t
 }

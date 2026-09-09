@@ -68,6 +68,7 @@ func NewTriArbActor(id uint64, gw actor.Gateway, cfg TriArbConfig) *TriArbActor 
 		books:     make(map[string]bookTop),
 	}
 	a.SetHandler(a)
+	a.SetDeterministicPhasePending(nil)
 	a.AddTicker(cfg.CheckInterval, a.onTick)
 	return a
 }

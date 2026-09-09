@@ -80,6 +80,7 @@ func NewOptionValueTaker(id uint64, gw actor.Gateway, cfg OptionValueTakerConfig
 	}
 	taker.set.onFill = taker.onFill
 	taker.SetHandler(taker)
+	taker.SetDeterministicPhasePending(nil)
 	taker.AddTicker(cfg.Interval, taker.onTick)
 	return taker
 }

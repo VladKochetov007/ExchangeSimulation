@@ -100,6 +100,7 @@ func NewBasisArbActor(id uint64, gw actor.Gateway, cfg BasisArbConfig) *BasisArb
 		cfg:       cfg,
 	}
 	a.SetHandler(a)
+	a.SetDeterministicPhasePending(nil)
 	a.AddTicker(100*time.Millisecond, a.onTick)
 	return a
 }

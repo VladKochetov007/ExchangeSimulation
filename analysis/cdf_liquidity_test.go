@@ -1399,6 +1399,34 @@ func TestMeasureCDFLiquidityRejectsSyntheticStaleWithdrawalWithoutLiveOrder(t *t
 	}
 }
 
+func TestDecisionObservationAcceptsStaleCachedBookWithUnavailableMark(t *testing.T) {
+	decision := cdfDecisionEvidence{
+		ObservationTime:     1,
+		ObservationSequence: 1,
+		ObservationAge:      3,
+		BestBid:             99,
+		BestBidQty:          10,
+		BestAsk:             101,
+		BestAskQty:          10,
+		MarkPrice:           0,
+	}
+	snapshot := etypes.BookSnapshot{
+		Bids: []etypes.PriceLevel{{Price: 99, VisibleQty: 10}},
+		Asks: []etypes.PriceLevel{{Price: 101, VisibleQty: 10}},
+	}
+	if decisionObservationMatchesPublicSnapshot(decision, snapshot, false) == false {
+		t.Fatal("stale cached book with an intentionally unavailable mark was rejected")
+	}
+	decision.MarkPrice = 100
+	if decisionObservationMatchesPublicSnapshot(decision, snapshot, false) {
+		t.Fatal("stale cached book accepted a usable midpoint mark")
+	}
+	decision.MarkPrice = 100
+	if !decisionObservationMatchesPublicSnapshot(decision, snapshot, true) {
+		t.Fatal("fresh two-sided book rejected its midpoint mark")
+	}
+}
+
 func TestMeasureCDFLiquidityAcceptsStaleWithdrawalFillCancelRace(t *testing.T) {
 	run := writeCDFLiquidityFullFillCancelRaceFixture(t)
 	audit, err := run.MeasureCDFLiquidity()
@@ -1823,6 +1851,18 @@ func TestMeasureCDFLiquidityConservesNonzeroQuoteFee(t *testing.T) {
 		t.Fatal("fixture terminal account was not found")
 	}
 	if err := os.WriteFile(greeksPath, []byte(greeksMutated), 0644); err != nil {
+		t.Fatal(err)
+	}
+	bookPath := filepath.Join(run.Dir, "venues", "north", "spot", "CDF-USD.jsonl")
+	book, err := os.ReadFile(bookPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bookWithFee := strings.Replace(string(book), `"is_full":true}`, `"fee_amount":1,"fee_asset":"USD","is_full":true}`, 1)
+	if bookWithFee == string(book) {
+		t.Fatal("fixture order fill was not found")
+	}
+	if err := os.WriteFile(bookPath, []byte(bookWithFee), 0644); err != nil {
 		t.Fatal(err)
 	}
 	run, err = Open(run.Dir)

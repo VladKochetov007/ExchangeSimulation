@@ -96,6 +96,7 @@ func NewCashCarryArb(id uint64, gw actor.Gateway, cfg CarryArbConfig) *CashCarry
 		}
 	}
 	a.SetHandler(a)
+	a.SetDeterministicPhasePending(nil)
 	a.AddTicker(cfg.CheckInterval, a.onTick)
 	return a
 }

@@ -844,6 +844,8 @@ type cdfOrderFillEvidence struct {
 	Side         string `json:"side"`
 	Price        int64  `json:"price"`
 	Qty          int64  `json:"qty"`
+	FeeAmount    int64  `json:"fee_amount"`
+	FeeAsset     string `json:"fee_asset"`
 	FilledQty    int64  `json:"filled_qty"`
 	RemainingQty int64  `json:"remaining_qty"`
 	IsFull       bool   `json:"is_full"`
@@ -1658,7 +1660,7 @@ func (r *CDFLiquidityRunAudit) processDecision(event Event, states map[cdfPartic
 	}
 	r.validateCDFReference(event, decision, state)
 	if state.receiptRequired {
-		r.validateDecisionObservation(event, decision, emptyObservationAllowed, receiptEvidence)
+		r.validateDecisionObservation(event, decision, emptyObservationAllowed, receiptEvidence, state.configuredMaxObservationAge)
 	}
 	staleWithdrawal := isCDFStaleWithdrawal(decision, state.configuredMaxObservationAge)
 	if decision.Action == "withdraw" && decision.Reason == "stale_or_missing_observation" && !staleWithdrawal {
@@ -2073,7 +2075,12 @@ func (r *CDFLiquidityRunAudit) validateQuoteCashHeadroom(events []cdfCashEvent, 
 		case "OrderCancelled":
 			r.processQuoteCashCancelled(event, state, ledger)
 		case "elastic_liquidity_supplier_fill":
-			r.processQuoteCashFill(event, state, ledger)
+			// The supplier-side fill sidecar is a delayed actor observation and
+			// may be emitted after an exchange cancellation. The exchange's
+			// OrderFill is the authoritative venue-ordered cash transition;
+			// reconcile the sidecar separately in reconcileFills.
+		case "OrderFill":
+			r.processQuoteCashOrderFill(event, state, ledger)
 		}
 	}
 }
@@ -2225,6 +2232,23 @@ func (r *CDFLiquidityRunAudit) processQuoteCashFill(event Event, state *CDFLiqui
 		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: state.Role, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "malformed quote-cash fill: " + err.Error()})
 		return
 	}
+	r.applyQuoteCashFill(event, state, ledger, fill)
+}
+
+func (r *CDFLiquidityRunAudit) processQuoteCashOrderFill(event Event, state *CDFLiquiditySupplierAudit, ledger *cdfQuoteCashLedger) {
+	var orderFill cdfOrderFillEvidence
+	if err := decodeRequiredJSON(event.Raw(), &orderFill, "order_id", "trade_id", "side", "price", "qty", "is_full"); err != nil {
+		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: state.Role, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "malformed quote-cash order fill: " + err.Error()})
+		return
+	}
+	r.applyQuoteCashFill(event, state, ledger, cdfFillEvidence{
+		OrderID: orderFill.OrderID, TradeID: orderFill.TradeID, Side: orderFill.Side,
+		Price: orderFill.Price, Qty: orderFill.Qty, FeeAmount: orderFill.FeeAmount,
+		FeeAsset: orderFill.FeeAsset, IsFull: orderFill.IsFull,
+	})
+}
+
+func (r *CDFLiquidityRunAudit) applyQuoteCashFill(event Event, state *CDFLiquiditySupplierAudit, ledger *cdfQuoteCashLedger, fill cdfFillEvidence) {
 	key := cdfFillKey{VenueID: event.VenueID, ClientID: event.ClientID, OrderID: fill.OrderID, TradeID: fill.TradeID}
 	if _, exists := ledger.processedFills[key]; exists {
 		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: state.Role, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "quote-cash fill is duplicated"})
@@ -2482,7 +2506,7 @@ func (r *CDFLiquidityRunAudit) validateReceiptActions(evidence *cdfMarketDataEvi
 	}
 }
 
-func (r *CDFLiquidityRunAudit) validateDecisionObservation(event Event, decision cdfDecisionEvidence, emptyObservationAllowed bool, evidence *cdfMarketDataEvidence) {
+func (r *CDFLiquidityRunAudit) validateDecisionObservation(event Event, decision cdfDecisionEvidence, emptyObservationAllowed bool, evidence *cdfMarketDataEvidence, configuredMaxObservationAge int64) {
 	if evidence == nil {
 		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "supplier decision has no receipt evidence"})
 		return
@@ -2522,7 +2546,8 @@ func (r *CDFLiquidityRunAudit) validateDecisionObservation(event Event, decision
 		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "supplier decision receipt is not reconstructible from a retained public CDF snapshot"})
 		return
 	}
-	if !decisionObservationMatchesPublicSnapshot(decision, publicSnapshot) {
+	observationUsable := decision.ObservationTime > 0 && decision.ObservationSequence > 0 && decision.ObservationAge >= 0 && decision.ObservationAge <= configuredMaxObservationAge
+	if !decisionObservationMatchesPublicSnapshot(decision, publicSnapshot, observationUsable) {
 		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "supplier decision market observation does not match the retained public CDF snapshot"})
 	}
 }
@@ -2585,7 +2610,7 @@ func (r *CDFLiquidityRunAudit) publicCDFSnapshotForReceipt(receipt cdfMarketData
 	return etypes.BookSnapshot{}, false
 }
 
-func decisionObservationMatchesPublicSnapshot(decision cdfDecisionEvidence, snapshot etypes.BookSnapshot) bool {
+func decisionObservationMatchesPublicSnapshot(decision cdfDecisionEvidence, snapshot etypes.BookSnapshot, observationUsable bool) bool {
 	bestBid, bestBidQty := int64(0), int64(0)
 	for _, level := range snapshot.Bids {
 		if level.VisibleQty <= 0 || (bestBid != 0 && level.Price < bestBid) {
@@ -2612,7 +2637,7 @@ func decisionObservationMatchesPublicSnapshot(decision cdfDecisionEvidence, snap
 		return false
 	}
 	expectedMark, markAvailable := positiveDomainTwoSidedMidpoint(bestBid, bestAsk)
-	if !markAvailable {
+	if !observationUsable || !markAvailable {
 		expectedMark = 0
 	}
 	return decision.MarkPrice == expectedMark
@@ -3361,6 +3386,14 @@ func (r *CDFLiquidityRunAudit) validateStaleWithdrawals(orders map[cdfOrderKey]*
 		}
 		addFailure := func(failure string) {
 			r.addCheck(CDFLiquidityCheck{VenueID: key.VenueID, Role: role, ClientID: key.ClientID, Ordinal: withdrawal.ordinal, Failure: failure})
+		}
+		// A decision emitted exactly at the sealed horizon is right-censored:
+		// the exchange cannot be expected to publish the asynchronous cancel
+		// outcome after evidence collection has ended. The withdrawal remains
+		// visible to the horizon diagnostics, but its missing later outcome is
+		// not evidence of a broken lifecycle.
+		if r.terminalAt > 0 && withdrawal.decisionAt == r.terminalAt {
+			continue
 		}
 		if order == nil {
 			addFailure("stale withdrawal has no matching accepted supplier order")

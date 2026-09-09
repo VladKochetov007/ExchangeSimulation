@@ -161,6 +161,21 @@ func TestBaseActorRejectsAuxiliaryFeedOutsideDeterministicMode(t *testing.T) {
 	}
 }
 
+func TestBaseActorRejectsReadinessReconfigurationAfterStart(t *testing.T) {
+	base := NewBaseActor(1, exchange.NewClientGateway(1))
+	if err := base.SetDeterministicPhasePending(nil); err != nil {
+		t.Fatal(err)
+	}
+	base.EnableDeterministicPhases()
+	if err := base.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer base.Stop()
+	if err := base.SetDeterministicPhasePending(func() bool { return true }); err == nil {
+		t.Fatal("readiness callback was reconfigured after actor start")
+	}
+}
+
 func TestBaseActorCancelOrder(t *testing.T) {
 	gateway := exchange.NewClientGateway(1)
 	actor := NewBaseActor(1, gateway)

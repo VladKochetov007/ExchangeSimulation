@@ -56,6 +56,7 @@ func NewMarketMaker(id uint64, gw actor.Gateway, cfg MMConfig) *MarketMaker {
 		}
 	}
 	mm.SetHandler(mm)
+	mm.SetDeterministicPhasePending(nil)
 	mm.AddTicker(cfg.RefreshInterval, mm.onTick)
 	return mm
 }

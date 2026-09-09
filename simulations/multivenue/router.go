@@ -183,6 +183,7 @@ func NewCrossVenueArb(tier float64, cfg CrossVenueArbConfig, legs []CrossVenueAr
 			return nil, fmt.Errorf("multivenue: cross-venue router leg %s lacks an auditable delayed feed frontier", spec.VenueID)
 		}
 		leg.SetHandler(leg)
+		leg.SetDeterministicPhasePending(nil)
 		boundLeg := leg
 		leg.SetOrderDecisionObserver(func(request exchange.Request) {
 			router.observeDecision(boundLeg, request)

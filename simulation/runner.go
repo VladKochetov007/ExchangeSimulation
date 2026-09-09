@@ -68,6 +68,25 @@ type phaseTimerController interface {
 	DeterministicPhaseError() error
 }
 
+type timestampHookAdvanceable interface {
+	AdvanceWithTimestampHook(time.Duration, func() error) error
+}
+
+type deterministicPhasePendingReporter interface {
+	DeterministicPhasePending() bool
+}
+
+func deterministicPhaseParticipantPending(component any) bool {
+	reporter, ok := component.(deterministicPhasePendingReporter)
+	if !ok {
+		// A phase participant may own queues the framework cannot inspect. A
+		// missing readiness contract therefore opts it into the conservative
+		// path; skipping it would let extension-owned work cross a timestamp.
+		return true
+	}
+	return reporter.DeterministicPhasePending()
+}
+
 type Runner struct {
 	clock        Clock
 	mounts       []*Mount
@@ -242,6 +261,9 @@ func (r *Runner) prepareDeterministicPhases() error {
 	if _, ok := r.clock.(Advanceable); !ok {
 		return fmt.Errorf("simulation: deterministic phases require an advanceable clock")
 	}
+	if _, ok := r.clock.(timestampHookAdvanceable); !ok {
+		return fmt.Errorf("simulation: deterministic phases require a timestamp-hook clock")
+	}
 	for _, m := range r.mounts {
 		if err := m.EnableDeterministicPhases(); err != nil {
 			return err
@@ -277,6 +299,25 @@ func (r *Runner) deterministicPhaseError() error {
 	return nil
 }
 
+func (r *Runner) deterministicPhaseWorkPending() bool {
+	for _, m := range r.mounts {
+		if deterministicPhaseParticipantPending(m) {
+			return true
+		}
+	}
+	for _, a := range r.actors {
+		if deterministicPhaseParticipantPending(a) {
+			return true
+		}
+	}
+	for _, idler := range r.idlers {
+		if deterministicPhaseParticipantPending(idler) {
+			return true
+		}
+	}
+	return false
+}
+
 // phaseIdleConfirmations is how many consecutive rounds of no progress with
 // work still queued are required before the runner calls it a deadlock.
 const phaseIdleConfirmations = 64
@@ -292,29 +333,33 @@ func (r *Runner) drainDeterministicPhases(ctx context.Context) error {
 		limit = 100_000
 	}
 	noProgressRounds := 0
+	activeMounts := make([]bool, len(r.mounts))
+	activeActors := make([]bool, len(r.actors))
 	for round := 0; round < limit; round++ {
 		if err := r.deterministicPhaseError(); err != nil {
 			return err
 		}
 
 		progressed := false
-		for _, m := range r.mounts {
-			if m.PumpDeterministicPhase() {
+		for index, m := range r.mounts {
+			activeMounts[index] = deterministicPhaseParticipantPending(m)
+			if activeMounts[index] && m.PumpDeterministicPhase() {
 				progressed = true
 			}
 		}
-		for _, m := range r.mounts {
-			if m.Drain() {
+		for index, m := range r.mounts {
+			if activeMounts[index] && m.Drain() {
 				progressed = true
 			}
 		}
-		for _, m := range r.mounts {
-			if m.DrainDeterministicEgress() {
+		for index, m := range r.mounts {
+			if activeMounts[index] && m.DrainDeterministicEgress() {
 				progressed = true
 			}
 		}
-		for _, a := range r.actors {
-			if a.(phaseActor).PumpDeterministicPhase(ctx) {
+		for index, a := range r.actors {
+			activeActors[index] = deterministicPhaseParticipantPending(a)
+			if activeActors[index] && a.(phaseActor).PumpDeterministicPhase(ctx) {
 				progressed = true
 			}
 		}
@@ -326,6 +371,14 @@ func (r *Runner) drainDeterministicPhases(ctx context.Context) error {
 			noProgressRounds = 0
 		}
 		if !progressed {
+			// In the normal built-in path a reported false readiness means the
+			// fixed point is complete. Avoid the full Idle walk on every
+			// scheduler timestamp; reserve it for the exceptional case where a
+			// participant still reports ready work but its phase made no progress
+			// (typically bounded actor-inbox backpressure).
+			if !r.deterministicPhaseWorkPending() {
+				return nil
+			}
 			// Idle can flip under us: the exchange publishes market data from
 			// its own goroutine, so a component can report work pending for
 			// the instant it takes to hand it over. A single observation of
@@ -365,7 +418,18 @@ func (r *Runner) runDeterministicPhases(ctx context.Context) error {
 			return nil
 		default:
 		}
-		advanceable.Advance(r.config.Step)
+		if hooked, ok := r.clock.(timestampHookAdvanceable); ok {
+			if err := hooked.AdvanceWithTimestampHook(r.config.Step, func() error {
+				if !r.deterministicPhaseWorkPending() {
+					return nil
+				}
+				return r.drainDeterministicPhases(ctx)
+			}); err != nil {
+				return err
+			}
+		} else {
+			advanceable.Advance(r.config.Step)
+		}
 		if err := r.drainDeterministicPhases(ctx); err != nil {
 			return err
 		}

@@ -194,6 +194,7 @@ func NewOptionLiabilityTaker(id uint64, gw actor.Gateway, cfg OptionLiabilityTak
 	}
 	u.set.onFill = u.onFill
 	u.SetHandler(u)
+	u.SetDeterministicPhasePending(nil)
 	u.AddTickerWithOffset(cfg.Interval, cfg.DecisionPhaseOffset, u.onTick)
 	return u
 }

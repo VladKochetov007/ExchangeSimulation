@@ -60,6 +60,7 @@ func NewBootstrapDepth(id uint64, gw actor.Gateway, cfg BootstrapDepthConfig) *B
 		)
 	}
 	d.SetHandler(d)
+	d.SetDeterministicPhasePending(nil)
 	d.AddTicker(cfg.Interval, d.onTick)
 	return d
 }
