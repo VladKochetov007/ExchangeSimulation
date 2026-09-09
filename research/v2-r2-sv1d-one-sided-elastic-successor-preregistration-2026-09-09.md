@@ -135,18 +135,23 @@ successor-supplier displayed depth at the touch, and the public displayed depth
 at the touch. It reconstructs independent depth by removing all configured
 SV1D orders from that same globally ordered snapshot. A restoration is the
 first later public snapshot, in global event order, where the previously
-missing side has at least `minimum_executable_qty` displayed quantity. It is
-self-referential when the restored side has at least that much successor depth
-but less than that much residual non-SV1D depth. Let `N_self` be the number of
-self-referential restorations and `N_restore` the number of all qualifying
-restorations; the preregistered self-reference fraction is
-`N_self / N_restore`, and SV1D is killed when it exceeds `0.50`; `N_restore = 0`
-also fails the activation requirement. A qualifying restoration is not rejected
-merely because a supplier order is present: the reconstruction tests whether
-the roster supplied the missing executable side primarily by itself. This
-objective rule rejects a roster that collectively manufactures technical
-two-sidedness by observing one another, while leaving the actor unable to see
-the reconstruction.
+missing side has at least `minimum_executable_qty` displayed quantity. The
+restoration self-reference test uses the present-side anchor from the delayed
+observation's `source_sequence`, not the side that the supplier is trying to
+restore. Remove all SV1D orders from that source snapshot. The restoration is
+self-referential if the observed anchor disappears, changes, or has less than
+`minimum_executable_qty` residual non-SV1D depth after removal. This permits
+the legitimate causal case in which independent present-side liquidity
+motivates the supplier to add the missing side. Let `N_self` be the number of
+qualifying restorations whose observed anchor fails that counterfactual and
+`N_restore` the number of all qualifying restorations; the preregistered
+self-reference fraction is `N_self / N_restore`, and SV1D is killed when it
+exceeds `0.50`; `N_restore = 0` also fails the activation requirement.
+Separately, report whether the restored side is supplier-only or
+supplier-dominated; those side-specific concentration diagnostics remain
+subject to the limits below and do not redefine `N_self`. This objective rule
+rejects a roster that manufactures its own observation anchor while allowing
+a supplier-only restored side when the other side was independently present.
 
 ## Activation criteria
 
