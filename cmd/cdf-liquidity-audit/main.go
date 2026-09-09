@@ -20,9 +20,10 @@ import (
 func main() {
 	treatmentDir := flag.String("treatment", "", "original treatment run directory containing events.evs")
 	controlDir := flag.String("control", "", "original paired control run directory containing events.evs")
+	analysisOnlyReplay := flag.Bool("analysis-only-replay", false, "rescore retained raw evidence with a clean descendant analyzer without rerunning the simulator")
 	flag.Parse()
 	if *treatmentDir == "" || *controlDir == "" {
-		fmt.Fprintln(os.Stderr, "usage: cdf-liquidity-audit -treatment DIR -control DIR")
+		fmt.Fprintln(os.Stderr, "usage: cdf-liquidity-audit -treatment DIR -control DIR [-analysis-only-replay]")
 		os.Exit(2)
 	}
 	treatmentEvidence, err := os.MkdirTemp("", "cdf-liquidity-treatment-render-")
@@ -72,15 +73,8 @@ func main() {
 	}
 	analyzerDigest := sha256.Sum256(analyzerRaw)
 	comparison.Provenance.AnalyzerSHA256 = hex.EncodeToString(analyzerDigest[:])
-	comparison.Provenance.AnalyzerSourceRevision, comparison.Provenance.AnalyzerSourceModified = analyzerBuild()
-	if comparison.Provenance.AnalyzerSourceRevision == "unknown" || comparison.Provenance.AnalyzerSourceModified || comparison.Provenance.AnalyzerSourceRevision != comparison.Provenance.Treatment.SourceRevision || comparison.Provenance.AnalyzerSourceRevision != comparison.Provenance.Control.SourceRevision {
-		comparison.Provenance.Valid = false
-		comparison.Provenance.Failure = "analyzer binary is not provenance-pinned to the paired clean source revision"
-		comparison.EvidenceValid = false
-		comparison.ActivationSatisfied = false
-		comparison.AntiCheatingSatisfied = false
-		comparison.Valid = false
-	}
+	analyzerRevision, analyzerModified := analyzerBuild()
+	applyAnalyzerProvenance(comparison, analyzerRevision, analyzerModified, *analysisOnlyReplay)
 	encoded, err := json.MarshalIndent(comparison, "", "  ")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "marshal audit: %v\n", err)
@@ -90,6 +84,41 @@ func main() {
 	if !comparison.Valid {
 		os.Exit(1)
 	}
+}
+
+func applyAnalyzerProvenance(comparison *analysis.CDFLiquidityComparison, analyzerRevision string, analyzerModified, analysisOnlyReplay bool) {
+	comparison.Provenance.AnalyzerSourceRevision = analyzerRevision
+	comparison.Provenance.AnalyzerSourceModified = analyzerModified
+	if analysisOnlyReplay {
+		comparison.Provenance.SourceRevisionMode = "analysis_only_replay"
+		comparison.Provenance.RawSourceRevision = comparison.Provenance.Treatment.SourceRevision
+	} else {
+		comparison.Provenance.SourceRevisionMode = "pinned_live"
+	}
+
+	isAnalyzerClean := analyzerRevision != "unknown" && !analyzerModified
+	isSourcePaired := comparison.Provenance.Treatment != nil && comparison.Provenance.Control != nil &&
+		comparison.Provenance.Treatment.SourceRevision == comparison.Provenance.Control.SourceRevision
+	if analysisOnlyReplay {
+		// A replay may use a descendant analyzer, but it still requires the
+		// immutable raw pair to agree and the replacement analyzer to be clean.
+		if !isAnalyzerClean || !isSourcePaired {
+			invalidateComparisonProvenance(comparison, "analysis-only replay is not bound to a clean analyzer and paired raw source")
+		}
+		return
+	}
+	if !isAnalyzerClean || !isSourcePaired || analyzerRevision != comparison.Provenance.Treatment.SourceRevision {
+		invalidateComparisonProvenance(comparison, "analyzer binary is not provenance-pinned to the paired clean source revision")
+	}
+}
+
+func invalidateComparisonProvenance(comparison *analysis.CDFLiquidityComparison, failure string) {
+	comparison.Provenance.Valid = false
+	comparison.Provenance.Failure = failure
+	comparison.EvidenceValid = false
+	comparison.ActivationSatisfied = false
+	comparison.AntiCheatingSatisfied = false
+	comparison.Valid = false
 }
 
 func analyzerBuild() (string, bool) {

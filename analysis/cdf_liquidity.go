@@ -494,6 +494,8 @@ type CDFLiquidityComparisonProvenance struct {
 	AnalyzerSHA256         string                     `json:"analyzer_sha256,omitempty"`
 	AnalyzerSourceRevision string                     `json:"analyzer_source_revision,omitempty"`
 	AnalyzerSourceModified bool                       `json:"analyzer_source_modified,omitempty"`
+	SourceRevisionMode     string                     `json:"source_revision_mode,omitempty"`
+	RawSourceRevision      string                     `json:"raw_source_revision,omitempty"`
 	Valid                  bool                       `json:"valid"`
 	Failure                string                     `json:"failure,omitempty"`
 }
