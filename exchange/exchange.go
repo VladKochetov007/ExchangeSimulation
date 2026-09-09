@@ -1573,9 +1573,12 @@ func (e *DefaultExchange) StartAutomation(ctx context.Context) {
 		e.addDeterministicPhaseJob(phaseJobAutomation, collateralTicker, e.ChargeCollateralInterest)
 		e.addDeterministicPhaseJob(phaseJobAutomation, expiryTicker, func() {
 			e.CheckListings()
-			derivativeMarkEpoch := e.UpdateDerivativeMarks()
+			e.UpdateDerivativeMarks()
 			e.CheckExpiries()
-			e.checkPositionMarginerLiquidationsAtEpoch(derivativeMarkEpoch)
+			// Read the completed epoch after expiry processing. A callback or
+			// listing hook may publish another mark pass between refresh and
+			// risk evaluation; the public sweep selects that complete epoch.
+			e.CheckPositionMarginerLiquidations()
 		})
 		return
 	}
@@ -2692,17 +2695,20 @@ func (e *DefaultExchange) addPositionMarginerExposure(p *accountMarginProfile, c
 		if err := addRiskTotal(&p.Notional, notional, "notional"); err != nil {
 			return fmt.Errorf("%s: %w", symbol, err)
 		}
-		maintenance, ok := safePositionMaintenance(pm, pos.Size, precision)
-		if !ok || maintenance < 0 {
-			return fmt.Errorf("position maintenance for %s is unrepresentable", symbol)
-		}
+		var maintenance int64
+		var maintenanceOK bool
 		if markEpoch != 0 {
 			if _, ok := inst.(etypes.PositionMarginSnapshotter); !ok {
 				return fmt.Errorf("position margin snapshot for %s is unavailable", symbol)
 			}
-			maintenance, ok = safePositionMaintenanceAtMark(inst, pm, pos.Size, precision, snapshot.underlying, snapshot.mark, snapshot.maintenanceBps)
-			if !ok || maintenance < 0 {
+			maintenance, maintenanceOK = safePositionMaintenanceAtMark(inst, pm, pos.Size, precision, snapshot.underlying, snapshot.mark, snapshot.maintenanceBps)
+			if !maintenanceOK || maintenance < 0 {
 				return fmt.Errorf("position marked maintenance for %s is unrepresentable", symbol)
+			}
+		} else {
+			maintenance, maintenanceOK = safePositionMaintenance(pm, pos.Size, precision)
+			if !maintenanceOK || maintenance < 0 {
+				return fmt.Errorf("position maintenance for %s is unrepresentable", symbol)
 			}
 		}
 		// A short with zero maintenance means the instrument has no marks yet
@@ -3380,6 +3386,9 @@ func (e *DefaultExchange) ValidateNoBorrowingDebt() error {
 // equity must cover its aggregate maintenance requirement. A pending or
 // expired position is an unresolved lifecycle state, not zero exposure.
 func (e *DefaultExchange) ValidateMaintenanceAtCurrentMarks() error {
+	e.markPassMu.Lock()
+	defer e.markPassMu.Unlock()
+
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 

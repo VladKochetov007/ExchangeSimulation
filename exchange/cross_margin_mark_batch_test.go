@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	einstrument "exchange_sim/instrument"
 	etypes "exchange_sim/types"
 )
 
@@ -407,6 +408,62 @@ func TestStrictRiskRejectsUnrepresentableOptionMaintenance(t *testing.T) {
 	}()
 	if validationErr == nil {
 		t.Fatal("strict risk accepted unrepresentable option maintenance")
+	}
+}
+
+type strictMaintenanceProbeInstrument struct {
+	*einstrument.SpotInstrument
+	mark              int64
+	liveCalled        bool
+	snapshotCallCount int
+}
+
+func (p *strictMaintenanceProbeInstrument) PositionMark() (int64, error) {
+	return p.mark, nil
+}
+
+func (p *strictMaintenanceProbeInstrument) MaintenanceForPosition(int64, int64) int64 {
+	p.liveCalled = true
+	panic("strict risk called mutable live maintenance")
+}
+
+func (p *strictMaintenanceProbeInstrument) MaintenanceForPositionAtMark(int64, int64, int64, int64, int64) int64 {
+	p.snapshotCallCount++
+	return 7
+}
+
+func TestStrictRiskUsesOnlyCommittedPositionMaintenanceSnapshot(t *testing.T) {
+	ex := NewExchange(2, &RealClock{})
+	defer ex.Shutdown()
+	instrument := &strictMaintenanceProbeInstrument{
+		SpotInstrument: einstrument.NewSpotInstrument("ABC-SNAPSHOT-PROBE", "ABC", "USD", 1, 1, 1, 1),
+		mark:           100,
+	}
+	ex.AddInstrument(instrument)
+	ex.ConnectNewClient(1, nil, &FixedFee{})
+	ex.AddPerpBalance(1, "USD", 100)
+	if delta := ex.Positions.UpdatePosition(1, instrument.Symbol(), 1, instrument.mark, Buy, PositionBoth); delta.NewSize != 1 {
+		t.Fatalf("position delta = %#v", delta)
+	}
+	epoch, err := ex.CommitMarkEpoch([]string{instrument.Symbol()})
+	if err != nil {
+		t.Fatalf("commit mark epoch: %v", err)
+	}
+
+	ex.mu.RLock()
+	profile, profileErr := ex.buildAccountMarginProfileAtEpoch(1, "USD", "", 0, epoch)
+	ex.mu.RUnlock()
+	if profileErr != nil {
+		t.Fatalf("strict profile rejected snapshot-only instrument: %v", profileErr)
+	}
+	if instrument.liveCalled {
+		t.Fatal("strict profile called the mutable live maintenance method")
+	}
+	if instrument.snapshotCallCount != 1 {
+		t.Fatalf("snapshot maintenance calls = %d, want 1", instrument.snapshotCallCount)
+	}
+	if profile.Maintenance != 7 {
+		t.Fatalf("strict profile maintenance = %d, want 7", profile.Maintenance)
 	}
 }
 

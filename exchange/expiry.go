@@ -463,7 +463,7 @@ func (e *DefaultExchange) expiryLoop(ticker Ticker) {
 		case <-ticker.C():
 			e.automInFlight.Add(1)
 			e.CheckListings()
-			derivativeMarkEpoch := e.UpdateDerivativeMarks()
+			e.UpdateDerivativeMarks()
 			// Expiry is contractual settlement, not a liquidation trigger. Settle
 			// and delist contracts first so an at-expiry option cannot be
 			// force-traded (and charged a clearance fee) just before cash exercise.
@@ -471,7 +471,7 @@ func (e *DefaultExchange) expiryLoop(ticker Ticker) {
 			// After marks refresh: option books never enter the perp mark
 			// loop, so this sweep is the only liquidation path for accounts
 			// whose exposure is options-only.
-			e.checkPositionMarginerLiquidationsAtEpoch(derivativeMarkEpoch)
+			e.CheckPositionMarginerLiquidations()
 			e.automInFlight.Add(-1)
 			acknowledgeTicker(ticker)
 		}
