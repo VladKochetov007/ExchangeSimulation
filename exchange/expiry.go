@@ -520,9 +520,16 @@ func (e *DefaultExchange) CheckListings() {
 // when no option received a usable mark in this pass.
 func (e *DefaultExchange) UpdateDerivativeMarks() uint64 {
 	e.markPassMu.Lock()
-	defer e.markPassMu.Unlock()
+	epoch := e.updateDerivativeMarksLockedByPass()
+	e.markPassMu.Unlock()
 
-	return e.updateDerivativeMarksLockedByPass()
+	if e.postDerivativeMarkHook != nil {
+		// The callback is an external read-only extension point. Invoke it only
+		// after the pass mutex is released so a callback may use public risk
+		// inspection without recursively acquiring the non-reentrant lock.
+		e.postDerivativeMarkHook()
+	}
+	return epoch
 }
 
 // updateDerivativeMarksLockedByPass is the derivative lifecycle body. The
@@ -665,11 +672,6 @@ func (e *DefaultExchange) updateDerivativeMarksLockedByPass() uint64 {
 		e.mu.RUnlock()
 	}
 	e.publishIndexFeeds(now)
-	if e.postDerivativeMarkHook != nil {
-		// The hook sees a complete fresh mark set and precedes any same-timestamp
-		// expiry. It must remain read-only because it runs outside e.mu.
-		e.postDerivativeMarkHook()
-	}
 	return completedMarkEpoch
 }
 

@@ -57,3 +57,34 @@ func TestPreExpiryHookObservesPositionBeforeSettlement(t *testing.T) {
 		t.Fatalf("expiry settlement left position: %#v", pos)
 	}
 }
+
+func TestPostDerivativeMarkHookCanReadCurrentMarks(t *testing.T) {
+	ex := NewExchange(2, &RealClock{})
+	defer ex.Shutdown()
+
+	hookResult := make(chan error, 1)
+	ex.ConfigureAutomation(AutomationConfig{PostDerivativeMarkHook: func() {
+		hookResult <- ex.ValidateMaintenanceAtCurrentMarks()
+	}})
+
+	updateDone := make(chan struct{})
+	go func() {
+		ex.UpdateDerivativeMarks()
+		close(updateDone)
+	}()
+
+	select {
+	case err := <-hookResult:
+		if err != nil {
+			t.Fatalf("post-derivative hook risk inspection: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("post-derivative mark hook could not re-enter public risk inspection")
+	}
+
+	select {
+	case <-updateDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("derivative mark update did not complete after post-mark hook")
+	}
+}
