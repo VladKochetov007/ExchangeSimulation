@@ -165,7 +165,7 @@ jq -e '
 	(.elastic_liquidity_suppliers | type == "array" and length == 4) and
 	(.elastic_liquidity_suppliers | map(.role)) == ["cdf_elastic_supplier_1", "cdf_elastic_supplier_2", "cdf_elastic_supplier_3", "cdf_elastic_supplier_4"] and
 	(.elastic_liquidity_suppliers | map(.interval)) == [2000000000, 2000000000, 2000000000, 2000000000] and
-	(.elastic_liquidity_suppliers | map(.decision_phase_offset)) == [0, 500000000, 1000000000, 1500000000] and
+		(.elastic_liquidity_suppliers | map(.decision_phase_offset // 0)) == [0, 500000000, 1000000000, 1500000000] and
 	all(.elastic_liquidity_suppliers[]; .max_observation_age == 60000000000 and .base_precision == 100000000 and .quote_precision == 100000 and .maker_fee_bps == 5) and
 	all(.elastic_liquidity_suppliers[]; .symbol == "CDF/USD" and .base_asset == "CDF" and .quote_asset == "USD" and
 		.tick_size == 100000 and .minimum_executable_qty == 100000 and .registered_minimum_executable_qty == 100000 and
@@ -187,7 +187,7 @@ jq -e --slurpfile treatment "$treatment" '
 	(.elastic_liquidity_suppliers | map(del(.quote_on_one_sided_local_book))) == ($treatment[0].elastic_liquidity_suppliers | map(del(.quote_on_one_sided_local_book))) and
 	(.elastic_liquidity_suppliers | map(.role)) == ["cdf_elastic_supplier_1", "cdf_elastic_supplier_2", "cdf_elastic_supplier_3", "cdf_elastic_supplier_4"] and
 	(.elastic_liquidity_suppliers | map(.interval)) == [2000000000, 2000000000, 2000000000, 2000000000] and
-	(.elastic_liquidity_suppliers | map(.decision_phase_offset)) == [0, 500000000, 1000000000, 1500000000] and
+	(.elastic_liquidity_suppliers | map(.decision_phase_offset // 0)) == [0, 500000000, 1000000000, 1500000000] and
 	all(.elastic_liquidity_suppliers[]; .minimum_executable_qty == 100000 and .registered_minimum_executable_qty == 100000 and .minimum_qualifying_qty == 1000000 and (.quote_on_one_sided_local_book // false) == false) and
 	(.market_data_receipt_roles | index("cdf_elastic_supplier") != null) and .record_elastic_liquidity_supplier_decisions == true' "$mode_off" >/dev/null || fail "mode-off roster contract failed"
 jq -e '
