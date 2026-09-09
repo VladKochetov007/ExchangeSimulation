@@ -2058,3 +2058,32 @@ contracts all passed. No simulator world, activation, capacity probe,
 development cell, freeze, or holdout was run. Holdouts `619`, `631`, and `641`
 remain untouched. The next action is a fresh exact-tree independent review of
 `9f7ae8f`; acceptance is still required before pinned scientific execution.
+
+## Append-only operational update: exact-tree review and binary rebinding — 2026-09-09
+
+The completed independent Sol-xhigh review by Huygens (`gpt-5.6-sol`, xhigh)
+accepted exact tree `27c3658d9c4ff2fa9c5c0030553acc06b3199ec3` for the bounded
+next step of clean Go 1.27 binary construction and the registered
+development-only seed-643 paired activation probe. The report and attestation
+are retained outside the repository at
+`/home/vlad/external-scratch/v2-r2-sv1c-review-27c3658d9c4ff2fa9c5c0030553acc06b3199ec3/`.
+The reviewed tree hash is
+`7e39ef93d9cc8b5ad749f2be0f98e6852c085fcc6f6959dcad4e0197f0215504`.
+The authorization excludes capacity, 24-hour development, freeze, and
+holdout execution.
+
+Two independent clean Go 1.27 builds of `cmd/multivenue` from that exact tree
+were byte-identical at
+`7fc9db45831c4df986e4106838b150415c88b6f9e4d3d9b3d138bec58e04413b` and
+reported `vcs.modified=false`, `CGO_ENABLED=0`, trimpath, and linux/amd64/v1.
+Commit `4c9d826` records only this normalizer identity and manifest binding;
+the effective configs and economic source are unchanged.
+
+The provenance-only commit changed the exact Git tree, so the older
+attestation is retained as historical review evidence but does not authorize
+the current candidate. A fresh exact-tree review of `4c9d826` is required
+before activation. No simulator world, capacity probe, registered development
+cell, freeze, or holdout ran; retained evidence was not removed and holdouts
+`619`, `631`, and `641` remain untouched. The async refs remain performance
+`b1847ac`, performance-port `39768df`, and economic-red-team `e85e16c` with no
+new commits.

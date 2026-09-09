@@ -1864,3 +1864,30 @@ performance `b1847ac`, performance-port `39768df`, and economic red-team
 `e85e16c`, with no new commits at the checkpoint and no code imported. The
 candidate is not promoted; the next gate is one fresh independent exact-tree
 Sol-xhigh review of `9f7ae8f`.
+
+## Append-only audit update: exact-tree review recorded and provenance rebound — 2026-09-09
+
+Huygens (`gpt-5.6-sol`, xhigh) independently reviewed clean exact tree
+`27c3658d9c4ff2fa9c5c0030553acc06b3199ec3` and returned `ACCEPT FOR
+PROMOTION`, bounded to clean pinned Go 1.27 binaries and the registered
+seed-643 paired activation probe. The external report and attestation are
+retained at
+`/home/vlad/external-scratch/v2-r2-sv1c-review-27c3658d9c4ff2fa9c5c0030553acc06b3199ec3/`.
+No capacity, 24-hour development, freeze, or holdout authorization was
+included.
+
+The exact-tree normalizer was rebuilt twice with isolated Go caches. Both
+artifacts match at
+`7fc9db45831c4df986e4106838b150415c88b6f9e4d3d9b3d138bec58e04413b` and carry
+Go 1.27, trimpath, CGO-disabled linux/amd64/v1, and `vcs.modified=false`.
+Commit `4c9d826` updates only the tracked normalizer registration and
+provenance manifest to this identity; it does not change economic source,
+effective configs, or retained evidence.
+
+The review is intentionally not bound to `4c9d826`: even a provenance-only
+commit changes the exact tree hash. The next gate is one fresh exact-tree
+Sol-xhigh review of `4c9d826`, followed—if accepted—by clean builds of all
+activation binaries and only the registered seed-643 activation probe. No
+simulator world or holdout has run; holdouts `619`, `631`, and `641` remain
+untouched. Async refs remain performance `b1847ac`, performance-port `39768df`,
+and economic red-team `e85e16c`, with no newer commits.

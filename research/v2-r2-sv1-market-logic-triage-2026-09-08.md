@@ -539,3 +539,24 @@ commits were present and no auxiliary implementation was imported. The next
 gate is one fresh independent exact-tree Sol-xhigh review of `9f7ae8f`,
 followed only on acceptance by the pinned production/capacity and seed-643
 sequence.
+
+## SV1C exact-tree review record and binary rebinding — 2026-09-09
+
+The completed independent Huygens review (`gpt-5.6-sol`, xhigh) examined exact
+tree `27c3658d9c4ff2fa9c5c0030553acc06b3199ec3`, tree hash
+`7e39ef93d9cc8b5ad749f2be0f98e6852c085fcc6f6959dcad4e0197f0215504`, and a
+clean worktree. It accepted promotion only to clean Go 1.27 production-binary
+construction and the registered seed-643 paired activation probe. Its report
+and attestation are preserved at
+`/home/vlad/external-scratch/v2-r2-sv1c-review-27c3658d9c4ff2fa9c5c0030553acc06b3199ec3/`.
+The reviewer explicitly left capacity, full development, freeze, and holdout
+execution unauthorized.
+
+The exact reviewed tree produced two byte-identical `cmd/multivenue` builds at
+`7fc9db45831c4df986e4106838b150415c88b6f9e4d3d9b3d138bec58e04413b`.
+`4c9d826` records that identity in the normalizer registration and manifest.
+This provenance-only change advanced the exact tree, so the old attestation is
+retained as historical review evidence but is not treated as an attestation of
+the current candidate. No simulator world, capacity probe, development cell,
+freeze, or holdout ran. The next action is a fresh exact-tree review of
+`4c9d826`.
