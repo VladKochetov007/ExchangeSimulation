@@ -48,6 +48,15 @@ roster; the mode-off paired control uses the same roster and sets it to
 control. No balance, inventory, elasticity, cadence, reference half-life,
 latency, or fee value is changed from the SV1C roster.
 
+The exchange admission minimum and the scientific survival threshold are
+separate registered quantities. The current CDF/USD instrument admits orders
+at `minimum_executable_qty = 100000` base units. SV1D records
+`minimum_qualifying_qty = 1000000` base units (ten admission lots); only the
+latter threshold can establish that a missing side was materially restored or
+that a weak-side interval is cured. Both values are retained in the normalized
+manifest, and the supplier's declared admission minimum must equal the actual
+registered instrument minimum before a bounded-risk supplier is constructed.
+
 At each supplier decision, after the normal delayed local snapshot checks:
 
 1. with a positive bid and ask, the supplier uses the existing midpoint and
@@ -71,6 +80,10 @@ the calculated price is invalid, the target gap is zero, or a risk limit is
 reached, the supplier withdraws or waits. A cancellation is not automatically
 replaced. The supplier has no obligation to quote either side, and no code
 path replenishes capital, inventory, or a withdrawn order.
+
+After a one-sided quote is fully filled or canceled, the supplier must observe a
+strictly later local snapshot before submitting another one-sided quote. This
+prevents a close event from becoming a same-observation replenishment path.
 
 The one-sided missing-side quote price is deterministic integer arithmetic. The
 `tick` is read from the registered `CDF/USD` instrument and is not an
@@ -133,14 +146,25 @@ at decision time. The analyzer records whether the present touch was public,
 whether a registered successor-supplier order occupied that price level, the
 successor-supplier displayed depth at the touch, and the public displayed depth
 at the touch. It reconstructs independent depth by removing all configured
-SV1D orders from that same globally ordered snapshot. A restoration is the
-first later public snapshot, in global event order, where the previously
-missing side has at least `minimum_executable_qty` displayed quantity. The
+SV1D orders from that same globally ordered snapshot. An accepted missing-side
+decision becomes a restoration candidate only when the accepted passive order
+has at least `minimum_qualifying_qty` and lies one to twenty configured ticks
+from the observed present-side touch. The independent present-side touch is
+used only by the separate supplier-removal self-reference test. Unaccepted or
+sub-threshold decisions remain diagnostic and cannot enter `N_restore`. A
+candidate is credited only if that same accepted order is reconstructibly live
+with at least the qualifying minimum remaining quantity at the first later
+public snapshot, in global event order, where the previously missing side has
+at least `minimum_qualifying_qty` displayed quantity. A canceled, fully filled,
+or otherwise closed candidate is unresolved rather than credited to unrelated
+liquidity. The per-candidate audit records the order outcome, restoration
+sequence, candidate executable quantity, supplier and independent depth, and
+whether a later inventory-responsive decision followed a partial fill. The
 restoration self-reference test uses the present-side anchor from the delayed
 observation's `source_sequence`, not the side that the supplier is trying to
 restore. Remove all SV1D orders from that source snapshot. The restoration is
 self-referential if the observed anchor disappears, changes, or has less than
-`minimum_executable_qty` residual non-SV1D depth after removal. This permits
+`minimum_qualifying_qty` residual non-SV1D depth after removal. This permits
 the legitimate causal case in which independent present-side liquidity
 motivates the supplier to add the missing side. Let `N_self` be the number of
 qualifying restorations whose observed anchor fails that counterfactual and
@@ -152,6 +176,8 @@ supplier-dominated; those side-specific concentration diagnostics remain
 subject to the limits below and do not redefine `N_self`. This objective rule
 rejects a roster that manufactures its own observation anchor while allowing
 a supplier-only restored side when the other side was independently present.
+The same self-reference threshold is applied independently to each venue audit;
+an aggregate pass cannot conceal a self-referential venue.
 
 ## Activation criteria
 
@@ -193,10 +219,13 @@ Retain the preregistered concentration limits: supplier CDF volume share above
 active intervals in any venue, is a kill condition. Apply the same threshold
 separately to aggregate supplier bid depth and aggregate supplier ask depth,
 including time-weighted and executable-quantity-qualified shares. The
-registered SV1D roster sets `minimum_executable_qty = 100000` base units. A
-one-sided restoration qualifies only when the supplier's accepted resting
-quantity is at least that value and its price is between one and twenty
-`CDF/USD` ticks from the independent present-side touch. The current registered
+registered SV1D roster sets `minimum_executable_qty = 100000` base units and
+`minimum_qualifying_qty = 1000000` base units. A one-sided restoration
+candidate qualifies only when the supplier's accepted resting quantity is at
+least `minimum_qualifying_qty` and its price is between one and twenty
+`CDF/USD` ticks from the observed present-side touch; it is credited only
+while that same order remains live with at least the qualifying minimum
+quantity at the qualifying snapshot. The current registered
 instrument has `tick = 100000` quote units; the normalized manifest must bind
 both values to the instrument rather than duplicate them as actor economics.
 The analyzer reports quote distance, displayed and executable depth, and
@@ -216,13 +245,26 @@ submit/accept/fill/cancel/reprice/withdraw counts, local observation age and
 sequence, one-sided quote source, private-reference path, and risk-limit state.
 For treatment and both controls, retain exact one-sided intervals, empty-side
 durations, strict mark availability, terminal valuation status, and the
-canonical global evidence hashes.
+canonical global evidence hashes. The frozen survival comparator is a
+public-only, event-time-weighted weak-side duration. For every client-zero
+`CDF/USD` public snapshot, sum displayed quantity across all retained levels on
+each side. The snapshot owns the interval from its publication timestamp up to
+the next client-zero public snapshot, and the final snapshot owns the interval
+through the terminal simulation timestamp. An interval is weak when either
+side's total displayed quantity is below the registered
+`minimum_qualifying_qty`; client-specific snapshots are excluded. The analyzer
+must prove ordered snapshots, a positive observed duration, and complete
+terminal coverage. The paired SV1D treatment and same-roster mode-off control
+must have equal observed duration, and the treatment passes this effect
+predicate only when its weak-side duration is strictly smaller than control's.
+This is a measured causal development predicate, not a target encoded in the
+actor or calendar.
 
 The mechanism is falsified for SV1D if the activation predicate fails, the
-treatment remains strictly unvaluatable, one-sided intervals are not reduced
-relative to the matched mode-off control, or any anti-cheating/kill criterion
-fires. A negative result is scientifically valid. No post-outcome threshold or
-roster selection may rescue it.
+treatment remains strictly unvaluatable, the public weak-side duration is not
+strictly reduced relative to the matched mode-off control, or any
+anti-cheating/kill criterion fires. A negative result is scientifically valid.
+No post-outcome threshold or roster selection may rescue it.
 
 ## Fixed promotion sequence
 
