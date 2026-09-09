@@ -177,6 +177,7 @@ jq -e '
 jq -e --slurpfile source "$source_treatment" '
 	(.elastic_liquidity_suppliers | map(del(.tick_size, .minimum_qualifying_qty, .registered_minimum_executable_qty, .quote_on_one_sided_local_book, .decision_phase_offset))) ==
 	($source[0].elastic_liquidity_suppliers | map(
+		del(.decision_phase_offset) |
 		.initial_base_balance = (.initial_base_balance / 10 | floor) |
 		.initial_quote_balance = (.initial_quote_balance / 10 | floor) |
 		.max_position = (.max_position / 10 | floor) |
