@@ -3,7 +3,7 @@
 Date: 2026-09-09
 Scientific branch: `feature/r2-cdf-survival-successor-sv1d`
 Predecessor candidate: `1fda960` / SV1C negative activation
-Implementation commit: `910cf2c`
+Implementation commits: `910cf2c`, `bdacbae`, `a5893f8`, `9c2ab23`
 Status: implementation and focused contract testing; no seed 659, development
 cell, 24-hour world, or holdout has run from this candidate
 
@@ -119,3 +119,23 @@ timeout at 600 seconds; this is recorded as a compatibility/runtime timeout,
 not as scientific evidence. The required follow-up is a clean full test with
 an explicit longer package timeout, followed by vet/race/evidence-contract
 checks and a fresh exact-tree independent review.
+
+## Append-only mark-pass serialization checkpoint
+
+The successor now serializes `CommitMarkEpoch`, perp mark publication, option
+derivative refresh, and public liquidation entry points with one
+exchange-owned pass mutex. The derivative refresh calls the non-reentrant mark
+producer helper when a changed option input requires a complete sibling refresh;
+it does not deadlock by reacquiring the public wrapper. This closes the
+concurrent producer gap without changing the strict five-argument
+`PositionMarginSnapshotter` extension contract already present on this branch.
+
+The regression `TestMarkProducersSerializeRiskEpochCommit` blocks a mark
+calculator and verifies that a concurrent derivative refresh waits for the
+first pass to complete. This is a concurrency/information-boundary correction,
+not an economic retuning. It has been pushed in `a5893f8`; the subsequent
+scorer provenance correction is `9c2ab23`. No config, binary, activation
+attestation, development world, or holdout has been created from these
+revisions. The performance/red-team refs remain `b1847ac`, `39768df`, and
+`e85e16c`, with no newer fetched commits; no performance-branch code is
+imported.
