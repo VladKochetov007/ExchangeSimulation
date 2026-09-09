@@ -12,13 +12,16 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
+	"sort"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/klauspost/compress/zstd"
 
+	"exchange_sim/analysis"
 	"exchange_sim/evstream"
 	"exchange_sim/exchange"
 	"exchange_sim/simulations/feesim"
@@ -696,6 +699,233 @@ func TestBinaryEvidenceProductionPathRunsAndRenders(t *testing.T) {
 	}
 	if report.EventFrames == 0 || report.Routes == 0 || report.ExecutionHash == "" || report.FullEvidenceHash == "" {
 		t.Fatalf("production render report = %+v", report)
+	}
+}
+
+type comparableEvidenceRecord struct {
+	ClientID uint64
+	Event    string
+	SimTS    int64
+	VenueID  string
+	Payload  json.RawMessage
+}
+
+func readComparableEvidenceRecords(t *testing.T, raw []byte) []comparableEvidenceRecord {
+	t.Helper()
+	lines := bytes.Split(bytes.TrimSpace(raw), []byte("\n"))
+	records := make([]comparableEvidenceRecord, 0, len(lines))
+	for lineNumber, line := range lines {
+		if len(bytes.TrimSpace(line)) == 0 {
+			continue
+		}
+		var envelope struct {
+			ClientID uint64 `json:"client_id"`
+			Data     struct {
+				VenueID string          `json:"venue_id"`
+				Payload json.RawMessage `json:"payload"`
+			} `json:"data"`
+			Event string `json:"event"`
+			SimTS int64  `json:"sim_ts"`
+		}
+		if err := json.Unmarshal(line, &envelope); err != nil {
+			t.Fatalf("decode route record %d: %v", lineNumber, err)
+		}
+		if envelope.Data.Payload == nil || bytes.Equal(bytes.TrimSpace(envelope.Data.Payload), []byte("null")) {
+			t.Fatalf("route record %d has no payload", lineNumber)
+		}
+		var compact bytes.Buffer
+		if err := json.Compact(&compact, envelope.Data.Payload); err != nil {
+			t.Fatalf("compact route payload %d: %v", lineNumber, err)
+		}
+		records = append(records, comparableEvidenceRecord{
+			ClientID: envelope.ClientID, Event: envelope.Event, SimTS: envelope.SimTS,
+			VenueID: envelope.Data.VenueID, Payload: append([]byte(nil), compact.Bytes()...),
+		})
+	}
+	return records
+}
+
+func collectRouteEvidence(t *testing.T, root string) map[string][]byte {
+	t.Helper()
+	routes := make(map[string][]byte)
+	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".jsonl") {
+			return nil
+		}
+		relative, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		if !strings.HasPrefix(filepath.ToSlash(relative), "venues/") {
+			return nil
+		}
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		routes[filepath.ToSlash(relative)] = raw
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return routes
+}
+
+func TestBinaryEvidenceProductionCorpusMatchesLegacyJSON(t *testing.T) {
+	t.Setenv("EXSIM_BINARY_EVIDENCE", "")
+	root := t.TempDir()
+	run := func(name, evidenceFormat string) string {
+		dir := filepath.Join(root, name)
+		sim, err := NewSim(30*time.Second, Config{
+			LogDir: dir, LogMode: "full", EvidenceFormat: evidenceFormat,
+			CheckpointIntervalSeconds: 1, Seed: 101, StrictPopulationAccounting: true,
+		})
+		if err != nil {
+			t.Fatalf("create %s simulation: %v", name, err)
+		}
+		if err := sim.Run(context.Background()); err != nil {
+			t.Fatalf("run %s simulation: %v", name, err)
+		}
+		if err := sim.Close(); err != nil {
+			t.Fatalf("close %s simulation: %v", name, err)
+		}
+		if err := writeV24AnalysisReport(dir, sim); err != nil {
+			t.Fatalf("write %s analysis report: %v", name, err)
+		}
+		if err := writeV24RunConfig(dir, sim.Config); err != nil {
+			t.Fatalf("write %s run config: %v", name, err)
+		}
+		return dir
+	}
+	legacyDir := run("legacy", "jsonl")
+	binaryDir := run("binary", binaryRepresentation)
+	renderedDir := filepath.Join(root, "rendered")
+	if _, err := RenderBinaryEvidence(binaryDir, renderedDir); err != nil {
+		t.Fatalf("render binary production corpus: %v", err)
+	}
+
+	legacyRoutes := collectRouteEvidence(t, legacyDir)
+	renderedRoutes := collectRouteEvidence(t, renderedDir)
+	legacyNames := make([]string, 0, len(legacyRoutes))
+	for name := range legacyRoutes {
+		legacyNames = append(legacyNames, name)
+	}
+	renderedNames := make([]string, 0, len(renderedRoutes))
+	for name := range renderedRoutes {
+		renderedNames = append(renderedNames, name)
+	}
+	sort.Strings(legacyNames)
+	sort.Strings(renderedNames)
+	if !reflect.DeepEqual(legacyNames, renderedNames) {
+		t.Fatalf("legacy routes=%v rendered routes=%v", legacyNames, renderedNames)
+	}
+	for _, route := range legacyNames {
+		legacyRecords := readComparableEvidenceRecords(t, legacyRoutes[route])
+		renderedRecords := readComparableEvidenceRecords(t, renderedRoutes[route])
+		if len(legacyRecords) != len(renderedRecords) {
+			t.Fatalf("route %s legacy records=%d rendered records=%d", route, len(legacyRecords), len(renderedRecords))
+		}
+		for index := range legacyRecords {
+			if !reflect.DeepEqual(legacyRecords[index], renderedRecords[index]) {
+				t.Fatalf("route %s record %d differs:\n legacy=%+v\nrendered=%+v", route, index, legacyRecords[index], renderedRecords[index])
+			}
+		}
+	}
+
+	stream, err := os.Open(filepath.Join(binaryDir, "events.evs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader, err := evstream.NewReader(stream, evstream.ReaderOptions{VerifyHash: true, HashFrame: hashGlobalBinaryExecutionFrame})
+	if err != nil {
+		_ = stream.Close()
+		t.Fatal(err)
+	}
+	schemaCounts := make(map[uint16]int)
+	if err := reader.Range(func(frame evstream.Frame) error {
+		schemaCounts[frame.Header.SchemaID]++
+		return nil
+	}); err != nil {
+		_ = stream.Close()
+		t.Fatal(err)
+	}
+	if err := stream.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for _, schemaID := range []uint16{
+		evstream.SchemaOpaqueJSON, etypes.SchemaBalanceChange, etypes.SchemaFeeRevenue,
+		etypes.SchemaTrade, exchange.SchemaFillEvidence, exchange.SchemaBookDelta,
+		exchange.SchemaBookSnapshot, exchange.SchemaVenueBalance, exchange.SchemaInstrumentLog,
+	} {
+		if schemaCounts[schemaID] == 0 {
+			t.Fatalf("production corpus did not exercise schema %d; counts=%v", schemaID, schemaCounts)
+		}
+	}
+
+	legacyRun, err := analysis.Open(legacyDir)
+	if err != nil {
+		t.Fatalf("open legacy analysis run: %v", err)
+	}
+	renderedRun, err := analysis.OpenRenderedRun(binaryDir, renderedDir)
+	if err != nil {
+		t.Fatalf("open rendered analysis run: %v", err)
+	}
+	analyzers := []struct {
+		name    string
+		measure func(*analysis.Run) (any, error)
+	}{
+		{name: "ecology", measure: func(run *analysis.Run) (any, error) { return run.MeasureEcology() }},
+		{name: "lifecycle", measure: func(run *analysis.Run) (any, error) {
+			return run.MeasureLifecycle(analysis.LifecycleOptions{})
+		}},
+		{name: "calendar", measure: func(run *analysis.Run) (any, error) {
+			return run.MeasureCalendar(analysis.CalendarOptions{})
+		}},
+		{name: "expiry_fills", measure: func(run *analysis.Run) (any, error) { return run.MeasureExpiryFills() }},
+		{name: "liquidations", measure: func(run *analysis.Run) (any, error) { return run.MeasureLiquidations() }},
+		{name: "price_unavailable", measure: func(run *analysis.Run) (any, error) {
+			return run.MeasurePriceUnavailableOrderRejections()
+		}},
+		{name: "roles", measure: func(run *analysis.Run) (any, error) {
+			return run.MeasureRoles(analysis.RoleAuditOptions{})
+		}},
+		{name: "viability", measure: func(run *analysis.Run) (any, error) {
+			return run.MeasureViability(analysis.ViabilityOptions{})
+		}},
+		{name: "book_shape", measure: func(run *analysis.Run) (any, error) {
+			return run.MeasureBookShape(analysis.BookShapeOptions{})
+		}},
+		{name: "basis", measure: func(run *analysis.Run) (any, error) {
+			return run.MeasureBasis(analysis.BasisOptions{})
+		}},
+		{name: "stream_hash", measure: func(run *analysis.Run) (any, error) {
+			return run.MeasureStreamHash(analysis.StreamHashOptions{PerEvent: true})
+		}},
+	}
+	for _, analyzer := range analyzers {
+		legacyResult, legacyErr := analyzer.measure(legacyRun)
+		renderedResult, renderedErr := analyzer.measure(renderedRun)
+		if (legacyErr == nil) != (renderedErr == nil) {
+			t.Fatalf("analyzer %s error mismatch: legacy=%v rendered=%v", analyzer.name, legacyErr, renderedErr)
+		}
+		if legacyErr != nil {
+			t.Fatalf("analyzer %s failed: legacy=%v rendered=%v", analyzer.name, legacyErr, renderedErr)
+		}
+		legacyJSON, err := json.Marshal(legacyResult)
+		if err != nil {
+			t.Fatalf("marshal legacy %s result: %v", analyzer.name, err)
+		}
+		renderedJSON, err := json.Marshal(renderedResult)
+		if err != nil {
+			t.Fatalf("marshal rendered %s result: %v", analyzer.name, err)
+		}
+		if !bytes.Equal(legacyJSON, renderedJSON) {
+			t.Fatalf("analyzer %s differs:\n legacy=%s\nrendered=%s", analyzer.name, legacyJSON, renderedJSON)
+		}
 	}
 }
 

@@ -819,6 +819,29 @@ func TestMeasureCDFLiquidityFailsClosedOnMissingFillField(t *testing.T) {
 	}
 }
 
+func TestMeasureCDFLiquidityRejectsAuthoritativeOrderFillWithoutFeeFields(t *testing.T) {
+	run := writeCDFLiquidityFixture(t, true, false)
+	bookPath := filepath.Join(run.Dir, "venues", "north", "spot", "CDF-USD.jsonl")
+	raw, err := os.ReadFile(bookPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mutated := strings.Replace(string(raw), `,"fee_amount":0,"fee_asset":""`, "", 1)
+	if mutated == string(raw) {
+		t.Fatal("authoritative order fill fee fields were not found")
+	}
+	if err := os.WriteFile(bookPath, []byte(mutated), 0644); err != nil {
+		t.Fatal(err)
+	}
+	audit, err := run.MeasureCDFLiquidity()
+	if err != nil {
+		t.Fatalf("MeasureCDFLiquidity: %v", err)
+	}
+	if audit.Valid || !hasCDFCheck(audit.Checks, "malformed supplier order fill") {
+		t.Fatalf("missing authoritative fee audit = %+v, want fail-closed rejection", audit)
+	}
+}
+
 func TestCompareCDFLiquidityRunsRequiresSeparateRoster(t *testing.T) {
 	treatment := writeCDFLiquidityFixture(t, true, false)
 	control := writeCDFLiquidityFixture(t, false, false)
@@ -1470,7 +1493,7 @@ func TestMeasureCDFLiquidityRejectsReorderedFillCancelRace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fill := cdfFixtureLine(13, 2, "OrderFill", `{"order_id":8,"trade_id":2,"side":"BUY","price":99,"qty":4,"filled_qty":4,"remaining_qty":0,"is_full":true}`) + "\n"
+	fill := cdfFixtureLine(13, 2, "OrderFill", `{"order_id":8,"trade_id":2,"side":"BUY","price":99,"qty":4,"filled_qty":4,"remaining_qty":0,"fee_amount":0,"fee_asset":"","is_full":true}`) + "\n"
 	rejection := cdfFixtureLine(14, 2, "OrderCancelRejected", `{"request_id":4,"success":false,"error":"ORDER_ALREADY_FILLED"}`) + "\n"
 	reordered := cdfFixtureLine(13, 2, "OrderCancelRejected", `{"request_id":4,"success":false,"error":"ORDER_ALREADY_FILLED"}`) + "\n" + fill
 	if !strings.Contains(string(raw), fill+rejection) {
@@ -2108,7 +2131,7 @@ func writeCDFLiquidityFullFillCancelRaceFixture(t *testing.T) *Run {
 		t.Fatal("fixture cancellation was not found")
 	}
 	book = []byte(strings.Replace(string(book), oldCancellation, "", 1))
-	book = append(book, []byte(cdfFixtureLine(13, 2, "OrderFill", `{"order_id":8,"trade_id":2,"side":"BUY","price":99,"qty":4,"filled_qty":4,"remaining_qty":0,"is_full":true}`)+"\n")...)
+	book = append(book, []byte(cdfFixtureLine(13, 2, "OrderFill", `{"order_id":8,"trade_id":2,"side":"BUY","price":99,"qty":4,"filled_qty":4,"remaining_qty":0,"fee_amount":0,"fee_asset":"","is_full":true}`)+"\n")...)
 	book = append(book, []byte(cdfFixtureLine(14, 2, "OrderCancelRejected", `{"request_id":4,"success":false,"error":"ORDER_ALREADY_FILLED"}`)+"\n")...)
 	if err := os.WriteFile(bookPath, book, 0644); err != nil {
 		t.Fatal(err)
@@ -2176,7 +2199,7 @@ func writeCDFLiquidityFixture(t *testing.T, supplier, malformedFill bool) *Run {
 	book += cdfFixtureLine(2, 2, "OrderAccepted", `{"order_id":7,"client_id":2,"request_id":1,"side":"BUY","type":"LIMIT","time_in_force":"GTC","post_only":true,"price":99,"qty":5}`) + "\n"
 	book += cdfFixtureLine(2, 0, "BookSnapshot", `{"bids":[{"price":99,"visible_qty":10,"hidden_qty":0}],"asks":[{"price":101,"visible_qty":10,"hidden_qty":0}]}`) + "\n"
 	book += cdfFixtureLine(3, 0, "Trade", `{"trade_id":1,"price":99,"qty":5,"side":"SELL","taker_order_id":9}`) + "\n"
-	book += cdfFixtureLine(3, 2, "OrderFill", `{"order_id":7,"trade_id":1,"side":"BUY","price":99,"qty":5,"filled_qty":5,"remaining_qty":0,"is_full":true}`) + "\n"
+	book += cdfFixtureLine(3, 2, "OrderFill", `{"order_id":7,"trade_id":1,"side":"BUY","price":99,"qty":5,"filled_qty":5,"remaining_qty":0,"fee_amount":0,"fee_asset":"","is_full":true}`) + "\n"
 	book += cdfFixtureLine(4, 0, "Trade", `{"trade_id":2,"price":99,"qty":20,"side":"SELL","taker_order_id":10}`) + "\n"
 	book += cdfFixtureLine(5, 2, "OrderAccepted", `{"order_id":8,"client_id":2,"request_id":2,"side":"BUY","type":"LIMIT","time_in_force":"GTC","post_only":true,"price":99,"qty":4}`) + "\n"
 	book += cdfFixtureLine(6, 2, "OrderCancelled", `{"order_id":8,"request_id":3,"remaining_qty":4}`) + "\n"

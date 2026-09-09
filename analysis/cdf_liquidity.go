@@ -2237,8 +2237,12 @@ func (r *CDFLiquidityRunAudit) processQuoteCashFill(event Event, state *CDFLiqui
 
 func (r *CDFLiquidityRunAudit) processQuoteCashOrderFill(event Event, state *CDFLiquiditySupplierAudit, ledger *cdfQuoteCashLedger) {
 	var orderFill cdfOrderFillEvidence
-	if err := decodeRequiredJSON(event.Raw(), &orderFill, "order_id", "trade_id", "side", "price", "qty", "is_full"); err != nil {
+	if err := decodeRequiredJSON(event.Raw(), &orderFill, "order_id", "trade_id", "side", "price", "qty", "is_full", "fee_amount", "fee_asset"); err != nil {
 		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: state.Role, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "malformed quote-cash order fill: " + err.Error()})
+		return
+	}
+	if !cdfOrderFillFeeMatches(orderFill, state) {
+		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: state.Role, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "quote-cash order fill fee does not match registered maker-fee schedule"})
 		return
 	}
 	r.applyQuoteCashFill(event, state, ledger, cdfFillEvidence{
@@ -2656,8 +2660,7 @@ func (r *CDFLiquidityRunAudit) processSupplierFill(event Event, states map[cdfPa
 		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: fill.Role, ClientID: fill.ClientID, Ordinal: event.Ordinal, Failure: "fill from unregistered supplier"})
 		return
 	}
-	expectedFee, feeOK := expectedCDFMakerFee(fill.Price, fill.Qty, state.configuredBasePrecision, state.configuredMakerFeeBps)
-	if !feeOK || fill.FeeAmount != expectedFee || (expectedFee > 0 && fill.FeeAsset != state.configuredQuoteAsset) {
+	if !cdfOrderFillFeeMatches(cdfOrderFillEvidence{Price: fill.Price, Qty: fill.Qty, FeeAmount: fill.FeeAmount, FeeAsset: fill.FeeAsset}, state) {
 		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: fill.Role, ClientID: fill.ClientID, Ordinal: event.Ordinal, Failure: "supplier fill fee does not match registered maker-fee schedule"})
 	}
 	r.FillCount++
@@ -2851,6 +2854,14 @@ func expectedCDFMakerFee(price, quantity, basePrecision, makerFeeBps int64) (int
 		return 0, false
 	}
 	return etypes.TryMulBps(notional, makerFeeBps)
+}
+
+func cdfOrderFillFeeMatches(fill cdfOrderFillEvidence, state *CDFLiquiditySupplierAudit) bool {
+	expectedFee, ok := expectedCDFMakerFee(fill.Price, fill.Qty, state.configuredBasePrecision, state.configuredMakerFeeBps)
+	if !ok || fill.FeeAmount != expectedFee {
+		return false
+	}
+	return expectedFee == 0 || fill.FeeAsset == state.configuredQuoteAsset
 }
 
 func expectedCDFQuoteRequirement(price, quantity, basePrecision, makerFeeBps int64) (int64, bool) {
@@ -3275,8 +3286,12 @@ func (r *CDFLiquidityRunAudit) processBookEvent(event Event, states map[cdfParti
 			return
 		}
 		var fill cdfOrderFillEvidence
-		if err := decodeRequiredJSON(event.Raw(), &fill, "order_id", "trade_id", "side", "price", "qty", "filled_qty", "remaining_qty", "is_full"); err != nil {
+		if err := decodeRequiredJSON(event.Raw(), &fill, "order_id", "trade_id", "side", "price", "qty", "filled_qty", "remaining_qty", "is_full", "fee_amount", "fee_asset"); err != nil {
 			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: state.Role, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "malformed supplier order fill: " + err.Error()})
+			return
+		}
+		if !cdfOrderFillFeeMatches(fill, state) {
+			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: state.Role, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "supplier order fill fee does not match registered maker-fee schedule"})
 			return
 		}
 		orderKey := cdfOrderKey{VenueID: event.VenueID, ClientID: event.ClientID, OrderID: fill.OrderID}

@@ -41,7 +41,8 @@ type RunnerConfig struct {
 	// only through the runner-owned deterministic courier.
 	DeterministicPhases bool
 
-	// PhaseMaxRounds bounds same-timestamp reaction chains. Zero defaults to
+	// PhaseMaxRounds bounds the cumulative same-timestamp reaction chain,
+	// including re-entry from scheduler timestamp hooks. Zero defaults to
 	// 100,000. Reaching it is a model error, never a silently truncated run.
 	PhaseMaxRounds int
 }
@@ -76,6 +77,12 @@ type deterministicPhasePendingReporter interface {
 	DeterministicPhasePending() bool
 }
 
+type deterministicPhaseBudget struct {
+	timestamp   int64
+	rounds      int
+	initialized bool
+}
+
 func deterministicPhaseParticipantPending(component any) bool {
 	reporter, ok := component.(deterministicPhasePendingReporter)
 	if !ok {
@@ -97,6 +104,7 @@ type Runner struct {
 	// phasesPrepared marks that deterministic phases are live, so anything
 	// registered afterwards is brought into them immediately.
 	phasesPrepared bool
+	phaseBudget    deterministicPhaseBudget
 }
 
 func NewRunner(clock Clock, config RunnerConfig) *Runner {
@@ -318,6 +326,18 @@ func (r *Runner) deterministicPhaseWorkPending() bool {
 	return false
 }
 
+func (r *Runner) consumeDeterministicPhaseRound(limit int) error {
+	timestamp := r.clock.NowUnixNano()
+	if !r.phaseBudget.initialized || r.phaseBudget.timestamp != timestamp {
+		r.phaseBudget = deterministicPhaseBudget{timestamp: timestamp, initialized: true}
+	}
+	if r.phaseBudget.rounds >= limit {
+		return fmt.Errorf("simulation: deterministic phase exceeded %d same-timestamp rounds at %d", limit, timestamp)
+	}
+	r.phaseBudget.rounds++
+	return nil
+}
+
 // phaseIdleConfirmations is how many consecutive rounds of no progress with
 // work still queued are required before the runner calls it a deadlock.
 const phaseIdleConfirmations = 64
@@ -335,8 +355,14 @@ func (r *Runner) drainDeterministicPhases(ctx context.Context) error {
 	noProgressRounds := 0
 	activeMounts := make([]bool, len(r.mounts))
 	activeActors := make([]bool, len(r.actors))
-	for round := 0; round < limit; round++ {
+	for {
 		if err := r.deterministicPhaseError(); err != nil {
+			return err
+		}
+		if !r.deterministicPhaseWorkPending() {
+			return nil
+		}
+		if err := r.consumeDeterministicPhaseRound(limit); err != nil {
 			return err
 		}
 
@@ -404,11 +430,11 @@ func (r *Runner) drainDeterministicPhases(ctx context.Context) error {
 			return nil
 		}
 	}
-	return fmt.Errorf("simulation: deterministic phase exceeded %d same-timestamp rounds", limit)
 }
 
 func (r *Runner) runDeterministicPhases(ctx context.Context) error {
 	advanceable := r.clock.(Advanceable)
+	r.phaseBudget = deterministicPhaseBudget{timestamp: r.clock.NowUnixNano(), initialized: true}
 	if err := r.drainDeterministicPhases(ctx); err != nil {
 		return err
 	}

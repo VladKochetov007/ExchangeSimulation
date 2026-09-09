@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -293,6 +294,49 @@ func TestDeterministicRunnerCompletesEndpointEventPhaseChain(t *testing.T) {
 	}
 	if got, want := phaseActor.events, []string{"endpoint-phase", "endpoint-follow-up"}; !equalStrings(got, want) {
 		t.Fatalf("endpoint phase events = %v, want %v", got, want)
+	}
+}
+
+type recursiveTimestampPhaseActor struct {
+	*actor.BaseActor
+	clock     *SimulatedClock
+	scheduler *EventScheduler
+	queue     chan struct{}
+	remaining int
+}
+
+func (a *recursiveTimestampPhaseActor) HandleEvent(context.Context, *actor.Event) {}
+
+func (a *recursiveTimestampPhaseActor) PumpDeterministicPhase(ctx context.Context) bool {
+	select {
+	case <-a.queue:
+		if a.remaining > 0 {
+			a.remaining--
+			a.scheduler.Schedule(a.clock.NowUnixNano(), func() { a.queue <- struct{}{} })
+		}
+		return true
+	default:
+		return a.BaseActor.PumpDeterministicPhase(ctx)
+	}
+}
+
+func TestDeterministicPhaseBudgetSpansSchedulerHookReentry(t *testing.T) {
+	clock := NewSimulatedClock(0)
+	scheduler := NewEventScheduler(clock)
+	clock.SetScheduler(scheduler)
+	phaseActor := &recursiveTimestampPhaseActor{
+		BaseActor: actor.NewBaseActor(1, exchange.NewClientGateway(1)),
+		clock:     clock, scheduler: scheduler, queue: make(chan struct{}, 1), remaining: 1,
+	}
+	phaseActor.SetHandler(phaseActor)
+	phaseActor.SetDeterministicPhasePending(func() bool { return len(phaseActor.queue) != 0 })
+	scheduler.Schedule(int64(time.Second), func() { phaseActor.queue <- struct{}{} })
+	runner := NewRunner(clock, RunnerConfig{
+		Iterations: 1, Step: time.Second, DeterministicPhases: true, PhaseMaxRounds: 1,
+	})
+	runner.AddActor(phaseActor)
+	if err := runner.Run(context.Background()); err == nil || !strings.Contains(err.Error(), "same-timestamp rounds") {
+		t.Fatalf("same-timestamp recursive phase error = %v, want aggregate budget failure", err)
 	}
 }
 
