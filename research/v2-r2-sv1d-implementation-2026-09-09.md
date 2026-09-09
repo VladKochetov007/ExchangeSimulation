@@ -95,7 +95,8 @@ candidate authorizes a full campaign, freeze, or holdout execution.
 The clean full repository test was run with `go test -timeout=30m ./...` under
 `GOMAXPROCS=2` and `GOMEMLIMIT=8GiB`. All Go packages, including the long
 fresh-process multivenue suite, passed; the first run failed only because a
-repository-path hygiene test found a literal `/tmp` in the config checker.
+repository-path hygiene test found a literal system-temporary path in the
+config checker.
 That non-scientific issue was removed in commit `b729a9f`, and its focused
 regression passes.
 
