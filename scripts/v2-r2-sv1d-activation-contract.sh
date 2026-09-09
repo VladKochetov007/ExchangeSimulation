@@ -1,0 +1,480 @@
+#!/usr/bin/env bash
+# SV1D is an activation-only successor namespace. It reuses historical
+# evidence primitives but owns its candidate, configs, review identity, and
+# output root so a failed successor cannot rewrite an earlier result.
+set -euo pipefail
+
+source "$root_dir/scripts/v2-r2-sv1-24h-contract.sh"
+
+v2_r2_output_root="/home/vlad/v2-r2-sv1d-activation-development-v1"
+v2_r2_attestation_root="/home/vlad/v2-r2-sv1d-activation-development-v1-attestations"
+v2_r2_namespace_lock_path="/home/vlad/v2-r2-sv1d-activation-development-v1.lock"
+v2_r2_sv1_candidate_id="V2-R2-SV1D-ONE-SIDED-ELASTIC-LIQUIDITY"
+v2_r2_sv1_require_candidate_metadata=true
+v2_r2_sv1_require_generator_metadata=true
+v2_r2_sv1_candidate_contract_version="v2-r2-sv1d-activation-candidate-v1"
+v2_r2_sv1_generator_path="scripts/render-v2-r2-sv1d-activation-configs.sh"
+v2_r2_sv1_contract_path="scripts/v2-r2-sv1d-activation-contract.sh"
+v2_r2_sv1_contract_loader_path="scripts/v2-r2-sv1-contract-loader.sh"
+v2_r2_sv1_config_normalizer_path="bin/multivenue"
+v2_r2_sv1_config_normalizer_package="exchange_sim/cmd/multivenue"
+v2_r2_sv1_config_normalizer_registration_path=""
+v2_r2_sv1_contract_dependency_paths=(
+	scripts/v2-r2-sv1-24h-contract.sh
+	scripts/v2-integrated-longrun-r2-contract.sh
+	scripts/v2-r2-sv1-terminal-outcome.jq
+	scripts/v2-r2-sv1-activation-status.sh
+)
+v2_r2_sv1_preregistration_path="research/v2-r2-sv1d-one-sided-elastic-successor-preregistration-2026-09-09.md"
+v2_r2_sv1_implementation_path="research/v2-r2-sv1d-implementation-2026-09-09.md"
+v2_r2_sv1_scorer_contract="v2-r2-sv1d-activation-scorer-v1"
+v2_r2_sv1_survival_contract="v2-r2-sv1d-activation-survival-v1"
+v2_r2_sv1_paired_effect_contract="v2-r2-sv1d-activation-paired-effect-v1"
+v2_r2_sv1_parity_contract="v2-r2-sv1d-activation-parity-v1"
+v2_r2_sv1_predecessor_id="V2-R2-SV1C-STRICT-RISK-CDF-LIQUIDITY"
+v2_r2_sv1_runner_contract="v2-r2-sv1d-activation-runner-v1"
+v2_r2_sv1_require_terminal_outcome=true
+v2_r2_sv1_completion_sentinels='["greeks.json", "latency.json", "terminal-outcome.json"]'
+v2_r2_sv1_require_positive_loss_budget=true
+v2_r2_sv1_require_no_replacement_withdrawal=false
+v2_r2_sv1_experiment_prefix="v2-r2-sv1d-activation"
+v2_r2_sv1_config_provenance_contract="v2-r2-sv1d-activation-config-provenance-v1"
+v2_r2_sv1_config_dir="$root_dir/research/configs/v2-r2-sv1d-activation"
+v2_r2_sv1_config_provenance_manifest="$root_dir/research/v2-r2-sv1d-activation-config-provenance.json"
+v2_r2_sv1_seeds=(659)
+v2_r2_sv1_parity_seed=659
+v2_r2_sv1_source_config_names=(activation-643.json activation-643-control.json)
+v2_r2_sv1_activation_config="$root_dir/research/configs/v2-r2-sv1d-activation/activation-659-treatment.json"
+v2_r2_sv1_activation_control_config="$root_dir/research/configs/v2-r2-sv1d-activation/activation-659-mode-off.json"
+v2_r2_sv1_activation_no_roster_config="$root_dir/research/configs/v2-r2-sv1d-activation/activation-659-no-roster.json"
+v2_r2_sv1_activation_seed=659
+v2_r2_sv1_run_hypothesis_id="V2-R2-SV1D-ONE-SIDED-ELASTIC-LIQUIDITY"
+v2_r2_sv1_activation_hypothesis_prefix="V2-R2-SV1D-ONE-SIDED-ELASTIC-LIQUIDITY"
+v2_r2_sv1_activation_contract="v2-r2-sv1d-activation-provenance-v1"
+v2_r2_sv1_activation_pair_contract="v2-r2-sv1d-activation-tri-arm-v1"
+v2_r2_sv1_activation_arm_status_contract="v2-r2-sv1d-activation-arm-status-v1"
+v2_r2_sv1_activation_horizon="5m"
+v2_r2_sv1_activation_simulation_start_nano=1735689600000000000
+v2_r2_sv1_activation_simulation_end_nano=1735689900000000000
+v2_r2_sv1_activation_evidence_format="evstream_v3"
+v2_r2_sv1_activation_log_mode="full"
+v2_r2_sv1_activation_output_prefix="v2-r2-sv1d-activation"
+v2_r2_sv1_review_contract="v2-r2-sv1d-independent-review-v1"
+v2_r2_sv1_activation_review_contract="v2-r2-sv1d-activation-review-v1"
+v2_r2_sv1_config_checker_path="scripts/check-v2-r2-sv1d-activation-configs.sh"
+v2_r2_sv1_config_contract_test_path="scripts/test-v2-r2-sv1d-activation-config-contract.sh"
+v2_r2_sv1_activation_runner_path="scripts/run-v2-r2-sv1d-activation-probe.sh"
+v2_r2_sv1_activation_scorer_path="scripts/score-v2-r2-sv1d-activation.sh"
+v2_r2_sv1_terminal_outcome_path="scripts/v2-r2-sv1-terminal-outcome.jq"
+v2_r2_sv1_cpu_limit_percent=90
+v2_r2_sv1_review_scope='["r2_calendar", "correctness_hardening", "binary_evidence", "cdf_supplier", "one_sided_local_book", "activation_protocol", "tri_arm_controls", "provenance_binding", "historical_boundary"]'
+v2_r2_sv1_activation_review_scope='["activation_evidence", "cdf_activation", "one_sided_local_book", "tri_arm_controls", "binary_evidence", "resource_guards", "provenance_binding", "historical_boundary"]'
+v2_r2_sv1_activation_gomaxprocs=2
+v2_r2_sv1_activation_memory_limit_bytes=$((20 * 1024 * 1024 * 1024))
+v2_r2_sv1_activation_gomemlimit_bytes=$((18 * 1024 * 1024 * 1024))
+v2_r2_sv1_activation_minimum_free_bytes=$((4 * 1024 * 1024 * 1024))
+v2_r2_sv1_activation_minimum_memory_available_bytes=$((4 * 1024 * 1024 * 1024))
+v2_r2_sv1_activation_max_wall_seconds=900
+v2_r2_sv1_activation_analyzer_max_wall_seconds=300
+
+v2_r2_sv1d_calendar='[{"name":"short","listing_interval_nano":3600000000000,"time_to_expiry_nano":7200000000000},{"name":"medium","listing_interval_nano":10800000000000,"time_to_expiry_nano":21600000000000},{"name":"long","listing_interval_nano":21600000000000,"time_to_expiry_nano":43200000000000}]'
+v2_r2_sv1d_arm_names=(treatment mode-off no-roster)
+
+v2_r2_is_successor_candidate() {
+	[[ "${v2_r2_sv1_candidate_id:-}" == "V2-R2-SV1D-ONE-SIDED-ELASTIC-LIQUIDITY" ]]
+}
+
+v2_r2_require_known_candidate() {
+	v2_r2_is_successor_candidate
+}
+
+v2_r2_is_go_127() {
+	[[ "$1" == "go1.27.0" ]]
+}
+
+v2_r2_sv1d_config_for_arm() {
+	[[ $# -eq 1 ]] || return 1
+	case "$1" in
+		treatment) printf '%s\n' "$v2_r2_sv1_activation_config" ;;
+		mode-off) printf '%s\n' "$v2_r2_sv1_activation_control_config" ;;
+		no-roster) printf '%s\n' "$v2_r2_sv1_activation_no_roster_config" ;;
+		*) return 1 ;;
+	esac
+}
+
+v2_r2_sv1d_arm_mode() {
+	case "$1" in
+		treatment) printf 'one_sided\n' ;;
+		mode-off) printf 'two_sided_only\n' ;;
+		no-roster) printf 'no_roster\n' ;;
+		*) return 1 ;;
+	esac
+}
+
+v2_r2_sv1d_review_attestation_path() {
+	local revision=${1:-$(git -C "$root_dir" rev-parse HEAD)}
+	[[ "$revision" =~ ^[0-9a-f]{40}$ ]] || return 1
+	printf '%s\n' "${V2_R2_SV1D_REVIEW_ATTESTATION:-/home/vlad/external-scratch/v2-r2-sv1d-review-${revision}/review-attestation.json}"
+}
+
+v2_r2_sv1d_activation_review_attestation_path() {
+	local revision=${1:-$(git -C "$root_dir" rev-parse HEAD)}
+	[[ "$revision" =~ ^[0-9a-f]{40}$ ]] || return 1
+	printf '%s\n' "${V2_R2_SV1D_ACTIVATION_REVIEW_ATTESTATION:-/home/vlad/external-scratch/v2-r2-sv1d-activation-review-${v2_r2_sv1_activation_seed}-${revision}/review-attestation.json}"
+}
+
+v2_r2_sv1d_cpu_policy() {
+	local host_cpu_count allowed_cpu_count
+	host_cpu_count=$(nproc --all) || return 1
+	[[ "$host_cpu_count" =~ ^[1-9][0-9]*$ ]] || return 1
+	allowed_cpu_count=$((host_cpu_count * v2_r2_sv1_cpu_limit_percent / 100))
+	(( allowed_cpu_count > 0 )) || allowed_cpu_count=1
+	printf '%s\t%s\t0-%s\n' "$host_cpu_count" "$allowed_cpu_count" "$((allowed_cpu_count - 1))"
+}
+
+v2_r2_sv1d_sha256_file() {
+	[[ $# -eq 1 && -f "$1" && ! -L "$1" ]] || return 1
+	sha256sum -- "$1" | awk '$1 ~ /^[0-9a-f]{64}$/ {print $1; found=1} END {if (!found) exit 1}'
+}
+
+v2_r2_sv1d_binary_metadata_value() {
+	[[ $# -eq 2 ]] || return 1
+	local metadata=$1 key=$2
+	awk -v key="$key" '
+		BEGIN { prefix = key "="; count = 0; value = "" }
+		$1 == "build" && index($2, prefix) == 1 { count++; value = substr($2, length(prefix) + 1) }
+		END { if (count != 1 || value == "") exit 1; print value }' <<<"$metadata"
+}
+
+v2_r2_sv1d_require_pinned_binary() {
+	[[ $# -eq 4 ]] || return 1
+	local binary=$1 expected_revision=$2 expected_sha256=$3 expected_package=$4 metadata
+	[[ "$binary" == /* && "$binary" != */ && "$expected_revision" =~ ^[0-9a-f]{40}$ && "$expected_sha256" =~ ^[0-9a-f]{64}$ ]] || return 1
+	[[ -x "$binary" && ! -L "$binary" && "$(realpath -e -- "$binary")" == "$binary" ]] || return 1
+	metadata=$(go version -m -- "$binary") || return 1
+	local go_version package_path module_path buildmode compiler trimpath cgo_enabled goos goarch goamd64 vcs vcs_revision vcs_modified
+	go_version=$(sed -n '1s/.*: //p' <<<"$metadata") || return 1
+	package_path=$(awk '$1 == "path" {count++; value=$2} END {if (count != 1 || value == "") exit 1; print value}' <<<"$metadata") || return 1
+	module_path=$(awk '$1 == "mod" {count++; value=$2} END {if (count != 1 || value == "") exit 1; print value}' <<<"$metadata") || return 1
+	buildmode=$(v2_r2_sv1d_binary_metadata_value "$metadata" "-buildmode") || return 1
+	compiler=$(v2_r2_sv1d_binary_metadata_value "$metadata" "-compiler") || return 1
+	trimpath=$(v2_r2_sv1d_binary_metadata_value "$metadata" "-trimpath") || return 1
+	cgo_enabled=$(v2_r2_sv1d_binary_metadata_value "$metadata" "CGO_ENABLED") || return 1
+	goos=$(v2_r2_sv1d_binary_metadata_value "$metadata" "GOOS") || return 1
+	goarch=$(v2_r2_sv1d_binary_metadata_value "$metadata" "GOARCH") || return 1
+	goamd64=$(v2_r2_sv1d_binary_metadata_value "$metadata" "GOAMD64") || return 1
+	vcs=$(v2_r2_sv1d_binary_metadata_value "$metadata" "vcs") || return 1
+	vcs_revision=$(v2_r2_sv1d_binary_metadata_value "$metadata" "vcs.revision") || return 1
+	vcs_modified=$(v2_r2_sv1d_binary_metadata_value "$metadata" "vcs.modified") || return 1
+	[[ "$go_version" == "go1.27.0" && "$package_path" == "$expected_package" && "$module_path" == "exchange_sim" &&
+		"$buildmode" == "exe" && "$compiler" == "gc" && "$trimpath" == "true" && "$cgo_enabled" == "0" &&
+		"$goos" == "linux" && "$goarch" == "amd64" && "$goamd64" == "v1" && "$vcs" == "git" &&
+		"$vcs_revision" == "$expected_revision" && "$vcs_modified" == "false" ]] || return 1
+	[[ "$(v2_r2_sv1d_sha256_file "$binary")" == "$expected_sha256" ]]
+}
+
+v2_r2_sv1d_git_tree_sha256() {
+	[[ $# -eq 1 && "$1" =~ ^[0-9a-f]{40}$ ]] || return 1
+	git -C "$root_dir" ls-tree -r --full-tree "$1" | sha256sum | awk '{print $1}'
+}
+
+v2_r2_sv1b_cpu_policy() { v2_r2_sv1d_cpu_policy "$@"; }
+v2_r2_sv1b_require_pinned_binary() { v2_r2_sv1d_require_pinned_binary "$@"; }
+v2_r2_sv1b_git_tree_sha256() { v2_r2_sv1d_git_tree_sha256 "$@"; }
+v2_r2_sv1b_review_attestation_path() { v2_r2_sv1d_review_attestation_path "$@"; }
+
+v2_r2_require_sv1b_review_attestation() {
+	[[ $# -eq 2 ]] || return 1
+	local review_path=$1 expected_revision=$2 expected_tree report_path report_sha actual_report_sha
+	[[ -f "$review_path" && ! -L "$review_path" && "$expected_revision" =~ ^[0-9a-f]{40}$ ]] || return 1
+	v2_r2_require_single_json_object "$review_path" || return 1
+	expected_tree=$(v2_r2_sv1d_git_tree_sha256 "$expected_revision") || return 1
+	[[ "$(jq -er '.reviewed_tree_sha256' "$review_path")" == "$expected_tree" ]] || return 1
+	report_path=$(jq -er '.review_report_path | select(type == "string" and length > 0)' "$review_path") || return 1
+	report_sha=$(jq -er '.review_report_sha256 | select(type == "string" and test("^[0-9a-f]{64}$"))' "$review_path") || return 1
+	[[ "$report_path" == /* && "$report_path" != "$root_dir"/* && -f "$report_path" && ! -L "$report_path" ]] || return 1
+	actual_report_sha=$(v2_r2_sv1d_sha256_file "$report_path") || return 1
+	[[ "$actual_report_sha" == "$report_sha" ]] || return 1
+	jq -e --arg contract "$v2_r2_sv1_review_contract" --arg revision "$expected_revision" --arg tree "$expected_tree" --arg report_sha "$report_sha" --argjson required_scope "$v2_r2_sv1_review_scope" '
+		type == "object" and .schema_version == 1 and .contract == $contract and
+		.reviewed_revision == $revision and .reviewed_tree_sha256 == $tree and
+		.review_type == "independent_sol_xhigh" and .verdict == "ACCEPTED_FOR_ACTIVATION" and
+		.reviewed_worktree_clean == true and .holdouts_consumed == false and
+		(.reviewer | type == "string" and length > 0) and (.reviewed_scope | type == "array") and
+		(($required_scope - .reviewed_scope) | length == 0) and .review_report_sha256 == $report_sha' "$review_path" >/dev/null
+}
+
+# The activation runner and scorer use the same closed artifact set. Keeping
+# this predicate in the candidate contract prevents a producer and consumer
+# from silently drifting on terminal-failure or receipt-file semantics.
+v2_r2_sv1d_expected_arm_root_files() {
+	printf '%s\n' \
+		run-config.json run-metadata.json run-status.json manifest.json greeks.json latency.json checkpoints.jsonl \
+		events.evs binary-evidence-attestation.json evidence-manifest.json evidence-only-artifact-hash.json terminal-outcome.json \
+		market-data-evidence-v2.json market-data-schedules-v2.bin market-data-receipts-v2.bin \
+		market-data-decisions-v2.bin market-data-actions-v2.bin simulator.stdout.log simulator.stderr.log | LC_ALL=C sort
+}
+
+v2_r2_sv1d_require_json_objects() {
+	[[ $# -ge 1 ]] || return 1
+	local arm_dir=$1 relative
+	shift
+	for relative in "$@"; do
+		v2_r2_require_single_json_object "$arm_dir/$relative" || return 1
+	done
+}
+
+v2_r2_sv1d_require_activation_arm_artifacts() {
+	[[ $# -eq 5 ]] || return 1
+	local arm_dir=$1 arm_name=$2 expected_revision=$3 expected_config_sha256=$4 expected_binary_sha256=$5
+	local expected_config expected_venue_ids expected_experiment expected_hypothesis expected_root_files actual_root_files
+	local expected_outcome terminal_outcome_status status_field file_path expected_hash actual_hash
+	[[ "$arm_name" == treatment || "$arm_name" == mode-off || "$arm_name" == no-roster ]] || return 1
+	[[ "$arm_dir" == /* && "$arm_dir" != */ && "$arm_dir" != *$'\n'* && "$arm_dir" != *$'\t'* ]] || return 1
+	[[ "$expected_revision" =~ ^[0-9a-f]{40}$ && "$expected_config_sha256" =~ ^[0-9a-f]{64}$ && "$expected_binary_sha256" =~ ^[0-9a-f]{64}$ ]] || return 1
+	[[ -d "$arm_dir" && ! -L "$arm_dir" && "$(realpath -e -- "$arm_dir")" == "$arm_dir" ]] || return 1
+	if find "$arm_dir" -type l -print -quit 2>/dev/null | grep -q .; then
+		return 1
+	fi
+	expected_config=$(realpath -e -- "$(v2_r2_sv1d_config_for_arm "$arm_name")") || return 1
+	expected_venue_ids=$(jq -ce '.venue_ids | select(type == "array" and length > 0)' "$expected_config") || return 1
+	expected_experiment=$(jq -er '.experiment_id | select(type == "string" and length > 0)' "$expected_config") || return 1
+	expected_hypothesis=$(jq -er '.hypothesis_id | select(type == "string" and length > 0)' "$expected_config") || return 1
+	[[ -f "$arm_dir/run-config.json" && ! -L "$arm_dir/run-config.json" &&
+		"$(v2_r2_sv1d_sha256_file "$arm_dir/run-config.json")" == "$expected_config_sha256" ]] || return 1
+	v2_r2_sv1d_require_json_objects "$arm_dir" \
+		run-config.json run-metadata.json run-status.json manifest.json greeks.json latency.json \
+		binary-evidence-attestation.json evidence-manifest.json evidence-only-artifact-hash.json terminal-outcome.json market-data-evidence-v2.json || return 1
+	expected_root_files=$(v2_r2_sv1d_expected_arm_root_files)
+	actual_root_files=$(find "$arm_dir" -mindepth 1 -maxdepth 1 -type f -printf '%f\n' | LC_ALL=C sort)
+	[[ "$actual_root_files" == "$expected_root_files" ]] || return 1
+	while IFS= read -r file_path; do
+		[[ -f "$arm_dir/$file_path" && ! -L "$arm_dir/$file_path" ]] || return 1
+		if [[ "$file_path" != market-data-*.bin && "$file_path" != simulator.stdout.log && "$file_path" != simulator.stderr.log ]]; then
+			[[ -s "$arm_dir/$file_path" ]] || return 1
+		fi
+	done < <(v2_r2_sv1d_expected_arm_root_files)
+	v2_r2_verify_evidence_manifest "$arm_dir" || return 1
+	jq -e --arg revision "$expected_revision" --argjson seed "$v2_r2_sv1_activation_seed" \
+		--argjson venue_ids "$expected_venue_ids" --arg experiment "$expected_experiment" --arg hypothesis "$expected_hypothesis" \
+		--arg evidence_format "$v2_r2_sv1_activation_evidence_format" --arg log_mode "$v2_r2_sv1_activation_log_mode" \
+		--arg contract "$v2_r2_sv1_activation_contract" --arg arm "$arm_name" --arg mode "$(v2_r2_sv1d_arm_mode "$arm_name")" \
+		--arg cell "${v2_r2_sv1_activation_output_prefix}-${v2_r2_sv1_activation_seed}-${arm_name}" \
+		--argjson start "$v2_r2_sv1_activation_simulation_start_nano" --argjson end "$v2_r2_sv1_activation_simulation_end_nano" \
+		--arg expected_config_sha256 "$expected_config_sha256" --arg expected_binary_sha256 "$expected_binary_sha256" '
+		type == "object" and .schema_version == 1 and .contract == $contract and .arm == $arm and .mode == $mode and
+			.cell == $cell and .seed == $seed and .simulated_horizon == "5m" and
+			.simulation_start_nano == $start and .simulation_end_nano == $end and
+			.config_sha256 == $expected_config_sha256 and .binary_sha256 == $expected_binary_sha256 and
+			.git_revision == $revision and .config_experiment_id == $experiment and .hypothesis_id == $hypothesis and
+			.evidence_format == $evidence_format and .log_mode == $log_mode and .venue_ids == $venue_ids and
+			.binary_go_version == "go1.27.0" and .binary_goos == "linux" and .binary_goarch == "amd64" and .binary_goamd64 == "v1" and
+			(.binary_path | type == "string" and startswith("/")) and
+			(.checkpoint_validator_path | type == "string" and startswith("/")) and
+			(.checkpoint_validator_revision == $revision) and
+			(.checkpoint_validator_sha256 | type == "string" and test("^[0-9a-f]{64}$")) and
+			(.review_attestation_path | type == "string" and startswith("/")) and
+			(.review_attestation_sha256 | type == "string" and test("^[0-9a-f]{64}$")) and
+			.resource_policy.gomaxprocs == 2 and .resource_policy.memory_limit_bytes == (20 * 1024 * 1024 * 1024) and
+			.resource_policy.gomemlimit_bytes == (18 * 1024 * 1024 * 1024) and .resource_policy.cpu_limit_percent == 90 and
+			.resource_policy.minimum_free_bytes == (4 * 1024 * 1024 * 1024) and
+			.resource_policy.minimum_memory_available_bytes == (4 * 1024 * 1024 * 1024) and
+			.resource_policy.max_wall_seconds == 900 and .resource_policy.analyzer_max_wall_seconds == 300 and
+			(.command == ["multivenue", "-config", "run-config.json", "-duration", "5m", "-logdir", ".", "-log-mode", $log_mode, "-evidence-format", $evidence_format])' \
+		"$arm_dir/run-metadata.json" >/dev/null || return 1
+	jq -e --arg revision "$expected_revision" --argjson seed "$v2_r2_sv1_activation_seed" \
+		--argjson venue_ids "$expected_venue_ids" --arg experiment "$expected_experiment" --arg hypothesis "$expected_hypothesis" \
+		--arg evidence_format "$v2_r2_sv1_activation_evidence_format" --arg log_mode "$v2_r2_sv1_activation_log_mode" \
+		'.schema_version == 2 and .build.revision == $revision and .build.modified == false and
+		 .build.goos == "linux" and .build.goarch == "amd64" and .build.goamd64 == "v1" and
+		 .venue_ids == $venue_ids and .config.seed == $seed and .config.experiment_id == $experiment and
+		 .config.hypothesis_id == $hypothesis and .config.log_mode == $log_mode and
+		 .config.evidence_format == $evidence_format and .config.record_market_data_receipts == true and
+		 .config.strict_risk_contract == true and .config.auto_borrow_spot == false and
+		 .config.cross_asset_spot_graph == true and .config.cross_asset_collateral_marks == false' \
+		"$arm_dir/manifest.json" >/dev/null || return 1
+	[[ "$(jq -cS '.' "$arm_dir/run-config.json")" == "$(jq -cS '.config' "$arm_dir/manifest.json")" ]] || return 1
+	jq -e --argjson start "$v2_r2_sv1_activation_simulation_start_nano" --argjson end "$v2_r2_sv1_activation_simulation_end_nano" \
+		-f "$root_dir/scripts/v2-r2-sv1-terminal-outcome.jq" "$arm_dir/terminal-outcome.json" >/dev/null || return 1
+	terminal_outcome_status=$(jq -er '.status' "$arm_dir/terminal-outcome.json") || return 1
+	case "$terminal_outcome_status" in
+		completed) expected_outcome=completed ;;
+		terminal_failure) expected_outcome=terminal_failure ;;
+		*) return 1 ;;
+	esac
+	if [[ "$expected_outcome" == completed ]]; then
+		jq -e --arg arm "$arm_name" --arg contract "$v2_r2_sv1_activation_arm_status_contract" '
+			.schema_version == 2 and .contract == $contract and .arm == $arm and .exit_status == 0 and
+			.completion_verified == true and .terminal_failure_verified == false and
+			.terminal_outcome_status == "completed" and .resource_guard_failed == false and
+			(.wall_clock_seconds | type == "number" and floor == . and . <= 900)' \
+			"$arm_dir/run-status.json" >/dev/null || return 1
+		v2_r2_terminal_completed_outcome_present "$arm_dir" || return 1
+	else
+		jq -e --arg arm "$arm_name" --arg contract "$v2_r2_sv1_activation_arm_status_contract" '
+			.schema_version == 2 and .contract == $contract and .arm == $arm and
+			(.exit_status | type == "number" and floor == . and . > 0 and . <= 255) and
+			.completion_verified == false and .terminal_failure_verified == true and
+			.terminal_outcome_status == "terminal_failure" and .resource_guard_failed == false and
+			(.wall_clock_seconds | type == "number" and floor == . and . <= 900)' \
+			"$arm_dir/run-status.json" >/dev/null || return 1
+		v2_r2_terminal_failure_outcome_present "$arm_dir" || return 1
+	fi
+	while IFS=$'\t' read -r status_field file_path; do
+		expected_hash=$(jq -er --arg field "$status_field" '.[$field] | select(type == "string" and test("^[0-9a-f]{64}$"))' "$arm_dir/run-status.json") || return 1
+		actual_hash=$(v2_r2_sv1d_sha256_file "$arm_dir/$file_path") || return 1
+		[[ "$actual_hash" == "$expected_hash" ]] || return 1
+	done < <(printf '%s\n' \
+		$'terminal_outcome_sha256\tterminal-outcome.json' \
+		$'run_metadata_sha256\trun-metadata.json' \
+		$'manifest_sha256\tmanifest.json' \
+		$'greeks_sha256\tgreeks.json' \
+		$'latency_sha256\tlatency.json' \
+		$'checkpoints_sha256\tcheckpoints.jsonl' \
+		$'binary_attestation_sha256\tbinary-evidence-attestation.json' \
+		$'evidence_manifest_sha256\tevidence-manifest.json' \
+		$'simulator_stdout_sha256\tsimulator.stdout.log' \
+		$'simulator_stderr_sha256\tsimulator.stderr.log')
+	v2_r2_require_binary_checkpoint_stream_exact "$arm_dir/checkpoints.jsonl" \
+		"$v2_r2_sv1_activation_simulation_start_nano" "$v2_r2_sv1_activation_simulation_end_nano" \
+		"$arm_dir/binary-evidence-attestation.json" || return 1
+	jq -e '
+		type == "object" and .domain == "canonical_binary_execution_frames" and .ordering == "ordered_stream" and
+		.hashing == "route_and_global_sequence_neutral_v2" and (.event_frames | type) == "number" and
+		(.event_frames | floor) == .event_frames and .event_frames > 0 and (.stream_frames | type) == "number" and
+		(.stream_frames | floor) == .stream_frames and .stream_frames >= .event_frames and
+		(.execution_stream_hash | type) == "string" and (.execution_stream_hash | test("^[0-9a-f]{64}$")) and
+		(.canonical_execution_stream_hash | type) == "string" and (.canonical_execution_stream_hash | test("^[0-9a-f]{64}$")) and
+		(.persisted_event_records | type) == "number" and (.persisted_event_records | floor) == .persisted_event_records and
+		.persisted_event_records >= 0 and (.final_global_sequence | type) == "number" and
+		(.final_global_sequence | floor) == .final_global_sequence and .final_global_sequence >= 0 and
+		.final_global_sequence == (.event_frames + .persisted_event_records) and
+		((.unencodable_payloads // 0) | type) == "number" and (((.unencodable_payloads // 0) | floor) == (.unencodable_payloads // 0)) and
+		((.unencodable_payloads // 0) == 0)' "$arm_dir/binary-evidence-attestation.json" >/dev/null || return 1
+}
+
+v2_r2_sv1d_require_no_roster_diagnostic() {
+	[[ $# -eq 3 ]] || return 1
+	local diagnostic_path=$1 arm_dir=$2 expected_config_sha256=$3
+	[[ "$diagnostic_path" == /* && "$diagnostic_path" != */ && ! -L "$diagnostic_path" && -f "$diagnostic_path" ]] || return 1
+	v2_r2_require_single_json_object "$diagnostic_path" || return 1
+	local status_sha256 terminal_sha256 metadata_sha256 manifest_sha256 attestation_sha256 evidence_manifest_sha256 stdout_sha256 stderr_sha256
+	status_sha256=$(v2_r2_sv1d_sha256_file "$arm_dir/run-status.json") || return 1
+	terminal_sha256=$(v2_r2_sv1d_sha256_file "$arm_dir/terminal-outcome.json") || return 1
+	metadata_sha256=$(v2_r2_sv1d_sha256_file "$arm_dir/run-metadata.json") || return 1
+	manifest_sha256=$(v2_r2_sv1d_sha256_file "$arm_dir/manifest.json") || return 1
+	attestation_sha256=$(v2_r2_sv1d_sha256_file "$arm_dir/binary-evidence-attestation.json") || return 1
+	evidence_manifest_sha256=$(v2_r2_sv1d_sha256_file "$arm_dir/evidence-manifest.json") || return 1
+	stdout_sha256=$(v2_r2_sv1d_sha256_file "$arm_dir/simulator.stdout.log") || return 1
+	stderr_sha256=$(v2_r2_sv1d_sha256_file "$arm_dir/simulator.stderr.log") || return 1
+	jq -e --arg contract "v2-r2-sv1d-no-roster-diagnostic-v1" --arg config_sha256 "$expected_config_sha256" \
+		--arg status_sha256 "$status_sha256" --arg terminal_sha256 "$terminal_sha256" --arg metadata_sha256 "$metadata_sha256" \
+		--arg manifest_sha256 "$manifest_sha256" --arg attestation_sha256 "$attestation_sha256" \
+		--arg evidence_manifest_sha256 "$evidence_manifest_sha256" --arg stdout_sha256 "$stdout_sha256" --arg stderr_sha256 "$stderr_sha256" \
+		--arg terminal_status "$(jq -er '.status' "$arm_dir/terminal-outcome.json")" \
+		' type == "object" and .schema_version == 1 and .contract == $contract and .arm == "no-roster" and
+			.config_sha256 == $config_sha256 and .run_status_sha256 == $status_sha256 and
+			.terminal_outcome_sha256 == $terminal_sha256 and .run_metadata_sha256 == $metadata_sha256 and
+			.manifest_sha256 == $manifest_sha256 and .binary_attestation_sha256 == $attestation_sha256 and
+			.evidence_manifest_sha256 == $evidence_manifest_sha256 and .simulator_stdout_sha256 == $stdout_sha256 and
+			.simulator_stderr_sha256 == $stderr_sha256 and .terminal_status == $terminal_status and
+			($terminal_status == "completed" or $terminal_status == "terminal_failure") and
+			.strict_population_accounting == true and .cdf_roster == false and .cdf_metrics == "out_of_scope" and
+			.status == "VALID_TOPOLOGY_CONTROL" and .holdouts_consumed == false' "$diagnostic_path" >/dev/null
+}
+
+v2_r2_sv1d_require_comparison_provenance() {
+	[[ $# -eq 3 ]] || return 1
+	local comparison_path=$1 expected_analyzer_sha256=$2 expected_revision=$3
+	[[ "$expected_analyzer_sha256" =~ ^[0-9a-f]{64}$ && "$expected_revision" =~ ^[0-9a-f]{40}$ ]] || return 1
+	v2_r2_require_single_json_object "$comparison_path" || return 1
+	jq -e --arg analyzer_sha256 "$expected_analyzer_sha256" --arg revision "$expected_revision" '
+		type == "object" and
+		(if .status == "UNAVAILABLE_TERMINAL_FAILURE" then
+			.provenance == null
+		 else
+			(.provenance | type) == "object" and .provenance.valid == true and
+			.provenance.analyzer_sha256 == $analyzer_sha256 and
+			.provenance.analyzer_source_revision == $revision and
+			.provenance.analyzer_source_modified == false and
+			.provenance.source_revision_mode == "pinned_live" and
+			(.provenance.treatment.source_revision == $revision) and
+			(.provenance.control.source_revision == $revision)
+		 end)' "$comparison_path" >/dev/null
+}
+
+# SV1D pairs a one-sided treatment with a same-roster mode-off control. The
+# historical comparison predicate intentionally requires a zero-roster
+# control, so using it here would silently reject the registered scientific
+# design. Keep this stricter mode-pair predicate beside the successor contract
+# and require both arms to be reconstructible before accepting an activation.
+v2_r2_sv1d_require_mode_pair_comparison() {
+	[[ $# -eq 2 ]] || return 1
+	local comparison_path=$1 expected_supplier_count=$2
+	v2_r2_require_single_json_object "$comparison_path" || return 1
+	[[ "$expected_supplier_count" =~ ^[1-9][0-9]*$ ]] || return 1
+	jq -e --argjson expected_supplier_count "$expected_supplier_count" '
+		def bounded_fraction:
+			type == "number" and isfinite and . >= 0 and . <= 1;
+		def supplier_contract:
+			.valid == true and .evidence_valid == true and .anti_cheating_satisfied == true and
+			.configured_max_position > 0 and .max_position <= .configured_max_position and
+			.min_position >= (-.configured_max_position) and
+			.configured_max_inventory > 0 and .max_gross_base_balance <= .configured_max_inventory and
+			(.max_inventory_utilization | bounded_fraction) and
+			.configured_max_quote_qty > 0 and .max_quote_qty <= .configured_max_quote_qty and
+			.max_borrowed == 0;
+		def evidence_run:
+			.valid == true and .evidence_valid == true and .anti_cheating_satisfied == true and
+			.supplier_count == $expected_supplier_count and
+			(.suppliers | type) == "array" and length == $expected_supplier_count and
+			(.venues | type) == "array" and length == 3 and
+			.supplier_removal_counterfactual_valid == true and
+			.supplier_removal_time_weighted_counterfactual_valid == true and
+			(.supplier_removal_snapshot_count | type) == "number" and
+			.supplier_removal_snapshot_count == .snapshot_count and
+			(.supplier_removal_observed_duration_ns | type) == "number" and .supplier_removal_observed_duration_ns > 0 and
+			(.supplier_volume_share | bounded_fraction) and .supplier_volume_share <= 0.75 and
+			(.supplier_depth_over_75_active_time_fraction | bounded_fraction) and .supplier_depth_over_75_active_time_fraction <= 0.5 and
+			(.supplier_bid_depth_over_75_active_time_fraction | bounded_fraction) and .supplier_bid_depth_over_75_active_time_fraction <= 0.5 and
+			(.supplier_ask_depth_over_75_active_time_fraction | bounded_fraction) and .supplier_ask_depth_over_75_active_time_fraction <= 0.5 and
+			(.supplier_bid_time_weighted_resting_depth_share | bounded_fraction) and .supplier_bid_time_weighted_resting_depth_share <= 0.75 and
+			(.supplier_ask_time_weighted_resting_depth_share | bounded_fraction) and .supplier_ask_time_weighted_resting_depth_share <= 0.75 and
+			(.supplier_only_bid_time_weighted_fraction | bounded_fraction) and .supplier_only_bid_time_weighted_fraction <= 0.5 and
+			(.supplier_only_ask_time_weighted_fraction | bounded_fraction) and .supplier_only_ask_time_weighted_fraction <= 0.5 and
+			(.supplier_removal_qualified_bid_absence_active_time_fraction | bounded_fraction) and .supplier_removal_qualified_bid_absence_active_time_fraction <= 0.5 and
+			(.supplier_removal_qualified_ask_absence_active_time_fraction | bounded_fraction) and .supplier_removal_qualified_ask_absence_active_time_fraction <= 0.5 and
+			all(.venues[];
+				.supplier_removal_counterfactual_valid == true and
+				.supplier_removal_time_weighted_counterfactual_valid == true and
+				(.supplier_removal_snapshot_count | type) == "number" and .supplier_removal_snapshot_count == .snapshot_count and
+				(.supplier_removal_observed_duration_ns | type) == "number" and .supplier_removal_observed_duration_ns > 0 and
+				(.supplier_depth_over_75_active_time_fraction | bounded_fraction) and .supplier_depth_over_75_active_time_fraction <= 0.5 and
+				(.supplier_bid_depth_over_75_active_time_fraction | bounded_fraction) and .supplier_bid_depth_over_75_active_time_fraction <= 0.5 and
+				(.supplier_ask_depth_over_75_active_time_fraction | bounded_fraction) and .supplier_ask_depth_over_75_active_time_fraction <= 0.5 and
+				(.supplier_bid_time_weighted_resting_depth_share | bounded_fraction) and .supplier_bid_time_weighted_resting_depth_share <= 0.75 and
+				(.supplier_ask_time_weighted_resting_depth_share | bounded_fraction) and .supplier_ask_time_weighted_resting_depth_share <= 0.75 and
+				(.supplier_only_bid_time_weighted_fraction | bounded_fraction) and .supplier_only_bid_time_weighted_fraction <= 0.5 and
+				(.supplier_only_ask_time_weighted_fraction | bounded_fraction) and .supplier_only_ask_time_weighted_fraction <= 0.5 and
+				(.supplier_removal_qualified_bid_absence_active_time_fraction | bounded_fraction) and .supplier_removal_qualified_bid_absence_active_time_fraction <= 0.5 and
+				(.supplier_removal_qualified_ask_absence_active_time_fraction | bounded_fraction) and .supplier_removal_qualified_ask_absence_active_time_fraction <= 0.5) and
+			all(.suppliers[]; supplier_contract);
+		def activated_run:
+			evidence_run and .activation_satisfied == true and
+			all(.suppliers[];
+				 supplier_contract and
+				.fill_caused_risk_transition == true and .fill_count > 0 and .trading_pnl != 0 and
+				.inventory_responsive_decision_count > 0 and
+				.max_inventory_utilization > 0);
+			(.provenance | type) == "object" and .provenance.valid == true and
+			.valid == true and .evidence_valid == true and .liquidation_evidence_valid == true and
+			(.treatment | activated_run) and
+			(.control | evidence_run) and
+			.treatment.one_sided_decision_count > 0 and
+			.treatment.one_sided_missing_side_accepted_count > 0 and
+			.treatment.one_sided_restoration_count > 0 and
+			.control.one_sided_decision_count == 0 and
+			.survival_effect_satisfied == true and .activation_satisfied == true and
+			.anti_cheating_satisfied == true
+	' "$comparison_path" >/dev/null
+}

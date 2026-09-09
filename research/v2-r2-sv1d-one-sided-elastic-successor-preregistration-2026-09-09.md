@@ -266,6 +266,31 @@ strictly reduced relative to the matched mode-off control, or any
 anti-cheating/kill criterion fires. A negative result is scientifically valid.
 No post-outcome threshold or roster selection may rescue it.
 
+The five-minute seed-659 activation probe has a deliberately asymmetric
+diagnostic reach. The registered roster starts each supplier with positive CDF
+inventory, so a short probe can exercise a bid-only public book and a
+missing-ask restoration, but it cannot be represented as a test of the
+ask-only/positive-inventory branch. At the configured `40,000,000,000` to
+`70,000,000,000` raw base-unit initial inventories (0.4 to 0.7 CDF at the
+registered `100,000,000` base precision) and `40,000,000` to `70,000,000` raw
+base-unit maximum quote quantities (0.4 to 0.7 CDF per order), exhausting a
+supplier's inventory would require approximately 1,000 full fills, well
+beyond the probe's bounded decision budget. Absence of an ask-only event in
+this probe is therefore diagnostic, not evidence that the branch is activated
+or validated. The full development campaign must report the two directions
+separately; any claim requiring ask-only activation needs a separately
+registered depletion probe or a later campaign cell, with the same finite-risk
+and no-replenishment contract.
+
+The audit must also report capital utilization rather than treating finite
+configuration alone as proof that capital binds. For each supplier it records
+the maximum observed gross CDF balance divided by the configured gross
+inventory limit (`max_inventory_utilization`) alongside the raw maximum gross
+base/quote balances, position path, quote quantity, and loss budget. This is a
+diagnostic: no minimum utilization is silently promoted into the activation
+predicate, and a supplier that never approaches a limit must be reported as
+capital-unconstrained over that probe horizon.
+
 ## Fixed promotion sequence
 
 1. hash this preregistration and the exact SV1D treatment, same-roster

@@ -356,7 +356,7 @@ func TestElasticLiquiditySupplierRequiresFreshObservationAfterOneSidedQuoteClose
 	})
 	ctx := context.Background()
 	supplier.onTick(time.Unix(0, int64(time.Second)))
-	supplier.HandleEvent(ctx, elasticSupplierSnapshot("CDF/USD", int64(time.Second), 2_699, 2_701))
+	supplier.HandleEvent(ctx, elasticSupplierOneSidedSnapshot("CDF/USD", int64(time.Second), 2_700, 0))
 	supplier.onTick(time.Unix(0, int64(2*time.Second)))
 	initial := gw.orders()[0]
 	supplier.HandleEvent(ctx, &actor.Event{Type: actor.EventOrderAccepted, Data: actor.OrderAcceptedEvent{OrderID: 41, RequestID: initial.RequestID}})
@@ -369,10 +369,74 @@ func TestElasticLiquiditySupplierRequiresFreshObservationAfterOneSidedQuoteClose
 		t.Fatalf("same-observation reentry = orders %+v decisions %+v, want no replacement and explicit wait", gw.orders(), decisions)
 	}
 
-	supplier.HandleEvent(ctx, elasticSupplierSnapshot("CDF/USD", int64(4*time.Second), 2_699, 2_701))
+	supplier.HandleEvent(ctx, elasticSupplierOneSidedSnapshot("CDF/USD", int64(4*time.Second), 2_700, 0))
 	supplier.onTick(time.Unix(0, int64(5*time.Second)))
 	if len(gw.orders()) != 2 {
 		t.Fatalf("fresh-observation reentry = orders %+v, want replacement quote", gw.orders())
+	}
+}
+
+func TestElasticLiquiditySupplierDoesNotGateTwoSidedQuoteAfterClose(t *testing.T) {
+	gw := newMetaGateway()
+	var decisions []ElasticLiquiditySupplierDecision
+	supplier := NewElasticLiquiditySupplier(1, gw, ElasticLiquiditySupplierConfig{
+		Role: "cdf_elastic_supplier_1", ClientID: 7, Symbol: "CDF/USD",
+		Interval: time.Second, MaxObservationAge: time.Minute,
+		ReferencePrice: 3_000, ReferenceHalfLife: time.Hour,
+		BaseHolding: 0, ElasticityPerPercent: 10, MaxPosition: 100, MaxQuoteQty: 25,
+		TickSize: 100, QuoteOnOneSidedLocalBook: true,
+		DecisionObserver: func(decision ElasticLiquiditySupplierDecision) { decisions = append(decisions, decision) },
+	})
+	ctx := context.Background()
+	supplier.onTick(time.Unix(0, int64(time.Second)))
+	supplier.HandleEvent(ctx, elasticSupplierSnapshot("CDF/USD", int64(time.Second), 2_699, 2_701))
+	supplier.onTick(time.Unix(0, int64(2*time.Second)))
+	initial := gw.orders()[0]
+	supplier.HandleEvent(ctx, &actor.Event{Type: actor.EventOrderAccepted, Data: actor.OrderAcceptedEvent{OrderID: 41, RequestID: initial.RequestID}})
+	supplier.HandleEvent(ctx, &actor.Event{Type: actor.EventOrderFilled, Data: actor.OrderFillEvent{
+		OrderID: 41, Symbol: "CDF/USD", Side: exchange.Buy, Qty: initial.Qty, Price: initial.Price, IsFull: true,
+	}})
+
+	// The closing quote was created from a two-sided observation. A later
+	// decision may therefore reprice from the same observation; only a closed
+	// one-sided quote establishes the SV1D fresh-observation frontier.
+	supplier.onTick(time.Unix(0, int64(3*time.Second)))
+	if len(gw.orders()) != 2 || len(decisions) == 0 || decisions[len(decisions)-1].Reason == "awaiting_fresh_observation_after_close" {
+		t.Fatalf("two-sided close reentry = orders %+v decisions %+v, want immediate replacement", gw.orders(), decisions)
+	}
+}
+
+func TestElasticLiquiditySupplierAllowsTwoSidedReplacementAfterOneSidedClose(t *testing.T) {
+	gw := newMetaGateway()
+	var decisions []ElasticLiquiditySupplierDecision
+	supplier := NewElasticLiquiditySupplier(1, gw, ElasticLiquiditySupplierConfig{
+		Role: "cdf_elastic_supplier_1", ClientID: 7, Symbol: "CDF/USD",
+		Interval: time.Second, MaxObservationAge: time.Minute,
+		ReferencePrice: 3_000, ReferenceHalfLife: time.Hour,
+		BaseHolding: 0, ElasticityPerPercent: 10, MaxPosition: 100, MaxQuoteQty: 25,
+		TickSize: 100, QuoteOnOneSidedLocalBook: true,
+		DecisionObserver: func(decision ElasticLiquiditySupplierDecision) { decisions = append(decisions, decision) },
+	})
+	ctx := context.Background()
+	supplier.onTick(time.Unix(0, int64(time.Second)))
+	supplier.HandleEvent(ctx, elasticSupplierOneSidedSnapshot("CDF/USD", int64(time.Second), 2_700, 0))
+	supplier.onTick(time.Unix(0, int64(2*time.Second)))
+	initial := gw.orders()[0]
+	supplier.HandleEvent(ctx, &actor.Event{Type: actor.EventOrderAccepted, Data: actor.OrderAcceptedEvent{OrderID: 41, RequestID: initial.RequestID}})
+
+	// A newer two-sided observation arrives while the original one-sided quote
+	// is live. Closing that old quote must not block a replacement that is
+	// derived from the now-current two-sided local book.
+	supplier.HandleEvent(ctx, elasticSupplierSnapshot("CDF/USD", int64(3*time.Second), 2_699, 2_701))
+	supplier.HandleEvent(ctx, &actor.Event{Type: actor.EventOrderFilled, Data: actor.OrderFillEvent{
+		OrderID: 41, Symbol: "CDF/USD", Side: exchange.Buy, Qty: initial.Qty, Price: initial.Price, IsFull: true,
+	}})
+	supplier.onTick(time.Unix(0, int64(4*time.Second)))
+	if len(gw.orders()) != 2 {
+		t.Fatalf("two-sided replacement after one-sided close = orders %+v decisions %+v, want replacement", gw.orders(), decisions)
+	}
+	if decisions[len(decisions)-1].Action != "submit" || decisions[len(decisions)-1].LocalBookMode != "two_sided" {
+		t.Fatalf("replacement decision = %+v, want immediate two-sided submit", decisions[len(decisions)-1])
 	}
 }
 

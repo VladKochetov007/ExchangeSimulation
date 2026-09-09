@@ -96,6 +96,7 @@ test:
 	@./scripts/test-v2-r2-sv1-activation-contract.sh
 	@./scripts/test-v2-r2-sv1b-terminal-activation-contract.sh
 	@./scripts/test-v2-r2-sv1c-contract.sh
+	@./scripts/test-v2-r2-sv1d-activation-config-contract.sh
 	@./scripts/test-v2-r2-sv1-survival-contract.sh
 	@./scripts/test-v2-r2-sv1-paired-survival-contract.sh
 	@./scripts/test-v2-r2-sv1-score-contract.sh

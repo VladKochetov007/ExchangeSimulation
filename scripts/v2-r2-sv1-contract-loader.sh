@@ -6,14 +6,15 @@
 # provenance-sensitive runner.
 v2_r2_select_sv1_contract() {
 	[[ $# -eq 1 ]] || return 1
-	local root_dir=$1 requested=${V2_R2_SV1_CONTRACT_SCRIPT:-} historical successor_cdf successor_strict
+	local root_dir=$1 requested=${V2_R2_SV1_CONTRACT_SCRIPT:-} historical successor_cdf successor_strict successor_one_sided
 	historical="$root_dir/scripts/v2-r2-sv1-24h-contract.sh"
 	successor_cdf="$root_dir/scripts/v2-r2-sv1b-24h-contract.sh"
 	successor_strict="$root_dir/scripts/v2-r2-sv1c-24h-contract.sh"
+	successor_one_sided="$root_dir/scripts/v2-r2-sv1d-activation-contract.sh"
 	if [[ -z "$requested" ]]; then
 		requested=$historical
 	fi
-	[[ "$requested" == "$historical" || "$requested" == "$successor_cdf" || "$requested" == "$successor_strict" ]] || return 1
+	[[ "$requested" == "$historical" || "$requested" == "$successor_cdf" || "$requested" == "$successor_strict" || "$requested" == "$successor_one_sided" ]] || return 1
 	[[ -f "$requested" && ! -L "$requested" ]] || return 1
 	[[ "$(realpath -e -- "$requested")" == "$requested" ]] || return 1
 	printf '%s\n' "$requested"

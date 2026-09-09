@@ -370,6 +370,7 @@ type CDFLiquiditySupplierAudit struct {
 	BorrowEventCount                 int64   `json:"borrow_event_count"`
 	MaxGrossBaseBalance              int64   `json:"max_gross_base_balance"`
 	MaxGrossQuoteBalance             int64   `json:"max_gross_quote_balance"`
+	MaxInventoryUtilization          float64 `json:"max_inventory_utilization"`
 	RealizedPnL                      int64   `json:"realized_pnl"`
 	UnrealizedPnL                    int64   `json:"unrealized_pnl"`
 	BalanceSnapshotCount             int64   `json:"balance_snapshot_count"`
@@ -1828,7 +1829,11 @@ func CompareCDFLiquidityRuns(treatment, control *Run) (*CDFLiquidityComparison, 
 }
 
 func sv1DModeConfigurationMatches(config cdfRunConfig, enabled bool) bool {
-	if config.ElasticSupplierCount <= 0 || len(config.ElasticLiquiditySuppliers) != config.ElasticSupplierCount {
+	// elastic_supplier_count is the separate historical ABC/USD roster count;
+	// the CDF successor roster is intentionally represented by the distinct
+	// elastic_liquidity_suppliers slice. A real SV1D config therefore has eight
+	// historical suppliers and four CDF specifications per venue.
+	if config.ElasticSupplierCount <= 0 || len(config.ElasticLiquiditySuppliers) == 0 {
 		return false
 	}
 	for _, supplier := range config.ElasticLiquiditySuppliers {
@@ -5498,6 +5503,9 @@ func (r *CDFLiquidityRunAudit) finalizeSuppliers(states map[cdfParticipantKey]*C
 		state.BorrowEventCount = state.borrowEventCount
 		state.MaxGrossBaseBalance = state.maxGrossBaseBalance
 		state.MaxGrossQuoteBalance = state.maxGrossQuoteBalance
+		if state.configuredMaxInventory > 0 {
+			state.MaxInventoryUtilization = float64(state.maxGrossBaseBalance) / float64(state.configuredMaxInventory)
+		}
 		if state.configuredMaxInventory <= 0 || state.maxGrossBaseBalance > state.configuredMaxInventory {
 			r.addCheck(CDFLiquidityCheck{VenueID: key.VenueID, Role: state.Role, ClientID: key.ClientID, Failure: "supplier exceeded configured gross base inventory"})
 		}
@@ -5933,9 +5941,9 @@ func quoteMatchesObservedTouch(decision cdfDecisionEvidence) bool {
 		return false
 	}
 	if decision.Side == "BUY" {
-		return decision.QuotePrice == decision.BestBid && decision.QuoteQty <= decision.BestBidQty
+		return decision.QuotePrice == decision.BestBid
 	}
-	return decision.QuotePrice == decision.BestAsk && decision.QuoteQty <= decision.BestAskQty
+	return decision.QuotePrice == decision.BestAsk
 }
 
 func expectedCDFTargetPosition(markPrice, referencePrice int64, state *CDFLiquiditySupplierAudit) (int64, bool) {

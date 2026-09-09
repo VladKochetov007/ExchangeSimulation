@@ -373,6 +373,13 @@ func TestOneSidedMissingSideQuoteMatchesPresentTouch(t *testing.T) {
 	}) {
 		t.Fatal("buy quote at or above the present ask was accepted")
 	}
+	if !quoteMatchesObservedTouch(cdfDecisionEvidence{
+		LocalBookMode: "two_sided", QuotePriceSource: "two_sided_touch",
+		Side: "BUY", QuotePrice: 700, QuoteQty: 1_000, BestBid: 700, BestBidQty: 1,
+		BestAsk: 800, BestAskQty: 1,
+	}) {
+		t.Fatal("present-side quote larger than observed touch depth was rejected despite no registered depth-size rule")
+	}
 }
 
 func TestOneSidedRestorationDoesNotCreditClosedCandidate(t *testing.T) {
@@ -1005,6 +1012,12 @@ func TestCanonicalSV1DComparisonConfigPreservesRosterAndNormalizesMode(t *testin
 	}
 	if !sv1DModeConfigurationMatches(cdfRunConfig{ElasticSupplierCount: 1, ElasticLiquiditySuppliers: []cdfSupplierConfig{{QuoteOnOneSidedLocalBook: true}}}, true) {
 		t.Fatal("enabled one-sided roster did not match enabled mode")
+	}
+	if !sv1DModeConfigurationMatches(cdfRunConfig{ElasticSupplierCount: 8, ElasticLiquiditySuppliers: []cdfSupplierConfig{
+		{QuoteOnOneSidedLocalBook: true}, {QuoteOnOneSidedLocalBook: true},
+		{QuoteOnOneSidedLocalBook: true}, {QuoteOnOneSidedLocalBook: true},
+	}}, true) {
+		t.Fatalf("8-plus-4 successor roster did not match enabled mode")
 	}
 	if sv1DModeConfigurationMatches(cdfRunConfig{ElasticSupplierCount: 1}, false) {
 		t.Fatal("empty roster matched a mode-paired SV1D control")

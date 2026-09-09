@@ -261,6 +261,7 @@ type elasticLiquidityQuote struct {
 	submittedAt          int64
 	observationSequence  uint64
 	observationTimestamp int64
+	oneSidedObservation  bool
 }
 
 // ElasticLiquiditySupplier posts at most one inventory-sensitive passive
@@ -297,6 +298,7 @@ type ElasticLiquiditySupplier struct {
 	riskLimitTriggered             bool
 	lastClosedObservationSequence  uint64
 	lastClosedObservationTimestamp int64
+	requiresFreshObservation       bool
 }
 
 func NewElasticLiquiditySupplier(id uint64, gw actor.Gateway, cfg ElasticLiquiditySupplierConfig) *ElasticLiquiditySupplier {
@@ -442,12 +444,16 @@ func (s *ElasticLiquiditySupplier) validRestingFill(event actor.OrderFillEvent) 
 }
 
 func (s *ElasticLiquiditySupplier) recordQuoteCloseObservation() {
+	if !s.quote.oneSidedObservation {
+		return
+	}
 	s.lastClosedObservationSequence = s.observationSequence
 	s.lastClosedObservationTimestamp = s.observationTime
+	s.requiresFreshObservation = true
 }
 
 func (s *ElasticLiquiditySupplier) hasFreshObservationAfterQuoteClose() bool {
-	if s.lastClosedObservationSequence == 0 && s.lastClosedObservationTimestamp == 0 {
+	if !s.requiresFreshObservation {
 		return true
 	}
 	if s.observationSequence > s.lastClosedObservationSequence {
@@ -903,7 +909,7 @@ func (s *ElasticLiquiditySupplier) onTick(now time.Time) {
 		s.emitDecision(decision)
 		return
 	}
-	if s.cfg.QuoteOnOneSidedLocalBook && !s.hasFreshObservationAfterQuoteClose() {
+	if localBook.localBookMode == "one_sided" && !s.hasFreshObservationAfterQuoteClose() {
 		decision.Action, decision.Reason = "wait", "awaiting_fresh_observation_after_close"
 		s.emitDecision(decision)
 		return
@@ -922,7 +928,7 @@ func (s *ElasticLiquiditySupplier) onTick(now time.Time) {
 	}
 	requestID := s.SubmitPostOnlyOrder(s.cfg.Symbol, desiredSide, desiredPrice, quantity)
 	s.pendingRequestID = requestID
-	s.quote = elasticLiquidityQuote{requestID: requestID, side: desiredSide, price: desiredPrice, qty: quantity, submittedAt: now.UnixNano(), observationSequence: s.observationSequence, observationTimestamp: s.observationTime}
+	s.quote = elasticLiquidityQuote{requestID: requestID, side: desiredSide, price: desiredPrice, qty: quantity, submittedAt: now.UnixNano(), observationSequence: s.observationSequence, observationTimestamp: s.observationTime, oneSidedObservation: localBook.localBookMode == "one_sided"}
 	decision.Action, decision.Reason = "submit", "inventory_target_gap"
 	decision.QuoteRequestID, decision.QuoteSubmittedAt = requestID, now.UnixNano()
 	s.emitDecision(decision)

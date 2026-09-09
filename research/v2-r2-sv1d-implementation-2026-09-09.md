@@ -89,3 +89,33 @@ The next promotion boundary is:
 
 Holdouts `619`, `631`, and `641` remain untouched. No result from this
 candidate authorizes a full campaign, freeze, or holdout execution.
+
+## Package repair checkpoint after independent review
+
+The first independent review of the activation package was not treated as a
+launch authorization. Its concrete objections were repaired in the working
+candidate and are now covered by the package contract: the probe runs a
+treatment, a same-roster mode-off control, and a no-roster control; the
+comparison uses a successor-specific mode-pair predicate; and the matcher
+recognizes the retained eight ABC/USD suppliers separately from the four CDF
+specifications replicated across three venues. The one-sided fresh-observation
+frontier is recorded only when a one-sided quote closes; a two-sided quote does
+not inherit that wait state.
+
+The generator/checker pair now binds the exact clean source parent, registered
+contract dependencies, config hashes, normalized-config idempotence, exact
+rosters/roles/cadences/thresholds, and the allowed generated-artifact delta.
+The runner and scorer require all three arm artifact sets, terminal outcomes,
+binary checkpoint attestations, evidence manifests, and an externally stored
+accepted exact-tree review before measurement. The preregistration explicitly
+limits the five-minute probe's direction coverage: positive initial inventory
+can exercise bid-only/missing-ask restoration, while ask-only/positive-inventory
+depletion remains unclaimed and requires a separately registered probe.
+
+At this checkpoint no configs, binaries, review attestation, seed-659 output,
+development world, or holdout have been produced from the successor. The
+default `make test` invocation reached the existing multivenue fresh-process
+timeout at 600 seconds; this is recorded as a compatibility/runtime timeout,
+not as scientific evidence. The required follow-up is a clean full test with
+an explicit longer package timeout, followed by vet/race/evidence-contract
+checks and a fresh exact-tree independent review.
