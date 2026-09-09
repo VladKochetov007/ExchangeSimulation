@@ -31,6 +31,20 @@ func elasticSupplierSnapshot(symbol string, timestamp, bid, ask int64) *actor.Ev
 	}
 }
 
+func elasticSupplierOneSidedSnapshot(symbol string, timestamp, bid, ask int64) *actor.Event {
+	snapshot := &etypes.BookSnapshot{}
+	if bid > 0 {
+		snapshot.Bids = []etypes.PriceLevel{{Price: bid, VisibleQty: 100}}
+	}
+	if ask > 0 {
+		snapshot.Asks = []etypes.PriceLevel{{Price: ask, VisibleQty: 100}}
+	}
+	return &actor.Event{
+		Type: actor.EventBookSnapshot,
+		Data: actor.BookSnapshotEvent{Symbol: symbol, Timestamp: timestamp, Snapshot: snapshot},
+	}
+}
+
 type oneShotMarketSeller struct {
 	*actor.BaseActor
 	triggerAt int64
@@ -92,6 +106,131 @@ func TestElasticLiquiditySupplierQuotesOneInventorySensitiveSide(t *testing.T) {
 	decision := decisions[len(decisions)-1]
 	if decision.ObservationLinkID != 4 || decision.ObservationOrdinal != 8 || decision.ObservationDeliveredAt != int64(time.Second) || decision.ObservationFingerprint != "01020300000000000000000000000000" {
 		t.Fatalf("decision observation frontier = %+v, want exact delayed-message identity", decision)
+	}
+}
+
+func TestElasticLiquiditySupplierQuotesMissingAskOnRegisteredTickGrid(t *testing.T) {
+	gateway := newMetaGateway()
+	var decisions []ElasticLiquiditySupplierDecision
+	supplier := NewElasticLiquiditySupplier(1, gateway, ElasticLiquiditySupplierConfig{
+		Role: "cdf_elastic_supplier_1", ClientID: 7, Symbol: "CDF/USD",
+		BaseAsset: "CDF", QuoteAsset: "USD", BasePrecision: 1, QuotePrecision: 1,
+		InitialBaseBalance: 100, InitialQuoteBalance: 100_000,
+		TickSize: 100, QuoteOnOneSidedLocalBook: true, MaxLossQuote: 1_000,
+		Interval: time.Second, MaxObservationAge: time.Minute,
+		ReferencePrice: 1_000, ReferenceHalfLife: time.Hour,
+		BaseHolding: 0, ElasticityPerPercent: 1, MaxPosition: 100, MaxInventory: 200, MaxQuoteQty: 50,
+		DecisionObserver: func(decision ElasticLiquiditySupplierDecision) { decisions = append(decisions, decision) },
+	})
+	supplier.onTick(time.Unix(0, int64(time.Second)))
+	supplier.position = 30
+	supplier.HandleEvent(context.Background(), elasticSupplierOneSidedSnapshot("CDF/USD", int64(time.Second), 1_200, 0))
+	supplier.onTick(time.Unix(0, int64(2*time.Second)))
+	orders := gateway.orders()
+	if len(orders) != 1 {
+		t.Fatalf("orders = %d, want one missing-ask quote", len(orders))
+	}
+	if orders[0].Side != exchange.Sell || orders[0].Price != 1_300 || orders[0].Qty != 49 || !orders[0].PostOnly || orders[0].TimeInForce != exchange.GTC {
+		t.Fatalf("missing-ask quote = %+v, want sell 49 at the next registered tick", orders[0])
+	}
+	decision := decisions[len(decisions)-1]
+	if decision.LocalBookMode != "one_sided" || decision.QuotePriceSource != "one_sided_missing_side_blended" || decision.RiskMarkSource != "one_sided_bid" || decision.MarkPrice != 1_200 || decision.RiskMarkPrice != 1_200 {
+		t.Fatalf("one-sided decision provenance = %+v", decision)
+	}
+}
+
+func TestElasticLiquiditySupplierQuotesMissingBidOnRegisteredTickGrid(t *testing.T) {
+	gateway := newMetaGateway()
+	var decisions []ElasticLiquiditySupplierDecision
+	supplier := NewElasticLiquiditySupplier(1, gateway, ElasticLiquiditySupplierConfig{
+		Role: "cdf_elastic_supplier_1", ClientID: 7, Symbol: "CDF/USD",
+		BaseAsset: "CDF", QuoteAsset: "USD", BasePrecision: 1, QuotePrecision: 1,
+		InitialBaseBalance: 100, InitialQuoteBalance: 100_000,
+		TickSize: 100, QuoteOnOneSidedLocalBook: true, MaxLossQuote: 25_000,
+		Interval: time.Second, MaxObservationAge: time.Minute,
+		ReferencePrice: 1_000, ReferenceHalfLife: time.Hour,
+		BaseHolding: 0, ElasticityPerPercent: 1, MaxPosition: 100, MaxInventory: 200, MaxQuoteQty: 50,
+		DecisionObserver: func(decision ElasticLiquiditySupplierDecision) { decisions = append(decisions, decision) },
+	})
+	supplier.onTick(time.Unix(0, int64(time.Second)))
+	// This is the reachable zero-gross-inventory state after selling the
+	// supplier's finite initial base holding. Keep the quote balance consistent
+	// with the 800-unit sale so the risk mark is not testing an impossible loss.
+	if !supplier.applyPositionDelta(exchange.Sell, 100) {
+		t.Fatal("selling the finite initial base holding was rejected")
+	}
+	supplier.quoteCashAvailable = 180_000
+	supplier.HandleEvent(context.Background(), elasticSupplierOneSidedSnapshot("CDF/USD", int64(time.Second), 0, 800))
+	supplier.onTick(time.Unix(0, int64(2*time.Second)))
+	orders := gateway.orders()
+	if len(orders) != 1 {
+		t.Fatalf("orders = %d, want one missing-bid quote; decisions = %+v", len(orders), decisions)
+	}
+	if orders[0].Side != exchange.Buy || orders[0].Price != 700 || orders[0].Qty != 50 {
+		t.Fatalf("missing-bid quote = %+v, want bounded buy 50 at the prior registered tick", orders[0])
+	}
+}
+
+func TestElasticLiquiditySupplierOneSidedRiskMarkFailsClosedWithoutBid(t *testing.T) {
+	gateway := newMetaGateway()
+	var decisions []ElasticLiquiditySupplierDecision
+	supplier := NewElasticLiquiditySupplier(1, gateway, ElasticLiquiditySupplierConfig{
+		Role: "cdf_elastic_supplier_1", ClientID: 7, Symbol: "CDF/USD",
+		BaseAsset: "CDF", QuoteAsset: "USD", BasePrecision: 1, QuotePrecision: 1,
+		InitialBaseBalance: 100, InitialQuoteBalance: 10_000,
+		TickSize: 100, QuoteOnOneSidedLocalBook: true, MaxLossQuote: 500,
+		Interval: time.Second, MaxObservationAge: time.Minute,
+		ReferencePrice: 100, ReferenceHalfLife: time.Hour,
+		BaseHolding: 0, ElasticityPerPercent: 10, MaxPosition: 100, MaxInventory: 200, MaxQuoteQty: 50,
+		DecisionObserver: func(decision ElasticLiquiditySupplierDecision) { decisions = append(decisions, decision) },
+	})
+	supplier.onTick(time.Unix(0, int64(time.Second)))
+	supplier.position = 10
+	supplier.HandleEvent(context.Background(), elasticSupplierOneSidedSnapshot("CDF/USD", int64(time.Second), 0, 200))
+	supplier.onTick(time.Unix(0, int64(2*time.Second)))
+	if len(gateway.orders()) != 0 {
+		t.Fatalf("orders = %+v, want no quote without a positive-inventory liquidation bid", gateway.orders())
+	}
+	decision := decisions[len(decisions)-1]
+	if decision.Action != "wait" || decision.Reason != "equity_unavailable" || decision.EquityAvailable || decision.RiskMarkPrice != 0 || decision.MarkPrice != 200 || decision.RiskMarkSource != "one_sided_ask_unavailable" {
+		t.Fatalf("ask-only risk decision = %+v", decision)
+	}
+}
+
+func TestElasticLiquiditySupplierRejectsLockedBookInOneSidedMode(t *testing.T) {
+	gateway := newMetaGateway()
+	var decisions []ElasticLiquiditySupplierDecision
+	supplier := NewElasticLiquiditySupplier(1, gateway, ElasticLiquiditySupplierConfig{
+		Role: "cdf_elastic_supplier_1", ClientID: 7, Symbol: "CDF/USD",
+		BaseAsset: "CDF", QuoteAsset: "USD", BasePrecision: 1, QuotePrecision: 1,
+		InitialBaseBalance: 100, InitialQuoteBalance: 10_000,
+		TickSize: 100, QuoteOnOneSidedLocalBook: true, MaxLossQuote: 500,
+		Interval: time.Second, MaxObservationAge: time.Minute,
+		ReferencePrice: 100, ReferenceHalfLife: time.Hour,
+		BaseHolding: 0, ElasticityPerPercent: 10, MaxPosition: 100, MaxInventory: 200, MaxQuoteQty: 50,
+		DecisionObserver: func(decision ElasticLiquiditySupplierDecision) { decisions = append(decisions, decision) },
+	})
+	supplier.onTick(time.Unix(0, int64(time.Second)))
+	supplier.HandleEvent(context.Background(), elasticSupplierSnapshot("CDF/USD", int64(time.Second), 100, 100))
+	supplier.onTick(time.Unix(0, int64(2*time.Second)))
+	if len(gateway.orders()) != 0 {
+		t.Fatalf("locked-book orders = %+v, want no quote", gateway.orders())
+	}
+	decision := decisions[len(decisions)-1]
+	if decision.Action != "wait" || decision.Reason != "one_sided_or_locked_book" || decision.LocalBookMode != "" {
+		t.Fatalf("locked-book decision = %+v, want explicit fail-closed wait", decision)
+	}
+}
+
+func TestOneSidedTickRoundingRejectsOverflow(t *testing.T) {
+	if price, ok := floorToPositiveTick(math.MaxInt64, 2); !ok || price != math.MaxInt64-1 {
+		t.Fatalf("floor tick rounding = (%d, %t), want (%d, true)", price, ok, math.MaxInt64-1)
+	}
+	if price, ok := ceilToPositiveTick(1_001, 100); !ok || price != 1_100 {
+		t.Fatalf("ceil tick rounding = (%d, %t), want (1100, true)", price, ok)
+	}
+	if price, ok := ceilToPositiveTick(math.MaxInt64, 2); ok || price != 0 {
+		t.Fatalf("ceil tick overflow = (%d, %t), want (0, false)", price, ok)
 	}
 }
 
@@ -174,7 +313,7 @@ func TestElasticLiquiditySupplierReducesQuoteAfterInventoryFill(t *testing.T) {
 		Role: "cdf_elastic_supplier_1", ClientID: 7, Symbol: "CDF/USD",
 		Interval: time.Second, MaxObservationAge: time.Minute,
 		ReferencePrice: 3_000, ReferenceHalfLife: time.Hour,
-		BaseHolding: 0, ElasticityPerPercent: 10, MaxPosition: 100, MaxQuoteQty: 100,
+		BaseHolding: 0, ElasticityPerPercent: 10, MaxPosition: 100, MaxQuoteQty: 50,
 		DecisionObserver: func(decision ElasticLiquiditySupplierDecision) { decisions = append(decisions, decision) },
 		FillObserver:     func(fill ElasticLiquiditySupplierFill) { fills = append(fills, fill) },
 	})
@@ -185,22 +324,55 @@ func TestElasticLiquiditySupplierReducesQuoteAfterInventoryFill(t *testing.T) {
 	request := gw.orders()[0].RequestID
 	supplier.HandleEvent(ctx, &actor.Event{Type: actor.EventOrderAccepted, Data: actor.OrderAcceptedEvent{OrderID: 41, RequestID: request}})
 	supplier.HandleEvent(ctx, &actor.Event{Type: actor.EventOrderFilled, Data: actor.OrderFillEvent{
-		OrderID: 41, Symbol: "CDF/USD", Side: exchange.Buy, Qty: 25, Price: 2_699, IsFull: true,
+		OrderID: 41, Symbol: "CDF/USD", Side: exchange.Buy, Qty: 50, Price: 2_699, IsFull: true,
 	}})
-	supplier.HandleEvent(ctx, elasticSupplierSnapshot("CDF/USD", int64(3*time.Second), 2_699, 2_701))
+	supplier.HandleEvent(ctx, elasticSupplierSnapshot("CDF/USD", int64(3*time.Second), 2_774, 2_776))
 	supplier.onTick(time.Unix(0, int64(4*time.Second)))
 	orders := gw.orders()
 	if len(orders) != 2 || orders[1].Qty >= orders[0].Qty {
 		t.Fatalf("quotes after fill = %+v, want reduced replacement quantity", orders)
 	}
-	if supplier.Position() != 25 {
-		t.Fatalf("position = %d, want 25", supplier.Position())
+	if supplier.Position() != 50 {
+		t.Fatalf("position = %d, want 50", supplier.Position())
 	}
 	if len(fills) != 1 || !fills[0].IsFull {
 		t.Fatalf("fill evidence = %+v, want one full fill", fills)
 	}
 	if len(decisions) < 2 || decisions[len(decisions)-1].TargetPosition <= decisions[len(decisions)-1].Position {
 		t.Fatalf("post-fill decision = %+v, want remaining inventory gap", decisions[len(decisions)-1])
+	}
+}
+
+func TestElasticLiquiditySupplierRequiresFreshObservationAfterOneSidedQuoteClose(t *testing.T) {
+	gw := newMetaGateway()
+	var decisions []ElasticLiquiditySupplierDecision
+	supplier := NewElasticLiquiditySupplier(1, gw, ElasticLiquiditySupplierConfig{
+		Role: "cdf_elastic_supplier_1", ClientID: 7, Symbol: "CDF/USD",
+		Interval: time.Second, MaxObservationAge: time.Minute,
+		ReferencePrice: 3_000, ReferenceHalfLife: time.Hour,
+		BaseHolding: 0, ElasticityPerPercent: 10, MaxPosition: 100, MaxQuoteQty: 25,
+		TickSize: 100, QuoteOnOneSidedLocalBook: true,
+		DecisionObserver: func(decision ElasticLiquiditySupplierDecision) { decisions = append(decisions, decision) },
+	})
+	ctx := context.Background()
+	supplier.onTick(time.Unix(0, int64(time.Second)))
+	supplier.HandleEvent(ctx, elasticSupplierSnapshot("CDF/USD", int64(time.Second), 2_699, 2_701))
+	supplier.onTick(time.Unix(0, int64(2*time.Second)))
+	initial := gw.orders()[0]
+	supplier.HandleEvent(ctx, &actor.Event{Type: actor.EventOrderAccepted, Data: actor.OrderAcceptedEvent{OrderID: 41, RequestID: initial.RequestID}})
+	supplier.HandleEvent(ctx, &actor.Event{Type: actor.EventOrderFilled, Data: actor.OrderFillEvent{
+		OrderID: 41, Symbol: "CDF/USD", Side: exchange.Buy, Qty: initial.Qty, Price: initial.Price, IsFull: true,
+	}})
+
+	supplier.onTick(time.Unix(0, int64(3*time.Second)))
+	if len(gw.orders()) != 1 || len(decisions) == 0 || decisions[len(decisions)-1].Reason != "awaiting_fresh_observation_after_close" {
+		t.Fatalf("same-observation reentry = orders %+v decisions %+v, want no replacement and explicit wait", gw.orders(), decisions)
+	}
+
+	supplier.HandleEvent(ctx, elasticSupplierSnapshot("CDF/USD", int64(4*time.Second), 2_699, 2_701))
+	supplier.onTick(time.Unix(0, int64(5*time.Second)))
+	if len(gw.orders()) != 2 {
+		t.Fatalf("fresh-observation reentry = orders %+v, want replacement quote", gw.orders())
 	}
 }
 
@@ -465,6 +637,26 @@ func TestElasticLiquiditySupplierRejectsInvalidForcedCloseWithoutMutation(t *tes
 	}
 }
 
+func TestElasticLiquiditySupplierRejectsContradictoryRestingFillWithoutMutation(t *testing.T) {
+	invalidEvents := []actor.OrderFillEvent{
+		{OrderID: 41, Symbol: "CDF/USD", Side: exchange.Sell, Qty: 5, Price: 100, IsFull: false},
+		{OrderID: 41, Symbol: "CDF/USD", Side: exchange.Buy, Qty: 5, Price: 101, IsFull: false},
+		{OrderID: 41, Symbol: "CDF/USD", Side: exchange.Buy, Qty: 11, Price: 100, IsFull: true},
+		{OrderID: 41, Symbol: "CDF/USD", Side: exchange.Buy, Qty: 5, Price: 100, IsFull: true},
+	}
+	for _, event := range invalidEvents {
+		supplier := NewElasticLiquiditySupplier(1, newMetaGateway(), ElasticLiquiditySupplierConfig{
+			Role: "cdf_elastic_supplier_1", ClientID: 7, Symbol: "CDF/USD",
+			InitialBaseBalance: 100, MaxPosition: 100, MaxInventory: 200, MaxQuoteQty: 10,
+		})
+		supplier.quote = elasticLiquidityQuote{orderID: 41, side: exchange.Buy, price: 100, qty: 10}
+		supplier.HandleEvent(context.Background(), &actor.Event{Type: actor.EventOrderPartialFill, Data: event})
+		if supplier.Position() != 0 || supplier.quote.qty != 10 || !supplier.equityUnavailable || !supplier.riskLimitTriggered {
+			t.Fatalf("contradictory fill %+v changed live state: position=%d quote=%+v unavailable=%t risk=%t", event, supplier.Position(), supplier.quote, supplier.equityUnavailable, supplier.riskLimitTriggered)
+		}
+	}
+}
+
 func testElasticLiquiditySupplierSpec() ElasticLiquiditySupplierSpec {
 	return ElasticLiquiditySupplierSpec{
 		Role: "cdf_elastic_supplier_1", Symbol: "CDF/USD", BaseAsset: "CDF", QuoteAsset: "USD",
@@ -515,6 +707,61 @@ func TestElasticLiquiditySupplierSpecRejectsInvalidDecisionPhase(t *testing.T) {
 		if err := spec.validate(); err == nil {
 			t.Fatalf("decision phase %s was accepted", phase)
 		}
+	}
+}
+
+func TestElasticLiquiditySupplierOneSidedModeRequiresRegisteredRiskContract(t *testing.T) {
+	spec := testElasticLiquiditySupplierSpec()
+	spec.QuoteOnOneSidedLocalBook = true
+	if err := spec.validate(); err == nil || !strings.Contains(err.Error(), "one-sided local-book mode") {
+		t.Fatalf("one-sided mode without registered tick/risk limits was accepted: %v", err)
+	}
+	spec.TickSize = mvQuotePrecision
+	spec.MinimumExecutableQty = mvBasePrecision / 1_000
+	spec.MinimumQualifyingQty = 10 * spec.MinimumExecutableQty
+	spec.RegisteredMinimumExecutableQty = spec.MinimumExecutableQty
+	spec.MaxLossQuote = mvQuotePrecision
+	if err := spec.validate(); err != nil {
+		t.Fatalf("complete one-sided successor contract rejected: %v", err)
+	}
+}
+
+func TestElasticLiquiditySupplierBindsTickToRegisteredInstrument(t *testing.T) {
+	spec := testElasticLiquiditySupplierSpec()
+	spec.TickSize = mvQuotePrecision
+	spec.MinimumExecutableQty = mvBasePrecision / 1_000
+	spec.MinimumQualifyingQty = 10 * spec.MinimumExecutableQty
+	spec.RegisteredMinimumExecutableQty = spec.MinimumExecutableQty
+	spec.MaxLossQuote = mvQuotePrecision
+	spec.QuoteOnOneSidedLocalBook = true
+	config := Config{
+		LogDir: t.TempDir(), CrossAssetSpotGraph: true,
+		ElasticLiquiditySuppliers: []ElasticLiquiditySupplierSpec{spec},
+		LatencyProfiles: map[string]LatencyProfile{
+			"cdf_elastic_supplier": {Model: "constant", Delay: time.Millisecond},
+		},
+	}
+	sim, err := NewSim(time.Second, config)
+	if err != nil {
+		t.Fatalf("NewSim: %v", err)
+	}
+	if got := sim.Venues[0].ElasticLiquiditySuppliers[0].cfg.TickSize; got != mvQuotePrecision {
+		t.Fatalf("supplier tick = %d, want registered CDF/USD tick %d", got, mvQuotePrecision)
+	}
+	if err := sim.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	config.ElasticLiquiditySuppliers[0].TickSize = 1
+	config.LogDir = t.TempDir()
+	if _, err := NewSim(time.Second, config); err == nil || !strings.Contains(err.Error(), "does not match registered") {
+		t.Fatalf("mismatched registered tick was accepted: %v", err)
+	}
+	config.ElasticLiquiditySuppliers[0].TickSize = mvQuotePrecision
+	config.ElasticLiquiditySuppliers[0].RegisteredMinimumExecutableQty = 1
+	config.LogDir = t.TempDir()
+	if _, err := NewSim(time.Second, config); err == nil || !strings.Contains(err.Error(), "declared registered executable minimum") {
+		t.Fatalf("mismatched registered executable minimum was accepted: %v", err)
 	}
 }
 

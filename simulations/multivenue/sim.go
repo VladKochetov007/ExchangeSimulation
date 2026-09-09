@@ -3689,6 +3689,27 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 		venue.Suppliers = append(venue.Suppliers, supplier)
 	}
 	for _, spec := range s.Config.ElasticLiquiditySuppliers {
+		registeredInstrument, instrumentExists := ex.Instruments[spec.Symbol]
+		if !instrumentExists || registeredInstrument == nil {
+			return nil, fmt.Errorf("elastic liquidity supplier %s references unregistered instrument %q", spec.Role, spec.Symbol)
+		}
+		registeredTick := registeredInstrument.TickSize()
+		if registeredTick <= 0 || spec.TickSize > 0 && spec.TickSize != registeredTick {
+			return nil, fmt.Errorf("elastic liquidity supplier %s tick %d does not match registered %s tick %d", spec.Role, spec.TickSize, spec.Symbol, registeredTick)
+		}
+		registeredMinimum := registeredInstrument.MinOrderSize()
+		if registeredMinimum <= 0 {
+			return nil, fmt.Errorf("elastic liquidity supplier %s references %s without a positive registered minimum order size", spec.Role, spec.Symbol)
+		}
+		if spec.MaxLossQuote > 0 && spec.MinimumExecutableQty != registeredMinimum {
+			return nil, fmt.Errorf("elastic liquidity supplier %s executable minimum %d does not match registered %s minimum %d", spec.Role, spec.MinimumExecutableQty, spec.Symbol, registeredMinimum)
+		}
+		if spec.QuoteOnOneSidedLocalBook && spec.RegisteredMinimumExecutableQty != registeredMinimum {
+			return nil, fmt.Errorf("elastic liquidity supplier %s declared registered executable minimum %d does not match registered %s minimum %d", spec.Role, spec.RegisteredMinimumExecutableQty, spec.Symbol, registeredMinimum)
+		}
+		if spec.QuoteOnOneSidedLocalBook && spec.TickSize != registeredTick {
+			return nil, fmt.Errorf("elastic liquidity supplier %s one-sided mode requires explicit registered tick %d, got %d", spec.Role, registeredTick, spec.TickSize)
+		}
 		// Keep the successor fee policy separate from noiseFee so the eight
 		// historical ABC/USD suppliers remain unchanged.
 		supplierFee := exchange.FeeModel(&exchange.PercentageFee{
@@ -3699,28 +3720,32 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 			spec.QuoteAsset: spec.InitialQuoteBalance,
 		}, 0, supplierFee)
 		liquidityConfig := ElasticLiquiditySupplierConfig{
-			Role:                 spec.Role,
-			ClientID:             clientID,
-			Symbol:               spec.Symbol,
-			BaseAsset:            spec.BaseAsset,
-			QuoteAsset:           spec.QuoteAsset,
-			BasePrecision:        spec.BasePrecision,
-			QuotePrecision:       spec.QuotePrecision,
-			InitialBaseBalance:   spec.InitialBaseBalance,
-			InitialQuoteBalance:  spec.InitialQuoteBalance,
-			Interval:             spec.Interval,
-			DecisionPhaseOffset:  spec.DecisionPhaseOffset,
-			MaxObservationAge:    spec.MaxObservationAge,
-			ReferencePrice:       spec.ReferencePrice,
-			ReferenceHalfLife:    spec.ReferenceHalfLife,
-			BaseHolding:          spec.BaseHolding,
-			ElasticityPerPercent: spec.ElasticityPerPercent,
-			MaxPosition:          spec.MaxPosition,
-			MaxInventory:         spec.MaxInventory,
-			MaxQuoteQty:          spec.MaxQuoteQty,
-			MinimumExecutableQty: spec.MinimumExecutableQty,
-			MaxLossQuote:         spec.MaxLossQuote,
-			MakerFeeBps:          spec.MakerFeeBps,
+			Role:                           spec.Role,
+			ClientID:                       clientID,
+			Symbol:                         spec.Symbol,
+			BaseAsset:                      spec.BaseAsset,
+			QuoteAsset:                     spec.QuoteAsset,
+			BasePrecision:                  spec.BasePrecision,
+			QuotePrecision:                 spec.QuotePrecision,
+			InitialBaseBalance:             spec.InitialBaseBalance,
+			InitialQuoteBalance:            spec.InitialQuoteBalance,
+			Interval:                       spec.Interval,
+			DecisionPhaseOffset:            spec.DecisionPhaseOffset,
+			MaxObservationAge:              spec.MaxObservationAge,
+			ReferencePrice:                 spec.ReferencePrice,
+			ReferenceHalfLife:              spec.ReferenceHalfLife,
+			BaseHolding:                    spec.BaseHolding,
+			ElasticityPerPercent:           spec.ElasticityPerPercent,
+			MaxPosition:                    spec.MaxPosition,
+			MaxInventory:                   spec.MaxInventory,
+			MaxQuoteQty:                    spec.MaxQuoteQty,
+			MinimumExecutableQty:           spec.MinimumExecutableQty,
+			MinimumQualifyingQty:           spec.MinimumQualifyingQty,
+			RegisteredMinimumExecutableQty: spec.RegisteredMinimumExecutableQty,
+			TickSize:                       registeredTick,
+			QuoteOnOneSidedLocalBook:       spec.QuoteOnOneSidedLocalBook,
+			MaxLossQuote:                   spec.MaxLossQuote,
+			MakerFeeBps:                    spec.MakerFeeBps,
 		}
 		liquidityConfig.ObservationFrontier = func() simulation.MarketDataFrontier {
 			provider, ok := gateway.(interface {

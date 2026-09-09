@@ -32,7 +32,8 @@ func main() {
 		os.Exit(1)
 	}
 	defer os.RemoveAll(treatmentEvidence)
-	if _, err := multivenue.RenderBinaryEvidence(*treatmentDir, treatmentEvidence); err != nil {
+	treatmentRender, err := multivenue.RenderBinaryEvidence(*treatmentDir, treatmentEvidence)
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "render treatment: %v\n", err)
 		os.Exit(1)
 	}
@@ -42,7 +43,8 @@ func main() {
 		os.Exit(1)
 	}
 	defer os.RemoveAll(controlEvidence)
-	if _, err := multivenue.RenderBinaryEvidence(*controlDir, controlEvidence); err != nil {
+	controlRender, err := multivenue.RenderBinaryEvidence(*controlDir, controlEvidence)
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "render control: %v\n", err)
 		os.Exit(1)
 	}
@@ -60,6 +62,16 @@ func main() {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "audit: %v\n", err)
 		os.Exit(1)
+	}
+	comparison.Provenance.TreatmentExecutionHash = treatmentRender.ExecutionHash
+	comparison.Provenance.TreatmentCanonicalHash = treatmentRender.CanonicalHash
+	comparison.Provenance.TreatmentFullEvidenceHash = treatmentRender.FullEvidenceHash
+	comparison.Provenance.ControlExecutionHash = controlRender.ExecutionHash
+	comparison.Provenance.ControlCanonicalHash = controlRender.CanonicalHash
+	comparison.Provenance.ControlFullEvidenceHash = controlRender.FullEvidenceHash
+	if treatmentRender.ExecutionHash == "" || treatmentRender.CanonicalHash == "" || treatmentRender.FullEvidenceHash == "" ||
+		controlRender.ExecutionHash == "" || controlRender.CanonicalHash == "" || controlRender.FullEvidenceHash == "" {
+		invalidateComparisonProvenance(comparison, "binary rendering did not return complete execution and canonical evidence hashes")
 	}
 	analyzerPath, err := os.Executable()
 	if err != nil {

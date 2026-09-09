@@ -43,6 +43,88 @@ func TestMeasureCDFLiquidityReconstructsBoundedSupplier(t *testing.T) {
 	}
 }
 
+func TestMeasurePublicWeakSideDurationUsesOnlyPublicSnapshots(t *testing.T) {
+	snapshots := []cdfPublicSnapshot{
+		{
+			clientID: 0, publishedAt: 10, evidence: evidenceOrder{timestamp: 10, globalSequence: 1},
+			snapshot: etypes.BookSnapshot{
+				Bids: []etypes.PriceLevel{{Price: 99, VisibleQty: 10}},
+				Asks: []etypes.PriceLevel{{Price: 101, VisibleQty: 10}},
+			},
+		},
+		{
+			clientID: 0, publishedAt: 20, evidence: evidenceOrder{timestamp: 20, globalSequence: 2},
+			snapshot: etypes.BookSnapshot{
+				Asks: []etypes.PriceLevel{{Price: 101, VisibleQty: 10}},
+			},
+		},
+		{
+			clientID: 0, publishedAt: 30, evidence: evidenceOrder{timestamp: 30, globalSequence: 3},
+			snapshot: etypes.BookSnapshot{
+				Bids: []etypes.PriceLevel{{Price: 99, VisibleQty: 10}},
+				Asks: []etypes.PriceLevel{{Price: 101, VisibleQty: 10}},
+			},
+		},
+	}
+	measurement := measurePublicWeakSideDuration(snapshots, 10, 40)
+	if !measurement.valid || measurement.observedDuration != 30 || measurement.weakSideDuration != 10 || measurement.weakSideSnapshots != 1 {
+		t.Fatalf("public weak-side measurement = %+v, want 30 observed ns, 10 weak ns, one weak snapshot", measurement)
+	}
+}
+
+func TestMeasurePublicWeakSideDurationRejectsClientSpecificSnapshot(t *testing.T) {
+	snapshots := []cdfPublicSnapshot{
+		{
+			clientID: 7, publishedAt: 10, evidence: evidenceOrder{timestamp: 10, globalSequence: 1},
+			snapshot: etypes.BookSnapshot{
+				Bids: []etypes.PriceLevel{{Price: 99, VisibleQty: 10}},
+				Asks: []etypes.PriceLevel{{Price: 101, VisibleQty: 10}},
+			},
+		},
+	}
+	measurement := measurePublicWeakSideDuration(snapshots, 10, 20)
+	if measurement.valid {
+		t.Fatalf("client-specific snapshot was accepted: %+v", measurement)
+	}
+}
+
+func TestCDFLiquidityUsesQualifyingMinimumForSuccessorDepth(t *testing.T) {
+	run := &CDFLiquidityRunAudit{MinimumExecutableQty: 1, MinimumQualifyingQty: 10}
+	if got := run.qualifyingMinimumQty(); got != 10 {
+		t.Fatalf("successor qualifying minimum = %d, want 10", got)
+	}
+	run.MinimumQualifyingQty = 0
+	if got := run.qualifyingMinimumQty(); got != 1 {
+		t.Fatalf("historical qualifying fallback = %d, want admission minimum 1", got)
+	}
+}
+
+func TestMeasureCDFLiquidityRequiresSV1DProvenance(t *testing.T) {
+	run := writeCDFLiquidityFixture(t, true, false)
+	manifestPath := filepath.Join(run.Dir, "manifest.json")
+	raw, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated := strings.ReplaceAll(string(raw), "V2-R2-SV1-CDF-LIQUIDITY", "V2-R2-SV1D-CDF-LIQUIDITY")
+	if updated == string(raw) {
+		t.Fatal("fixture hypothesis was not present in manifest")
+	}
+	if err := os.WriteFile(manifestPath, []byte(updated), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(run.Dir, "run-metadata.json")); err != nil {
+		t.Fatal(err)
+	}
+	audit, err := run.MeasureCDFLiquidity()
+	if err != nil {
+		t.Fatalf("MeasureCDFLiquidity: %v", err)
+	}
+	if audit.Valid || !hasCDFFailureContaining(audit.Checks, "run-metadata.json is required") {
+		t.Fatalf("missing SV1D provenance audit = %+v", audit)
+	}
+}
+
 func TestMeasureCDFLiquidityRecognizesSV1CSuccessorLossBudget(t *testing.T) {
 	run := writeCDFLiquidityFixture(t, true, false)
 	manifestPath := filepath.Join(run.Dir, "manifest.json")
@@ -97,6 +179,248 @@ func TestCDFSupplierRemovalCounterfactualUsesSideSpecificResidualDepth(t *testin
 	}
 	if len(run.Venues) != 1 || run.Venues[0].SupplierRemovalQualifiedBidAbsenceFraction != 1 {
 		t.Fatalf("venue residual diagnostics = %+v", run.Venues)
+	}
+}
+
+func TestCDFSupplierRemovalCoverageUsesPublicSnapshotDenominator(t *testing.T) {
+	run := &CDFLiquidityRunAudit{MinimumExecutableQty: 1}
+	venueAudits := map[string]*CDFLiquidityVenueAudit{}
+	publicSnapshot := json.RawMessage(`{"bids":[{"price":99,"visible_qty":4}],"asks":[{"price":101,"visible_qty":4}]}`)
+	for ordinal, clientID := range []uint64{0, 7} {
+		run.processBookEvent(Event{
+			Name: "BookSnapshot", VenueID: "north", ClientID: clientID, SimTS: 1, Ordinal: int64(ordinal + 1),
+			payload: publicSnapshot,
+		}, nil, nil, nil, venueAudits)
+	}
+	run.finalizeVenueAudits(venueAudits)
+	if run.SnapshotCount != 2 || run.PublicSnapshotCount != 1 || run.SupplierRemovalSnapshotCount != 1 {
+		t.Fatalf("snapshot populations = %+v", run)
+	}
+	if len(run.Venues) != 1 || run.Venues[0].SnapshotCount != 2 || run.Venues[0].PublicSnapshotCount != 1 || run.Venues[0].SupplierRemovalSnapshotCount != 1 {
+		t.Fatalf("venue snapshot populations = %+v", run.Venues)
+	}
+	if !run.SupplierRemovalCounterfactualValid || !run.Venues[0].SupplierRemovalCounterfactualValid {
+		t.Fatalf("private snapshot incorrectly invalidated public removal coverage: %+v", run)
+	}
+}
+
+func TestOneSidedRestorationUsesIndependentPresentSideForSelfReference(t *testing.T) {
+	file := "CDF-USD.jsonl"
+	sourceEvidence := evidenceOrder{timestamp: 1, file: file, ordinal: 1, globalSequence: 10}
+	acceptedEvidence := evidenceOrder{timestamp: 2, file: file, ordinal: 2, globalSequence: 20}
+	restoredEvidence := evidenceOrder{timestamp: 3, file: file, ordinal: 3, globalSequence: 30}
+	source := cdfPublicSnapshot{
+		venueID: "north", clientID: 0, sequence: 10, publishedAt: 1, evidence: sourceEvidence,
+		snapshot: etypes.BookSnapshot{Bids: []etypes.PriceLevel{{Price: 99, VisibleQty: 3}}},
+	}
+	restored := cdfPublicSnapshot{
+		venueID: "north", clientID: 0, sequence: 30, publishedAt: 3, evidence: restoredEvidence,
+		snapshot: etypes.BookSnapshot{
+			Bids: []etypes.PriceLevel{{Price: 99, VisibleQty: 3}},
+			Asks: []etypes.PriceLevel{{Price: 101, VisibleQty: 3}},
+		},
+	}
+	candidate := cdfOneSidedRestorationCandidate{
+		key: cdfParticipantKey{VenueID: "north", ClientID: 7}, role: "cdf_elastic_supplier_1", orderID: 22,
+		presentSide: "BUY", missingSide: "SELL", anchorPrice: 99, anchorQty: 3, minimumQty: 3,
+		acceptedPrice: 101, acceptedQty: 3, acceptedAt: acceptedEvidence, sourceSnapshot: source,
+	}
+	orders := map[cdfOrderKey]*cdfOrderState{
+		{VenueID: "north", ClientID: 7, OrderID: 22}: {
+			clientID: 7, side: "SELL", price: 101, acceptedAt: 2, acceptedSequence: 20, acceptedQty: 3, remainingQty: 3,
+			remainingUpdates: []cdfOrderRemainingUpdate{{evidence: acceptedEvidence, remainingQty: 3}},
+		},
+	}
+	run := &CDFLiquidityRunAudit{
+		publicSnapshots:               map[string][]cdfPublicSnapshot{"north": {source, restored}},
+		oneSidedRestorationCandidates: []cdfOneSidedRestorationCandidate{candidate},
+	}
+	state := &CDFLiquiditySupplierAudit{}
+	venue := &CDFLiquidityVenueAudit{VenueID: "north"}
+	run.evaluateOneSidedRestorations(orders, map[cdfParticipantKey]*CDFLiquiditySupplierAudit{candidate.key: state}, map[string]*CDFLiquidityVenueAudit{"north": venue})
+	if run.OneSidedRestorationCount != 1 || run.OneSidedSelfReferenceCount != 0 || run.OneSidedSupplierOnlyRestorationCount != 1 || run.OneSidedRestorationInvalidCount != 0 || run.OneSidedRestorationUnresolvedCount != 0 || run.OneSidedSelfReferenceFraction != 0 {
+		t.Fatalf("independent present-side restoration = %+v", run)
+	}
+	if len(run.OneSidedRestorationAudits) != 1 || run.OneSidedRestorationAudits[0].RestorationGlobalEventSequence != 30 || run.OneSidedRestorationAudits[0].RestorationTimestamp != 3 {
+		t.Fatalf("restoration identity = %+v, want sequence 30 at timestamp 3", run.OneSidedRestorationAudits)
+	}
+}
+
+func TestOneSidedRestorationRejectsSelfAnchoredPresentSide(t *testing.T) {
+	file := "CDF-USD.jsonl"
+	sourceEvidence := evidenceOrder{timestamp: 1, file: file, ordinal: 1, globalSequence: 10}
+	anchorEvidence := evidenceOrder{timestamp: 1, file: file, ordinal: 0, globalSequence: 5}
+	acceptedEvidence := evidenceOrder{timestamp: 2, file: file, ordinal: 2, globalSequence: 20}
+	restoredEvidence := evidenceOrder{timestamp: 3, file: file, ordinal: 3, globalSequence: 30}
+	source := cdfPublicSnapshot{
+		venueID: "north", clientID: 0, sequence: 10, publishedAt: 1, evidence: sourceEvidence,
+		snapshot: etypes.BookSnapshot{Bids: []etypes.PriceLevel{{Price: 99, VisibleQty: 3}}},
+	}
+	restored := cdfPublicSnapshot{
+		venueID: "north", clientID: 0, sequence: 30, publishedAt: 3, evidence: restoredEvidence,
+		snapshot: etypes.BookSnapshot{
+			Bids: []etypes.PriceLevel{{Price: 99, VisibleQty: 3}},
+			Asks: []etypes.PriceLevel{{Price: 101, VisibleQty: 3}},
+		},
+	}
+	candidate := cdfOneSidedRestorationCandidate{
+		key: cdfParticipantKey{VenueID: "north", ClientID: 7}, role: "cdf_elastic_supplier_1", orderID: 22,
+		presentSide: "BUY", missingSide: "SELL", anchorPrice: 99, anchorQty: 3, minimumQty: 3,
+		acceptedPrice: 101, acceptedQty: 3, acceptedAt: acceptedEvidence, sourceSnapshot: source,
+	}
+	orders := map[cdfOrderKey]*cdfOrderState{
+		{VenueID: "north", ClientID: 7, OrderID: 11}: {
+			clientID: 7, side: "BUY", price: 99, acceptedAt: 1, acceptedSequence: 5, acceptedQty: 3, remainingQty: 3,
+			remainingUpdates: []cdfOrderRemainingUpdate{{evidence: anchorEvidence, remainingQty: 3}},
+		},
+		{VenueID: "north", ClientID: 7, OrderID: 22}: {
+			clientID: 7, side: "SELL", price: 101, acceptedAt: 2, acceptedSequence: 20, acceptedQty: 3, remainingQty: 3,
+			remainingUpdates: []cdfOrderRemainingUpdate{{evidence: acceptedEvidence, remainingQty: 3}},
+		},
+	}
+	run := &CDFLiquidityRunAudit{
+		publicSnapshots:               map[string][]cdfPublicSnapshot{"north": {source, restored}},
+		oneSidedRestorationCandidates: []cdfOneSidedRestorationCandidate{candidate},
+	}
+	state := &CDFLiquiditySupplierAudit{}
+	venue := &CDFLiquidityVenueAudit{VenueID: "north"}
+	run.evaluateOneSidedRestorations(orders, map[cdfParticipantKey]*CDFLiquiditySupplierAudit{candidate.key: state}, map[string]*CDFLiquidityVenueAudit{"north": venue})
+	if run.OneSidedRestorationCount != 1 || run.OneSidedSelfReferenceCount != 1 || run.OneSidedSelfReferenceFraction != 1 || run.OneSidedRestorationInvalidCount != 0 {
+		t.Fatalf("self-anchored restoration = %+v", run)
+	}
+}
+
+func TestOneSidedSelfReferenceAllowsIndependentDepthAtSameAnchor(t *testing.T) {
+	candidate := cdfOneSidedRestorationCandidate{
+		key: cdfParticipantKey{VenueID: "north", ClientID: 7}, presentSide: "BUY", anchorPrice: 99, anchorQty: 150, minimumQty: 100,
+		sourceSnapshot: cdfPublicSnapshot{
+			venueID: "north", clientID: 0, evidence: evidenceOrder{globalSequence: 10},
+			snapshot: etypes.BookSnapshot{Bids: []etypes.PriceLevel{{Price: 99, VisibleQty: 150}}},
+		},
+	}
+	orders := map[cdfOrderKey]*cdfOrderState{
+		{VenueID: "north", ClientID: 7, OrderID: 11}: {
+			side: "BUY", price: 99, remainingUpdates: []cdfOrderRemainingUpdate{{evidence: evidenceOrder{globalSequence: 5}, remainingQty: 50}},
+		},
+	}
+	selfReferenced, reconstructible := (&CDFLiquidityRunAudit{}).oneSidedAnchorSelfReference(candidate, orders)
+	if !reconstructible || selfReferenced {
+		t.Fatalf("mixed independent/supplier anchor = (%t, %t), want (false, true)", selfReferenced, reconstructible)
+	}
+}
+
+func TestOneSidedActivationAllowsUnresolvedAttempts(t *testing.T) {
+	run := &CDFLiquidityRunAudit{
+		oneSidedPolicyEnabled:              true,
+		OneSidedDecisionCount:              4,
+		OneSidedMissingSideAcceptedCount:   3,
+		OneSidedRestorationCount:           1,
+		OneSidedRestorationUnresolvedCount: 2,
+		OneSidedRestorationInvalidCount:    0,
+		OneSidedSelfReferenceFraction:      0.5,
+	}
+	if !run.oneSidedRestorationActivationSatisfied() {
+		t.Fatal("valid restoration plus unresolved attempts failed one-sided activation subgate")
+	}
+	run.OneSidedSelfReferenceFraction = 0.500001
+	if run.oneSidedRestorationActivationSatisfied() {
+		t.Fatal("self-reference fraction above 0.50 passed one-sided activation subgate")
+	}
+	run.OneSidedSelfReferenceFraction = 0
+	run.OneSidedRestorationCount = 0
+	if run.oneSidedRestorationActivationSatisfied() {
+		t.Fatal("zero restorations passed one-sided activation subgate")
+	}
+}
+
+func TestOneSidedMissingSideQuoteMatchesPresentTouch(t *testing.T) {
+	cases := []struct {
+		name      string
+		decision  cdfDecisionEvidence
+		wantShare float64
+	}{
+		{
+			name: "buy below ask",
+			decision: cdfDecisionEvidence{
+				LocalBookMode: "one_sided", QuotePriceSource: "one_sided_missing_side_blended",
+				Side: "BUY", QuotePrice: 700, QuoteQty: 19, BestAsk: 800, BestAskQty: 100,
+			},
+			wantShare: 0.19,
+		},
+		{
+			name: "sell above bid",
+			decision: cdfDecisionEvidence{
+				LocalBookMode: "one_sided", QuotePriceSource: "one_sided_missing_side_blended",
+				Side: "SELL", QuotePrice: 1300, QuoteQty: 49, BestBid: 1200, BestBidQty: 100,
+			},
+			wantShare: 0.49,
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			if !quoteMatchesObservedTouch(testCase.decision) {
+				t.Fatalf("quote matching rejected missing-side quote: %+v", testCase.decision)
+			}
+			share, ok := decisionTouchShare(testCase.decision)
+			if !ok || math.Abs(share-testCase.wantShare) > 1e-12 {
+				t.Fatalf("touch share = (%f, %t), want (%f, true)", share, ok, testCase.wantShare)
+			}
+		})
+	}
+	if quoteMatchesObservedTouch(cdfDecisionEvidence{
+		LocalBookMode: "one_sided", QuotePriceSource: "one_sided_missing_side_blended",
+		Side: "BUY", QuotePrice: 900, QuoteQty: 1, BestAsk: 800, BestAskQty: 100,
+	}) {
+		t.Fatal("buy quote at or above the present ask was accepted")
+	}
+}
+
+func TestOneSidedRestorationDoesNotCreditClosedCandidate(t *testing.T) {
+	file := "CDF-USD.jsonl"
+	sourceEvidence := evidenceOrder{timestamp: 1, file: file, ordinal: 1, globalSequence: 10}
+	acceptedEvidence := evidenceOrder{timestamp: 2, file: file, ordinal: 2, globalSequence: 20}
+	closedEvidence := evidenceOrder{timestamp: 3, file: file, ordinal: 3, globalSequence: 25}
+	restoredEvidence := evidenceOrder{timestamp: 4, file: file, ordinal: 4, globalSequence: 30}
+	candidate := cdfOneSidedRestorationCandidate{
+		key: cdfParticipantKey{VenueID: "north", ClientID: 7}, role: "cdf_elastic_supplier_1", orderID: 22,
+		presentSide: "BUY", missingSide: "SELL", anchorPrice: 99, anchorQty: 3, minimumQty: 3,
+		acceptedPrice: 101, acceptedQty: 3, acceptedAt: acceptedEvidence,
+		sourceSnapshot: cdfPublicSnapshot{
+			venueID: "north", clientID: 0, sequence: 10, publishedAt: 1, evidence: sourceEvidence,
+			snapshot: etypes.BookSnapshot{Bids: []etypes.PriceLevel{{Price: 99, VisibleQty: 3}}},
+		},
+	}
+	orders := map[cdfOrderKey]*cdfOrderState{
+		{VenueID: "north", ClientID: 7, OrderID: 22}: {
+			clientID: 7, side: "SELL", price: 101, acceptedAt: 2, acceptedSequence: 20, acceptedQty: 3,
+			remainingQty: 0, closed: true, cancelled: true, closedAt: 3,
+			remainingUpdates: []cdfOrderRemainingUpdate{
+				{evidence: acceptedEvidence, remainingQty: 3},
+				{evidence: closedEvidence, remainingQty: 3, closed: true},
+			},
+		},
+	}
+	restoredSnapshot := cdfPublicSnapshot{
+		venueID: "north", clientID: 0, sequence: 30, publishedAt: 4, evidence: restoredEvidence,
+		snapshot: etypes.BookSnapshot{
+			Bids: []etypes.PriceLevel{{Price: 99, VisibleQty: 3}},
+			Asks: []etypes.PriceLevel{{Price: 101, VisibleQty: 3}},
+		},
+	}
+	run := &CDFLiquidityRunAudit{
+		publicSnapshots: map[string][]cdfPublicSnapshot{"north": {
+			candidate.sourceSnapshot, restoredSnapshot,
+		}},
+		oneSidedRestorationCandidates: []cdfOneSidedRestorationCandidate{candidate},
+	}
+	state := &CDFLiquiditySupplierAudit{}
+	venue := &CDFLiquidityVenueAudit{VenueID: "north"}
+	run.evaluateOneSidedRestorations(orders, map[cdfParticipantKey]*CDFLiquiditySupplierAudit{candidate.key: state}, map[string]*CDFLiquidityVenueAudit{"north": venue})
+	if run.OneSidedRestorationCount != 0 || run.OneSidedRestorationUnresolvedCount != 1 || run.OneSidedRestorationInvalidCount != 0 {
+		t.Fatalf("closed candidate restoration = %+v, want unresolved without credit", run)
+	}
+	if len(run.OneSidedRestorationAudits) != 1 || !run.OneSidedRestorationAudits[0].Unresolved || run.OneSidedRestorationAudits[0].OrderOutcome != "cancelled" {
+		t.Fatalf("closed candidate audit = %+v", run.OneSidedRestorationAudits)
 	}
 }
 
@@ -208,6 +532,34 @@ func TestCDFLiquidityAntiCheatingRejectsSingleVenueDominance(t *testing.T) {
 	base.Venues[0].SupplierBidTimeWeightedRestingDepthShare = .8
 	if base.computeAntiCheatingSatisfied() {
 		t.Fatal("single-venue side time-weighted dominance was accepted")
+	}
+}
+
+func TestCDFLiquidityAntiCheatingRejectsPerVenueSelfReference(t *testing.T) {
+	run := CDFLiquidityRunAudit{
+		SupplierCount:                            1,
+		SupplierPresentSnapshotCount:             1,
+		SupplierPresenceTimeWeightedFraction:     1,
+		SupplierRemovalCounterfactualValid:       true,
+		SupplierVolumeShare:                      .2,
+		SupplierDepthOver75ActiveTimeFraction:    .2,
+		SupplierBidDepthOver75ActiveTimeFraction: .2,
+		SupplierAskDepthOver75ActiveTimeFraction: .2,
+		SupplierOnlyBidFraction:                  .2,
+		SupplierOnlyAskFraction:                  .2,
+		oneSidedPolicyEnabled:                    true,
+		Suppliers:                                []CDFLiquiditySupplierAudit{{AntiCheatingSatisfied: true}},
+		Venues: []CDFLiquidityVenueAudit{{
+			VenueID: "north", SupplierRemovalCounterfactualValid: true,
+			SupplierVolumeShare: .2, OneSidedSelfReferenceFraction: .6,
+		}},
+	}
+	if run.computeAntiCheatingSatisfied() {
+		t.Fatal("per-venue self-reference dominance was accepted")
+	}
+	run.Venues[0].OneSidedSelfReferenceFraction = .4
+	if !run.computeAntiCheatingSatisfied() {
+		t.Fatal("per-venue self-reference below the threshold was rejected")
 	}
 }
 
@@ -624,6 +976,38 @@ func TestCanonicalCDFComparisonConfigPreservesNonCDFReceiptRoles(t *testing.T) {
 	}
 	if withCDF == withUnrelatedRoleChange {
 		t.Fatal("unrelated receipt-role change was removed from comparison identity")
+	}
+}
+
+func TestCanonicalSV1DComparisonConfigPreservesRosterAndNormalizesMode(t *testing.T) {
+	withMode := []byte(`{"experiment_id":"treatment","hypothesis_id":"V2-R2-SV1D-CDF-LIQUIDITY","elastic_supplier_count":1,"elastic_liquidity_suppliers":[{"role":"cdf_elastic_supplier_1","symbol":"CDF/USD","max_inventory":200,"quote_on_one_sided_local_book":true}]}`)
+	withoutMode := []byte(`{"experiment_id":"control","hypothesis_id":"V2-R2-SV1D-CDF-LIQUIDITY","elastic_supplier_count":1,"elastic_liquidity_suppliers":[{"role":"cdf_elastic_supplier_1","symbol":"CDF/USD","max_inventory":200}]}`)
+	withDigest, err := canonicalSV1DComparisonConfig(withMode)
+	if err != nil {
+		t.Fatal(err)
+	}
+	withoutDigest, err := canonicalSV1DComparisonConfig(withoutMode)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if withDigest != withoutDigest {
+		t.Fatalf("mode-only treatment/control change altered comparison identity: %s != %s", withDigest, withoutDigest)
+	}
+	changedRoster, err := canonicalSV1DComparisonConfig([]byte(`{"experiment_id":"control","hypothesis_id":"V2-R2-SV1D-CDF-LIQUIDITY","elastic_supplier_count":1,"elastic_liquidity_suppliers":[{"role":"cdf_elastic_supplier_1","symbol":"CDF/USD","max_inventory":201}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changedRoster == withoutDigest {
+		t.Fatal("economic roster change was removed from SV1D comparison identity")
+	}
+	if sv1DModeConfigurationMatches(cdfRunConfig{ElasticSupplierCount: 1, ElasticLiquiditySuppliers: []cdfSupplierConfig{{QuoteOnOneSidedLocalBook: true}}}, false) {
+		t.Fatal("enabled one-sided roster matched disabled mode")
+	}
+	if !sv1DModeConfigurationMatches(cdfRunConfig{ElasticSupplierCount: 1, ElasticLiquiditySuppliers: []cdfSupplierConfig{{QuoteOnOneSidedLocalBook: true}}}, true) {
+		t.Fatal("enabled one-sided roster did not match enabled mode")
+	}
+	if sv1DModeConfigurationMatches(cdfRunConfig{ElasticSupplierCount: 1}, false) {
+		t.Fatal("empty roster matched a mode-paired SV1D control")
 	}
 }
 
@@ -2322,6 +2706,15 @@ func cdfFixtureLine(sequence uint64, clientID uint64, event, payload string) str
 func hasCDFCheck(checks []CDFLiquidityCheck, prefix string) bool {
 	for _, check := range checks {
 		if strings.HasPrefix(check.Failure, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasCDFFailureContaining(checks []CDFLiquidityCheck, fragment string) bool {
+	for _, check := range checks {
+		if strings.Contains(check.Failure, fragment) {
 			return true
 		}
 	}
