@@ -519,6 +519,16 @@ func (e *DefaultExchange) CheckListings() {
 // seller margin formula. It returns the completed option-mark epoch, or zero
 // when no option received a usable mark in this pass.
 func (e *DefaultExchange) UpdateDerivativeMarks() uint64 {
+	e.markPassMu.Lock()
+	defer e.markPassMu.Unlock()
+
+	return e.updateDerivativeMarksLockedByPass()
+}
+
+// updateDerivativeMarksLockedByPass is the derivative lifecycle body. The
+// caller must hold markPassMu so its optional complete mark refresh cannot
+// interleave with another mark producer.
+func (e *DefaultExchange) updateDerivativeMarksLockedByPass() uint64 {
 	now := e.Clock.NowUnixNano()
 
 	type expirableData struct {
@@ -649,7 +659,7 @@ func (e *DefaultExchange) UpdateDerivativeMarks() uint64 {
 		e.mu.Unlock()
 	}
 	if needsCompleteMarginRefresh {
-		e.updateAllPerpPrices()
+		e.updateAllPerpPricesLockedByPass()
 		e.mu.RLock()
 		completedMarkEpoch = e.markEpoch
 		e.mu.RUnlock()

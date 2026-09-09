@@ -207,6 +207,9 @@ type DefaultExchange struct {
 	markEpoch         uint64
 	markEpochBySymbol map[string]uint64
 	riskMarkSnapshots map[string]riskMarkSnapshot
+	// Mark publication, derivative refresh, and public risk entry points share
+	// one pass mutex so no caller can observe or commit an interleaved epoch.
+	markPassMu sync.Mutex
 	// The expiry scheduler can run at the same simulated timestamp as the
 	// price scheduler. Reusing this completed pass prevents stateful mark and
 	// liquidation work from being applied twice in one phase.
@@ -1765,6 +1768,9 @@ func (e *DefaultExchange) UpdatePerpPrices() {
 // liquidation call without this boundary fails closed. The caller must list
 // every margined symbol that can contribute to the accounts it will sweep.
 func (e *DefaultExchange) CommitMarkEpoch(symbols []string) (uint64, error) {
+	e.markPassMu.Lock()
+	defer e.markPassMu.Unlock()
+
 	if len(symbols) == 0 {
 		return 0, errors.New("mark epoch requires at least one symbol")
 	}
@@ -1832,6 +1838,16 @@ func (e *DefaultExchange) CommitMarkEpoch(symbols []string) (uint64, error) {
 }
 
 func (e *DefaultExchange) updateAllPerpPrices() {
+	e.markPassMu.Lock()
+	defer e.markPassMu.Unlock()
+
+	e.updateAllPerpPricesLockedByPass()
+}
+
+// updateAllPerpPricesLockedByPass is the mark producer body. The caller must
+// hold markPassMu; UpdateDerivativeMarks uses it when a changed option mark
+// requires a complete sibling refresh at the same simulated timestamp.
+func (e *DefaultExchange) updateAllPerpPricesLockedByPass() {
 	e.mu.Lock()
 	if e.markPriceCalc == nil {
 		e.markPriceCalc = NewMidPriceCalculator()
@@ -2541,6 +2557,9 @@ func (e *DefaultExchange) clientHasSettlementPendingExposureLocked(clientID uint
 // a pure short-vol account could sink arbitrarily far underwater untouched.
 // Runs on the derivative mark cadence, after marks refresh.
 func (e *DefaultExchange) CheckPositionMarginerLiquidations() {
+	e.markPassMu.Lock()
+	defer e.markPassMu.Unlock()
+
 	e.mu.RLock()
 	markEpoch := e.markEpoch
 	e.mu.RUnlock()
@@ -2718,6 +2737,9 @@ func (e *DefaultExchange) addPositionMarginerExposure(p *accountMarginProfile, c
 // and any deficit are finalized once.
 // Hedge-mode Long/Short positions are included.
 func (e *DefaultExchange) CheckLiquidations(symbol string, perp *PerpFutures, markPrice int64) {
+	e.markPassMu.Lock()
+	defer e.markPassMu.Unlock()
+
 	e.checkLiquidationsAtEpoch(symbol, perp, markPrice, 0)
 }
 

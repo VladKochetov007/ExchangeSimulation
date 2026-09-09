@@ -3,6 +3,7 @@ package exchange
 import (
 	"errors"
 	"math"
+	"sync"
 	"testing"
 	"time"
 
@@ -229,6 +230,63 @@ func TestUpdateDerivativeMarksReusesSameTimestampMarkPass(t *testing.T) {
 	}
 	if calculator.calls != 1 {
 		t.Fatalf("same-timestamp expiry pass repeated stateful mark calculation %d times", calculator.calls)
+	}
+}
+
+type blockingMarkCalculator struct {
+	started chan struct{}
+	release chan struct{}
+	once    sync.Once
+	price   int64
+}
+
+func (c *blockingMarkCalculator) Calculate(*OrderBook) (int64, error) {
+	c.once.Do(func() { close(c.started) })
+	<-c.release
+	return c.price, nil
+}
+
+func TestMarkProducersSerializeRiskEpochCommit(t *testing.T) {
+	ex := NewExchange(2, &RealClock{})
+	defer ex.Shutdown()
+	perp := NewPerpFutures("ABC-PERP", "ABC", "USD", 1, 1, 1, 1)
+	ex.AddInstrument(perp)
+	calculator := &blockingMarkCalculator{
+		started: make(chan struct{}), release: make(chan struct{}), price: 100,
+	}
+	ex.ConfigureAutomation(AutomationConfig{MarkPriceCalc: calculator})
+
+	priceDone := make(chan struct{})
+	go func() {
+		ex.UpdatePerpPrices()
+		close(priceDone)
+	}()
+	select {
+	case <-calculator.started:
+	case <-time.After(time.Second):
+		t.Fatal("mark calculator did not start")
+	}
+
+	derivativeDone := make(chan struct{})
+	go func() {
+		ex.UpdateDerivativeMarks()
+		close(derivativeDone)
+	}()
+	select {
+	case <-derivativeDone:
+		t.Fatal("derivative refresh overtook an in-flight mark/risk pass")
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(calculator.release)
+	select {
+	case <-priceDone:
+	case <-time.After(time.Second):
+		t.Fatal("mark pass did not finish after release")
+	}
+	select {
+	case <-derivativeDone:
+	case <-time.After(time.Second):
+		t.Fatal("derivative refresh did not finish after mark pass")
 	}
 }
 
