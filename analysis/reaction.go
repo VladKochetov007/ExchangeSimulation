@@ -73,6 +73,13 @@ type Reaction struct {
 	UndefinedMarkouts int `json:"undefined_markouts"`
 }
 
+func reactionBookSymbol(event Event) string {
+	if event.Symbol != "" {
+		return event.Symbol
+	}
+	return symbolFromPath(event.File)
+}
+
 // MeasureReaction computes delivered reaction lag and maker markouts.
 func (r *Run) MeasureReaction(opts ReactionOptions) (*Reaction, error) {
 	horizon := opts.HorizonSeconds
@@ -84,16 +91,28 @@ func (r *Run) MeasureReaction(opts ReactionOptions) (*Reaction, error) {
 		maxReaction = 30
 	}
 
+	type reactionOrigin struct {
+		file    string
+		ordinal int64
+	}
+	beforeOrigin := func(left, right reactionOrigin) bool {
+		if left.file != right.file {
+			return left.file < right.file
+		}
+		return left.ordinal < right.ordinal
+	}
 	type bookEvent struct {
 		at      int64
 		isOrder bool
 		client  uint64
+		origin  reactionOrigin
 	}
 	type tradeEvent struct {
 		at       int64
 		price    int64
 		makerID  uint64
 		takerBuy bool
+		origin   reactionOrigin
 	}
 	var mu sync.Mutex
 	books := make(map[markKey][]bookEvent)
@@ -105,6 +124,7 @@ func (r *Run) MeasureReaction(opts ReactionOptions) (*Reaction, error) {
 		price  int64
 		buy    bool
 		client uint64
+		origin reactionOrigin
 	}
 	makerFills := make(map[markKey][]makerFill)
 
@@ -126,15 +146,16 @@ func (r *Run) MeasureReaction(opts ReactionOptions) (*Reaction, error) {
 		FilesSelected: opts.FilesSelected,
 	}
 	if err := r.Scan(scan, func(event Event) {
-		key := markKey{event.VenueID, event.Symbol}
+		key := markKey{event.VenueID, reactionBookSymbol(event)}
 		switch event.Name {
 		case "BookDelta":
 			mu.Lock()
-			books[key] = append(books[key], bookEvent{at: event.SimTS})
+			books[key] = append(books[key], bookEvent{at: event.SimTS, origin: reactionOrigin{event.File, event.Ordinal}})
 			mu.Unlock()
 		case "OrderAccepted":
 			mu.Lock()
-			books[key] = append(books[key], bookEvent{at: event.SimTS, isOrder: true, client: event.ClientID})
+			books[key] = append(books[key], bookEvent{at: event.SimTS, isOrder: true, client: event.ClientID,
+				origin: reactionOrigin{event.File, event.Ordinal}})
 			mu.Unlock()
 		case "Trade":
 			var payload tradePayload
@@ -142,7 +163,8 @@ func (r *Run) MeasureReaction(opts ReactionOptions) (*Reaction, error) {
 				return
 			}
 			mu.Lock()
-			trades[key] = append(trades[key], tradeEvent{at: event.SimTS, price: payload.Price, takerBuy: payload.Side == "BUY"})
+			trades[key] = append(trades[key], tradeEvent{at: event.SimTS, price: payload.Price,
+				takerBuy: payload.Side == "BUY", origin: reactionOrigin{event.File, event.Ordinal}})
 			mu.Unlock()
 		case "OrderFill":
 			var payload fillPayload
@@ -152,6 +174,7 @@ func (r *Run) MeasureReaction(opts ReactionOptions) (*Reaction, error) {
 			mu.Lock()
 			makerFills[key] = append(makerFills[key], makerFill{
 				at: event.SimTS, price: payload.Price, buy: payload.Side == "BUY", client: event.ClientID,
+				origin: reactionOrigin{event.File, event.Ordinal},
 			})
 			mu.Unlock()
 		}
@@ -180,7 +203,10 @@ func (r *Run) MeasureReaction(opts ReactionOptions) (*Reaction, error) {
 			}
 			// A change is observed before anything can react to it, so at an
 			// identical instant the change sorts first.
-			return !events[i].isOrder && events[j].isOrder
+			if events[i].isOrder != events[j].isOrder {
+				return !events[i].isOrder
+			}
+			return beforeOrigin(events[i].origin, events[j].origin)
 		})
 		var lags []float64
 		for i, event := range events {
@@ -232,8 +258,23 @@ func (r *Run) MeasureReaction(opts ReactionOptions) (*Reaction, error) {
 	// horizon after each maker fill, and sign the move against the maker.
 	for key := range trades {
 		series := trades[key]
-		sort.Slice(series, func(i, j int) bool { return series[i].at < series[j].at })
+		sort.Slice(series, func(i, j int) bool {
+			if series[i].at != series[j].at {
+				return series[i].at < series[j].at
+			}
+			return beforeOrigin(series[i].origin, series[j].origin)
+		})
 		trades[key] = series
+	}
+	for key := range makerFills {
+		fills := makerFills[key]
+		sort.Slice(fills, func(i, j int) bool {
+			if fills[i].at != fills[j].at {
+				return fills[i].at < fills[j].at
+			}
+			return beforeOrigin(fills[i].origin, fills[j].origin)
+		})
+		makerFills[key] = fills
 	}
 	type adverseKey struct {
 		venue string
@@ -245,7 +286,18 @@ func (r *Run) MeasureReaction(opts ReactionOptions) (*Reaction, error) {
 		pickedOff int
 	}
 	accumulators := make(map[adverseKey]*adverseAcc)
-	for key, fills := range makerFills {
+	fillKeys := make([]markKey, 0, len(makerFills))
+	for key := range makerFills {
+		fillKeys = append(fillKeys, key)
+	}
+	sort.Slice(fillKeys, func(i, j int) bool {
+		if fillKeys[i].venue != fillKeys[j].venue {
+			return fillKeys[i].venue < fillKeys[j].venue
+		}
+		return fillKeys[i].symbol < fillKeys[j].symbol
+	})
+	for _, key := range fillKeys {
+		fills := makerFills[key]
 		series := trades[key]
 		if len(series) == 0 {
 			continue

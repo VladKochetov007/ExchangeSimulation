@@ -62,6 +62,29 @@ func TestAuditMarketDataEvidenceStreamingMatchesBufferedOracle(t *testing.T) {
 	}
 }
 
+func TestAuditMarketDataEvidenceOracleRejectsStoredOutOfOrderRecords(t *testing.T) {
+	dir := writeEvidenceFixture(t, func(schedules, _, _ []byte) {
+		first := append([]byte(nil), schedules[:marketDataScheduleRecordBytes]...)
+		copy(schedules[:marketDataScheduleRecordBytes], schedules[marketDataScheduleRecordBytes:])
+		copy(schedules[marketDataScheduleRecordBytes:], first)
+	})
+
+	streaming, err := AuditMarketDataReceipts(dir)
+	if err != nil {
+		t.Fatalf("streaming audit failed: %v", err)
+	}
+	buffered, err := auditMarketDataReceiptsBuffered(dir)
+	if err != nil {
+		t.Fatalf("buffered oracle failed: %v", err)
+	}
+	if streaming.Valid || buffered.Valid {
+		t.Fatalf("stored event order was repaired by an audit path: streaming=%+v buffered=%+v", streaming, buffered)
+	}
+	if streaming.BadEventOrder == 0 || buffered.BadEventOrder == 0 {
+		t.Fatalf("stored event order was not reported by both audit paths: streaming=%+v buffered=%+v", streaming, buffered)
+	}
+}
+
 // Each mutation rewrites every file digest. The auditor must detect broken
 // semantics, not merely a checksum mismatch.
 func TestAuditMarketDataEvidenceCatchesAdversarialMutations(t *testing.T) {

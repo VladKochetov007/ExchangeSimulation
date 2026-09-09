@@ -240,14 +240,16 @@ func auditMarketDataReceiptsBuffered(dir string) (*MarketDataReceiptAudit, error
 		}
 	}
 
-	events := make([]informationEvent, 0, result.Schedules+result.Receipts+result.Decisions)
+	scheduleEvents := make([]informationEvent, 0, result.Schedules)
+	receiptEvents := make([]informationEvent, 0, result.Receipts)
+	decisionEvents := make([]informationEvent, 0, result.Decisions)
 	for offset := 0; offset < len(schedulesRaw); offset += marketDataScheduleRecordBytes {
 		record := decodeObservation(schedulesRaw[offset : offset+marketDataScheduleRecordBytes])
 		validateObservation(result, record, links, symbols, false)
 		if activity := linkActivity[record.linkID]; activity != nil {
 			activity.Schedules++
 		}
-		events = append(events, informationEvent{ordinal: record.eventOrdinal, kind: eventSchedule, observation: record})
+		scheduleEvents = append(scheduleEvents, informationEvent{ordinal: record.eventOrdinal, kind: eventSchedule, observation: record})
 	}
 	for offset := 0; offset < len(receiptsRaw); offset += marketDataReceiptRecordBytes {
 		record := decodeObservation(receiptsRaw[offset : offset+marketDataReceiptRecordBytes])
@@ -255,7 +257,7 @@ func auditMarketDataReceiptsBuffered(dir string) (*MarketDataReceiptAudit, error
 		if activity := linkActivity[record.linkID]; activity != nil {
 			activity.Receipts++
 		}
-		events = append(events, informationEvent{ordinal: record.eventOrdinal, kind: eventReceipt, observation: record})
+		receiptEvents = append(receiptEvents, informationEvent{ordinal: record.eventOrdinal, kind: eventReceipt, observation: record})
 	}
 	for offset := 0; offset < len(decisionsRaw); offset += marketDataDecisionRecordBytes {
 		record := decodeDecision(decisionsRaw[offset : offset+marketDataDecisionRecordBytes])
@@ -271,16 +273,19 @@ func auditMarketDataReceiptsBuffered(dir string) (*MarketDataReceiptAudit, error
 		if activity := linkActivity[record.linkID]; activity != nil {
 			activity.Decisions++
 		}
-		for _, value := range decisionsRaw[offset+19 : offset+24] {
+		if decisionsRaw[offset+19] > 1 {
+			result.NonzeroReserved++
+		}
+		for _, value := range decisionsRaw[offset+20 : offset+24] {
 			if value != 0 {
 				result.NonzeroReserved++
 				break
 			}
 		}
-		events = append(events, informationEvent{ordinal: record.eventOrdinal, kind: eventDecision, decision: record})
+		decisionEvents = append(decisionEvents, informationEvent{ordinal: record.eventOrdinal, kind: eventDecision, decision: record})
 	}
 
-	sort.Slice(events, func(i, j int) bool { return events[i].ordinal < events[j].ordinal })
+	events := mergeInformationEvents(scheduleEvents, receiptEvents, decisionEvents)
 	schedules := make(map[scheduleKey]observationRecord, result.Schedules)
 	sources := make(map[sourceKey]struct{}, result.Schedules)
 	frontiers := make(map[linkKey]auditedFrontier)
@@ -363,6 +368,25 @@ func auditMarketDataReceiptsBuffered(dir string) (*MarketDataReceiptAudit, error
 		result.ScheduleMismatch == 0 && result.MissingDueReceipt == 0 && result.BadEventOrder == 0 &&
 		result.DecisionWithoutLink == 0 && result.BadDecisionFrontier == 0 && result.FutureDecisionUse == 0
 	return result, nil
+}
+
+func mergeInformationEvents(schedules, receipts, decisions []informationEvent) []informationEvent {
+	streams := [3][]informationEvent{schedules, receipts, decisions}
+	merged := make([]informationEvent, 0, len(schedules)+len(receipts)+len(decisions))
+	for {
+		selected := -1
+		for index, stream := range streams {
+			if len(stream) == 0 || (selected >= 0 && stream[0].ordinal >= streams[selected][0].ordinal) {
+				continue
+			}
+			selected = index
+		}
+		if selected < 0 {
+			return merged
+		}
+		merged = append(merged, streams[selected][0])
+		streams[selected] = streams[selected][1:]
+	}
 }
 
 // evidenceRecordStream reads one fixed-width sidecar without materializing the
@@ -897,7 +921,10 @@ func auditMarketDataReceiptsStreaming(dir string) (*MarketDataReceiptAudit, erro
 			if activity := linkActivity[record.linkID]; activity != nil {
 				activity.Decisions++
 			}
-			for _, value := range raw[19:24] {
+			if raw[19] > 1 {
+				result.NonzeroReserved++
+			}
+			for _, value := range raw[20:24] {
 				if value != 0 {
 					result.NonzeroReserved++
 					break
