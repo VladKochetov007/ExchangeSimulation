@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"testing"
 
 	"exchange_sim/analysis"
@@ -47,5 +48,26 @@ func TestApplyAnalyzerProvenanceAnalysisOnlyReplayRejectsModifiedAnalyzer(t *tes
 	applyAnalyzerProvenance(comparison, "descendant-revision", true, true)
 	if comparison.Valid || comparison.Provenance.Valid {
 		t.Fatal("analysis-only replay accepted a modified analyzer")
+	}
+}
+
+func TestCDFComparisonProvenanceRendersExplicitAnalyzerModifiedFlag(t *testing.T) {
+	comparison := pairedCDFComparisonForProvenanceTest()
+	applyAnalyzerProvenance(comparison, "raw-revision", false, false)
+	encoded, err := json.Marshal(comparison)
+	if err != nil {
+		t.Fatalf("marshal comparison: %v", err)
+	}
+	var document map[string]json.RawMessage
+	if err := json.Unmarshal(encoded, &document); err != nil {
+		t.Fatalf("unmarshal comparison: %v", err)
+	}
+	var provenance map[string]json.RawMessage
+	if err := json.Unmarshal(document["provenance"], &provenance); err != nil {
+		t.Fatalf("unmarshal provenance: %v", err)
+	}
+	modified, ok := provenance["analyzer_source_modified"]
+	if !ok || string(modified) != "false" {
+		t.Fatalf("analyzer_source_modified = %s, want explicit false", modified)
 	}
 }

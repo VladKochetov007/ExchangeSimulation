@@ -493,7 +493,7 @@ type CDFLiquidityComparisonProvenance struct {
 	Control                *CDFLiquidityRunProvenance `json:"control"`
 	AnalyzerSHA256         string                     `json:"analyzer_sha256,omitempty"`
 	AnalyzerSourceRevision string                     `json:"analyzer_source_revision,omitempty"`
-	AnalyzerSourceModified bool                       `json:"analyzer_source_modified,omitempty"`
+	AnalyzerSourceModified bool                       `json:"analyzer_source_modified"`
 	SourceRevisionMode     string                     `json:"source_revision_mode,omitempty"`
 	RawSourceRevision      string                     `json:"raw_source_revision,omitempty"`
 	Valid                  bool                       `json:"valid"`
