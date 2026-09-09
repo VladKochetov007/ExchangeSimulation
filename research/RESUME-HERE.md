@@ -2128,3 +2128,25 @@ preserved, and holdouts `619`, `631`, and `641` remain untouched. The next
 promotion boundary is a fresh exact-tree independent Sol-xhigh review of the
 post-documentation candidate and this rescore decision; absent an accepted
 activation path, seed `659` and full SV1C development remain closed.
+
+## Append-only operational update: SV1C independently closed — 2026-09-09
+
+Lovelace (`gpt-5.6-sol`, xhigh) independently reviewed the clean exact tree
+`7aa9fe27f2fb1b40435bfbba98cd4f6c10fa4d72`, the retained raw pair, and the
+final replay. The report and attestation are recorded in
+`research/reviews/v2-r2-sv1c-independent-review-2026-09-09.md` and retained
+outside the repository at
+`/home/vlad/external-scratch/v2-r2-sv1c-review-7aa9fe2/`.
+
+The verdict is `REJECT SV1C FOR SCIENTIFIC PROMOTION`. The reviewer accepts
+the global-order analyzer correction as analysis-only/rescore-only and accepts
+the corrected replay as valid evidence of negative activation. It independently
+confirmed five supplier/venue instances without inventory-responsive decisions
+and invalid aggregate supplier-removal coverage (900/939 snapshots). It
+rejects any relaxation, retuning, or favorable rerun as a new successor rather
+than a continuation of SV1C.
+
+SV1C is now closed as **VALID EVIDENCE / NEGATIVE ACTIVATION**. No experiment
+is authorized: seed `659`, full development, freeze, and holdouts `619`, `631`,
+and `641` remain prohibited. Further simulation requires a separately named,
+preregistered successor mechanism and a new exact-tree activation review.

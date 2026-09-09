@@ -658,3 +658,37 @@ post-documentation successor tree, the replay protocol, and the negative
 activation decision. Unless that review establishes a separately justified
 registered path, the SV1C successor stops at this activation boundary rather
 than proceeding to full development.
+
+## Independent SV1C promotion review and closure — 2026-09-09
+
+Lovelace (`gpt-5.6-sol`, xhigh) independently reviewed exact clean tree
+`7aa9fe27f2fb1b40435bfbba98cd4f6c10fa4d72` and the retained evidence. The
+review report is
+`research/reviews/v2-r2-sv1c-independent-review-2026-09-09.md`; the external
+review attestation is retained at
+`/home/vlad/external-scratch/v2-r2-sv1c-review-7aa9fe2/` with report SHA-256
+`5410116266994fad02cd2701875ae742c8ee81aea0e935236b8661fc1f5eecc4` and
+attestation SHA-256
+`c9dd0929c087daea577e466d3807d32ee9dc1473addb000703b59fed73c661a3`.
+
+The independent verdict is **REJECT SV1C FOR SCIENTIFIC PROMOTION**. The
+reviewer accepts the global-order analyzer correction as an analysis-only,
+rescore-only fix and accepts the corrected replay as a valid negative
+activation decision. It independently confirms the exact R2 calendar
+semantics, strict-risk/account-scope hardening, finite delayed-local CDF
+supplier constraints, source/analyzer provenance split, 68/68 raw artifact
+hashes, and deterministic two-build/two-replay result.
+
+The rejection is substantive, not a tooling failure. Only 7 of 12 supplier
+instances have an inventory-responsive decision; five have fills and PnL but
+no post-fill inventory response. Supplier-removal reconstruction covers 900 of
+939 snapshots, so aggregate anti-cheating is invalid as well. The reviewer
+therefore rejects capacity seed 659, 24-hour development, freeze, and all
+holdouts. SV1C is archived as **VALID EVIDENCE / NEGATIVE ACTIVATION**.
+
+The five-minute activation pair had no liquidation or explicit withdrawal
+event; those remain source/test limitations, not reasons to reinterpret the
+negative. No predicate was relaxed, no historical trajectory was repaired, and
+no retained evidence was overwritten. Any further simulation must be a
+separately named and preregistered successor with a new exact-tree review and
+development-only activation gate.

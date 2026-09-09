@@ -1892,6 +1892,30 @@ simulator world or holdout has run; holdouts `619`, `631`, and `641` remain
 untouched. Async refs remain performance `b1847ac`, performance-port `39768df`,
 and economic red-team `e85e16c`, with no newer commits.
 
+## Append-only audit update: independent SV1C rejection and closure — 2026-09-09
+
+The fresh independent reviewer Lovelace (`gpt-5.6-sol`, xhigh) examined exact
+tree `7aa9fe27f2fb1b40435bfbba98cd4f6c10fa4d72`, Git tree object
+`b2a902a38287c9c4404dab4ce3d12f02f48b746a`, a clean worktree, all retained raw
+artifact hashes, and the final deterministic analysis-only replay. The review
+report is committed at
+`research/reviews/v2-r2-sv1c-independent-review-2026-09-09.md`; its external
+attestation is
+`/home/vlad/external-scratch/v2-r2-sv1c-review-7aa9fe2/review-attestation.json`
+with SHA-256 `c9dd0929c087daea577e466d3807d32ee9dc1473addb000703b59fed73c661a3`.
+
+Verdict: `REJECT SV1C FOR SCIENTIFIC PROMOTION`. The reviewer separately
+accepted the routed global-order analyzer correction as rescore-only and the
+corrected retained replay as a valid negative activation result. It confirmed
+that only 7/12 supplier instances had inventory-responsive decisions, that
+supplier-removal coverage was 900/939 snapshots, and that no capacity,
+development, freeze, or holdout experiment is authorized.
+
+SV1C is closed as **VALID EVIDENCE / NEGATIVE ACTIVATION**. Relaxing the
+all-supplier activation predicate, changing the roster, or rerunning for a
+positive outcome would define a new successor and requires new preregistration,
+exact-tree review, and a fresh activation boundary. No holdout was consumed.
+
 ## Append-only audit update: corrected retained activation replay — 2026-09-09
 
 The exact current successor source checkpoint before this note is clean and
