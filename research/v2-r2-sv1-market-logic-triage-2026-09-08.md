@@ -437,3 +437,43 @@ old result is promoted to corrected-semantics evidence. Holdouts `619`, `631`,
 and `641` remain untouched. The next gate is one fresh exact-tree independent
 Sol-xhigh review of the R2 calendar, finite CDF supplier, strict risk boundary,
 liquidation evidence, analyzer hardening, and binary evidence contract.
+
+## Clean normalizer provenance and full mechanical gate — 2026-09-09
+
+The exact successor tree is clean and pushed at `1c1a1aa` on
+`feature/r2-cdf-survival-successor`. The preceding source checkpoint was
+`59be3c327ac60567ee9eb5fc6311d66197e009c0`; it contains the deterministic
+timestamp-batch, readiness, gateway-order, risk/evidence, and binary-sink
+hardening described above. No development or holdout world has run at either
+checkpoint.
+
+The first clean `make test` reached every Go package and all preceding
+contract suites, then correctly rejected the old normalizer registration: its
+binary was built from `b46640696c24504fb298cfebcd876e2b1894aad0`, while the
+source closure had changed at `59be3c3`. This is classified as a stale
+provenance registration, not as a simulator or analyzer failure. A fresh
+Go 1.27 build was made with the registered command and reproduced independently
+in a second clean build. Both reported `vcs.modified=false` and produced the
+identical `bin/multivenue` digest
+`e9644433cda10116460164b6549a9435ddc44db9059a10c45b774011e3f01970`.
+
+Commit `1c1a1aa` updates only the normalizer registration and its bound
+provenance fields to source revision `59be3c3`; no economic configuration,
+calendar rule, supplier roster, historical evidence, or prior verdict changed.
+The subsequent clean `make test` completed with `MAKE_TEST_STATUS=0`. It
+passed the full Go package suite, integrated-long-run and R2 contracts, binary
+capacity/archive fixtures, activation-output boundary, SV1C config and
+normalizer checks, survival/paired-survival/score/terminal contracts, and
+archive checks. The intentionally malformed fixture diagnostics remained
+expected negative tests followed by explicit pass results.
+
+The asynchronous refs were fetched immediately before this checkpoint and
+remain `b1847ac40e8b7483e6e8a3f94b3705b4058884b` (performance),
+`39768dfed4ba4a5134f0c5ccf53351a79a0b1d64` (performance-port), and
+`e85e16c5e920382e5df9aa050ac5ff9b22b51661` (economic red team). No auxiliary
+implementation was imported. No pinned production run, activation, capacity
+measurement, registered development cell, freeze, or holdout was consumed;
+holdouts `619`, `631`, and `641` remain untouched. The next gate is one fresh
+independent exact-tree Sol-xhigh review of `1c1a1aa`, after which only review
+acceptance can authorize the pinned production binaries and seed-643 activation
+probe.

@@ -2001,3 +2001,37 @@ review of the complete current successor. Only an accepted review can authorize
 the current clean pinned binaries, the registered binary-capacity measurement,
 and then the seed-643 paired activation probe. Development cells and holdouts
 remain closed.
+
+## Append-only operational update: clean SV1C provenance gate — 2026-09-09
+
+The exact successor tree is clean and pushed at `1c1a1aa` on
+`feature/r2-cdf-survival-successor`. The full clean `make test` initially
+identified a genuine stale-registration condition: the registered SV1C
+normalizer still named source revision `b46640696c24504fb298cfebcd876e2b1894aad0`,
+but the source closure had advanced through the deterministic runtime and
+evidence hardening at `59be3c327ac60567ee9eb5fc6311d66197e009c0`.
+
+The normalizer was rebuilt with Go `go1.27.0`, the registered trimpath,
+CGO-disabled linux/amd64/v1 command. Two independent clean builds reported
+`vcs.modified=false` and matched byte-for-byte at digest
+`e9644433cda10116460164b6549a9435ddc44db9059a10c45b774011e3f01970`.
+`1c1a1aa` updates only the registration and nested provenance fields; the
+effective configs and economic successor semantics are unchanged.
+
+The rerun against the committed tree completed with `MAKE_TEST_STATUS=0`.
+All Go packages and repository contract suites passed, including the
+integrated-long-run, binary-capacity/archive, SV1 activation-boundary, strict
+normalizer/config, survival, paired-survival, score, terminal, and archive
+contracts. Negative fixtures emitted their expected rejection diagnostics and
+then passed. Focused suites, `go vet ./...`, targeted race tests, and
+`git diff --check` were already green for the unchanged source checkpoint.
+
+The asynchronous refs were refetched without switching worktrees and had no
+new commits beyond performance `b1847ac`, performance-port `39768df`, or
+economic red-team `e85e16c`. No code or evidence from those branches was
+merged. No production binary run, capacity probe, seed-643 activation,
+registered development cell, freeze, or holdout run occurred; retained
+evidence was not removed and holdouts `619`, `631`, and `641` remain untouched.
+The next action is a fresh independent exact-tree Sol-xhigh review of the
+complete `1c1a1aa` successor. Review acceptance remains required before
+pinned production binaries or the activation probe.

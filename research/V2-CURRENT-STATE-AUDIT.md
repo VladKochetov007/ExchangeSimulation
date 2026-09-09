@@ -1807,3 +1807,36 @@ The candidate is still not promoted. The next gate is a fresh independent
 exact-tree Sol-xhigh review of the complete R2/CDF/risk/evidence/provenance
 contract. Review acceptance is required before binary capacity measurement or
 the seed-643 activation probe.
+
+## Append-only audit update: clean SV1C registration and mechanical gate — 2026-09-09
+
+The current successor is clean and pushed at `1c1a1aa` on
+`feature/r2-cdf-survival-successor`. The prior full gate exposed that the
+precommitted normalizer registration at source `b46640696c24504fb298cfebcd876e2b1894aad0`
+was no longer valid after source hardening at `59be3c3`. The source-closure
+contract rejected it before any scientific world could start. This was a
+provenance mismatch and did not alter the predecessor R2 negative control or
+any retained evidence.
+
+Two clean Go 1.27 builds of `cmd/multivenue`, using the registered
+CGO-disabled linux/amd64/v1 trimpath command, reported `vcs.modified=false`
+and were byte-identical. The new normalizer digest is
+`e9644433cda10116460164b6549a9435ddc44db9059a10c45b774011e3f01970`, bound to
+source `59be3c327ac60567ee9eb5fc6311d66197e009c0`. Commit `1c1a1aa` updates
+only this registration and its manifest references.
+
+The clean rerun completed with status zero. It passed all Go packages and the
+integrated, R2, binary-capacity/archive, activation-output, strict SV1C
+normalizer/config, survival, paired-survival, score, terminal, and archive
+contracts. Malformed-input messages in the log are intentional negative
+fixtures with explicit pass results. Focused tests, vet, targeted race checks,
+and diff validation remain green; no simulator world was produced.
+
+The asynchronous refs were fetched at this checkpoint and remain
+performance `b1847ac40e8b7483e6e8a3f94b3705b4058884b`, performance-port
+`39768dfed4ba4a5134f0c5ccf53351a79a0b1d64`, and economic red-team
+`e85e16c5e920382e5df9aa050ac5ff9b22b51661`. No auxiliary implementation was
+merged, no evidence was deleted, and holdouts `619`, `631`, and `641` remain
+untouched. The candidate is still unpromoted; the next gate is one fresh
+independent exact-tree Sol-xhigh review of the complete `1c1a1aa` tree before
+any pinned production run, capacity measurement, or seed-643 activation.
