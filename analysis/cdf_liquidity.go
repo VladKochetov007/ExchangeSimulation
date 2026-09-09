@@ -999,6 +999,7 @@ type cdfDepthIntervalStats struct {
 }
 
 type cdfOrderRemainingUpdate struct {
+	evidence     evidenceOrder
 	ordinal      int64
 	remainingQty int64
 	closed       bool
@@ -1007,17 +1008,21 @@ type cdfOrderRemainingUpdate struct {
 type cdfRestDecision struct {
 	key      cdfOrderKey
 	role     string
+	evidence evidenceOrder
 	ordinal  int64
 	side     string
 	price    int64
 	quantity int64
 }
 
-func (order *cdfOrderState) remainingAt(ordinal int64) (int64, bool, bool) {
+func (order *cdfOrderState) remainingAt(use evidenceOrder) (int64, bool, bool) {
 	var latest cdfOrderRemainingUpdate
 	found := false
 	for _, update := range order.remainingUpdates {
-		if update.ordinal <= ordinal && (!found || update.ordinal > latest.ordinal) {
+		if !evidenceAtOrBefore(update.evidence, use) {
+			continue
+		}
+		if !found || evidenceBefore(latest.evidence, update.evidence) {
 			latest = update
 			found = true
 		}
@@ -1780,8 +1785,13 @@ func (r *CDFLiquidityRunAudit) processDecision(event Event, states map[cdfPartic
 		state.RestCount++
 		r.RestCount++
 		r.restDecisions = append(r.restDecisions, cdfRestDecision{
-			key:  cdfOrderKey{VenueID: event.VenueID, ClientID: decision.ClientID, OrderID: decision.QuoteOrderID},
-			role: decision.Role, ordinal: event.Ordinal, side: decision.Side, price: decision.QuotePrice, quantity: decision.QuoteQty,
+			key:      cdfOrderKey{VenueID: event.VenueID, ClientID: decision.ClientID, OrderID: decision.QuoteOrderID},
+			role:     decision.Role,
+			evidence: eventEvidenceOrder(event),
+			ordinal:  event.Ordinal,
+			side:     decision.Side,
+			price:    decision.QuotePrice,
+			quantity: decision.QuoteQty,
 		})
 		if decision.QuoteOrderID == 0 || decision.ObservationSequence == 0 || !validSide(decision.Side) || decision.QuotePrice <= 0 || decision.QuoteQty <= 0 {
 			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "rest decision has incomplete quote identity"})
@@ -3248,7 +3258,7 @@ func (r *CDFLiquidityRunAudit) processBookEvent(event Event, states map[cdfParti
 			}
 		}
 		_, cancelRequested := r.cancelRequestedByOrder[orderKey]
-		order := &cdfOrderState{clientID: event.ClientID, side: accepted.Side, price: accepted.Price, requestID: accepted.RequestID, acceptedAt: event.SimTS, acceptedSequence: event.Sequence, acceptedQty: accepted.Qty, remainingQty: accepted.Qty, cancelRequested: cancelRequested, remainingUpdates: []cdfOrderRemainingUpdate{{ordinal: event.Ordinal, remainingQty: accepted.Qty}}}
+		order := &cdfOrderState{clientID: event.ClientID, side: accepted.Side, price: accepted.Price, requestID: accepted.RequestID, acceptedAt: event.SimTS, acceptedSequence: event.Sequence, acceptedQty: accepted.Qty, remainingQty: accepted.Qty, cancelRequested: cancelRequested, remainingUpdates: []cdfOrderRemainingUpdate{{evidence: eventEvidenceOrder(event), ordinal: event.Ordinal, remainingQty: accepted.Qty}}}
 		if share, ok := state.pendingTouchByRequest[accepted.RequestID]; ok {
 			order.touchShare, order.touchShareKnown = share, true
 			delete(state.pendingTouchByRequest, accepted.RequestID)
@@ -3320,7 +3330,7 @@ func (r *CDFLiquidityRunAudit) processBookEvent(event Event, states map[cdfParti
 			order.closed, order.closedAt, order.filled = true, event.SimTS, true
 			order.filledAt, order.filledOrdinal = event.SimTS, event.Ordinal
 		}
-		order.remainingUpdates = append(order.remainingUpdates, cdfOrderRemainingUpdate{ordinal: event.Ordinal, remainingQty: order.remainingQty, closed: order.closed})
+		order.remainingUpdates = append(order.remainingUpdates, cdfOrderRemainingUpdate{evidence: eventEvidenceOrder(event), ordinal: event.Ordinal, remainingQty: order.remainingQty, closed: order.closed})
 	case "OrderCancelled":
 		state := states[cdfParticipantKey{VenueID: event.VenueID, ClientID: event.ClientID}]
 		if state == nil {
@@ -3347,7 +3357,7 @@ func (r *CDFLiquidityRunAudit) processBookEvent(event Event, states map[cdfParti
 		}
 		order.closed, order.closedAt = true, event.SimTS
 		order.cancelled, order.cancelRequestID, order.cancelledSequence = true, cancelled.RequestID, event.Sequence
-		order.remainingUpdates = append(order.remainingUpdates, cdfOrderRemainingUpdate{ordinal: event.Ordinal, remainingQty: order.remainingQty, closed: true})
+		order.remainingUpdates = append(order.remainingUpdates, cdfOrderRemainingUpdate{evidence: eventEvidenceOrder(event), ordinal: event.Ordinal, remainingQty: order.remainingQty, closed: true})
 	case "OrderCancelRejected":
 		state := states[cdfParticipantKey{VenueID: event.VenueID, ClientID: event.ClientID}]
 		if state == nil {
@@ -3530,7 +3540,7 @@ func (r *CDFLiquidityRunAudit) validateRestDecisionQuantities(orders map[cdfOrde
 			addFailure("rest decision has no matching accepted supplier order")
 			continue
 		}
-		remaining, closed, found := order.remainingAt(decision.ordinal)
+		remaining, closed, found := order.remainingAt(decision.evidence)
 		if !found || closed || remaining <= 0 {
 			addFailure("rest decision does not name a live exchange order")
 			continue

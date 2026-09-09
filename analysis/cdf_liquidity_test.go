@@ -902,8 +902,8 @@ func TestCDFRestDecisionMatchesExchangeRemainingQuantity(t *testing.T) {
 		key: {
 			clientID: 2, side: "BUY", price: 99,
 			remainingUpdates: []cdfOrderRemainingUpdate{
-				{ordinal: 2, remainingQty: 10},
-				{ordinal: 4, remainingQty: 6},
+				{evidence: evidenceOrder{ordinal: 2}, ordinal: 2, remainingQty: 10},
+				{evidence: evidenceOrder{ordinal: 4}, ordinal: 4, remainingQty: 6},
 			},
 		},
 	}
@@ -913,7 +913,7 @@ func TestCDFRestDecisionMatchesExchangeRemainingQuantity(t *testing.T) {
 
 	t.Run("remaining quantity accepted", func(t *testing.T) {
 		audit := &CDFLiquidityRunAudit{restDecisions: []cdfRestDecision{{
-			key: key, role: "cdf_elastic_supplier_1", ordinal: 5, side: "BUY", price: 99, quantity: 6,
+			key: key, role: "cdf_elastic_supplier_1", evidence: evidenceOrder{ordinal: 5}, ordinal: 5, side: "BUY", price: 99, quantity: 6,
 		}}}
 		audit.validateRestDecisionQuantities(orders, states)
 		if len(audit.Checks) != 0 {
@@ -923,13 +923,49 @@ func TestCDFRestDecisionMatchesExchangeRemainingQuantity(t *testing.T) {
 
 	t.Run("stale quantity rejected", func(t *testing.T) {
 		audit := &CDFLiquidityRunAudit{restDecisions: []cdfRestDecision{{
-			key: key, role: "cdf_elastic_supplier_1", ordinal: 5, side: "BUY", price: 99, quantity: 10,
+			key: key, role: "cdf_elastic_supplier_1", evidence: evidenceOrder{ordinal: 5}, ordinal: 5, side: "BUY", price: 99, quantity: 10,
 		}}}
 		audit.validateRestDecisionQuantities(orders, states)
 		if !hasCDFCheck(audit.Checks, "rest decision quantity does not match exchange remaining order state") {
 			t.Fatalf("stale remaining quantity was accepted: %+v", audit.Checks)
 		}
 	})
+}
+
+func TestCDFRestDecisionUsesGlobalSequenceAcrossRoutedEvidenceFiles(t *testing.T) {
+	key := cdfOrderKey{VenueID: "north", ClientID: 2, OrderID: 7}
+	orders := map[cdfOrderKey]*cdfOrderState{
+		key: {
+			clientID: 2, side: "BUY", price: 99,
+			remainingUpdates: []cdfOrderRemainingUpdate{
+				{evidence: evidenceOrder{timestamp: 100, file: "spot/CDF-USD.jsonl", ordinal: 200, globalSequence: 10}, remainingQty: 6},
+				{evidence: evidenceOrder{timestamp: 100, file: "spot/CDF-USD.jsonl", ordinal: 201, globalSequence: 30}, remainingQty: 0, closed: true},
+			},
+		},
+	}
+	states := map[cdfParticipantKey]*CDFLiquiditySupplierAudit{
+		{VenueID: "north", ClientID: 2}: {Role: "cdf_elastic_supplier_1"},
+	}
+
+	validRest := &CDFLiquidityRunAudit{restDecisions: []cdfRestDecision{{
+		key: key, role: "cdf_elastic_supplier_1",
+		evidence: evidenceOrder{timestamp: 100, file: "general.jsonl", ordinal: 1, globalSequence: 20},
+		ordinal:  1, side: "BUY", price: 99, quantity: 6,
+	}}}
+	validRest.validateRestDecisionQuantities(orders, states)
+	if len(validRest.Checks) != 0 {
+		t.Fatalf("cross-route live order was rejected: %+v", validRest.Checks)
+	}
+
+	closedRest := &CDFLiquidityRunAudit{restDecisions: []cdfRestDecision{{
+		key: key, role: "cdf_elastic_supplier_1",
+		evidence: evidenceOrder{timestamp: 100, file: "general.jsonl", ordinal: 2, globalSequence: 40},
+		ordinal:  2, side: "BUY", price: 99, quantity: 0,
+	}}}
+	closedRest.validateRestDecisionQuantities(orders, states)
+	if !hasCDFCheck(closedRest.Checks, "rest decision does not name a live exchange order") {
+		t.Fatalf("rest after global fill was accepted: %+v", closedRest.Checks)
+	}
 }
 
 func TestCompareCDFLiquidityRunsRejectsMalformedInactiveTreatmentEvidence(t *testing.T) {

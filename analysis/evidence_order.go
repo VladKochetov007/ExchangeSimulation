@@ -45,6 +45,23 @@ func evidenceBefore(left, right evidenceOrder) bool {
 	return left.ordinal < right.ordinal
 }
 
+// evidenceAtOrBefore answers whether a state-changing record was effective by
+// the time of a later use record. Same-timestamp records from different
+// historical JSON routes are intentionally incomparable without a canonical
+// global sequence; file names must not invent lifecycle causality.
+func evidenceAtOrBefore(record, use evidenceOrder) bool {
+	if record.globalSequence != 0 && use.globalSequence != 0 {
+		return record.globalSequence <= use.globalSequence
+	}
+	if record.timestamp != use.timestamp {
+		return record.timestamp < use.timestamp
+	}
+	if record.file != use.file {
+		return false
+	}
+	return record.ordinal <= use.ordinal
+}
+
 func latestCausalPrerequisite(prerequisites []evidenceOrder, use evidenceOrder) (evidenceOrder, bool) {
 	var latest evidenceOrder
 	found := false
