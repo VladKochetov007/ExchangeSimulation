@@ -477,3 +477,65 @@ holdouts `619`, `631`, and `641` remain untouched. The next gate is one fresh
 independent exact-tree Sol-xhigh review of `1c1a1aa`, after which only review
 acceptance can authorize the pinned production binaries and seed-643 activation
 probe.
+
+## SV1C review-blocker closure and production differential — 2026-09-09
+
+The previous independent Sol-xhigh review of the complete source checkpoint
+`1c1a1aa` was recorded as `REJECTED FOR PROMOTION`. The reviewer, McClintock
+(`gpt-5.6-sol`, xhigh reasoning), identified three correctness/evidence
+blockers and one process-identity issue. The rejection is retained; it is not
+rewritten as an acceptance.
+
+The exact source checkpoint `2407319608858e2c9a26b8f0eaf1fb1654025d96`
+(`2407319`) closes the technical blockers in one attributable commit:
+
+* the deterministic phase budget is now cumulative across scheduler timestamp
+  hook re-entry, with an alternating same-timestamp recursion regression;
+* authoritative CDF supplier `OrderFill` evidence requires and validates
+  `fee_amount` and `fee_asset` against the registered maker-fee schedule before
+  state reconstruction; and
+* a 30-second live production corpus now runs once under JSONL and once under
+  binary evidence, renders the binary stream, compares every routed record
+  (including payload and optional-field shape), requires every currently
+  registered production schema, and differentially compares the common
+  analyzer outputs for ecology, lifecycle, calendar, expiry, liquidation,
+  price-unavailable, roles, viability, book shape, basis, and per-event stream
+  hash. Strict-only lifecycle identity checks remain separate because the JSONL
+  predecessor intentionally lacks global binary sequence metadata.
+
+The Go source closure was rebuilt twice with the registered Go 1.27 command.
+Both builds reported `CGO_ENABLED=0`, `-trimpath`, `GOAMD64=v1`, and
+`vcs.modified=false`; they were byte-identical at
+`308f39b9baad76e7685cf605b8ea8d73e28a56692030c35d81091e86dfe0f43c`. The
+registration and provenance manifest were then committed in `9f7ae8f`, whose
+only changes after `2407319` are provenance JSON. The current exact tree is
+therefore `9f7ae8faac49bf17134259d258be6b6b11d40ed7`, clean and pushed.
+
+The mechanical evidence is:
+
+* uncached `go test -timeout=30m ./...` passed, including `simulations/multivenue`
+  (1025.822 seconds at the source checkpoint);
+* the post-differential package pass included the new analyzer corpus test
+  (`simulations/multivenue` 1021.288 seconds);
+* clean `GOFLAGS=-timeout=30m make test` passed at `9f7ae8f`, including the
+  capacity/archive fixture, integrated-long-run and R2 contracts, SV1C
+  normalizer/config checks, survival/paired-survival/score/terminal checks,
+  and archive checks. The malformed-input diagnostics in that log are the
+  registered negative fixtures and were followed by explicit pass results.
+
+The earlier default-timeout `make test` attempt and the dirty-tree rerun are
+retained as diagnostics: the former reached the known 600-second
+fresh-process package timeout, and the latter correctly rejected the stale
+normalizer/dirty-tree precondition. Neither produced a scientific world.
+No activation, capacity measurement, registered development cell, freeze, or
+holdout world has run. Historical evidence and verdicts remain unchanged;
+holdouts `619`, `631`, and `641` remain untouched.
+
+The asynchronous refs were fetched read-only at this checkpoint. The mirrored
+performance feed remains `b1847ac40e8b7483e6e8a3f94b3705b4058884b`, the
+performance-port remains `39768dfed4ba4a5134f0c5ccf53351a79a0b1d64`, and the
+economic red-team remains `e85e16c5e920382e5df9aa050ac5ff9b22b51661`; no new
+commits were present and no auxiliary implementation was imported. The next
+gate is one fresh independent exact-tree Sol-xhigh review of `9f7ae8f`,
+followed only on acceptance by the pinned production/capacity and seed-643
+sequence.

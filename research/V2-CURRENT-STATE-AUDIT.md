@@ -1840,3 +1840,27 @@ merged, no evidence was deleted, and holdouts `619`, `631`, and `641` remain
 untouched. The candidate is still unpromoted; the next gate is one fresh
 independent exact-tree Sol-xhigh review of the complete `1c1a1aa` tree before
 any pinned production run, capacity measurement, or seed-643 activation.
+
+## Append-only audit update: review-blocker closure at SV1C `9f7ae8f` — 2026-09-09
+
+The last independent Sol-xhigh review rejected the previous exact candidate.
+Its findings are preserved. Source commit `2407319` adds the missing
+cumulative same-timestamp reaction budget, fail-closed authoritative CDF fill
+fee validation, and a live JSONL-versus-binary production-corpus differential
+covering routed records, optional semantics, current schemas, and common
+analyzer outputs. Provenance commit `9f7ae8f` registers the new exact Go 1.27
+normalizer source closure.
+
+Two clean builds match at binary digest
+`308f39b9baad76e7685cf605b8ea8d73e28a56692030c35d81091e86dfe0f43c` with
+`vcs.modified=false`. The uncached extended Go suite, the new corpus/analyzer
+test, and the clean repository `make test` contract pass. The clean contract
+also passed the capacity/archive fixture and all SV1C/R2/survival/terminal and
+archive checks; its malformed-input lines are intentional negative tests.
+
+No activation, capacity, development, freeze, or holdout world ran. No
+retained evidence was removed or rewritten. The async branch markers remain
+performance `b1847ac`, performance-port `39768df`, and economic red-team
+`e85e16c`, with no new commits at the checkpoint and no code imported. The
+candidate is not promoted; the next gate is one fresh independent exact-tree
+Sol-xhigh review of `9f7ae8f`.

@@ -2035,3 +2035,26 @@ evidence was not removed and holdouts `619`, `631`, and `641` remain untouched.
 The next action is a fresh independent exact-tree Sol-xhigh review of the
 complete `1c1a1aa` successor. Review acceptance remains required before
 pinned production binaries or the activation probe.
+
+## Append-only operational update: SV1C review blockers closed — 2026-09-09
+
+The prior fresh Sol-xhigh review rejected `1c1a1aa` for cumulative
+same-timestamp phase-budget coverage, authoritative CDF fill-fee validation,
+incomplete production-corpus/analyzer differential proof, and split candidate
+identity. The rejection is retained as a negative review result.
+
+Commit `2407319` closes the source blockers: scheduler hook re-entry now shares
+one per-timestamp phase budget; authoritative CDF `OrderFill` rows require and
+reconcile fee fields; and the live binary-evidence corpus test compares JSONL
+and binary-rendered routes record-for-record, covers all current production
+schemas, and compares the common analyzer outputs. Commit `9f7ae8f` refreshes
+the registered normalizer/provenance at the new source closure. Two independent
+Go 1.27 builds are byte-identical at
+`308f39b9baad76e7685cf605b8ea8d73e28a56692030c35d81091e86dfe0f43c`.
+
+The extended package suite and clean `GOFLAGS=-timeout=30m make test` pass at
+`9f7ae8f`; capacity/archive, R2, SV1C config, survival, terminal, and archive
+contracts all passed. No simulator world, activation, capacity probe,
+development cell, freeze, or holdout was run. Holdouts `619`, `631`, and `641`
+remain untouched. The next action is a fresh exact-tree independent review of
+`9f7ae8f`; acceptance is still required before pinned scientific execution.
