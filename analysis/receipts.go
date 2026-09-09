@@ -273,10 +273,7 @@ func auditMarketDataReceiptsBuffered(dir string) (*MarketDataReceiptAudit, error
 		if activity := linkActivity[record.linkID]; activity != nil {
 			activity.Decisions++
 		}
-		if decisionsRaw[offset+19] > 1 {
-			result.NonzeroReserved++
-		}
-		for _, value := range decisionsRaw[offset+20 : offset+24] {
+		for _, value := range decisionsRaw[offset+19 : offset+24] {
 			if value != 0 {
 				result.NonzeroReserved++
 				break
@@ -921,10 +918,7 @@ func auditMarketDataReceiptsStreaming(dir string) (*MarketDataReceiptAudit, erro
 			if activity := linkActivity[record.linkID]; activity != nil {
 				activity.Decisions++
 			}
-			if raw[19] > 1 {
-				result.NonzeroReserved++
-			}
-			for _, value := range raw[20:24] {
+			for _, value := range raw[19:24] {
 				if value != 0 {
 					result.NonzeroReserved++
 					break

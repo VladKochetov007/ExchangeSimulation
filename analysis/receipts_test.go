@@ -85,6 +85,31 @@ func TestAuditMarketDataEvidenceOracleRejectsStoredOutOfOrderRecords(t *testing.
 	}
 }
 
+func TestAuditMarketDataEvidenceRejectsReservedDecisionByte(t *testing.T) {
+	dir := writeEvidenceFixture(t, func(_, _, decisions []byte) {
+		decisions[19] = 1
+	})
+
+	audits := []struct {
+		name string
+		fn   func(string) (*MarketDataReceiptAudit, error)
+	}{
+		{name: "streaming", fn: AuditMarketDataReceipts},
+		{name: "buffered", fn: auditMarketDataReceiptsBuffered},
+	}
+	for _, auditCase := range audits {
+		t.Run(auditCase.name, func(t *testing.T) {
+			audit, err := auditCase.fn(dir)
+			if err != nil {
+				t.Fatalf("audit failed: %v", err)
+			}
+			if audit.Valid || audit.NonzeroReserved == 0 {
+				t.Fatalf("reserved decision byte was accepted: %+v", audit)
+			}
+		})
+	}
+}
+
 // Each mutation rewrites every file digest. The auditor must detect broken
 // semantics, not merely a checksum mismatch.
 func TestAuditMarketDataEvidenceCatchesAdversarialMutations(t *testing.T) {
