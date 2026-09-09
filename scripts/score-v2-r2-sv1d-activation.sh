@@ -115,6 +115,7 @@ done
 treatment_dir="$output_root/treatment"
 mode_off_dir="$output_root/mode-off"
 no_roster_dir="$output_root/no-roster"
+no_roster_terminal_status=$(jq -er '.status' "$no_roster_dir/terminal-outcome.json") || exit 1
 jq -e '
 	.elastic_liquidity_suppliers == null and .record_elastic_liquidity_supplier_decisions == null and
 	.market_data_receipt_roles == ["liability_hedger"] and .record_market_data_receipts == true and
@@ -167,6 +168,7 @@ jq -n --arg contract "$v2_r2_sv1_scorer_contract" --arg candidate "$v2_r2_sv1_ca
 	--arg reason "$score_reason" --arg output_root "$output_root" --arg comparison_path "$comparison_path" \
 	--arg comparison_sha256 "$comparison_sha256" --argjson seed "$v2_r2_sv1_activation_seed" \
 	--argjson holdouts_consumed false --argjson arm_count "${#v2_r2_sv1d_arm_names[@]}" \
+	--arg no_roster_terminal_status "$no_roster_terminal_status" \
 	--argjson comparison_valid "$(jq -r '(.valid // false)' "$comparison_path")" \
 	--argjson comparison_evidence_valid "$(jq -r '(.evidence_valid // false)' "$comparison_path")" \
 	--argjson comparison_anticheating "$(jq -r '(.anti_cheating_satisfied // false)' "$comparison_path")" \
@@ -178,7 +180,7 @@ jq -n --arg contract "$v2_r2_sv1_scorer_contract" --arg candidate "$v2_r2_sv1_ca
 	   evidence_valid: $comparison_evidence_valid, anti_cheating_satisfied: $comparison_anticheating,
 	   provenance_valid: ($comparison_provenance_valid == "true"), terminal_negative: ($comparison_status == "true")},
 	 no_roster_control: {config_path: "research/configs/v2-r2-sv1d-activation/activation-659-no-roster.json",
-	   terminal_status: "completed", role_contract: "liability_hedger_only"},
+	   terminal_status: $no_roster_terminal_status, role_contract: "liability_hedger_only"},
 	 scope: "development-only five-minute activation classification; no 24-hour or holdout claim"}' \
 	>"$score_tmp"
 mv -- "$score_tmp" "$score_path"
