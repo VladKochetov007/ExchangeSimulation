@@ -114,7 +114,7 @@ v2_r2_sv1d_require_pinned_binary "$normalizer" "$current_revision" "$current_nor
 	fail "current normalizer is not the pinned Go 1.27 candidate build"
 for arm in "${v2_r2_sv1d_arm_names[@]}"; do
 	config=$(v2_r2_sv1d_config_for_arm "$arm")
-	normalizer_scratch=$(mktemp -d /tmp/v2-r2-sv1d-normalizer.XXXXXX)
+	normalizer_scratch=$(mktemp -d)
 	mkdir -- "$normalizer_scratch/logs"
 	"$normalizer" -config "$config" -logdir "$normalizer_scratch/logs" \
 		-write-effective-config "$normalizer_scratch/effective.json" >/dev/null 2>&1 ||
