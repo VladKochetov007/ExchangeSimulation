@@ -17,6 +17,8 @@ for file in "$contract" "$checker" "$generator" "$runner" "$scorer"; do
 done
 [[ -f "$status_writer" && ! -L "$status_writer" ]] || { echo "SV1D activation status writer is missing or symlinked" >&2; exit 1; }
 
+"$checker"
+
 rg -F 'activation-659-treatment.json' "$contract" "$checker" "$generator" >/dev/null
 rg -F 'activation-659-mode-off.json' "$contract" "$checker" "$generator" >/dev/null
 rg -F 'activation-659-no-roster.json' "$contract" "$checker" "$generator" >/dev/null
