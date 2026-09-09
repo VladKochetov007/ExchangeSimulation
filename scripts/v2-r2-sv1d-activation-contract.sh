@@ -76,9 +76,48 @@ v2_r2_sv1_activation_minimum_free_bytes=$((4 * 1024 * 1024 * 1024))
 v2_r2_sv1_activation_minimum_memory_available_bytes=$((4 * 1024 * 1024 * 1024))
 v2_r2_sv1_activation_max_wall_seconds=900
 v2_r2_sv1_activation_analyzer_max_wall_seconds=300
+v2_r2_sv1d_activation_decision_interval_nano=2000000000
 
 v2_r2_sv1d_calendar='[{"name":"short","listing_interval_nano":3600000000000,"time_to_expiry_nano":7200000000000},{"name":"medium","listing_interval_nano":10800000000000,"time_to_expiry_nano":21600000000000},{"name":"long","listing_interval_nano":21600000000000,"time_to_expiry_nano":43200000000000}]'
 v2_r2_sv1d_arm_names=(treatment mode-off no-roster)
+
+v2_r2_sv1d_host_memory_total_bytes() {
+	awk '$1 == "MemTotal:" { printf "%.0f\n", $2 * 1024; exit }' /proc/meminfo
+}
+
+v2_r2_sv1d_required_memory_available_bytes() {
+	[[ $# -eq 1 && "$1" =~ ^[1-9][0-9]*$ ]] || return 1
+	local host_memory_total_bytes=$1 twenty_percent_bytes
+	twenty_percent_bytes=$(( (host_memory_total_bytes + 4) / 5 ))
+	if (( twenty_percent_bytes < 4 * 1024 * 1024 * 1024 )); then
+		twenty_percent_bytes=$((4 * 1024 * 1024 * 1024))
+	fi
+	printf '%s\n' "$twenty_percent_bytes"
+}
+
+v2_r2_sv1d_activation_decision_budget() {
+	local duration_nano=$((v2_r2_sv1_activation_simulation_end_nano - v2_r2_sv1_activation_simulation_start_nano))
+	(( duration_nano > 0 )) || return 1
+	printf '%s\n' "$(( (duration_nano + v2_r2_sv1d_activation_decision_interval_nano - 1) / v2_r2_sv1d_activation_decision_interval_nano ))"
+}
+
+v2_r2_sv1d_require_activation_capacity() {
+	[[ $# -eq 1 && -s "$1" && ! -L "$1" ]] || return 1
+	local config_path=$1 decision_budget
+	decision_budget=$(v2_r2_sv1d_activation_decision_budget) || return 1
+	jq -e --argjson decision_budget "$decision_budget" '
+		(.elastic_liquidity_suppliers | type) == "array" and
+		all(.elastic_liquidity_suppliers[];
+			(.initial_base_balance | type) == "number" and (.initial_base_balance | floor) == .initial_base_balance and .initial_base_balance > 0 and
+			(.initial_quote_balance | type) == "number" and (.initial_quote_balance | floor) == .initial_quote_balance and .initial_quote_balance > 0 and
+			(.max_position | type) == "number" and (.max_position | floor) == .max_position and .max_position > 0 and
+			(.max_inventory | type) == "number" and (.max_inventory | floor) == .max_inventory and .max_inventory >= .initial_base_balance and
+			(.max_quote_qty | type) == "number" and (.max_quote_qty | floor) == .max_quote_qty and .max_quote_qty > 0 and
+			(.max_loss_quote | type) == "number" and (.max_loss_quote | floor) == .max_loss_quote and .max_loss_quote > 0 and
+			.max_position <= (.max_quote_qty * $decision_budget) and
+			(.max_inventory - .initial_base_balance) <= (.max_quote_qty * $decision_budget))' \
+		"$config_path" >/dev/null
+}
 
 v2_r2_is_successor_candidate() {
 	[[ "${v2_r2_sv1_candidate_id:-}" == "V2-R2-SV1D-ONE-SIDED-ELASTIC-LIQUIDITY" ]]
@@ -228,7 +267,7 @@ v2_r2_sv1d_require_activation_arm_artifacts() {
 	[[ $# -eq 5 ]] || return 1
 	local arm_dir=$1 arm_name=$2 expected_revision=$3 expected_config_sha256=$4 expected_binary_sha256=$5
 	local expected_config expected_venue_ids expected_experiment expected_hypothesis expected_root_files actual_root_files
-	local expected_outcome terminal_outcome_status status_field file_path expected_hash actual_hash
+	local expected_outcome terminal_outcome_status status_field file_path expected_hash actual_hash resource_policy_host_memory_total_bytes
 	[[ "$arm_name" == treatment || "$arm_name" == mode-off || "$arm_name" == no-roster ]] || return 1
 	[[ "$arm_dir" == /* && "$arm_dir" != */ && "$arm_dir" != *$'\n'* && "$arm_dir" != *$'\t'* ]] || return 1
 	[[ "$expected_revision" =~ ^[0-9a-f]{40}$ && "$expected_config_sha256" =~ ^[0-9a-f]{64}$ && "$expected_binary_sha256" =~ ^[0-9a-f]{64}$ ]] || return 1
@@ -236,10 +275,17 @@ v2_r2_sv1d_require_activation_arm_artifacts() {
 	if find "$arm_dir" -type l -print -quit 2>/dev/null | grep -q .; then
 		return 1
 	fi
+	if find "$arm_dir" \( -type p -o -type s -o -type b -o -type c \) -print -quit 2>/dev/null | grep -q .; then
+		return 1
+	fi
+	local actual_root_directories
+	actual_root_directories=$(find "$arm_dir" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | LC_ALL=C sort)
+	[[ "$actual_root_directories" == venues ]] || return 1
 	expected_config=$(realpath -e -- "$(v2_r2_sv1d_config_for_arm "$arm_name")") || return 1
 	expected_venue_ids=$(jq -ce '.venue_ids | select(type == "array" and length > 0)' "$expected_config") || return 1
 	expected_experiment=$(jq -er '.experiment_id | select(type == "string" and length > 0)' "$expected_config") || return 1
 	expected_hypothesis=$(jq -er '.hypothesis_id | select(type == "string" and length > 0)' "$expected_config") || return 1
+	resource_policy_host_memory_total_bytes=$(jq -er '.resource_policy.host_memory_total_bytes | select(type == "number" and floor == . and . > 0)' "$arm_dir/run-metadata.json" 2>/dev/null || printf '0')
 	[[ -f "$arm_dir/run-config.json" && ! -L "$arm_dir/run-config.json" &&
 		"$(v2_r2_sv1d_sha256_file "$arm_dir/run-config.json")" == "$expected_config_sha256" ]] || return 1
 	v2_r2_sv1d_require_json_objects "$arm_dir" \
@@ -261,7 +307,8 @@ v2_r2_sv1d_require_activation_arm_artifacts() {
 		--arg contract "$v2_r2_sv1_activation_contract" --arg arm "$arm_name" --arg mode "$(v2_r2_sv1d_arm_mode "$arm_name")" \
 		--arg cell "${v2_r2_sv1_activation_output_prefix}-${v2_r2_sv1_activation_seed}-${arm_name}" \
 		--argjson start "$v2_r2_sv1_activation_simulation_start_nano" --argjson end "$v2_r2_sv1_activation_simulation_end_nano" \
-		--arg expected_config_sha256 "$expected_config_sha256" --arg expected_binary_sha256 "$expected_binary_sha256" '
+		--arg expected_config_sha256 "$expected_config_sha256" --arg expected_binary_sha256 "$expected_binary_sha256" \
+		--argjson resource_policy_host_memory_total_bytes "$resource_policy_host_memory_total_bytes" '
 		type == "object" and .schema_version == 1 and .contract == $contract and .arm == $arm and .mode == $mode and
 			.cell == $cell and .seed == $seed and .simulated_horizon == "5m" and
 			.simulation_start_nano == $start and .simulation_end_nano == $end and
@@ -278,7 +325,9 @@ v2_r2_sv1d_require_activation_arm_artifacts() {
 			.resource_policy.gomaxprocs == 2 and .resource_policy.memory_limit_bytes == (20 * 1024 * 1024 * 1024) and
 			.resource_policy.gomemlimit_bytes == (18 * 1024 * 1024 * 1024) and .resource_policy.cpu_limit_percent == 90 and
 			.resource_policy.minimum_free_bytes == (4 * 1024 * 1024 * 1024) and
-			.resource_policy.minimum_memory_available_bytes == (4 * 1024 * 1024 * 1024) and
+			(.resource_policy.host_memory_total_bytes | type) == "number" and .resource_policy.host_memory_total_bytes > 0 and
+			(.resource_policy.minimum_memory_available_bytes | type) == "number" and
+			.resource_policy.minimum_memory_available_bytes == (if (($resource_policy_host_memory_total_bytes + 4) / 5) < (4 * 1024 * 1024 * 1024) then (4 * 1024 * 1024 * 1024) else (($resource_policy_host_memory_total_bytes + 4) / 5 | floor) end) and
 			.resource_policy.max_wall_seconds == 900 and .resource_policy.analyzer_max_wall_seconds == 300 and
 			(.command == ["multivenue", "-config", "run-config.json", "-duration", "5m", "-logdir", ".", "-log-mode", $log_mode, "-evidence-format", $evidence_format])' \
 		"$arm_dir/run-metadata.json" >/dev/null || return 1
@@ -353,12 +402,14 @@ v2_r2_sv1d_require_activation_arm_artifacts() {
 		((.unencodable_payloads // 0) == 0)' "$arm_dir/binary-evidence-attestation.json" >/dev/null || return 1
 }
 
-v2_r2_sv1d_require_no_roster_diagnostic() {
+v2_r2_sv1d_require_arm_record_matches() {
 	[[ $# -eq 3 ]] || return 1
-	local diagnostic_path=$1 arm_dir=$2 expected_config_sha256=$3
-	[[ "$diagnostic_path" == /* && "$diagnostic_path" != */ && ! -L "$diagnostic_path" && -f "$diagnostic_path" ]] || return 1
-	v2_r2_require_single_json_object "$diagnostic_path" || return 1
-	local status_sha256 terminal_sha256 metadata_sha256 manifest_sha256 attestation_sha256 evidence_manifest_sha256 stdout_sha256 stderr_sha256
+	local provenance_path=$1 arm=$2 arm_dir=$3 arm_record
+	[[ -s "$provenance_path" && ! -L "$provenance_path" && -d "$arm_dir" && ! -L "$arm_dir" ]] || return 1
+	arm_record=$(jq -ce --arg arm "$arm" '.arms[$arm] | select(type == "object")' "$provenance_path") || return 1
+	local config_path config_sha256 status_sha256 terminal_sha256 metadata_sha256 manifest_sha256 attestation_sha256 evidence_manifest_sha256 stdout_sha256 stderr_sha256
+	config_path=$(v2_r2_sv1d_config_for_arm "$arm") || return 1
+	config_sha256=$(v2_r2_sv1d_sha256_file "$config_path") || return 1
 	status_sha256=$(v2_r2_sv1d_sha256_file "$arm_dir/run-status.json") || return 1
 	terminal_sha256=$(v2_r2_sv1d_sha256_file "$arm_dir/terminal-outcome.json") || return 1
 	metadata_sha256=$(v2_r2_sv1d_sha256_file "$arm_dir/run-metadata.json") || return 1
@@ -367,40 +418,140 @@ v2_r2_sv1d_require_no_roster_diagnostic() {
 	evidence_manifest_sha256=$(v2_r2_sv1d_sha256_file "$arm_dir/evidence-manifest.json") || return 1
 	stdout_sha256=$(v2_r2_sv1d_sha256_file "$arm_dir/simulator.stdout.log") || return 1
 	stderr_sha256=$(v2_r2_sv1d_sha256_file "$arm_dir/simulator.stderr.log") || return 1
-	jq -e --arg contract "v2-r2-sv1d-no-roster-diagnostic-v1" --arg config_sha256 "$expected_config_sha256" \
+	local exit_status terminal_status
+	exit_status=$(jq -er '.exit_status | select(type == "number" and floor == .)' "$arm_dir/run-status.json") || return 1
+	terminal_status=$(jq -er '.status | select(type == "string")' "$arm_dir/terminal-outcome.json") || return 1
+	jq -e --arg path "$arm_dir" --arg config_path "$config_path" --arg mode "$(v2_r2_sv1d_arm_mode "$arm")" \
+		--arg config_sha256 "$config_sha256" --argjson exit_status "$exit_status" --arg terminal_status "$terminal_status" \
 		--arg status_sha256 "$status_sha256" --arg terminal_sha256 "$terminal_sha256" --arg metadata_sha256 "$metadata_sha256" \
 		--arg manifest_sha256 "$manifest_sha256" --arg attestation_sha256 "$attestation_sha256" \
 		--arg evidence_manifest_sha256 "$evidence_manifest_sha256" --arg stdout_sha256 "$stdout_sha256" --arg stderr_sha256 "$stderr_sha256" \
+		'.path == $path and .config_path == $config_path and .mode == $mode and .config_sha256 == $config_sha256 and
+			.exit_status == $exit_status and .terminal_status == $terminal_status and .valid == true and
+			.run_status_sha256 == $status_sha256 and .terminal_outcome_sha256 == $terminal_sha256 and
+			.run_metadata_sha256 == $metadata_sha256 and .manifest_sha256 == $manifest_sha256 and
+			.binary_attestation_sha256 == $attestation_sha256 and .evidence_manifest_sha256 == $evidence_manifest_sha256 and
+			.simulator_stdout_sha256 == $stdout_sha256 and .simulator_stderr_sha256 == $stderr_sha256' <<<"$arm_record" >/dev/null
+}
+
+v2_r2_sv1d_require_no_roster_diagnostic() {
+	[[ $# -eq 3 ]] || return 1
+	local diagnostic_path=$1 arm_dir=$2 expected_config_sha256=$3
+	[[ "$diagnostic_path" == /* && "$diagnostic_path" != */ && ! -L "$diagnostic_path" && -f "$diagnostic_path" ]] || return 1
+	v2_r2_require_single_json_object "$diagnostic_path" || return 1
+	local status_sha256 terminal_sha256 metadata_sha256 manifest_sha256 attestation_sha256 evidence_manifest_sha256 stdout_sha256 stderr_sha256 greeks_sha256
+	status_sha256=$(v2_r2_sv1d_sha256_file "$arm_dir/run-status.json") || return 1
+	terminal_sha256=$(v2_r2_sv1d_sha256_file "$arm_dir/terminal-outcome.json") || return 1
+	metadata_sha256=$(v2_r2_sv1d_sha256_file "$arm_dir/run-metadata.json") || return 1
+	manifest_sha256=$(v2_r2_sv1d_sha256_file "$arm_dir/manifest.json") || return 1
+	greeks_sha256=$(v2_r2_sv1d_sha256_file "$arm_dir/greeks.json") || return 1
+	attestation_sha256=$(v2_r2_sv1d_sha256_file "$arm_dir/binary-evidence-attestation.json") || return 1
+	evidence_manifest_sha256=$(v2_r2_sv1d_sha256_file "$arm_dir/evidence-manifest.json") || return 1
+	stdout_sha256=$(v2_r2_sv1d_sha256_file "$arm_dir/simulator.stdout.log") || return 1
+	stderr_sha256=$(v2_r2_sv1d_sha256_file "$arm_dir/simulator.stderr.log") || return 1
+	local runtime_cdf_supplier_count runtime_cdf_decision_count runtime_cdf_fill_count
+	runtime_cdf_supplier_count=$(v2_r2_sv1d_runtime_cdf_supplier_count "$arm_dir") || return 1
+	runtime_cdf_decision_count=$(v2_r2_sv1d_runtime_cdf_event_count "$arm_dir" '"event":"elastic_liquidity_supplier_decision"') || return 1
+	runtime_cdf_fill_count=$(v2_r2_sv1d_runtime_cdf_event_count "$arm_dir" '"event":"elastic_liquidity_supplier_fill"') || return 1
+	jq -e --arg contract "v2-r2-sv1d-no-roster-diagnostic-v1" --arg config_sha256 "$expected_config_sha256" \
+		--arg status_sha256 "$status_sha256" --arg terminal_sha256 "$terminal_sha256" --arg metadata_sha256 "$metadata_sha256" \
+		--arg greeks_sha256 "$greeks_sha256" --arg manifest_sha256 "$manifest_sha256" --arg attestation_sha256 "$attestation_sha256" \
+		--arg evidence_manifest_sha256 "$evidence_manifest_sha256" --arg stdout_sha256 "$stdout_sha256" --arg stderr_sha256 "$stderr_sha256" \
 		--arg terminal_status "$(jq -er '.status' "$arm_dir/terminal-outcome.json")" \
+		--argjson runtime_cdf_supplier_count "$runtime_cdf_supplier_count" --argjson runtime_cdf_decision_count "$runtime_cdf_decision_count" \
+		--argjson runtime_cdf_fill_count "$runtime_cdf_fill_count" \
 		' type == "object" and .schema_version == 1 and .contract == $contract and .arm == "no-roster" and
 			.config_sha256 == $config_sha256 and .run_status_sha256 == $status_sha256 and
 			.terminal_outcome_sha256 == $terminal_sha256 and .run_metadata_sha256 == $metadata_sha256 and
-			.manifest_sha256 == $manifest_sha256 and .binary_attestation_sha256 == $attestation_sha256 and
+			.greeks_sha256 == $greeks_sha256 and .manifest_sha256 == $manifest_sha256 and .binary_attestation_sha256 == $attestation_sha256 and
 			.evidence_manifest_sha256 == $evidence_manifest_sha256 and .simulator_stdout_sha256 == $stdout_sha256 and
 			.simulator_stderr_sha256 == $stderr_sha256 and .terminal_status == $terminal_status and
 			($terminal_status == "completed" or $terminal_status == "terminal_failure") and
 			.strict_population_accounting == true and .cdf_roster == false and .cdf_metrics == "out_of_scope" and
+			.runtime_topology_sha256 == $greeks_sha256 and .runtime_topology_valid == true and
+			.runtime_cdf_supplier_count == $runtime_cdf_supplier_count and .runtime_cdf_supplier_count == 0 and
+			.runtime_cdf_decision_count == $runtime_cdf_decision_count and .runtime_cdf_decision_count == 0 and
+			.runtime_cdf_fill_count == $runtime_cdf_fill_count and .runtime_cdf_fill_count == 0 and
 			.status == "VALID_TOPOLOGY_CONTROL" and .holdouts_consumed == false' "$diagnostic_path" >/dev/null
 }
 
+v2_r2_sv1d_runtime_cdf_supplier_count() {
+	[[ $# -eq 1 && -d "$1" && ! -L "$1" && -f "$1/greeks.json" && ! -L "$1/greeks.json" ]] || return 1
+	jq -er '[.initial_accounts // [] | .[] | select((.role // "") | test("^cdf_elastic_supplier_[0-9]+$"))] | length' "$1/greeks.json"
+}
+
+v2_r2_sv1d_runtime_cdf_event_count() {
+	[[ $# -eq 2 && -d "$1" && ! -L "$1" ]] || return 1
+	local arm_dir=$1 event_pattern=$2 path match_count total=0
+	while IFS= read -r -d '' path; do
+		match_count=$( { rg --text --only-matching -- "$event_pattern" "$path" || true; } | wc -l )
+		total=$((total + match_count))
+	done < <(find "$arm_dir/venues" -type f -name '*.jsonl' -print0 2>/dev/null)
+	printf '%s\n' "$total"
+}
+
 v2_r2_sv1d_require_comparison_provenance() {
-	[[ $# -eq 3 ]] || return 1
-	local comparison_path=$1 expected_analyzer_sha256=$2 expected_revision=$3
+	[[ $# -eq 5 ]] || return 1
+	local comparison_path=$1 expected_analyzer_sha256=$2 expected_revision=$3 treatment_dir=$4 control_dir=$5
 	[[ "$expected_analyzer_sha256" =~ ^[0-9a-f]{64}$ && "$expected_revision" =~ ^[0-9a-f]{40}$ ]] || return 1
 	v2_r2_require_single_json_object "$comparison_path" || return 1
+	if jq -e '.status == "UNAVAILABLE_TERMINAL_FAILURE"' "$comparison_path" >/dev/null 2>&1; then
+		local treatment_terminal_status control_terminal_status treatment_status_sha256 control_status_sha256
+		local treatment_terminal_sha256 control_terminal_sha256
+		treatment_terminal_status=$(jq -er '.status' "$treatment_dir/terminal-outcome.json") || return 1
+		control_terminal_status=$(jq -er '.status' "$control_dir/terminal-outcome.json") || return 1
+		treatment_status_sha256=$(v2_r2_sv1d_sha256_file "$treatment_dir/run-status.json") || return 1
+		control_status_sha256=$(v2_r2_sv1d_sha256_file "$control_dir/run-status.json") || return 1
+		treatment_terminal_sha256=$(v2_r2_sv1d_sha256_file "$treatment_dir/terminal-outcome.json") || return 1
+		control_terminal_sha256=$(v2_r2_sv1d_sha256_file "$control_dir/terminal-outcome.json") || return 1
+		jq -e --arg contract "$v2_r2_sv1_activation_contract" --argjson seed "$v2_r2_sv1_activation_seed" \
+			--arg horizon "$v2_r2_sv1_activation_horizon" --argjson start "$v2_r2_sv1_activation_simulation_start_nano" \
+			--argjson end "$v2_r2_sv1_activation_simulation_end_nano" --arg treatment_status "$treatment_terminal_status" \
+			--arg control_status "$control_terminal_status" --arg treatment_status_sha256 "$treatment_status_sha256" \
+			--arg control_status_sha256 "$control_status_sha256" --arg treatment_terminal_sha256 "$treatment_terminal_sha256" \
+			--arg control_terminal_sha256 "$control_terminal_sha256" '
+			type == "object" and .schema_version == 1 and .contract == $contract and .seed == $seed and
+			.simulated_horizon == $horizon and .simulation_start_nano == $start and .simulation_end_nano == $end and
+			.status == "UNAVAILABLE_TERMINAL_FAILURE" and .valid == false and .evidence_valid == true and
+			.activation_satisfied == false and .anti_cheating_satisfied == false and .provenance == null and
+			.holdouts_consumed == false and .arm_artifacts_valid == true and
+			(.treatment_terminal_status == $treatment_status) and (.control_terminal_status == $control_status) and
+			(.treatment_run_status_sha256 == $treatment_status_sha256) and
+			(.control_run_status_sha256 == $control_status_sha256) and
+			(.treatment_terminal_outcome_sha256 == $treatment_terminal_sha256) and
+			(.control_terminal_outcome_sha256 == $control_terminal_sha256) and
+			(($treatment_status == "terminal_failure") or ($control_status == "terminal_failure")) and
+			(($treatment_status == "completed") or ($treatment_status == "terminal_failure")) and
+			(($control_status == "completed") or ($control_status == "terminal_failure"))' "$comparison_path" >/dev/null
+		return $?
+	fi
 	jq -e --arg analyzer_sha256 "$expected_analyzer_sha256" --arg revision "$expected_revision" '
 		type == "object" and
-		(if .status == "UNAVAILABLE_TERMINAL_FAILURE" then
-			.provenance == null
-		 else
-			(.provenance | type) == "object" and .provenance.valid == true and
+		(.provenance | type) == "object" and .provenance.valid == true and
 			.provenance.analyzer_sha256 == $analyzer_sha256 and
 			.provenance.analyzer_source_revision == $revision and
 			.provenance.analyzer_source_modified == false and
 			.provenance.source_revision_mode == "pinned_live" and
 			(.provenance.treatment.source_revision == $revision) and
-			(.provenance.control.source_revision == $revision)
-		 end)' "$comparison_path" >/dev/null
+			(.provenance.control.source_revision == $revision) and
+			(.provenance.resource | type) == "object" and .provenance.resource.executed == true and
+			.provenance.resource.resource_guard_failed == false and
+			(.provenance.resource.exit_status == 0 or .provenance.resource.exit_status == 1) and
+			(.provenance.resource.wall_clock_seconds | type) == "number" and
+			.provenance.resource.wall_clock_seconds >= 0 and .provenance.resource.wall_clock_seconds <= 300 and
+			(.provenance.resource.peak_rss_bytes | type) == "number" and
+			.provenance.resource.peak_rss_bytes > 0 and .provenance.resource.peak_rss_bytes <= (20 * 1024 * 1024 * 1024) and
+			(.provenance.resource.host_memory_total_bytes | type) == "number" and .provenance.resource.host_memory_total_bytes > 0 and
+			(.provenance.resource.minimum_memory_available_bytes | type) == "number" and
+			.provenance.resource.minimum_memory_available_bytes == (if ((.provenance.resource.host_memory_total_bytes + 4) / 5) < (4 * 1024 * 1024 * 1024) then (4 * 1024 * 1024 * 1024) else ((.provenance.resource.host_memory_total_bytes + 4) / 5 | floor) end) and
+			(.provenance.resource.initial_available_free_bytes | type) == "number" and
+			(.provenance.resource.final_available_free_bytes | type) == "number" and
+			(.provenance.resource.initial_memory_available_bytes | type) == "number" and
+			(.provenance.resource.final_memory_available_bytes | type) == "number" and
+			.provenance.resource.initial_available_free_bytes >= (4 * 1024 * 1024 * 1024) and
+			.provenance.resource.final_available_free_bytes >= (4 * 1024 * 1024 * 1024) and
+			.provenance.resource.initial_memory_available_bytes >= .provenance.resource.minimum_memory_available_bytes and
+			.provenance.resource.final_memory_available_bytes >= .provenance.resource.minimum_memory_available_bytes' "$comparison_path" >/dev/null
 }
 
 # SV1D pairs a one-sided treatment with a same-roster mode-off control. The
@@ -463,6 +614,7 @@ v2_r2_sv1d_require_mode_pair_comparison() {
 			evidence_run and .activation_satisfied == true and
 			all(.suppliers[];
 				 supplier_contract and
+				.configured_minimum_qualifying_qty > 0 and .filled_qty >= .configured_minimum_qualifying_qty and
 				.fill_caused_risk_transition == true and .fill_count > 0 and .trading_pnl != 0 and
 				.inventory_responsive_decision_count > 0 and
 				.max_inventory_utilization > 0);

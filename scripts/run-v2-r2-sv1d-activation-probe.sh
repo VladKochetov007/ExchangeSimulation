@@ -80,11 +80,13 @@ activation_gomaxprocs=$v2_r2_sv1_activation_gomaxprocs
 activation_memory_limit_bytes=$v2_r2_sv1_activation_memory_limit_bytes
 activation_gomemlimit_bytes=$v2_r2_sv1_activation_gomemlimit_bytes
 activation_minimum_free_bytes=$v2_r2_sv1_activation_minimum_free_bytes
-activation_minimum_memory_available_bytes=$v2_r2_sv1_activation_minimum_memory_available_bytes
+activation_host_memory_total_bytes=$(v2_r2_sv1d_host_memory_total_bytes) || exit 1
+activation_minimum_memory_available_bytes=$(v2_r2_sv1d_required_memory_available_bytes "$activation_host_memory_total_bytes") || exit 1
 activation_max_wall_seconds=$v2_r2_sv1_activation_max_wall_seconds
 activation_analyzer_max_wall_seconds=$v2_r2_sv1_activation_analyzer_max_wall_seconds
 [[ "$activation_gomaxprocs" =~ ^[1-9][0-9]*$ && "$activation_memory_limit_bytes" =~ ^[1-9][0-9]*$ &&
 	"$activation_gomemlimit_bytes" =~ ^[1-9][0-9]*$ && "$activation_minimum_free_bytes" =~ ^[1-9][0-9]*$ &&
+	"$activation_host_memory_total_bytes" =~ ^[1-9][0-9]*$ &&
 	"$activation_minimum_memory_available_bytes" =~ ^[1-9][0-9]*$ && "$activation_max_wall_seconds" =~ ^[1-9][0-9]*$ &&
 	"$activation_analyzer_max_wall_seconds" =~ ^[1-9][0-9]*$ ]] || exit 1
 (( activation_gomemlimit_bytes < activation_memory_limit_bytes )) || exit 1
@@ -171,8 +173,9 @@ available_memory_bytes() {
 }
 
 simulator_pid=""
-terminate_simulator() {
-	local child_pid=$simulator_pid
+analyzer_pid=""
+terminate_process_group() {
+	local child_pid=$1
 	[[ "$child_pid" =~ ^[1-9][0-9]*$ ]] || return 0
 	local process_group_id
 	process_group_id=$(ps -o pgid= -p "$child_pid" 2>/dev/null | tr -d ' ' || true)
@@ -195,12 +198,22 @@ terminate_simulator() {
 		fi
 	fi
 	wait "$child_pid" 2>/dev/null || true
+}
+terminate_simulator() {
+	local child_pid=$simulator_pid
+	terminate_process_group "$child_pid"
 	simulator_pid=""
+}
+terminate_analyzer() {
+	local child_pid=$analyzer_pid
+	terminate_process_group "$child_pid"
+	analyzer_pid=""
 }
 cleanup_simulator() {
 	local exit_status=$?
 	trap - EXIT INT TERM HUP
 	terminate_simulator
+	terminate_analyzer
 	exit "$exit_status"
 }
 trap cleanup_simulator EXIT
@@ -232,6 +245,7 @@ write_arm_metadata() {
 		--argjson gomemlimit_bytes "$activation_gomemlimit_bytes" --argjson host_cpu_count "$host_cpu_count" \
 		--argjson allowed_cpu_count "$allowed_cpu_count" --argjson cpu_limit_percent "$v2_r2_sv1_cpu_limit_percent" \
 		--arg cpu_affinity "$cpu_affinity" --argjson minimum_free_bytes "$activation_minimum_free_bytes" \
+		--argjson host_memory_total_bytes "$activation_host_memory_total_bytes" \
 		--argjson minimum_memory_available_bytes "$activation_minimum_memory_available_bytes" \
 		--argjson max_wall_seconds "$activation_max_wall_seconds" --argjson analyzer_max_wall_seconds "$activation_analyzer_max_wall_seconds" \
 		'{schema_version: 1, contract: $contract, arm: $arm, mode: $mode, cell: $cell,
@@ -249,6 +263,7 @@ write_arm_metadata() {
 		   gomemlimit_bytes: $gomemlimit_bytes, host_cpu_count: $host_cpu_count,
 		   allowed_cpu_count: $allowed_cpu_count, cpu_limit_percent: $cpu_limit_percent,
 		   cpu_affinity: $cpu_affinity, minimum_free_bytes: $minimum_free_bytes,
+		   host_memory_total_bytes: $host_memory_total_bytes,
 		   minimum_memory_available_bytes: $minimum_memory_available_bytes,
 		   max_wall_seconds: $max_wall_seconds, analyzer_max_wall_seconds: $analyzer_max_wall_seconds},
 		 command: ["multivenue", "-config", "run-config.json", "-duration", $horizon,
@@ -459,22 +474,38 @@ no_roster_dir="$output_root/no-roster"
 no_roster_diagnostic_path="$output_root/no-roster-diagnostic.json"
 no_roster_config_sha256=$(v2_r2_sv1d_sha256_file "$no_roster_dir/run-config.json") || exit 1
 no_roster_terminal_status=$(jq -er '.status' "$no_roster_dir/terminal-outcome.json") || exit 1
+jq -e '[.initial_accounts // [] | .[] | select((.role // "") | test("^cdf_elastic_supplier_[0-9]+$"))] | length == 0' \
+	"$no_roster_dir/greeks.json" >/dev/null || {
+	echo "no-roster runtime topology contains a CDF successor supplier" >&2
+	exit 1
+}
+no_roster_greeks_sha256=$(v2_r2_sv1d_sha256_file "$no_roster_dir/greeks.json") || exit 1
+no_roster_runtime_cdf_supplier_count=$(v2_r2_sv1d_runtime_cdf_supplier_count "$no_roster_dir") || exit 1
+no_roster_runtime_cdf_decision_count=$(v2_r2_sv1d_runtime_cdf_event_count "$no_roster_dir" '"event":"elastic_liquidity_supplier_decision"') || exit 1
+no_roster_runtime_cdf_fill_count=$(v2_r2_sv1d_runtime_cdf_event_count "$no_roster_dir" '"event":"elastic_liquidity_supplier_fill"') || exit 1
 jq -n --arg contract "v2-r2-sv1d-no-roster-diagnostic-v1" --arg terminal_status "$no_roster_terminal_status" \
 	--arg config_sha256 "$no_roster_config_sha256" \
 	--arg run_status_sha256 "$(v2_r2_sv1d_sha256_file "$no_roster_dir/run-status.json")" \
 	--arg terminal_outcome_sha256 "$(v2_r2_sv1d_sha256_file "$no_roster_dir/terminal-outcome.json")" \
 	--arg run_metadata_sha256 "$(v2_r2_sv1d_sha256_file "$no_roster_dir/run-metadata.json")" \
 	--arg manifest_sha256 "$(v2_r2_sv1d_sha256_file "$no_roster_dir/manifest.json")" \
+	--arg greeks_sha256 "$no_roster_greeks_sha256" \
 	--arg binary_attestation_sha256 "$(v2_r2_sv1d_sha256_file "$no_roster_dir/binary-evidence-attestation.json")" \
 	--arg evidence_manifest_sha256 "$(v2_r2_sv1d_sha256_file "$no_roster_dir/evidence-manifest.json")" \
 	--arg simulator_stdout_sha256 "$(v2_r2_sv1d_sha256_file "$no_roster_dir/simulator.stdout.log")" \
 	--arg simulator_stderr_sha256 "$(v2_r2_sv1d_sha256_file "$no_roster_dir/simulator.stderr.log")" \
+	--argjson runtime_cdf_supplier_count "$no_roster_runtime_cdf_supplier_count" \
+	--argjson runtime_cdf_decision_count "$no_roster_runtime_cdf_decision_count" \
+	--argjson runtime_cdf_fill_count "$no_roster_runtime_cdf_fill_count" \
 	'{schema_version: 1, contract: $contract, arm: "no-roster", config_sha256: $config_sha256,
 	 run_status_sha256: $run_status_sha256, terminal_outcome_sha256: $terminal_outcome_sha256,
 	 run_metadata_sha256: $run_metadata_sha256, manifest_sha256: $manifest_sha256,
+	 greeks_sha256: $greeks_sha256, runtime_topology_sha256: $greeks_sha256,
 	 binary_attestation_sha256: $binary_attestation_sha256, evidence_manifest_sha256: $evidence_manifest_sha256,
 	 simulator_stdout_sha256: $simulator_stdout_sha256, simulator_stderr_sha256: $simulator_stderr_sha256,
 	 terminal_status: $terminal_status, strict_population_accounting: true, cdf_roster: false,
+	 runtime_topology_valid: true, runtime_cdf_supplier_count: $runtime_cdf_supplier_count,
+	 runtime_cdf_decision_count: $runtime_cdf_decision_count, runtime_cdf_fill_count: $runtime_cdf_fill_count,
 	 cdf_metrics: "out_of_scope", status: "VALID_TOPOLOGY_CONTROL", holdouts_consumed: false}' \
 	>"$no_roster_diagnostic_path"
 v2_r2_sv1d_require_no_roster_diagnostic "$no_roster_diagnostic_path" "$no_roster_dir" "$no_roster_config_sha256" || exit 1
@@ -487,6 +518,18 @@ comparison_record_path="$comparison_path"
 comparison_status=125
 comparison_object_valid=false
 comparison_sha256=""
+comparison_resource_executed=false
+comparison_resource_guard_failed=false
+comparison_resource_reason=""
+comparison_initial_free=0
+comparison_final_free=0
+comparison_initial_memory=0
+comparison_final_memory=0
+comparison_analyzer_peak_rss=0
+comparison_analyzer_wall_seconds=0
+comparison_analyzer_exit_status=125
+comparison_analyzer_stderr_path=""
+comparison_analyzer_stderr_sha256=""
 if [[ "$(jq -r '.status' "$treatment_dir/terminal-outcome.json")" == completed &&
 	"$(jq -r '.status' "$mode_off_dir/terminal-outcome.json")" == completed ]]; then
 	comparison_tmp="$comparison_path.tmp-$$"
@@ -495,27 +538,112 @@ if [[ "$(jq -r '.status' "$treatment_dir/terminal-outcome.json")" == completed &
 	(( comparison_initial_free >= activation_minimum_free_bytes && comparison_initial_memory >= activation_minimum_memory_available_bytes )) || exit 1
 	comparison_tmpdir="$output_root/analyzer-tmp"
 	mkdir -- "$comparison_tmpdir"
-	if timeout --signal=TERM --kill-after=15s "$activation_analyzer_max_wall_seconds" \
-		taskset --cpu-list "$cpu_affinity" env TMPDIR="$comparison_tmpdir" GOMAXPROCS="$activation_gomaxprocs" \
+	comparison_analyzer_stderr_tmp=$(mktemp "$output_root/analyzer.stderr.XXXXXX")
+	comparison_analyzer_started_epoch=$(date +%s)
+	comparison_resource_executed=true
+	setsid --wait taskset --cpu-list "$cpu_affinity" env TMPDIR="$comparison_tmpdir" GOMAXPROCS="$activation_gomaxprocs" \
 		GOMEMLIMIT="$activation_gomemlimit_bytes"B prlimit --as="$activation_memory_limit_bytes" -- \
-		"$audit_binary" -treatment "$treatment_dir" -control "$mode_off_dir" >"$comparison_tmp"; then
-		comparison_status=0
+		"$audit_binary" -treatment "$treatment_dir" -control "$mode_off_dir" >"$comparison_tmp" 2>"$comparison_analyzer_stderr_tmp" &
+	analyzer_pid=$!
+	while kill -0 "$analyzer_pid" 2>/dev/null; do
+		comparison_analyzer_wall_seconds=$(( $(date +%s) - comparison_analyzer_started_epoch ))
+		if (( comparison_analyzer_wall_seconds > activation_analyzer_max_wall_seconds )); then
+			comparison_resource_guard_failed=true
+			comparison_resource_reason="analyzer exceeded registered wall-clock deadline"
+			terminate_analyzer
+			break
+		fi
+		if ! comparison_current_rss=$(process_group_rss_bytes "$analyzer_pid"); then
+			comparison_resource_guard_failed=true
+			comparison_resource_reason="analyzer process-group RSS became unmeasurable"
+			terminate_analyzer
+			break
+		fi
+		if (( comparison_current_rss > comparison_analyzer_peak_rss )); then
+			comparison_analyzer_peak_rss=$comparison_current_rss
+		fi
+		if (( comparison_current_rss > activation_memory_limit_bytes )); then
+			comparison_resource_guard_failed=true
+			comparison_resource_reason="analyzer process-group RSS exceeded hard memory limit"
+			terminate_analyzer
+			break
+		fi
+		if ! comparison_final_memory=$(available_memory_bytes); then
+			comparison_resource_guard_failed=true
+			comparison_resource_reason="analyzer available-memory measurement failed"
+			terminate_analyzer
+			break
+		fi
+		if (( comparison_final_memory < activation_minimum_memory_available_bytes )); then
+			comparison_resource_guard_failed=true
+			comparison_resource_reason="analyzer available-memory reserve crossed registered floor"
+			terminate_analyzer
+			break
+		fi
+		if ! comparison_final_free=$(activation_free_bytes "$output_root"); then
+			comparison_resource_guard_failed=true
+			comparison_resource_reason="analyzer free-disk measurement failed"
+			terminate_analyzer
+			break
+		fi
+		if (( comparison_final_free < activation_minimum_free_bytes )); then
+			comparison_resource_guard_failed=true
+			comparison_resource_reason="analyzer free-disk reserve crossed registered floor"
+			terminate_analyzer
+			break
+		fi
+		sleep 1
+	done
+	if [[ -n "$analyzer_pid" ]]; then
+		if wait "$analyzer_pid"; then comparison_analyzer_exit_status=0; else comparison_analyzer_exit_status=$?; fi
+		comparison_status=$comparison_analyzer_exit_status
+		analyzer_pid=""
 	else
-		comparison_status=$?
+		comparison_analyzer_exit_status=125
+		comparison_status=125
 	fi
+	comparison_analyzer_wall_seconds=$(( $(date +%s) - comparison_analyzer_started_epoch ))
 	comparison_final_free=$(activation_free_bytes "$output_root") || exit 1
 	comparison_final_memory=$(available_memory_bytes) || exit 1
 	if (( comparison_final_free < activation_minimum_free_bytes || comparison_final_memory < activation_minimum_memory_available_bytes )); then
+		comparison_resource_guard_failed=true
+		comparison_resource_reason="analyzer final resource reserve crossed registered floor"
 		comparison_status=125
 	fi
-	if v2_r2_require_single_json_object "$comparison_tmp"; then
+	if (( comparison_analyzer_wall_seconds > activation_analyzer_max_wall_seconds )); then
+		comparison_resource_guard_failed=true
+		comparison_resource_reason="final analyzer wall-clock duration exceeded registered deadline"
+		comparison_status=125
+	fi
+	comparison_analyzer_stderr_path="$output_root/analyzer.stderr.log"
+	mv -- "$comparison_analyzer_stderr_tmp" "$comparison_analyzer_stderr_path"
+	comparison_analyzer_stderr_sha256=$(v2_r2_sv1d_sha256_file "$comparison_analyzer_stderr_path") || exit 1
+	if [[ "$comparison_resource_guard_failed" == false ]] && v2_r2_require_single_json_object "$comparison_tmp"; then
+		comparison_enriched_tmp="$comparison_tmp.enriched"
+		jq --argjson analyzer_exit_status "$comparison_analyzer_exit_status" --argjson peak_rss_bytes "$comparison_analyzer_peak_rss" \
+			--argjson wall_clock_seconds "$comparison_analyzer_wall_seconds" --argjson initial_free_bytes "$comparison_initial_free" \
+			--argjson final_free_bytes "$comparison_final_free" --argjson initial_memory_available_bytes "$comparison_initial_memory" \
+			--argjson final_memory_available_bytes "$comparison_final_memory" --argjson host_memory_total_bytes "$activation_host_memory_total_bytes" \
+			--argjson minimum_memory_available_bytes "$activation_minimum_memory_available_bytes" \
+			--argjson resource_guard_failed "$comparison_resource_guard_failed" --arg resource_guard_reason "$comparison_resource_reason" \
+			'.provenance.resource = {executed: true, exit_status: $analyzer_exit_status, peak_rss_bytes: $peak_rss_bytes,
+				wall_clock_seconds: $wall_clock_seconds, initial_available_free_bytes: $initial_free_bytes,
+				final_available_free_bytes: $final_free_bytes, initial_memory_available_bytes: $initial_memory_available_bytes,
+				final_memory_available_bytes: $final_memory_available_bytes, host_memory_total_bytes: $host_memory_total_bytes,
+				minimum_memory_available_bytes: $minimum_memory_available_bytes, resource_guard_failed: $resource_guard_failed,
+				resource_guard_reason: $resource_guard_reason}' "$comparison_tmp" >"$comparison_enriched_tmp" &&
+			mv -- "$comparison_enriched_tmp" "$comparison_tmp"
+	else
+		comparison_object_valid=false
+	fi
+	if [[ "$comparison_resource_guard_failed" == false ]] && v2_r2_require_single_json_object "$comparison_tmp"; then
 		comparison_object_valid=true
 	else
 		comparison_object_valid=false
 	fi
 	if [[ "$comparison_status" -eq 0 || "$comparison_status" -eq 1 ]] && [[ "$comparison_object_valid" == true ]] &&
 		jq -e '(.evidence_valid == true) and (.provenance == null or .provenance.valid == true)' "$comparison_tmp" >/dev/null 2>&1 &&
-		v2_r2_sv1d_require_comparison_provenance "$comparison_tmp" "$audit_sha256" "$head_revision"; then
+		v2_r2_sv1d_require_comparison_provenance "$comparison_tmp" "$audit_sha256" "$head_revision" "$treatment_dir" "$mode_off_dir"; then
 		# cdf-liquidity-audit returns exit status 1 for a valid, reconstructible
 		# negative outcome whose economic predicate is false. The evidence
 		# validity, not that scientific outcome status, controls publication.
@@ -527,15 +655,25 @@ if [[ "$(jq -r '.status' "$treatment_dir/terminal-outcome.json")" == completed &
 	fi
 else
 	jq -n --arg contract "$v2_r2_sv1_activation_contract" --argjson seed "$v2_r2_sv1_activation_seed" \
+		--arg horizon "$horizon" --argjson start "$simulation_start_nano" --argjson end "$simulation_end_nano" \
 		--arg treatment_status "$(jq -r '.status' "$treatment_dir/terminal-outcome.json")" \
 		--arg control_status "$(jq -r '.status' "$mode_off_dir/terminal-outcome.json")" \
+		--arg treatment_status_sha256 "$(v2_r2_sv1d_sha256_file "$treatment_dir/run-status.json")" \
+		--arg control_status_sha256 "$(v2_r2_sv1d_sha256_file "$mode_off_dir/run-status.json")" \
+		--arg treatment_terminal_sha256 "$(v2_r2_sv1d_sha256_file "$treatment_dir/terminal-outcome.json")" \
+		--arg control_terminal_sha256 "$(v2_r2_sv1d_sha256_file "$mode_off_dir/terminal-outcome.json")" \
 		'{schema_version: 1, contract: $contract, seed: $seed, status: "UNAVAILABLE_TERMINAL_FAILURE",
 		 valid: false, evidence_valid: true, activation_satisfied: false, anti_cheating_satisfied: false,
 		 treatment_terminal_status: $treatment_status, control_terminal_status: $control_status,
+		 simulated_horizon: $horizon, simulation_start_nano: $start, simulation_end_nano: $end,
+		 provenance: null, arm_artifacts_valid: true, holdouts_consumed: false,
+		 treatment_run_status_sha256: $treatment_status_sha256, control_run_status_sha256: $control_status_sha256,
+		 treatment_terminal_outcome_sha256: $treatment_terminal_sha256, control_terminal_outcome_sha256: $control_terminal_sha256,
 		 reason: "treatment/mode-off pair lacks two completed terminal valuations"}' \
 		>"$comparison_path"
 	comparison_status=0
 	comparison_object_valid=true
+	v2_r2_sv1d_require_comparison_provenance "$comparison_path" "$audit_sha256" "$head_revision" "$treatment_dir" "$mode_off_dir" || exit 1
 fi
 
 if [[ -d "$output_root/analyzer-tmp" ]]; then
@@ -638,6 +776,14 @@ jq -n --arg contract "$v2_r2_sv1_activation_pair_contract" --arg candidate "$v2_
 	--argjson comparison_object_valid "$comparison_object_valid" --argjson comparison_status "$comparison_status" \
 	--arg comparison_path "$comparison_path" --arg recorded_path "$comparison_record_path" --arg comparison_sha256 "$comparison_sha256" \
 	--argjson comparison_activation "$comparison_activation" --argjson comparison_anticheating "$comparison_anticheating" \
+	--arg analyzer_stderr_path "$comparison_analyzer_stderr_path" --arg analyzer_stderr_sha256 "$comparison_analyzer_stderr_sha256" \
+	--argjson comparison_resource_executed "$comparison_resource_executed" \
+	--argjson comparison_resource_guard_failed "$comparison_resource_guard_failed" \
+	--arg comparison_resource_reason "$comparison_resource_reason" --argjson comparison_analyzer_exit_status "$comparison_analyzer_exit_status" \
+	--argjson comparison_analyzer_peak_rss "$comparison_analyzer_peak_rss" --argjson comparison_analyzer_wall_seconds "$comparison_analyzer_wall_seconds" \
+	--argjson comparison_initial_free "$comparison_initial_free" --argjson comparison_final_free "$comparison_final_free" \
+	--argjson comparison_initial_memory "$comparison_initial_memory" --argjson comparison_final_memory "$comparison_final_memory" \
+	--argjson comparison_host_memory_total "$activation_host_memory_total_bytes" --argjson comparison_minimum_memory "$activation_minimum_memory_available_bytes" \
 	--arg no_roster_diagnostic_path "$no_roster_diagnostic_path" --arg no_roster_diagnostic_sha256 "$no_roster_diagnostic_sha256" \
 	--arg binary_path "$binary" --arg binary_sha256 "$binary_sha256" --arg audit_path "$audit_binary" --arg audit_sha256 "$audit_sha256" \
 	--arg renderer_path "$renderer" --arg renderer_sha256 "$renderer_sha256" \
@@ -665,7 +811,15 @@ jq -n --arg contract "$v2_r2_sv1_activation_pair_contract" --arg candidate "$v2_
 	 review: {path: $review_path, sha256: $review_sha256},
 	 comparison: {path: $comparison_path, recorded_path: $recorded_path, sha256: $comparison_sha256,
 	   exit_status: $comparison_status, object_valid: $comparison_object_valid, valid: $comparison_valid,
-	   activation_satisfied: $comparison_activation, anti_cheating_satisfied: $comparison_anticheating},
+	   activation_satisfied: $comparison_activation, anti_cheating_satisfied: $comparison_anticheating,
+	   analyzer_stderr_path: (if $analyzer_stderr_path == "" then null else $analyzer_stderr_path end),
+	   analyzer_stderr_sha256: (if $analyzer_stderr_sha256 == "" then null else $analyzer_stderr_sha256 end),
+	   resource: {executed: $comparison_resource_executed, exit_status: $comparison_analyzer_exit_status,
+	     peak_rss_bytes: $comparison_analyzer_peak_rss, wall_clock_seconds: $comparison_analyzer_wall_seconds,
+	     initial_available_free_bytes: $comparison_initial_free, final_available_free_bytes: $comparison_final_free,
+	     initial_memory_available_bytes: $comparison_initial_memory, final_memory_available_bytes: $comparison_final_memory,
+	     host_memory_total_bytes: $comparison_host_memory_total, minimum_memory_available_bytes: $comparison_minimum_memory,
+	     resource_guard_failed: $comparison_resource_guard_failed, resource_guard_reason: $comparison_resource_reason}},
 	 no_roster_diagnostic: {path: $no_roster_diagnostic_path, sha256: $no_roster_diagnostic_sha256,
 	   status: "VALID_TOPOLOGY_CONTROL", cdf_metrics: "out_of_scope"},
 	 arms: $arms,

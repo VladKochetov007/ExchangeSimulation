@@ -51,7 +51,9 @@ jq -e --arg contract "$v2_r2_sv1_activation_pair_contract" --arg candidate "$v2_
 		.resource_policy.memory_limit_bytes == (20 * 1024 * 1024 * 1024) and
 		.resource_policy.gomemlimit_bytes == (18 * 1024 * 1024 * 1024) and
 		.resource_policy.minimum_free_bytes == (4 * 1024 * 1024 * 1024) and
-		.resource_policy.minimum_memory_available_bytes == (4 * 1024 * 1024 * 1024) and
+		(.resource_policy.host_memory_total_bytes | type) == "number" and .resource_policy.host_memory_total_bytes > 0 and
+		(.resource_policy.minimum_memory_available_bytes | type) == "number" and
+		.resource_policy.minimum_memory_available_bytes == (if ((.resource_policy.host_memory_total_bytes + 4) / 5) < (4 * 1024 * 1024 * 1024) then (4 * 1024 * 1024 * 1024) else ((.resource_policy.host_memory_total_bytes + 4) / 5 | floor) end) and
 		.resource_policy.max_wall_seconds == 900 and .resource_policy.analyzer_max_wall_seconds == 300' "$provenance_path" >/dev/null || exit 1
 
 config_checker="$root_dir/$v2_r2_sv1_config_checker_path"
@@ -103,6 +105,7 @@ for arm in "${v2_r2_sv1d_arm_names[@]}"; do
 				.simulator_stdout_sha256, .simulator_stderr_sha256][]; type == "string" and test("^[0-9a-f]{64}$"))' \
 		<<<"$arm_record" >/dev/null || exit 1
 	v2_r2_sv1d_require_activation_arm_artifacts "$arm_dir" "$arm" "$head_revision" "$arm_config_sha256" "$binary_sha256" || exit 1
+	v2_r2_sv1d_require_arm_record_matches "$provenance_path" "$arm" "$arm_dir" || exit 1
 	jq -e --arg binary_path "$binary_path" --arg checkpoint_path "$checkpoint_path" \
 		--arg review_path "$review_path" --arg review_sha256 "$review_sha256" \
 		--arg revision "$head_revision" --arg checkpoint_sha256 "$checkpoint_sha256" \
@@ -137,7 +140,7 @@ comparison_path=$(jq -er '.comparison.recorded_path | select(type == "string")' 
 comparison_sha256=$(jq -er '.comparison.sha256 | select(type == "string" and test("^[0-9a-f]{64}$"))' "$provenance_path") || exit 1
 [[ -f "$comparison_path" && ! -L "$comparison_path" && "$(v2_r2_sv1d_sha256_file "$comparison_path")" == "$comparison_sha256" ]] || exit 1
 v2_r2_require_single_json_object "$comparison_path" || exit 1
-v2_r2_sv1d_require_comparison_provenance "$comparison_path" "$audit_sha256" "$head_revision" || exit 1
+v2_r2_sv1d_require_comparison_provenance "$comparison_path" "$audit_sha256" "$head_revision" "$treatment_dir" "$mode_off_dir" || exit 1
 
 comparison_valid=$(jq -er '(.valid | type) == "boolean" and .valid' "$comparison_path" 2>/dev/null || true)
 comparison_evidence_valid=$(jq -er '(.evidence_valid | type) == "boolean" and .evidence_valid' "$comparison_path" 2>/dev/null || true)
@@ -163,6 +166,7 @@ if [[ "$comparison_evidence_valid" == true && "$comparison_provenance_valid" == 
 fi
 
 score_tmp="$score_path.tmp-$$"
+activation_provenance_sha256=$(v2_r2_sv1d_sha256_file "$provenance_path") || exit 1
 jq -n --arg contract "$v2_r2_sv1_scorer_contract" --arg candidate "$v2_r2_sv1_candidate_id" \
 	--arg revision "$head_revision" --arg tree_sha256 "$head_tree_sha256" --arg status "$score_status" \
 	--arg reason "$score_reason" --arg output_root "$output_root" --arg comparison_path "$comparison_path" \
@@ -173,9 +177,11 @@ jq -n --arg contract "$v2_r2_sv1_scorer_contract" --arg candidate "$v2_r2_sv1_ca
 	--argjson comparison_evidence_valid "$(jq -r '(.evidence_valid // false)' "$comparison_path")" \
 	--argjson comparison_anticheating "$(jq -r '(.anti_cheating_satisfied // false)' "$comparison_path")" \
 	--arg comparison_provenance_valid "$comparison_provenance_valid" --arg comparison_status "$comparison_terminal_negative" \
+	--arg activation_provenance_sha256 "$activation_provenance_sha256" \
 	'{schema_version: 1, contract: $contract, candidate: $candidate, candidate_revision: $revision,
 	 candidate_tree_sha256: $tree_sha256, seed: $seed, output_root: $output_root, status: $status,
 	 reason: $reason, holdouts_consumed: $holdouts_consumed, arm_count: $arm_count,
+	 activation_provenance_sha256: $activation_provenance_sha256,
 	 comparison: {path: $comparison_path, sha256: $comparison_sha256, valid: $comparison_valid,
 	   evidence_valid: $comparison_evidence_valid, anti_cheating_satisfied: $comparison_anticheating,
 	   provenance_valid: ($comparison_provenance_valid == "true"), terminal_negative: ($comparison_status == "true")},

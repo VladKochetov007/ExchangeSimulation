@@ -319,3 +319,30 @@ capital-unconstrained over that probe horizon.
 Holdouts `619`, `631`, and `641` remain untouched. No step in this document
 authorizes a holdout, a full campaign before activation, economic retuning
 after an outcome, or weakening strict terminal accounting.
+
+## Append-only capital-unit amendment — 2026-09-09
+
+The paragraph above describing the source roster's `40,000,000,000` to
+`70,000,000,000` raw base-unit balances as `0.4` to `0.7` CDF was a unit
+conversion error. At the registered `100,000,000` base precision those
+retained SV1C source balances are `400` to `700` CDF; the source maximum quote
+quantities are `0.4` to `0.7` CDF per order. That source roster remains
+unchanged and is historical input only.
+
+The SV1D seed-659 activation package is amended before generation to use a
+separate, explicitly registered activation roster. It divides each source
+supplier's `initial_base_balance`, `initial_quote_balance`, `max_position`,
+`max_inventory`, and `max_loss_quote` by exactly ten, preserving integer raw
+units; quote quantity, pricing, observation, cadence, and matching mechanics
+are unchanged. The resulting initial CDF inventories are `40` to `70` CDF,
+with `40` to `70` CDF position limits and `80` to `140` CDF gross-inventory
+limits. This makes finite capital reachable within the 150-decision,
+five-minute probe budget without changing the retained SV1C source or any
+historical R2 configuration.
+
+The activation contract now requires both this horizon-relative capacity
+condition and an observed filled quantity at least equal to the registered
+`minimum_qualifying_qty` for every treatment supplier. A positive configured
+balance or nonzero utilization alone is not activation evidence. The amendment
+does not authorize ask-only depletion claims: the seed-659 probe still has
+positive initial inventory and reports that direction separately as untested.

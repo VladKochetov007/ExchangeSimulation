@@ -67,12 +67,25 @@ done
 	exit 1
 }
 
+jq -e '
+	all(.elastic_liquidity_suppliers[];
+		.initial_base_balance % 10 == 0 and .initial_quote_balance % 10 == 0 and
+		.max_position % 10 == 0 and .max_inventory % 10 == 0 and .max_loss_quote % 10 == 0)' \
+	"$source_treatment" >/dev/null || {
+	echo "SV1D source capital values are not exactly divisible by the registered activation scale" >&2
+	exit 1
+}
 roster=$(jq -c '.elastic_liquidity_suppliers | map(. + {
 	tick_size: 100000,
 	minimum_qualifying_qty: 1000000,
 	registered_minimum_executable_qty: 100000,
 	quote_on_one_sided_local_book: true
-})' "$source_treatment")
+} |
+	.initial_base_balance = (.initial_base_balance / 10 | floor) |
+	.initial_quote_balance = (.initial_quote_balance / 10 | floor) |
+	.max_position = (.max_position / 10 | floor) |
+	.max_inventory = (.max_inventory / 10 | floor) |
+	.max_loss_quote = (.max_loss_quote / 10 | floor))' "$source_treatment")
 mode_off_roster=$(jq -cn --argjson roster "$roster" '$roster | map(.quote_on_one_sided_local_book = false)')
 
 write_normalized() {

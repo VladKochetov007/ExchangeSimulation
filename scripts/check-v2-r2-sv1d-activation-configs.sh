@@ -159,6 +159,8 @@ done
 treatment=$(v2_r2_sv1d_config_for_arm treatment)
 mode_off=$(v2_r2_sv1d_config_for_arm mode-off)
 no_roster=$(v2_r2_sv1d_config_for_arm no-roster)
+v2_r2_sv1d_require_activation_capacity "$treatment" || fail "treatment capital cannot bind within the registered activation horizon"
+v2_r2_sv1d_require_activation_capacity "$mode_off" || fail "mode-off capital cannot bind within the registered activation horizon"
 jq -e '
 	(.elastic_liquidity_suppliers | type == "array" and length == 4) and
 	(.elastic_liquidity_suppliers | map(.role)) == ["cdf_elastic_supplier_1", "cdf_elastic_supplier_2", "cdf_elastic_supplier_3", "cdf_elastic_supplier_4"] and
@@ -174,7 +176,12 @@ jq -e '
 	.record_elastic_liquidity_supplier_decisions == true' "$treatment" >/dev/null || fail "treatment contract failed"
 jq -e --slurpfile source "$source_treatment" '
 	(.elastic_liquidity_suppliers | map(del(.tick_size, .minimum_qualifying_qty, .registered_minimum_executable_qty, .quote_on_one_sided_local_book, .decision_phase_offset))) ==
-	($source[0].elastic_liquidity_suppliers | map(del(.decision_phase_offset)))' "$treatment" >/dev/null || fail "treatment changed retained CDF economics"
+	($source[0].elastic_liquidity_suppliers | map(
+		.initial_base_balance = (.initial_base_balance / 10 | floor) |
+		.initial_quote_balance = (.initial_quote_balance / 10 | floor) |
+		.max_position = (.max_position / 10 | floor) |
+		.max_inventory = (.max_inventory / 10 | floor) |
+		.max_loss_quote = (.max_loss_quote / 10 | floor)))' "$treatment" >/dev/null || fail "treatment capital amendment or retained CDF economics drift"
 jq -e --slurpfile treatment "$treatment" '
 	(.elastic_liquidity_suppliers | type == "array" and length == 4) and
 	(.elastic_liquidity_suppliers | map(del(.quote_on_one_sided_local_book))) == ($treatment[0].elastic_liquidity_suppliers | map(del(.quote_on_one_sided_local_book))) and

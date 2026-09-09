@@ -90,6 +90,39 @@ The next promotion boundary is:
 Holdouts `619`, `631`, and `641` remain untouched. No result from this
 candidate authorizes a full campaign, freeze, or holdout execution.
 
+## Post-review contract repair checkpoint — 2026-09-09
+
+The clean full repository test was run with `go test -timeout=30m ./...` under
+`GOMAXPROCS=2` and `GOMEMLIMIT=8GiB`. All Go packages, including the long
+fresh-process multivenue suite, passed; the first run failed only because a
+repository-path hygiene test found a literal `/tmp` in the config checker.
+That non-scientific issue was removed in commit `b729a9f`, and its focused
+regression passes.
+
+The independent Sol-xhigh review of commit `5558725` rejected promotion. Its
+high-severity objections are accepted and are being repaired before any
+activation measurement: source/base-unit conversion and horizon-relative
+finite-capital reachability; runtime no-roster topology evidence; exact
+terminal-failure comparison binding; dynamic available-memory reserve and
+live analyzer supervision; top-level arm-record binding; and closed artifact
+namespace checks. The previous `5558725` package therefore remains a rejected
+pre-review state, not an activation authorization.
+
+The current repair preserves the R2 calendar and simulator economics. It
+introduces one explicit SV1D activation-only roster amendment: the generated
+probe roster scales selected finite capital/risk fields from the retained SV1C
+source by ten, with the correction preregistered in the append-only amendment
+in the successor preregistration. Historical source configs and evidence are
+not rewritten. The treatment activation predicate additionally requires
+observed filled quantity at least equal to the configured scientific
+qualification minimum; initial balances and nonzero utilization are not
+treated as proof of economic activation.
+
+Current performance/red-team refs remain performance `b1847ac`, CDF port
+`39768df`, and economic audit `e85e16c`; the latest `git fetch origin --prune`
+found no newer commits. No seed 659, development cell, 24-hour world, or
+holdout has run from this candidate.
+
 ## Package repair checkpoint after independent review
 
 The first independent review of the activation package was not treated as a
