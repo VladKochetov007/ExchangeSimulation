@@ -924,3 +924,34 @@ finish and their contracts pass.
   promoted binaries, or launch dev-607 while either the reviewer or capacity
   gate is unresolved. Resume with fresh exact-tree review, then pinned build,
   only after both gates clear.
+
+## Append-only operational update: F3 epoch correction — 2026-09-09
+
+- The active scientific branch is `autoresearch/ffa-ecology-gen0` at pushed
+  HEAD `90d0ffbf32a07f3393a5be903b30fa9c954f723a`, with a clean worktree and
+  no cherry-pick in progress. This commit is the minimal simulator-semantic
+  correction for reachable F3 cross-margin stale-sibling marks; it preserves
+  the prior R2 calendar and the historical negative survival result.
+- The correction commits a coherent exchange-owned mark epoch across
+  perpetuals, dated futures, and options, fails closed on unavailable sibling
+  marks, serializes mark producers with risk sweeps, and provides the optional
+  `PositionMarginSnapshotter` extension for mark-dependent maintenance. The
+  built-in instrument path is covered by focused regressions and an independent
+  Avicenna Sol-xhigh review, which returned conditional acceptance with no
+  built-in-instrument blocker. The review limitations (epoch availability is
+  not a freshness/TTL guarantee; custom hidden maintenance inputs require the
+  snapshot interface) remain explicit.
+- Clean post-commit `make test`, `go vet ./...`, focused tests, focused race
+  tests, and `git diff --check` pass. No development cell, parity control,
+  binary launch, or holdout was consumed. The latest fetch found no new
+  performance-port or economic-red-team commits beyond the recorded refs.
+- The retained historical dev-607 archive remains unchanged. Its multi-symbol
+  exposure topology makes F3 reachable, but it has no observable liquidation
+  checks, liquidations, or margin calls; corrected semantics therefore require
+  a successor development rerun rather than offline trajectory repair.
+- The current R2 candidate remains explicitly `NON-VIABLE AT THE 24H
+  MARKET-SURVIVAL GATE`. The separately named CDF-liquidity successor remains
+  a negative, off-branch development result and is not merged by this fix.
+  Before any new cell, finish the binary-evidence successor promotion/review
+  boundary, build the pinned candidate, and use development cells only. Holdout
+  seeds `619/631/641` remain behind explicit freeze authorization.

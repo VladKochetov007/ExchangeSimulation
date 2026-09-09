@@ -618,3 +618,67 @@ the exact current HEAD. Independently measured disk capacity is also below the
 runner’s approximately 51 GiB fail-closed floor (about 28 GiB currently
 free), so dev-607 cannot safely launch even after review until capacity is
 resolved. Holdouts `619/631/641` remain untouched.
+
+## F3 corrected epoch gate — `90d0ffb` (2026-09-09)
+
+The scientific branch is now at exact pushed HEAD
+`90d0ffbf32a07f3393a5be903b30fa9c954f723a` (parent `0fccf15`). This is a
+semantic successor to the older candidate, not an offline repair of its
+retained trajectory. The implementation and regressions require cross-margin
+risk to consume one exchange-owned mark epoch: successful perpetual, dated
+future, and option marks are installed before the risk pass; unavailable
+siblings are removed from the epoch; multi-book accounts fail closed unless
+every exposed symbol has the current epoch and one timestamp; and manual
+trigger marks must equal the committed trigger snapshot. Mark producers and
+manual risk entry points share a serialization boundary. Built-in European
+option maintenance uses the captured underlying/premium pair, while the
+optional `PositionMarginSnapshotter` interface leaves legacy
+`PositionMarginer` implementations source-compatible.
+
+Avicenna (Sol-xhigh) independently reviewed the exact pre-commit tree and
+returned **CONDITIONAL ACCEPTANCE** (reviewed diff SHA-256
+`699baec02e127a3a576aa313dc28211de5a9b04e67cdb4d81ba67381b47af586`). The
+review found no F3 promotion blocker for the built-in instruments. Its two
+explicit limitations are retained as contract boundaries: an epoch is an
+atomic set of marks declared available, not a freshness/TTL guarantee, and a
+future custom marginer with hidden mutable maintenance inputs must implement
+the snapshot interface to make those inputs auditable. The commit contains
+exactly the reviewed code diff; no performance-branch code was merged.
+
+Post-commit gates passed:
+
+- `GOMAXPROCS=6 GOMEMLIMIT=20GiB make test`, including the full
+  `simulations/multivenue` run and integrated long-run/R2 contract and archive
+  tests;
+- `GOMAXPROCS=6 GOMEMLIMIT=20GiB go vet ./...`;
+- `GOMAXPROCS=4 GOMEMLIMIT=20GiB go test -race ./exchange ./instrument ./types ./tests`;
+- focused exchange/instrument/types/tests regressions; and
+- `git diff --check`.
+
+The asynchronous feeds were fetched again at this promotion checkpoint. No
+commits were added after the recorded performance heads
+`b1847ac40e8b7483e6e8a3f94b3705b4058884b`,
+`39768dfed4ba4a5134f0c5ccf53351a79a0b1d64`, and
+`e85e16c5e920382e5df9aa050ac5ff9b22b51661`; the binary evidence prototype
+remains a separately reviewed infrastructure line and was not broadened here.
+
+Historical impact remains bounded by activation evidence. The retained old
+dev-607 archive shows 656,038 multi-symbol position observations across the
+three venues, so the cross-margin topology was present, but it contains zero
+`liquidation_check`, `liquidation`, or `margin_call` records. This supports
+`ACTIVATED BUT OUTCOME UNAFFECTED` for observable historical risk actions,
+while internal solvent verdicts remain unobservable. Because F3 can alter
+forced orders, fills, balances, and subsequent state when a portfolio is near
+maintenance, the old trajectory is not promoted as evidence for corrected
+semantics and a fresh development rerun is required. No historical artifact
+was rewritten, no holdout was consumed, and no development cell was run from
+`90d0ffb`.
+
+The current scientific gate is therefore mechanically green for this
+correction but not a freeze or launch authorization. The old R2 candidate
+remains closed as `NON-VIABLE AT THE 24H MARKET-SURVIVAL GATE`; the separately
+named CDF-liquidity successor remains a negative development branch and is not
+silently merged. Before any new cell, reconcile the binary-evidence successor
+promotion state, obtain any required exact-tree review, build the pinned
+provenance artifact, and use the registered development-only sequence. Holdout
+seeds `619/631/641` remain untouched behind explicit freeze authorization.

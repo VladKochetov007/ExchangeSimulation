@@ -740,3 +740,41 @@ review. The review service currently reports its agent-thread limit even after
 all prior review threads completed, so no prior superseded verdict is being
 used as acceptance. Binary rebuild and every R2 cell remain gated on both
 fresh review and safe capacity.
+
+## Append-only current checkpoint — F3 correction `90d0ffb` (2026-09-09)
+
+The active scientific tree is clean at
+`90d0ffbf32a07f3393a5be903b30fa9c954f723a`. The F3 simulator correction is
+committed and pushed after an independent Avicenna Sol-xhigh conditional
+acceptance of the exact code diff. It establishes an exchange-owned coherent
+mark epoch for the built-in perpetual, dated-future, and option risk path;
+missing sibling marks fail closed; producer/risk entry points are serialized;
+and built-in option maintenance consumes the committed underlying/premium
+pair. The optional snapshotter interface preserves extensibility for custom
+position-margin instruments.
+
+The exact post-commit mechanical evidence is green: focused regressions,
+focused race tests, clean full `make test` (including the integrated long-run
+and R2 contract/archive suites), `go vet ./...`, and `git diff --check`. No
+development cell, parity cell, or holdout was launched. Holdouts `619/631/641`
+remain untouched. Host capacity at this checkpoint is approximately 48 GiB
+free and 23 GiB available RAM; no launch capacity claim has been made from
+that observation.
+
+The retained old trajectory was not rewritten. Multi-symbol positions make F3
+reachable in the historical topology, while retained evidence contains zero
+observable `liquidation_check`, `liquidation`, or `margin_call` records. This
+is not proof that unlogged internal solvent checks never occurred, so the old
+trajectory is not promoted under corrected semantics and must be rerun only in
+the authorized successor development sequence. The old R2 candidate remains
+closed as `NON-VIABLE AT THE 24H MARKET-SURVIVAL GATE`; the CDF-liquidity
+successor remains separately named and negative, and is not merged into this
+scientific branch.
+
+The asynchronous refs were fetched at this checkpoint with no new commits
+after performance `b1847ac`, performance-port `39768df`, or economic-red-team
+`e85e16c`. The binary evidence work remains a separately gated infrastructure
+successor; no performance-branch code was imported by `90d0ffb`. The next
+promotion boundary is binary-evidence successor reconciliation, exact review
+where required, pinned build, and development-only execution. Freeze
+authorization is still absent.
