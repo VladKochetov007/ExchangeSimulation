@@ -87,6 +87,78 @@ func TestCDFSupplierDecisionCarriesDeliveredObservationFingerprint(t *testing.T)
 	}
 }
 
+func TestCDFSupplierMissingSnapshotClearsStaleLocalState(t *testing.T) {
+	gateway := newMetaGateway()
+	cfg := cdfSupplierUnitConfig()
+	supplier := NewElasticLiquiditySupplier(1, gateway, cfg)
+	supplier.HandleEvent(context.Background(), cdfSupplierBookEvent(cfg.Symbol, int64(time.Second), 11, 900, 1_100, 100, 100))
+	if supplier.bestBid != 900 || supplier.bestAsk != 1_100 || supplier.observationSequence != 11 {
+		t.Fatalf("initial local state = bid %d ask %d sequence %d", supplier.bestBid, supplier.bestAsk, supplier.observationSequence)
+	}
+	supplier.HandleEvent(context.Background(), &actor.Event{
+		Type: actor.EventBookSnapshot,
+		Data: actor.BookSnapshotEvent{Symbol: cfg.Symbol, Timestamp: int64(2 * time.Second), SeqNum: 12},
+	})
+	if supplier.bestBid != 0 || supplier.bestBidQty != 0 || supplier.bestAsk != 0 || supplier.bestAskQty != 0 ||
+		supplier.riskMarkPrice != 0 || supplier.observationTime != int64(2*time.Second) || supplier.observationSequence != 12 {
+		t.Fatalf("missing snapshot retained local state: bid=%d/%d ask=%d/%d mark=%d time=%d sequence=%d",
+			supplier.bestBid, supplier.bestBidQty, supplier.bestAsk, supplier.bestAskQty,
+			supplier.riskMarkPrice, supplier.observationTime, supplier.observationSequence)
+	}
+	if observation := supplier.observeLocalBook(); observation.ok {
+		t.Fatalf("missing snapshot produced usable local book: %+v", observation)
+	}
+}
+
+func TestCDFSupplierValidSnapshotPreservesRiskMarkUntilRiskUpdate(t *testing.T) {
+	gateway := newMetaGateway()
+	cfg := cdfSupplierUnitConfig()
+	decisions := make([]ElasticLiquiditySupplierDecision, 0, 1)
+	cfg.DecisionObserver = func(decision ElasticLiquiditySupplierDecision) {
+		decisions = append(decisions, decision)
+	}
+	supplier := NewElasticLiquiditySupplier(1, gateway, cfg)
+	supplier.riskMarkPrice = 777
+	supplier.pendingRequestID = 42
+	supplier.subscribed = true
+	supplier.HandleEvent(context.Background(), cdfSupplierBookEvent(cfg.Symbol, int64(time.Second), 11, 900, 1_100, 100, 100))
+	supplier.onTick(time.Unix(0, int64(2*time.Second)))
+	if supplier.riskMarkPrice != 777 {
+		t.Fatalf("valid snapshot cleared risk mark before risk update: got %d, want 777", supplier.riskMarkPrice)
+	}
+	if len(decisions) != 1 || decisions[0].Action != "wait" || decisions[0].Reason != "order_pending" || decisions[0].RiskMarkPrice != 777 {
+		t.Fatalf("valid snapshot early-return decision = %+v, want pending with risk mark 777", decisions)
+	}
+}
+
+func TestCDFSupplierMissingSnapshotWithdrawsAndLaterValidSnapshotCanRecover(t *testing.T) {
+	gateway := newMetaGateway()
+	cfg := cdfSupplierUnitConfig()
+	supplier := NewElasticLiquiditySupplier(1, gateway, cfg)
+	supplier.onTick(time.Unix(0, int64(time.Second)))
+	supplier.HandleEvent(context.Background(), cdfSupplierBookEvent(cfg.Symbol, int64(time.Second), 11, 1_200, 1_300, 100, 100))
+	supplier.onTick(time.Unix(0, int64(2*time.Second)))
+	orders := gateway.orders()
+	if len(orders) != 1 {
+		t.Fatalf("initial orders = %+v, want one", orders)
+	}
+	supplier.HandleEvent(context.Background(), &actor.Event{Type: actor.EventOrderAccepted, Data: actor.OrderAcceptedEvent{OrderID: 42, RequestID: orders[0].RequestID}})
+	supplier.HandleEvent(context.Background(), &actor.Event{
+		Type: actor.EventBookSnapshot,
+		Data: actor.BookSnapshotEvent{Symbol: cfg.Symbol, Timestamp: int64(3 * time.Second), SeqNum: 12},
+	})
+	supplier.onTick(time.Unix(0, int64(4*time.Second)))
+	if len(gateway.requests) != 3 || gateway.requests[2].Type != etypes.ReqCancelOrder || gateway.requests[2].CancelReq.OrderID != 42 {
+		t.Fatalf("missing-snapshot requests = %+v, want one withdrawal cancel", gateway.requests)
+	}
+	supplier.HandleEvent(context.Background(), &actor.Event{Type: actor.EventOrderCancelled, Data: actor.OrderCancelledEvent{OrderID: 42, RequestID: gateway.requests[2].CancelReq.RequestID}})
+	supplier.HandleEvent(context.Background(), cdfSupplierBookEvent(cfg.Symbol, int64(5*time.Second), 13, 1_000, 1_100, 100, 100))
+	supplier.onTick(time.Unix(0, int64(6*time.Second)))
+	if len(gateway.orders()) != 2 {
+		t.Fatalf("orders after valid recovery = %+v, want a new quote after withdrawal", gateway.orders())
+	}
+}
+
 func TestCDFSupplierQuotesMissingAskOnRegisteredGrid(t *testing.T) {
 	gateway := newMetaGateway()
 	decisions := make([]ElasticLiquiditySupplierDecision, 0)

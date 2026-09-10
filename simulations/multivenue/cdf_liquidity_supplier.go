@@ -351,11 +351,18 @@ func (s *ElasticLiquiditySupplier) HandleEvent(_ context.Context, event *actor.E
 }
 
 func (s *ElasticLiquiditySupplier) observeSnapshot(event actor.BookSnapshotEvent) {
-	if event.Symbol != s.cfg.Symbol || event.Snapshot == nil {
+	if event.Symbol != s.cfg.Symbol {
 		return
 	}
 	s.bestBid, s.bestBidQty, s.bestAsk, s.bestAskQty, s.observationTime = 0, 0, 0, 0, event.Timestamp
 	s.observationSequence = event.SeqNum
+	if event.Snapshot == nil {
+		// An explicit missing snapshot is a new unavailable observation. Clear
+		// the previous book and mark so a transient producer/transport failure
+		// cannot authorize a quote from stale local state.
+		s.riskMarkPrice = 0
+		return
+	}
 	if len(event.Snapshot.Bids) > 0 {
 		s.bestBid = event.Snapshot.Bids[0].Price
 		s.bestBidQty = event.Snapshot.Bids[0].VisibleQty
