@@ -3,6 +3,7 @@ package multivenue
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"os"
@@ -15,6 +16,44 @@ import (
 	"exchange_sim/simulations/feesim"
 	etypes "exchange_sim/types"
 )
+
+func TestRenderBinaryFrameRejectsPayloadDigestMismatch(t *testing.T) {
+	var output bytes.Buffer
+	writer := evstream.NewWriter(&output, evstream.WriterOptions{SchemaEpoch: binaryEvidenceSchemaEpoch})
+	routeRef, err := writer.Intern("general.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	eventRef, err := writer.Intern("tamper_probe")
+	if err != nil {
+		t.Fatal(err)
+	}
+	venueRef, err := writer.Intern("north")
+	if err != nil {
+		t.Fatal(err)
+	}
+	inner := exchange.OpaqueJSON{Value: map[string]int{"value": 1}}
+	wrongDigest := sha256.Sum256([]byte(`{"value":2}`))
+	if err := writer.AppendInterning(1, 7, venueRef, sinkEnvelope{
+		routeRef: routeRef, eventRef: eventRef, sequence: 1,
+		payloadDigest: wrongDigest, inner: inner,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reader, err := evstream.NewReader(bytes.NewReader(output.Bytes()), evstream.ReaderOptions{VerifyHash: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := reader.Range(func(frame evstream.Frame) error {
+		_, _, err := renderBinaryFrameVersioned(reader, frame, true)
+		return err
+	}); err == nil {
+		t.Fatal("renderer accepted a payload whose digest does not match the decoded JSON")
+	}
+}
 
 func TestRenderBinaryEvidenceMergesEvidenceOnlySidecarsByVenueSequence(t *testing.T) {
 	inputDir := t.TempDir()

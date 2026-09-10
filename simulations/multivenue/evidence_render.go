@@ -51,6 +51,7 @@ type renderEventData struct {
 	VenueID        string          `json:"venue_id"`
 	Sequence       uint64          `json:"sequence"`
 	GlobalSequence uint64          `json:"global_sequence,omitempty"`
+	PayloadDigest  string          `json:"payload_digest,omitempty"`
 	Payload        json.RawMessage `json:"payload"`
 }
 
@@ -245,12 +246,20 @@ func renderBinaryFrame(reader *evstream.Reader, frame evstream.Frame) (renderRou
 }
 
 func renderBinaryFrameVersioned(reader *evstream.Reader, frame evstream.Frame, includeGlobalSequence bool) (renderRouteKey, renderRecord, error) {
-	if len(frame.Payload) < 16 {
-		return renderRouteKey{}, renderRecord{}, fmt.Errorf("multivenue: frame %d payload too short for v3 envelope", frame.Header.Seq)
+	envelopeBytes := 16
+	var sourcePayloadDigest [sha256.Size]byte
+	if reader.SchemaEpoch() >= 4 {
+		envelopeBytes += sha256.Size
+	}
+	if len(frame.Payload) < envelopeBytes {
+		return renderRouteKey{}, renderRecord{}, fmt.Errorf("multivenue: frame %d payload too short for epoch-%d envelope", frame.Header.Seq, reader.SchemaEpoch())
 	}
 	routeRef := binary.LittleEndian.Uint32(frame.Payload[0:4])
 	eventRef := binary.LittleEndian.Uint32(frame.Payload[4:8])
 	sequence := binary.LittleEndian.Uint64(frame.Payload[8:16])
+	if reader.SchemaEpoch() >= 4 {
+		copy(sourcePayloadDigest[:], frame.Payload[16:envelopeBytes])
+	}
 	if routeRef == 0 || eventRef == 0 || sequence == 0 {
 		return renderRouteKey{}, renderRecord{}, fmt.Errorf("multivenue: frame %d has incomplete route/event/sequence envelope", frame.Header.Seq)
 	}
@@ -269,13 +278,19 @@ func renderBinaryFrameVersioned(reader *evstream.Reader, frame evstream.Frame, i
 		return renderRouteKey{}, renderRecord{}, fmt.Errorf("multivenue: frame %d has no venue", frame.Header.Seq)
 	}
 	payload, handled, err := renderCDFPayloadJSONVersioned(
-		frame.Header.SchemaID, frame.Header.SchemaVersion, frame.Payload[16:], reader)
+		frame.Header.SchemaID, frame.Header.SchemaVersion, frame.Payload[envelopeBytes:], reader)
 	if !handled {
 		payload, err = exchange.RenderPayloadJSONVersioned(
-			frame.Header.SchemaID, frame.Header.SchemaVersion, frame.Payload[16:], reader)
+			frame.Header.SchemaID, frame.Header.SchemaVersion, frame.Payload[envelopeBytes:], reader)
 	}
 	if err != nil {
 		return renderRouteKey{}, renderRecord{}, fmt.Errorf("multivenue: frame %d (%s): %w", frame.Header.Seq, eventName, err)
+	}
+	if reader.SchemaEpoch() >= 4 {
+		renderedPayloadDigest := sha256.Sum256(payload)
+		if renderedPayloadDigest != sourcePayloadDigest {
+			return renderRouteKey{}, renderRecord{}, fmt.Errorf("multivenue: frame %d (%s) payload digest does not match source", frame.Header.Seq, eventName)
+		}
 	}
 	data := renderEventData{
 		VenueID:  frame.Venue,
@@ -284,6 +299,9 @@ func renderBinaryFrameVersioned(reader *evstream.Reader, frame evstream.Frame, i
 	}
 	if includeGlobalSequence {
 		data.GlobalSequence = frame.Header.Seq
+		if reader.SchemaEpoch() >= 4 {
+			data.PayloadDigest = hex.EncodeToString(sourcePayloadDigest[:])
+		}
 	}
 	raw, err := json.Marshal(renderPersistedEvent{
 		ClientID: frame.Header.ClientID,

@@ -2,6 +2,7 @@ package multivenue
 
 import (
 	"crypto/sha256"
+	"encoding/json"
 	"os"
 	"sync"
 
@@ -59,10 +60,11 @@ func newBinaryEvidence(out interface{ Write([]byte) (int, error) }) *binaryEvide
 // every payload is prefixed with an interned name reference — four bytes,
 // because the set of event names is tiny and closed.
 type sinkEnvelope struct {
-	routeRef uint32
-	eventRef uint32
-	sequence uint64
-	inner    evstream.InterningAppender
+	routeRef      uint32
+	eventRef      uint32
+	sequence      uint64
+	payloadDigest [sha256.Size]byte
+	inner         evstream.InterningAppender
 }
 
 func (e sinkEnvelope) SchemaID() uint16      { return e.inner.SchemaID() }
@@ -72,6 +74,7 @@ func (e sinkEnvelope) AppendPayloadInterning(dst []byte, in evstream.Interner) (
 	dst = evstream.AppendUint32(dst, e.routeRef)
 	dst = evstream.AppendUint32(dst, e.eventRef)
 	dst = evstream.AppendUint64(dst, e.sequence)
+	dst = append(dst, e.payloadDigest[:]...)
 	return e.inner.AppendPayloadInterning(dst, in)
 }
 
@@ -86,6 +89,12 @@ func (b *binaryEvidence) record(simTime int64, clientID uint64, eventName, venue
 	defer b.mu.Unlock()
 	if b.err != nil {
 		return b.err
+	}
+	canonicalPayload, marshalErr := json.Marshal(payload)
+	payloadDigest := sha256.Sum256(canonicalPayload)
+	if marshalErr != nil {
+		canonicalPayload = []byte(`"unencodable"`)
+		payloadDigest = sha256.Sum256(canonicalPayload)
 	}
 
 	eventRef, err := b.writer.Intern(eventName)
@@ -109,19 +118,30 @@ func (b *binaryEvidence) record(simTime int64, clientID uint64, eventName, venue
 	}
 
 	inner, typed := payload.(evstream.InterningAppender)
-	if !typed {
+	if !typed || marshalErr != nil {
 		inner = eexchange.OpaqueJSON{Value: payload}
+		if marshalErr != nil {
+			inner = eexchange.OpaqueJSON{Value: "unencodable"}
+		}
 	}
-	frame := sinkEnvelope{routeRef: routeRef, eventRef: eventRef, sequence: sequence, inner: inner}
+	frame := sinkEnvelope{
+		routeRef: routeRef, eventRef: eventRef, sequence: sequence,
+		payloadDigest: payloadDigest, inner: inner,
+	}
+	unencodable := marshalErr != nil
 	if err := b.writer.AppendInterning(simTime, clientID, venueRef, frame); err != nil {
 		// Preserve the event slot when a payload cannot be encoded. The
 		// substitute is itself canonical and keeps sequence continuity; the
 		// failed payload is counted so the run cannot hide its information loss.
 		frame.inner = eexchange.OpaqueJSON{Value: "unencodable"}
+		frame.payloadDigest = sha256.Sum256([]byte(`"unencodable"`))
 		if retryErr := b.writer.AppendInterning(simTime, clientID, venueRef, frame); retryErr != nil {
 			b.err = retryErr
 			return retryErr
 		}
+		unencodable = true
+	}
+	if unencodable {
 		b.unencodable++
 	}
 	b.events++

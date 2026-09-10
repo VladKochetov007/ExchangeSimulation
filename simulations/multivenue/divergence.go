@@ -90,7 +90,7 @@ const binaryRepresentation = "evstream_v3"
 // the successor stream. It changes when a compatible reader would need a new
 // schema contract, and makes a zero-valued attestation impossible to mistake
 // for an intentional schema identity.
-const binaryEvidenceSchemaEpoch uint32 = 3
+const binaryEvidenceSchemaEpoch uint32 = 4
 
 // traceRecord is one line of the narrow trace. Sequence is the sink's own
 // counter, which is the order events actually reached the log and therefore

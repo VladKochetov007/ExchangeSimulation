@@ -133,7 +133,7 @@ func RegisteredSV1DActivationContract() CDFActivationContract {
 		MaximumSupplierVolumeShare:        0.75,
 		MaximumSupplierDepthShare:         0.75,
 		MaximumDepthDominanceTimeFraction: 0.50,
-		BinarySchemaEpoch:                 3,
+		BinarySchemaEpoch:                 4,
 	}
 }
 
@@ -982,6 +982,7 @@ type cdfEvidenceFrameIdentity struct {
 	venueID        string
 	route          string
 	eventName      string
+	payloadDigest  [sha256.Size]byte
 }
 
 func validateCDFRenderedGlobalSequence(renderedRun *Run, evidenceDir, renderedDir string, expectedSchemaEpoch uint32) error {
@@ -1014,12 +1015,14 @@ func validateCDFRenderedGlobalSequence(renderedRun *Run, evidenceDir, renderedDi
 	sourceByGlobal := make(map[uint64]cdfEvidenceFrameIdentity)
 	var sourceEventCount uint64
 	if err := sourceReader.Range(func(frame evstream.Frame) error {
-		if len(frame.Payload) < 16 {
-			return fmt.Errorf("cdf activation: source frame %d payload is shorter than the v3 envelope", frame.Header.Seq)
+		if len(frame.Payload) < 16+sha256.Size {
+			return fmt.Errorf("cdf activation: source frame %d payload is shorter than the epoch-4 envelope", frame.Header.Seq)
 		}
 		routeRef := binary.LittleEndian.Uint32(frame.Payload[0:4])
 		eventRef := binary.LittleEndian.Uint32(frame.Payload[4:8])
 		localSequence := binary.LittleEndian.Uint64(frame.Payload[8:16])
+		var payloadDigest [sha256.Size]byte
+		copy(payloadDigest[:], frame.Payload[16:16+sha256.Size])
 		if routeRef == 0 || eventRef == 0 || localSequence == 0 || frame.Header.Seq == 0 || frame.Venue == "" {
 			return fmt.Errorf("cdf activation: source frame %d has incomplete identity envelope", frame.Header.Seq)
 		}
@@ -1035,6 +1038,7 @@ func validateCDFRenderedGlobalSequence(renderedRun *Run, evidenceDir, renderedDi
 			globalSequence: frame.Header.Seq, localSequence: localSequence,
 			simTS: frame.Header.SimTS, clientID: frame.Header.ClientID,
 			venueID: frame.Venue, route: filepath.ToSlash(route), eventName: eventName,
+			payloadDigest: payloadDigest,
 		}
 		sourceEventCount++
 		return nil
@@ -1096,6 +1100,7 @@ func validateCDFRenderedGlobalSequence(renderedRun *Run, evidenceDir, renderedDi
 			globalSequence: event.GlobalSequence, localSequence: event.LocalSequence,
 			simTS: event.SimTS, clientID: event.ClientID, venueID: event.VenueID,
 			route: strings.Join(parts[1:], "/"), eventName: event.Name,
+			payloadDigest: sha256.Sum256(event.Raw()),
 		}
 		if _, duplicate := renderedByGlobal[event.GlobalSequence]; duplicate {
 			renderedFailure = fmt.Errorf("cdf activation: rendered evidence repeats global frame sequence %d", event.GlobalSequence)
