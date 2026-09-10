@@ -318,3 +318,22 @@ the final marker was `FULL_MAKE_FINAL_B1F81CB_EXIT=0`.
 This closes the local mechanical gate for the exact review tree. It does not
 constitute independent scientific acceptance and it produced no activation,
 capacity, development, freeze, or holdout evidence.
+
+## Independent capacity-gate rejection and correction — 2026-09-10
+
+The fresh independent Sol-xhigh review of exact tree `0ed4644` rejected the
+promotion packet. The reviewer found that the capacity runner was not outcome
+neutral: it executed the seed-659 treatment for 24 simulated hours, retained
+the treatment evidence, and required a favorable terminal completion. This is
+classified as a reachable protocol defect before activation. No such run was
+performed, so no scientific trajectory or historical result was created.
+
+The rejection is preserved verbatim in the separate review record. The repair
+is an explicit preregistered synthetic capacity contract. It measures a fixed,
+deterministic production-shaped binary workload through the same global
+`evstream_v3` framing/hash contract, binds the treatment config only by path
+and hash, and records resource/storage evidence without any simulator or
+terminal state. The repair must add a library-level deterministic generator,
+command adapter, readback/corruption tests, and a fail-closed shell contract
+that rejects simulator invocation, seed-659 workload generation, terminal
+artifacts, and holdout identifiers before a fresh exact-tree review.

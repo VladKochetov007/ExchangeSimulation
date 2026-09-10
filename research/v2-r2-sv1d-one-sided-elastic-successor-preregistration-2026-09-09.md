@@ -346,3 +346,43 @@ condition and an observed filled quantity at least equal to the registered
 balance or nonzero utilization alone is not activation evidence. The amendment
 does not authorize ask-only depletion claims: the seed-659 probe still has
 positive initial inventory and reports that direction separately as untested.
+
+## Append-only capacity-protocol correction — 2026-09-10
+
+The first fresh independent exact-tree Sol-xhigh review rejected the prior
+capacity procedure because it launched the registered seed-659 treatment for a
+24-hour world and required a favorable terminal outcome. That procedure was
+not run, and its rejection does not alter the R2 calendar, the finite CDF
+supplier economics, or the SV1D activation hypothesis. The rejected review is
+retained in `research/reviews/v2-r2-sv1d-capacity-protocol-review-2026-09-10.md`.
+
+The capacity prerequisite is therefore re-registered as an outcome-neutral
+synthetic workload. The fixed profile is
+`sv1d-production-mix-v1`: the observed high-frequency BookDelta planning rate
+of `870,000` frames per simulated hour is represented as `20,880,000`
+BookDelta frames over 24 simulated hours, plus `2,610,000` BalanceChange
+frames and `2,610,000` lower-frequency opaque scientific event frames, for a
+total of `26,100,000` event frames. The workload uses timestamps spanning the
+registered 24-hour interval, the distinct workload seed `2026091001`, three
+fixed venue labels, fixed route/event names, and the promoted global binary
+hash contract `route_and_global_sequence_neutral_v2`. Event generation is a
+pure deterministic function of this profile; it has no market state, prices
+that influence decisions, actor, matching, risk, lifecycle, terminal, or
+survival state.
+
+The registered treatment config remains bound by path and SHA-256 only so the
+capacity attestation cannot be reused for a different launch identity. The
+capacity command must not execute or normalize that config, invoke
+`cmd/multivenue`, consume seed `659`, create terminal artifacts, or read any
+holdout. The attestation is valid only when it records
+`outcome_neutral=true`, `simulator_invoked=false`, `holdouts_consumed=false`,
+the exact profile and event count, completed stream/readback verification,
+global sequence continuity, canonical and projected hashes, closed evidence
+file hashes, and bounded disk/RAM/CPU measurements. A capacity result is never
+an activation result and contains no favorable-outcome predicate.
+
+This amendment replaces the former `full_24h_binary_evidence_capacity_probe`
+contract with `synthetic_24h_binary_evidence_capacity_probe_v2`. It requires a
+fresh exact-tree independent review before measurement. The first permitted
+world remains the separately reviewed five-minute seed-659 activation probe;
+development cells and all holdouts remain untouched.
