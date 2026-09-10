@@ -165,3 +165,32 @@ The exact-tree Sol-xhigh review remains outstanding. Until it accepts the
 complete tree, no capacity probe, seed-659 activation probe, development
 cell, freeze, or holdout is authorized. Holdouts `619`, `631`, and `641`
 remain untouched.
+
+## Exact-tree review packet — 2026-09-10
+
+The generated-artifact candidate `e592a1d23fa2d330a97927c673e23b3e3c3e4da6`
+passed the SV1D checker, expanded activation-contract fixture matrix, SV1C
+contract fixtures, shell syntax checks, `git diff --check`, and `go vet ./...`.
+Its clean Go 1.27.0 binaries were CGO-disabled, provenance-pinned, and
+reported `vcs.modified=false`; their SHA-256 identities were recorded in the
+implementation checkpoint. The targeted exact-tree race matrix passed for
+`exchange` (`16.411s`), `tests` (`42.867s`), and the selected multivenue
+evidence/calendar/risk/CDF tests (`5.283s`). The exact fresh-process
+determinism/evidence-neutrality pair passed in `128.837s`. No activation or
+holdout world ran.
+
+The independent review chain is intentionally not hidden: Tesla rejected the
+earlier exact tree at `bb436a2` / `46377d44619f687fd1234679067540d9d896f3a0`
+because the runner/scorer producer-consumer boundary omitted
+`evidence_valid` and `terminal_negative`, with no producer-shaped fixture.
+The scientific branch accepted and repaired those findings in `988ba59`,
+completed the comparison fixture in `69a6a60`, and corrected a real jq
+cardinality bug in `4b9c08a`. The full uncached repository test then passed at
+the preceding exact source candidate, with the long multivenue package taking
+`1000.377s`. These changes are contract/provenance corrections only; they do
+not alter R2 economics or historical evidence.
+
+The packet is still **NOT PROMOTED**. One fresh independent Sol-xhigh review
+of the complete final tree is required before the binary-capacity probe. No
+capacity measurement, seed-659 activation probe, development cell, freeze, or
+holdout is authorized; holdouts `619`, `631`, and `641` remain untouched.

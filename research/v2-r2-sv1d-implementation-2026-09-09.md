@@ -269,3 +269,39 @@ exact tree. Review acceptance is required before the binary-capacity probe;
 capacity is a launch measurement, not scientific activation evidence. The
 activation probe remains the only permitted SV1D world after that boundary,
 and development cells remain gated on its independent grading.
+
+## Exact-tree post-regeneration mechanical matrix — 2026-09-10
+
+At the generated-artifact revision `e592a1d23fa2d330a97927c673e23b3e3c3e4da6`,
+the SV1D config checker, expanded activation-contract fixtures, SV1C contract
+fixtures, shell syntax checks, `git diff --check`, and `go vet ./...` all
+passed. The four clean Go 1.27.0 binaries were rebuilt with CGO disabled for
+this exact revision and had `vcs.modified=false`:
+
+```text
+bin/multivenue          6fcafe1e5901b55f874f78db3c79e6be8ca59b78e7e5418d7f3f095bf70c27fa
+bin/cdf-liquidity-audit 8ac8c126596fa4252df7320a41402899fc7126baec94ac99442a0b4dcd5d6abb
+bin/evsrender           e4e879f903fdeee83fdb7a8cb6a3e0c177c040a1d1410053b5d9615b6e2106a5
+bin/checkpointvalidate  4297ea98d201315ab2176ad7b236087737a926c8f13e77a897bc384621c24401
+```
+
+The exact-tree targeted matrix passed with exit status zero: exchange race
+`16.411s`, repository-tests race `42.867s`, selected evidence/calendar/risk/
+CDF multivenue race `5.283s`, and fresh-process determinism/evidence-neutrality
+`128.837s`. No race report was emitted. The previously observed broad race
+timeout remains classified as a test-harness runtime limit, not a race
+finding.
+
+The review packet also preserves the rejected Tesla review of `bb436a2`
+(`46377d44619f687fd1234679067540d9d896f3a0`). Tesla found the runner omitted
+`evidence_valid` and `terminal_negative` while the scorer required them, and
+noted the absence of a producer-shaped boundary fixture. Those objections
+were accepted and repaired in `988ba59`; the fixture was completed in
+`69a6a60`, and the production cardinality predicate was corrected in
+`4b9c08a`. The subsequent generated-artifact pairs are recorded above. Tesla's
+rejected review was never treated as authorization for a world.
+
+This matrix is the final pre-review mechanical evidence packet. It contains
+no activation result: no capacity probe, seed-659 probe, development cell,
+freeze, or holdout has run. The fresh exact-tree independent review remains
+the next scientific promotion boundary.
