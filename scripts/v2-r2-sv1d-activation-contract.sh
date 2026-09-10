@@ -810,8 +810,8 @@ v2_r2_sv1d_require_mode_pair_comparison() {
 		def evidence_run:
 			.valid == true and .evidence_valid == true and .anti_cheating_satisfied == true and
 			.supplier_count == $expected_supplier_count and
-			(.suppliers | type) == "array" and length == $expected_supplier_count and
-			(.venues | type) == "array" and length == 3 and
+			(.suppliers | type) == "array" and (.suppliers | length) == $expected_supplier_count and
+			(.venues | type) == "array" and (.venues | length) == 3 and
 			.supplier_removal_counterfactual_valid == true and
 			.supplier_removal_time_weighted_counterfactual_valid == true and
 			(.supplier_removal_snapshot_count | type) == "number" and
