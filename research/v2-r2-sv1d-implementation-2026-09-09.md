@@ -231,3 +231,41 @@ the final gate will use and record the explicit longer timeout. No review
 attestation, capacity measurement, seed-659 activation probe, development
 cell, 24-hour world, freeze, or holdout has been created from the repaired
 candidate.
+
+## Final uncached mechanical gate before exact-tree review — 2026-09-10
+
+The exact clean candidate at `da57f8e28f89b6c51615ecec513e763fff352439`
+completed the deliberately uncached full repository gate:
+
+```text
+PATH=/usr/local/go/bin:$PATH GOTOOLCHAIN=local GOMAXPROCS=2 \
+GOMEMLIMIT=8GiB GOFLAGS="-count=1 -timeout=30m" make test
+```
+
+It passed with `FULL_MAKE_UNCACHED_EXIT=0`; the long
+`simulations/multivenue` package completed in `1000.377s`. The SV1C failure
+sentences printed during the shell contract checks are expected diagnostics
+from malformed/negative fixtures, and the checks concluded with passing
+SV1C, SV1D, survival-summary, and integrated-long-run archive contracts.
+
+The uncached run was performed after two non-economic promotion defects were
+found and repaired. The SV1D comparison fixture was completed with the
+required supplier-volume claim in `69a6a60`; then the production cardinality
+validator was corrected in `4b9c08a` so it measures the `suppliers` and
+`venues` arrays rather than the enclosing objects. The generated-artifact
+retirement/regeneration pairs are `655c89`/`c45aa67` and
+`1fb69ac`/`da57f8e`. These repairs preserve the R2 calendar, SV1D economics,
+the SV1C negative control, and all historical evidence.
+
+The prior focused vet, targeted race, and fresh-process evidence-neutrality
+gates remain green on the unchanged Go source lineage; the final promotion
+record will rerun the required exact-tree vet/race/contract matrix after the
+documentation-bound artifact regeneration. No review attestation, binary
+capacity measurement, seed-659 activation probe, development cell,
+24-hour world, freeze, or holdout has been created from this candidate.
+
+The next boundary is a fresh independent Sol-xhigh review of the complete
+exact tree. Review acceptance is required before the binary-capacity probe;
+capacity is a launch measurement, not scientific activation evidence. The
+activation probe remains the only permitted SV1D world after that boundary,
+and development cells remain gated on its independent grading.

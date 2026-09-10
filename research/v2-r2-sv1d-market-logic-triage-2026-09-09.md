@@ -134,3 +134,34 @@ runtime concern because the existing fresh-process multivenue test exceeds
 that limit; the final candidate gate must record the explicit longer-timeout
 full make invocation and its result. The final exact-tree Sol-xhigh review is
 still required before any capacity measurement or activation probe.
+
+## Final uncached mechanical gate before exact-tree review — 2026-09-10
+
+The exact scientific candidate tested here is clean HEAD
+`da57f8e28f89b6c51615ecec513e763fff352439` on
+`feature/r2-cdf-survival-successor-sv1d`. The asynchronous performance,
+CDF-port, and economic-audit refs were fetched again; none advanced beyond
+`b1847ac`, `39768df`, and `e85e16c`, respectively. No code from those feeds
+was merged.
+
+The uncached command
+`PATH=/usr/local/go/bin:$PATH GOTOOLCHAIN=local GOMAXPROCS=2
+GOMEMLIMIT=8GiB GOFLAGS="-count=1 -timeout=30m" make test` passed with exit
+status zero. The long multivenue package took `1000.377s`. The apparent SV1C
+failure lines are expected negative-fixture diagnostics; the complete shell
+contract matrix and integrated-long-run archive checks passed.
+
+Before this gate, the independent-review repair history exposed two further
+producer/consumer contract issues. Commit `69a6a60` added the missing
+`supplier_volume_share` field to the accepted comparison fixture. Commit
+`4b9c08a` fixed the cardinality predicate to apply `length` to the validated
+arrays, not to their enclosing objects. The generated artifacts were retired
+and regenerated in `655c89`/`c45aa67` and `1fb69ac`/`da57f8e`. The final
+config checker and SV1D contract tests now pass, and the repairs do not alter
+economic mechanics or historical identities.
+
+This is a mechanical gate only, not an independent scientific acceptance.
+The exact-tree Sol-xhigh review remains outstanding. Until it accepts the
+complete tree, no capacity probe, seed-659 activation probe, development
+cell, freeze, or holdout is authorized. Holdouts `619`, `631`, and `641`
+remain untouched.
