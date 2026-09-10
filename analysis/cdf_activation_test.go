@@ -13,9 +13,135 @@ import (
 	"strings"
 	"testing"
 
+	"exchange_sim/evstream"
+	"exchange_sim/exchange"
 	"exchange_sim/simulation"
 	etypes "exchange_sim/types"
 )
+
+type strictCDFTestEnvelope struct {
+	routeRef      uint32
+	eventRef      uint32
+	sequence      uint64
+	payloadDigest [sha256.Size]byte
+	inner         evstream.InterningAppender
+}
+
+func (e strictCDFTestEnvelope) SchemaID() uint16      { return e.inner.SchemaID() }
+func (e strictCDFTestEnvelope) SchemaVersion() uint16 { return e.inner.SchemaVersion() }
+
+func (e strictCDFTestEnvelope) AppendPayloadInterning(dst []byte, in evstream.Interner) ([]byte, error) {
+	dst = evstream.AppendUint32(dst, e.routeRef)
+	dst = evstream.AppendUint32(dst, e.eventRef)
+	dst = evstream.AppendUint64(dst, e.sequence)
+	dst = append(dst, e.payloadDigest[:]...)
+	return e.inner.AppendPayloadInterning(dst, in)
+}
+
+func TestCDFStrictRenderedEvidenceRejectsPayloadMutation(t *testing.T) {
+	evidenceDir := t.TempDir()
+	eventsFile, err := os.Create(filepath.Join(evidenceDir, "events.evs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	writer := evstream.NewWriter(eventsFile, evstream.WriterOptions{SchemaEpoch: 4})
+	routeRef, err := writer.Intern("general.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	eventRef, err := writer.Intern("payload_binding_probe")
+	if err != nil {
+		t.Fatal(err)
+	}
+	venueRef, err := writer.Intern("north")
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := map[string]int{"value": 1}
+	payloadRaw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.AppendInterning(100, 7, venueRef, strictCDFTestEnvelope{
+		routeRef: routeRef, eventRef: eventRef, sequence: 1,
+		payloadDigest: sha256.Sum256(payloadRaw), inner: exchange.OpaqueJSON{Value: payload},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := eventsFile.Close(); err != nil {
+		t.Fatal(err)
+	}
+	globalSequence := writer.Count()
+	digest := writer.ExecutionHash()
+	attestation := cdfBinaryEvidenceAttestation{
+		Domain: "canonical_binary_execution_frames", Ordering: "ordered_stream", SchemaEpoch: 4,
+		EventFrames: 1, StreamFrames: writer.Count(), ExecutionStreamHash: hex.EncodeToString(digest[:]),
+		EvidenceOnlyIncluded: true,
+	}
+	attestationRaw, err := json.Marshal(attestation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(evidenceDir, "binary-evidence-attestation.json"), append(attestationRaw, '\n'), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	renderedDir := filepath.Join(t.TempDir(), "rendered")
+	routeDir := filepath.Join(renderedDir, "venues", "north")
+	if err := os.MkdirAll(routeDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	writeRendered := func(value int) {
+		t.Helper()
+		renderedPayload, marshalErr := json.Marshal(map[string]int{"value": value})
+		if marshalErr != nil {
+			t.Fatal(marshalErr)
+		}
+		record := map[string]any{
+			"client_id": uint64(7),
+			"data": map[string]any{
+				"venue_id": "north", "sequence": uint64(1), "global_sequence": globalSequence,
+				"payload": json.RawMessage(renderedPayload),
+			},
+			"event": "payload_binding_probe", "sim_ts": int64(100),
+		}
+		raw, marshalErr := json.Marshal(record)
+		if marshalErr != nil {
+			t.Fatal(marshalErr)
+		}
+		if writeErr := os.WriteFile(filepath.Join(routeDir, "general.jsonl"), append(raw, '\n'), 0644); writeErr != nil {
+			t.Fatal(writeErr)
+		}
+		renderedDigest, digestErr := digestRenderedEvidenceDirectory(renderedDir)
+		if digestErr != nil {
+			t.Fatal(digestErr)
+		}
+		renderedAttestation := cdfRenderedEvidenceAttestation{
+			Domain: "rendered_binary_evidence", Ordering: "venue_sequence_files_with_global_frame_identity",
+			SourceExecutionHash: attestation.ExecutionStreamHash, SourceEventFrames: 1,
+			SourceStreamFrames: writer.Count(), RenderedDigest: renderedDigest, GlobalSequenceIncluded: true,
+		}
+		renderedRaw, marshalErr := json.Marshal(renderedAttestation)
+		if marshalErr != nil {
+			t.Fatal(marshalErr)
+		}
+		if writeErr := os.WriteFile(filepath.Join(renderedDir, "rendered-binary-evidence-attestation.json"), append(renderedRaw, '\n'), 0644); writeErr != nil {
+			t.Fatal(writeErr)
+		}
+	}
+	writeRendered(1)
+	run := &Run{Dir: evidenceDir, files: []string{filepath.Join(routeDir, "general.jsonl")}}
+	if err := validateCDFRenderedGlobalSequence(run, evidenceDir, renderedDir, 4); err != nil {
+		t.Fatalf("valid strict rendered evidence rejected: %v", err)
+	}
+	writeRendered(2)
+	if err := validateCDFRenderedGlobalSequence(run, evidenceDir, renderedDir, 4); err == nil {
+		t.Fatal("strict rendered audit accepted a payload mutation after attestation regeneration")
+	}
+}
 
 type cdfActivationFixtureOptions struct {
 	mutateConfig          func(*cdfActivationConfig)
