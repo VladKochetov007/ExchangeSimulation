@@ -1154,6 +1154,107 @@ func TestCDFTradeIdentityCannotBeCountedTwice(t *testing.T) {
 	}
 }
 
+func TestCDFStrictTradeAttributionUsesMakerOrderIdentity(t *testing.T) {
+	contract := RegisteredSV1DActivationContract().Suppliers[0]
+	quantity := contract.MinimumQualifyingQty
+	price := contract.ReferencePrice - contract.TickSize
+	fee, feeOK := cdfActivationFee(mustCDFTestNotional(t, price, quantity, contract.BasePrecision), contract.MakerFeeBps)
+	if !feeOK {
+		t.Fatal("fee calculation failed")
+	}
+	key := cdfFillKey{venueID: "north", clientID: 7, orderID: 701, tradeID: 801}
+	state := &cdfSupplierState{
+		audit:    CDFSupplierActivationAudit{VenueID: "north", Role: contract.Role, ClientID: key.clientID},
+		contract: contract,
+	}
+	fill := cdfOrderFillEvidence{
+		OrderID: key.orderID, TradeID: key.tradeID, Side: "BUY", Price: price, Qty: quantity,
+		FeeAmount: fee, FeeAsset: contract.QuoteAsset, FilledQty: quantity, IsFull: true,
+	}
+	observed := cdfFillEvidence{
+		Role: contract.Role, ClientID: key.clientID, Symbol: cdfActivationSymbol,
+		OrderID: key.orderID, TradeID: key.tradeID, Timestamp: 10, Side: "BUY", Price: price,
+		Qty: quantity, FeeAmount: fee, FeeAsset: contract.QuoteAsset, IsFull: true,
+	}
+	r := &CDFActivationAudit{
+		strictMechanics:    true,
+		trades:             map[cdfTradeKey]cdfTradeEvidence{{venueID: key.venueID, tradeID: key.tradeID}: {TradeID: key.tradeID, Price: price, Qty: quantity, Side: "SELL", MakerOrderID: key.orderID, TakerOrderID: 9001}},
+		totalVolumeByVenue: map[string]int64{key.venueID: quantity * 2},
+	}
+	r.reconcileCDFFills(
+		map[cdfParticipantKey]*cdfSupplierState{{venueID: key.venueID, clientID: key.clientID}: state},
+		map[cdfFillKey]cdfFillEvidence{key: observed},
+		map[cdfFillKey]cdfOrderFillEvidence{key: fill},
+		map[cdfOrderKey]*cdfOrderState{},
+	)
+	if len(r.Checks) != 0 {
+		t.Fatalf("valid maker attribution produced checks: %+v", r.Checks)
+	}
+	notional := mustCDFTestNotional(t, price, quantity, contract.BasePrecision)
+	if state.audit.TradeCount != 1 || state.audit.VolumeQty != quantity || state.audit.VolumeNotionalQuote != notional || state.audit.FeesPaidQuote != fee {
+		t.Fatalf("supplier attribution = %+v, want one verified trade", state.audit)
+	}
+	if r.SupplierVolumeQty != quantity || r.SupplierVolumeNotional != notional || r.SupplierFeesPaid != fee {
+		t.Fatalf("aggregate attribution = volume %d notional %d fees %d", r.SupplierVolumeQty, r.SupplierVolumeNotional, r.SupplierFeesPaid)
+	}
+}
+
+func TestCDFStrictTradeAttributionRejectsWrongMakerOrder(t *testing.T) {
+	contract := RegisteredSV1DActivationContract().Suppliers[0]
+	quantity := contract.MinimumQualifyingQty
+	price := contract.ReferencePrice - contract.TickSize
+	fee := cdfFixtureFee(price, quantity, contract.BasePrecision, contract.MakerFeeBps)
+	key := cdfFillKey{venueID: "north", clientID: 7, orderID: 701, tradeID: 801}
+	state := &cdfSupplierState{
+		audit:    CDFSupplierActivationAudit{VenueID: key.venueID, Role: contract.Role, ClientID: key.clientID},
+		contract: contract,
+	}
+	fill := cdfOrderFillEvidence{
+		OrderID: key.orderID, TradeID: key.tradeID, Side: "BUY", Price: price, Qty: quantity,
+		FeeAmount: fee, FeeAsset: contract.QuoteAsset, FilledQty: quantity, IsFull: true,
+	}
+	observed := cdfFillEvidence{
+		Role: contract.Role, ClientID: key.clientID, Symbol: cdfActivationSymbol,
+		OrderID: key.orderID, TradeID: key.tradeID, Timestamp: 10, Side: "BUY", Price: price,
+		Qty: quantity, FeeAmount: fee, FeeAsset: contract.QuoteAsset, IsFull: true,
+	}
+	r := &CDFActivationAudit{
+		strictMechanics:    true,
+		trades:             map[cdfTradeKey]cdfTradeEvidence{{venueID: key.venueID, tradeID: key.tradeID}: {TradeID: key.tradeID, Price: price, Qty: quantity, Side: "SELL", MakerOrderID: key.orderID + 1, TakerOrderID: 9001}},
+		totalVolumeByVenue: map[string]int64{key.venueID: quantity},
+	}
+	r.reconcileCDFFills(
+		map[cdfParticipantKey]*cdfSupplierState{{venueID: key.venueID, clientID: key.clientID}: state},
+		map[cdfFillKey]cdfFillEvidence{key: observed},
+		map[cdfFillKey]cdfOrderFillEvidence{key: fill},
+		map[cdfOrderKey]*cdfOrderState{},
+	)
+	if !hasCDFActivationFailure(r.Checks, "exchange OrderFill does not match a unique opposite-side CDF trade and maker order") || r.SupplierVolumeQty != 0 || state.audit.TradeCount != 0 {
+		t.Fatalf("wrong maker identity was attributed: checks=%+v audit=%+v aggregate=%d", r.Checks, state.audit, r.SupplierVolumeQty)
+	}
+}
+
+func TestCDFStrictTradeRequiresOrderIdentities(t *testing.T) {
+	payload, err := json.Marshal(map[string]any{"trade_id": 9, "price": 100, "qty": 3, "side": "SELL"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := &CDFActivationAudit{strictMechanics: true}
+	r.processCDFTrade(Event{VenueID: "north", payload: payload})
+	if !hasCDFActivationFailure(r.Checks, `malformed CDF trade evidence: missing required payload field "maker_order_id"`) {
+		t.Fatalf("strict trade without maker/taker identities was accepted: %+v", r.Checks)
+	}
+}
+
+func mustCDFTestNotional(t *testing.T, price, quantity, precision int64) int64 {
+	t.Helper()
+	notional, ok := cdfActivationNotional(price, quantity, precision)
+	if !ok {
+		t.Fatalf("notional calculation failed for price=%d quantity=%d precision=%d", price, quantity, precision)
+	}
+	return notional
+}
+
 func TestCDFSnapshotProjectionRequiresExactPublicView(t *testing.T) {
 	valid := cdfPublicSnapshotEvidence{
 		Bids: []etypes.PriceLevel{

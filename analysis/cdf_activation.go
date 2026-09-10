@@ -150,8 +150,11 @@ type CDFActivationAudit struct {
 	OneSidedDecisionCount    int64                        `json:"one_sided_decision_count"`
 	OneSidedRestorationCount int64                        `json:"one_sided_restoration_count"`
 	SupplierVolumeQty        int64                        `json:"supplier_volume_qty"`
+	SupplierVolumeNotional   int64                        `json:"supplier_volume_notional_quote"`
+	SupplierFeesPaid         int64                        `json:"supplier_fees_paid_quote"`
 	TotalVolumeQty           int64                        `json:"total_volume_qty"`
 	SupplierVolumeShare      float64                      `json:"supplier_volume_share"`
+	VolumeQtyByVenue         map[string]int64             `json:"volume_qty_by_venue"`
 	Suppliers                []CDFSupplierActivationAudit `json:"suppliers"`
 	Venues                   []CDFVenueConcentrationAudit `json:"venues"`
 	Checks                   []CDFActivationCheck         `json:"checks,omitempty"`
@@ -160,8 +163,9 @@ type CDFActivationAudit struct {
 	AntiCheatingSatisfied    bool                         `json:"anti_cheating_satisfied"`
 	Valid                    bool                         `json:"valid"`
 
-	strictMechanics bool
-	trades          map[cdfTradeKey]cdfTradeEvidence
+	strictMechanics    bool
+	trades             map[cdfTradeKey]cdfTradeEvidence
+	totalVolumeByVenue map[string]int64
 }
 
 type CDFActivationProvenance struct {
@@ -181,27 +185,34 @@ type CDFActivationProvenance struct {
 }
 
 type CDFSupplierActivationAudit struct {
-	VenueID                      string `json:"venue_id"`
-	Role                         string `json:"role"`
-	ClientID                     uint64 `json:"client_id"`
-	DecisionCount                int64  `json:"decision_count"`
-	EligibleObservationCount     int64  `json:"eligible_observation_count"`
-	AcceptedOrderCount           int64  `json:"accepted_order_count"`
-	FillCount                    int64  `json:"fill_count"`
-	BalanceSnapshotCount         int64  `json:"balance_snapshot_count"`
-	PostFillBalanceSnapshotCount int64  `json:"post_fill_balance_snapshot_count"`
-	PostFillResponsiveCount      int64  `json:"post_fill_responsive_count"`
-	WithdrawalCount              int64  `json:"withdrawal_count"`
-	OpenOrderCount               int64  `json:"open_order_count"`
-	OpenOrderQty                 int64  `json:"open_order_qty"`
-	InitialEquity                int64  `json:"initial_equity"`
-	TerminalEquity               int64  `json:"terminal_equity"`
-	PnL                          int64  `json:"pnl"`
-	MinPosition                  int64  `json:"min_position"`
-	MaxPosition                  int64  `json:"max_position"`
-	MaxGrossInventory            int64  `json:"max_gross_inventory"`
-	EvidenceValid                bool   `json:"evidence_valid"`
-	ActivationSatisfied          bool   `json:"activation_satisfied"`
+	VenueID                      string  `json:"venue_id"`
+	Role                         string  `json:"role"`
+	ClientID                     uint64  `json:"client_id"`
+	DecisionCount                int64   `json:"decision_count"`
+	EligibleObservationCount     int64   `json:"eligible_observation_count"`
+	AcceptedOrderCount           int64   `json:"accepted_order_count"`
+	FillCount                    int64   `json:"fill_count"`
+	BalanceSnapshotCount         int64   `json:"balance_snapshot_count"`
+	PostFillBalanceSnapshotCount int64   `json:"post_fill_balance_snapshot_count"`
+	PostFillResponsiveCount      int64   `json:"post_fill_responsive_count"`
+	TradeCount                   int64   `json:"trade_count"`
+	VolumeQty                    int64   `json:"volume_qty"`
+	VolumeNotionalQuote          int64   `json:"volume_notional_quote"`
+	FeesPaidQuote                int64   `json:"fees_paid_quote"`
+	VenueVolumeDenominatorQty    int64   `json:"venue_volume_denominator_qty"`
+	VenueVolumeShare             float64 `json:"venue_volume_share"`
+	GlobalVolumeShare            float64 `json:"global_volume_share"`
+	WithdrawalCount              int64   `json:"withdrawal_count"`
+	OpenOrderCount               int64   `json:"open_order_count"`
+	OpenOrderQty                 int64   `json:"open_order_qty"`
+	InitialEquity                int64   `json:"initial_equity"`
+	TerminalEquity               int64   `json:"terminal_equity"`
+	PnL                          int64   `json:"pnl"`
+	MinPosition                  int64   `json:"min_position"`
+	MaxPosition                  int64   `json:"max_position"`
+	MaxGrossInventory            int64   `json:"max_gross_inventory"`
+	EvidenceValid                bool    `json:"evidence_valid"`
+	ActivationSatisfied          bool    `json:"activation_satisfied"`
 }
 
 type CDFVenueConcentrationAudit struct {
@@ -428,10 +439,12 @@ type cdfRejectedEvidence struct {
 }
 
 type cdfTradeEvidence struct {
-	TradeID uint64 `json:"trade_id"`
-	Price   int64  `json:"price"`
-	Qty     int64  `json:"qty"`
-	Side    string `json:"side"`
+	TradeID      uint64 `json:"trade_id"`
+	Price        int64  `json:"price"`
+	Qty          int64  `json:"qty"`
+	Side         string `json:"side"`
+	TakerOrderID uint64 `json:"taker_order_id"`
+	MakerOrderID uint64 `json:"maker_order_id"`
 }
 
 type cdfBalanceEvidence struct {
@@ -594,7 +607,10 @@ func (r *Run) AuditCDFLiquidityActivation(options CDFActivationOptions) (*CDFAct
 	if err != nil {
 		return nil, err
 	}
-	result := &CDFActivationAudit{trades: make(map[cdfTradeKey]cdfTradeEvidence)}
+	result := &CDFActivationAudit{
+		trades:             make(map[cdfTradeKey]cdfTradeEvidence),
+		totalVolumeByVenue: make(map[string]int64),
+	}
 	config, metadata, err := loadCDFActivationIdentity(evidenceDir)
 	if err != nil {
 		return nil, err
@@ -2430,15 +2446,13 @@ func (r *CDFActivationAudit) processCDFOrderFill(event Event, states map[cdfPart
 	}
 	updatedBase, baseDeltaOK := checkedCDFAdd(state.exchangeBaseDelta, baseDelta)
 	updatedQuote, quoteDeltaOK := checkedCDFAdd(state.exchangeQuoteDelta, quoteDelta)
-	updatedVolume, volumeOK := checkedCDFAdd(r.SupplierVolumeQty, fill.Qty)
-	if !baseDeltaOK || !quoteDeltaOK || !volumeOK {
-		r.addEventCheck(event, state, "exchange OrderFill aggregate balance or volume overflows")
+	if !baseDeltaOK || !quoteDeltaOK {
+		r.addEventCheck(event, state, "exchange OrderFill aggregate balance delta overflows")
 		return
 	}
 	actual[key] = fill
 	state.exchangeBaseDelta = updatedBase
 	state.exchangeQuoteDelta = updatedQuote
-	r.SupplierVolumeQty = updatedVolume
 	order.remainingQty = expectedRemaining
 	order.filledQty = expectedFilled
 	if order.remainingQty == 0 {
@@ -2498,16 +2512,24 @@ func (r *CDFActivationAudit) processCDFCancelled(event Event, states map[cdfPart
 
 func (r *CDFActivationAudit) processCDFTrade(event Event) {
 	var trade cdfTradeEvidence
-	if err := decodeRequiredJSON(event.Raw(), &trade, "trade_id", "price", "qty", "side"); err != nil {
+	required := []string{"trade_id", "price", "qty", "side"}
+	if r.strictMechanics {
+		required = append(required, "maker_order_id", "taker_order_id")
+	}
+	if err := decodeRequiredJSON(event.Raw(), &trade, required...); err != nil {
 		r.addCheck(CDFActivationCheck{VenueID: event.VenueID, Ordinal: event.Ordinal, Failure: "malformed CDF trade evidence: " + err.Error()})
 		return
 	}
-	if trade.TradeID == 0 || trade.Price <= 0 || trade.Qty <= 0 || (trade.Side != "BUY" && trade.Side != "SELL") {
+	if trade.TradeID == 0 || trade.Price <= 0 || trade.Qty <= 0 || (trade.Side != "BUY" && trade.Side != "SELL") ||
+		(r.strictMechanics && (trade.MakerOrderID == 0 || trade.TakerOrderID == 0)) {
 		r.addCheck(CDFActivationCheck{VenueID: event.VenueID, Ordinal: event.Ordinal, Failure: "CDF trade evidence has invalid identity, price, quantity, or side"})
 		return
 	}
 	if r.trades == nil {
 		r.trades = make(map[cdfTradeKey]cdfTradeEvidence)
+	}
+	if r.totalVolumeByVenue == nil {
+		r.totalVolumeByVenue = make(map[string]int64)
 	}
 	tradeKey := cdfTradeKey{venueID: event.VenueID, tradeID: trade.TradeID}
 	if _, duplicate := r.trades[tradeKey]; duplicate {
@@ -2515,11 +2537,14 @@ func (r *CDFActivationAudit) processCDFTrade(event Event) {
 		return
 	}
 	r.trades[tradeKey] = trade
-	var ok bool
-	r.TotalVolumeQty, ok = checkedCDFAdd(r.TotalVolumeQty, trade.Qty)
-	if !ok {
+	updatedTotal, totalOK := checkedCDFAdd(r.TotalVolumeQty, trade.Qty)
+	updatedVenue, venueOK := checkedCDFAdd(r.totalVolumeByVenue[event.VenueID], trade.Qty)
+	if !totalOK || !venueOK {
 		r.addCheck(CDFActivationCheck{VenueID: event.VenueID, Ordinal: event.Ordinal, Failure: "aggregate CDF trade volume overflows"})
+		return
 	}
+	r.TotalVolumeQty = updatedTotal
+	r.totalVolumeByVenue[event.VenueID] = updatedVenue
 }
 
 func oppositeCDFSide(side string) string {
@@ -2620,21 +2645,29 @@ func (r *CDFActivationAudit) reconcileCDFFills(states map[cdfParticipantKey]*cdf
 			r.addCheck(CDFActivationCheck{VenueID: key.venueID, Role: state.audit.Role, ClientID: key.clientID, Failure: "supplier fill does not match exchange OrderFill evidence"})
 		}
 	}
-	for key := range actual {
+	for key, fill := range actual {
+		state := states[cdfParticipantKey{key.venueID, key.clientID}]
+		if state == nil {
+			r.addCheck(CDFActivationCheck{VenueID: key.venueID, ClientID: key.clientID, Failure: "exchange OrderFill is outside the registered CDF supplier roster"})
+			continue
+		}
 		if _, exists := observed[key]; !exists {
-			state := states[cdfParticipantKey{key.venueID, key.clientID}]
 			r.addCheck(CDFActivationCheck{VenueID: key.venueID, Role: state.audit.Role, ClientID: key.clientID, Failure: "exchange OrderFill has no supplier inventory transition"})
 		}
+		tradeMatches := false
+		trade, tradeExists := r.trades[cdfTradeKey{venueID: key.venueID, tradeID: key.tradeID}]
+		if tradeExists {
+			tradeMatches = trade.Price == fill.Price && trade.Qty == fill.Qty &&
+				trade.Side == oppositeCDFSide(fill.Side) && trade.MakerOrderID == fill.OrderID && trade.TakerOrderID != 0
+		}
 		if r.strictMechanics {
-			trade, exists := r.trades[cdfTradeKey{venueID: key.venueID, tradeID: key.tradeID}]
-			fill := actual[key]
-			if !exists || trade.Price != fill.Price || trade.Qty != fill.Qty || trade.Side != oppositeCDFSide(fill.Side) {
-				state := states[cdfParticipantKey{key.venueID, key.clientID}]
-				role := ""
-				if state != nil {
-					role = state.audit.Role
-				}
-				r.addCheck(CDFActivationCheck{VenueID: key.venueID, Role: role, ClientID: key.clientID, Failure: "exchange OrderFill does not match a unique opposite-side CDF trade"})
+			if !tradeMatches {
+				r.addCheck(CDFActivationCheck{VenueID: key.venueID, Role: state.audit.Role, ClientID: key.clientID, Failure: "exchange OrderFill does not match a unique opposite-side CDF trade and maker order"})
+			}
+		}
+		if !r.strictMechanics || tradeMatches {
+			if !r.attributeCDFSupplierFill(state, fill) {
+				r.addCheck(CDFActivationCheck{VenueID: key.venueID, Role: state.audit.Role, ClientID: key.clientID, Failure: "supplier volume attribution overflows"})
 			}
 		}
 	}
@@ -2662,6 +2695,31 @@ func (r *CDFActivationAudit) reconcileCDFFills(states map[cdfParticipantKey]*cdf
 	}
 }
 
+func (r *CDFActivationAudit) attributeCDFSupplierFill(state *cdfSupplierState, fill cdfOrderFillEvidence) bool {
+	notional, notionalOK := cdfActivationNotional(fill.Price, fill.Qty, state.contract.BasePrecision)
+	if !notionalOK {
+		return false
+	}
+	tradeCount, tradeCountOK := checkedCDFAdd(state.audit.TradeCount, 1)
+	volumeQty, volumeQtyOK := checkedCDFAdd(state.audit.VolumeQty, fill.Qty)
+	volumeNotional, volumeNotionalOK := checkedCDFAdd(state.audit.VolumeNotionalQuote, notional)
+	feesPaid, feesPaidOK := checkedCDFAdd(state.audit.FeesPaidQuote, fill.FeeAmount)
+	globalVolume, globalVolumeOK := checkedCDFAdd(r.SupplierVolumeQty, fill.Qty)
+	globalNotional, globalNotionalOK := checkedCDFAdd(r.SupplierVolumeNotional, notional)
+	globalFees, globalFeesOK := checkedCDFAdd(r.SupplierFeesPaid, fill.FeeAmount)
+	if !tradeCountOK || !volumeQtyOK || !volumeNotionalOK || !feesPaidOK || !globalVolumeOK || !globalNotionalOK || !globalFeesOK {
+		return false
+	}
+	state.audit.TradeCount = tradeCount
+	state.audit.VolumeQty = volumeQty
+	state.audit.VolumeNotionalQuote = volumeNotional
+	state.audit.FeesPaidQuote = feesPaid
+	r.SupplierVolumeQty = globalVolume
+	r.SupplierVolumeNotional = globalNotional
+	r.SupplierFeesPaid = globalFees
+	return true
+}
+
 func (r *CDFActivationAudit) finalizeCDFActivation(
 	states map[cdfParticipantKey]*cdfSupplierState,
 	submissions map[cdfRequestKey]*cdfSubmission,
@@ -2681,6 +2739,10 @@ func (r *CDFActivationAudit) finalizeCDFActivation(
 		}
 	}
 	allSuppliersActivated := len(states) == len(contract.VenueIDs)*len(contract.Suppliers)
+	r.VolumeQtyByVenue = make(map[string]int64, len(r.totalVolumeByVenue))
+	for venueID, volume := range r.totalVolumeByVenue {
+		r.VolumeQtyByVenue[venueID] = volume
+	}
 	keys := make([]cdfParticipantKey, 0, len(states))
 	for key := range states {
 		keys = append(keys, key)
@@ -2706,6 +2768,13 @@ func (r *CDFActivationAudit) finalizeCDFActivation(
 		expectedQuote, quoteOK := checkedCDFAdd(state.initialQuoteBalance, state.exchangeQuoteDelta)
 		if !baseOK || !quoteOK || expectedBase != state.terminalBaseBalance || expectedQuote != state.terminalQuoteBalance {
 			r.addCheck(CDFActivationCheck{VenueID: state.audit.VenueID, Role: state.audit.Role, ClientID: state.audit.ClientID, Failure: "terminal supplier balances do not reconcile to finite initial capital and exchange-matched fills"})
+		}
+		state.audit.VenueVolumeDenominatorQty = r.VolumeQtyByVenue[state.audit.VenueID]
+		if state.audit.VenueVolumeDenominatorQty > 0 {
+			state.audit.VenueVolumeShare = float64(state.audit.VolumeQty) / float64(state.audit.VenueVolumeDenominatorQty)
+		}
+		if r.TotalVolumeQty > 0 {
+			state.audit.GlobalVolumeShare = float64(state.audit.VolumeQty) / float64(r.TotalVolumeQty)
 		}
 		r.Suppliers = append(r.Suppliers, state.audit)
 	}
