@@ -178,6 +178,14 @@ type Config struct {
 	// marked account for every connected participant. It is the required mode
 	// for FFA fitness experiments; legacy mechanism controls may leave it off.
 	StrictPopulationAccounting bool `json:"strict_population_accounting"`
+	// StrictRiskContract selects the successor's explicit no-debt boundary. It
+	// requires an explicit false AutoBorrowSpot value and prevents the venue's
+	// order-admission paths from creating borrowing-backed liquidity.
+	StrictRiskContract bool `json:"strict_risk_contract,omitempty"`
+	// AutoBorrowSpot is a pointer so legacy configurations retain their
+	// historical enabled default while a strict successor can register an
+	// explicit disabled policy.
+	AutoBorrowSpot *bool `json:"auto_borrow_spot,omitempty"`
 	// VenueRules selects the exact matching policy for each venue. Omitted
 	// entries preserve the established price-time control.
 	VenueRules map[string]VenueRule `json:"venue_rules"`
@@ -713,6 +721,17 @@ func (c *Config) normalize() error {
 	if c.CrossAssetCollateralMarks && !c.CrossAssetSpotGraph {
 		return errors.New("multivenue: cross-asset collateral marks require the cross-asset spot graph")
 	}
+	if c.StrictRiskContract {
+		if c.AutoBorrowSpot == nil || *c.AutoBorrowSpot {
+			return errors.New("multivenue: strict risk contract requires explicit auto_borrow_spot=false")
+		}
+		if c.CrossAssetCollateralMarks {
+			return errors.New("multivenue: strict risk contract cannot authorize static cross-asset collateral marks")
+		}
+		if c.PerpExposureHedger != nil && c.PerpExposureHedger.AutoBorrowPerp {
+			return errors.New("multivenue: strict risk contract cannot authorize perp auto-borrow")
+		}
+	}
 	if c.RecordDecisionFrontierVectors && !c.RecordMarketDataReceipts {
 		return errors.New("multivenue: decision frontier vectors require market-data receipt evidence")
 	}
@@ -745,6 +764,12 @@ func (c *Config) normalize() error {
 	if len(c.ElasticLiquiditySuppliers) != 0 {
 		if !c.CrossAssetSpotGraph {
 			return errors.New("multivenue: elastic liquidity suppliers require the cross-asset spot graph")
+		}
+		if !c.StrictRiskContract {
+			return errors.New("multivenue: elastic liquidity suppliers require the strict risk contract")
+		}
+		if !c.StrictPopulationAccounting {
+			return errors.New("multivenue: elastic liquidity suppliers require strict population accounting")
 		}
 		seenRoles := make(map[string]struct{}, len(c.ElasticLiquiditySuppliers))
 		for _, supplier := range c.ElasticLiquiditySuppliers {
@@ -1890,6 +1915,12 @@ func (s *Sim) Run(ctx context.Context) error {
 				riskErr = venue.riskErr
 				break
 			}
+			if s.Config.StrictRiskContract {
+				if err := venue.Exchange.ValidateNoBorrowingDebt(); err != nil {
+					riskErr = fmt.Errorf("multivenue: strict no-debt boundary at %s: %w", venue.ID, err)
+					break
+				}
+			}
 			venue.TerminalRisk, riskErr = captureVenueRisk(venue, "terminal_post_mark")
 		}
 		if riskErr == nil && s.Config.StrictPopulationAccounting {
@@ -2485,6 +2516,7 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 		DeterministicIngress:                 true,
 		DeterministicPhases:                  true,
 		RequireExactLinearPositionAccounting: true,
+		ForbidBorrowing:                      s.Config.StrictRiskContract,
 		SnapshotInterval:                     s.Config.SnapshotInterval,
 		BalanceSnapshotInterval:              time.Minute,
 	})
@@ -2652,9 +2684,13 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 		// no-auto-perp-borrow contract.
 		autoBorrowPerp = policy.AutoBorrowPerp
 	}
+	autoBorrowSpot := true
+	if s.Config.AutoBorrowSpot != nil {
+		autoBorrowSpot = *s.Config.AutoBorrowSpot
+	}
 	if err := ex.EnableBorrowing(exchange.BorrowingConfig{
-		Enabled:           true,
-		AutoBorrowSpot:    true,
+		Enabled:           !s.Config.StrictRiskContract,
+		AutoBorrowSpot:    autoBorrowSpot,
 		AutoBorrowPerp:    autoBorrowPerp,
 		DefaultMarginMode: exchange.CrossMargin,
 		CollateralFactors: map[string]float64{"USD": 1},

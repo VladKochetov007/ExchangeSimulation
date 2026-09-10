@@ -850,6 +850,9 @@ func (e *DefaultExchange) fundMarketRequirement(clientID uint64, client *Client,
 	if available() >= required {
 		return true, nil
 	}
+	if e.forbidBorrowing {
+		return false, nil
+	}
 	if e.BorrowingMgr == nil {
 		return false, nil
 	}
@@ -1812,6 +1815,9 @@ func (e *DefaultExchange) tryReserveOrBorrow(
 	}
 	if reserveFn(asset, amount) {
 		return true, nil
+	}
+	if e.forbidBorrowing {
+		return false, nil
 	}
 	if e.BorrowingMgr == nil {
 		return false, nil

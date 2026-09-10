@@ -214,6 +214,11 @@ type DefaultExchange struct {
 	snapshotStopCh          chan struct{}
 	balanceSnapshotInterval time.Duration
 	balanceSnapshotStopCh   chan struct{}
+	// forbidBorrowing is an immutable safety boundary for scientific
+	// successors whose registered balance-sheet contract excludes debt.
+	// Keeping the boundary at the exchange prevents an internal order-admission
+	// path from silently re-enabling auto-borrow for one participant.
+	forbidBorrowing bool
 }
 
 // ExchangeConfig configures exchange behavior
@@ -256,6 +261,10 @@ type ExchangeConfig struct {
 
 	// BalanceSnapshotInterval is how often to log balance snapshots (default: 0 = disabled)
 	BalanceSnapshotInterval time.Duration
+
+	// ForbidBorrowing is an immutable exchange-level safety boundary. It is used
+	// by strict scientific successors whose registered contract excludes debt.
+	ForbidBorrowing bool
 }
 
 // NewExchange creates an exchange with default configuration
@@ -324,6 +333,7 @@ func NewExchangeWithConfig(config ExchangeConfig) *DefaultExchange {
 		snapshotPollInterval:         config.SnapshotPollInterval,
 		balanceSnapshotStopCh:        make(chan struct{}),
 		balanceSnapshotInterval:      config.BalanceSnapshotInterval,
+		forbidBorrowing:              config.ForbidBorrowing,
 		markEpochBySymbol:            make(map[string]uint64),
 		riskMarkSnapshots:            make(map[string]riskMarkSnapshot),
 	}
@@ -614,6 +624,9 @@ func (e *DefaultExchange) getLogger(symbol string) Logger {
 }
 
 func (e *DefaultExchange) EnableBorrowing(config BorrowingConfig) error {
+	if e.forbidBorrowing && (config.Enabled || config.AutoBorrowSpot || config.AutoBorrowPerp) {
+		return errors.New("borrowing is forbidden by the exchange risk contract")
+	}
 	if config.Enabled && config.PriceSource == nil {
 		return errors.New("price source required")
 	}
@@ -2815,6 +2828,9 @@ func (e *DefaultExchange) reportFundingSettlementFailure(now int64, symbol strin
 
 // BorrowMargin borrows amount of asset for clientID. Acquires exchange lock.
 func (e *DefaultExchange) BorrowMargin(clientID uint64, asset string, amount int64, reason string) error {
+	if e.forbidBorrowing {
+		return errors.New("borrowing is forbidden by the exchange risk contract")
+	}
 	if e.BorrowingMgr == nil {
 		return errors.New("borrowing not enabled")
 	}

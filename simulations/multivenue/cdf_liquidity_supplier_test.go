@@ -3,6 +3,7 @@ package multivenue
 import (
 	"context"
 	"math"
+	"strings"
 	"testing"
 	"time"
 
@@ -282,6 +283,7 @@ func TestCDFSupplierRosterIsOptInAndSeparateFromHistoricalSuppliers(t *testing.T
 	}
 	successor, err := NewSim(time.Second, Config{
 		LogDir: t.TempDir(), LogMode: "none", CrossAssetSpotGraph: true, ElasticSupplierCount: 8,
+		StrictPopulationAccounting: true, StrictRiskContract: true, AutoBorrowSpot: boolPointer(false),
 		ElasticLiquiditySuppliers: []ElasticLiquiditySupplierSpec{spec},
 		LatencyProfiles: map[string]LatencyProfile{
 			"cdf_elastic_supplier": {Model: "constant", Delay: time.Millisecond},
@@ -297,3 +299,29 @@ func TestCDFSupplierRosterIsOptInAndSeparateFromHistoricalSuppliers(t *testing.T
 		}
 	}
 }
+
+func TestCDFSupplierRosterRequiresStrictNoDebtContract(t *testing.T) {
+	spec := ElasticLiquiditySupplierSpec{
+		Role: "cdf_elastic_supplier_1", Symbol: "CDF/USD", BaseAsset: "CDF", QuoteAsset: "USD",
+		BasePrecision: mvBasePrecision, QuotePrecision: mvQuotePrecision,
+		InitialBaseBalance: 4_000_000_000, InitialQuoteBalance: 18_000_000_000,
+		Interval: 2 * time.Second, MaxObservationAge: time.Minute,
+		ReferencePrice: mvCDFBootstrap, ReferenceHalfLife: 3 * time.Hour,
+		ElasticityPerPercent: 12_000_000_000, MaxPosition: 4_000_000_000, MaxInventory: 8_000_000_000,
+		MaxQuoteQty: 40_000_000, MinimumExecutableQty: 100_000, MinimumQualifyingQty: 1_000_000,
+		RegisteredMinimumExecutableQty: mvBasePrecision / 1_000, TickSize: mvQuotePrecision,
+		QuoteOnOneSidedLocalBook: true, MaxLossQuote: 3_000_000_000,
+	}
+	_, err := NewSim(time.Second, Config{
+		LogDir: t.TempDir(), LogMode: "none", CrossAssetSpotGraph: true,
+		ElasticLiquiditySuppliers: []ElasticLiquiditySupplierSpec{spec},
+		LatencyProfiles: map[string]LatencyProfile{
+			"cdf_elastic_supplier": {Model: "constant", Delay: time.Millisecond},
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "strict risk contract") {
+		t.Fatalf("CDF roster without strict no-debt contract: %v", err)
+	}
+}
+
+func boolPointer(value bool) *bool { return &value }
