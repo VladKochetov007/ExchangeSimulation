@@ -173,3 +173,32 @@ attestation, development world, or holdout has been created from these
 revisions. The performance/red-team refs remain `b1847ac`, `39768df`, and
 `e85e16c`, with no newer fetched commits; no performance-branch code is
 imported.
+
+## Append-only capacity-contract checkpoint — 2026-09-10
+
+The default clean `make test` gate was rerun at the generated-config
+revision. All packages before and after `simulations/multivenue` passed; the
+repository's ten-minute multivenue package timeout recurred at exactly
+`600.015s` in `TestV24L1RandomSideControlEvidenceIsFreshProcessDeterministicAndNeutral`.
+The failure is retained as a runtime compatibility limitation, not treated as
+activation evidence or silently extended into a green result.
+
+The independent-review repair exposed one contract-layout defect before any
+capacity measurement: the dedicated 24-hour capacity runner creates a
+resource attestation and terminal evidence but intentionally does not create
+the activation arm's `run-status.json`. Commit `ca1a722` gives the capacity
+validator its own closed expected-file set rather than inheriting the
+activation set. The derived-config retirement/regeneration sequence is
+`6454fe7` then `c8ff967`; the final normalizer is a clean Go 1.27.0,
+CGO-disabled build whose VCS revision is `c8ff967`.
+
+The capacity probe remains a prerequisite, not a scientific result. It is
+registered for treatment seed 659 over 24 simulated hours with `evstream_v3`,
+full logs, `GOMAXPROCS=2`, a 20 GiB address-space limit, an 18 GiB Go memory
+limit, a 4 GiB free-disk reserve, a 4 GiB safety margin, live available-RAM
+monitoring, and a one-hour wall limit. Its output and attestation are bound
+to the exact source revision, normalized treatment hash, accepted exact-tree
+review, checkpoint validator, evidence manifest, terminal outcome, binary
+hashes, and observed resource measurements. No capacity probe, activation
+probe, development cell, 24-hour world, or holdout has run from this
+revision.
