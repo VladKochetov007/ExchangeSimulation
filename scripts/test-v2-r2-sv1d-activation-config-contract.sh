@@ -50,6 +50,13 @@ rg -F 'evidence_valid: $comparison_evidence_valid' "$runner" >/dev/null
 rg -F 'terminal_negative: $comparison_terminal_negative' "$runner" >/dev/null
 rg -F 'outcome_neutral' "$contract" "$capacity_runner" >/dev/null
 rg -F 'v2_r2_sv1d_capacity_binary' "$contract" "$capacity_runner" >/dev/null
+rg -F 'v2_r2_sv1d_require_capacity_attestation_shape' "$contract" "$capacity_runner" >/dev/null
+rg -F 'required_free_during_run' "$capacity_runner" >/dev/null
+rg -F '.capacity.contract == $capacity_contract' "$scorer" >/dev/null
+if rg -F 'v2-r2-sv1d-24h-binary-capacity-v1' "$scorer" >/dev/null; then
+	echo "SV1D scorer retains the obsolete capacity contract" >&2
+	exit 1
+fi
 [[ "$v2_r2_sv1d_capacity_workload_seed" == 2026091001 &&
 	"$v2_r2_sv1d_capacity_event_count" == 26100000 &&
 	"$v2_r2_sv1d_capacity_book_delta_events" == 20880000 &&
@@ -125,6 +132,43 @@ if v2_r2_sv1d_require_capacity_attestation "$temp_root/malformed-capacity-attest
 	"$(git -C "$root_dir" rev-parse HEAD)" "$(printf '%064d' 0)" "$(printf '%064d' 0)" \
 	"$temp_root/missing-review.json" "$(printf '%064d' 0)"; then
 	echo "malformed capacity attestation was accepted" >&2
+	exit 1
+fi
+
+capacity_shape_fixture="$temp_root/valid-capacity-attestation-shape.json"
+capacity_shape_hash=$(printf '%064d' 0)
+capacity_shape_revision=$(printf '%040d' 0)
+jq -n --arg contract "$v2_r2_sv1d_capacity_attestation_contract" --arg revision "$capacity_shape_revision" \
+	--arg hash "$capacity_shape_hash" --arg profile "$v2_r2_sv1d_capacity_workload_profile" \
+	--argjson seed "$v2_r2_sv1d_capacity_workload_seed" --argjson event_count "$v2_r2_sv1d_capacity_event_count" \
+	--argjson book_events "$v2_r2_sv1d_capacity_book_delta_events" --argjson balance_events "$v2_r2_sv1d_capacity_balance_change_events" \
+	--argjson opaque_events "$v2_r2_sv1d_capacity_opaque_events" --argjson start "$v2_r2_sv1d_capacity_workload_start_nano" \
+	--argjson end "$v2_r2_sv1d_capacity_workload_end_nano" --argjson minimum_free "$v2_r2_sv1d_capacity_minimum_free_bytes" \
+	--argjson safety_margin "$v2_r2_sv1d_capacity_safety_margin_bytes" --argjson gomaxprocs "$v2_r2_sv1d_capacity_gomaxprocs" \
+	--argjson memory_limit "$v2_r2_sv1d_capacity_memory_limit_bytes" --argjson gomemlimit "$v2_r2_sv1d_capacity_gomemlimit_bytes" \
+	--argjson host_memory_total "$((5 * 1024 * 1024 * 1024))" --argjson minimum_memory "$((4 * 1024 * 1024 * 1024))" \
+	--argjson peak_output 1024 --argjson peak_rss 1048576 --argjson stream_bytes 4096 \
+	--argjson initial_free "$((8 * 1024 * 1024 * 1024))" --argjson final_memory "$((4 * 1024 * 1024 * 1024))" \
+	--argjson required_free "$((4 * 1024 * 1024 * 1024 + 1024))" --argjson cpu_limit "$v2_r2_sv1_cpu_limit_percent" \
+	--argjson max_wall "$v2_r2_sv1d_capacity_max_wall_seconds" \
+	'{schema_version:1,contract:$contract,measurement:"synthetic_24h_binary_evidence_capacity_probe",capacity_only:true,
+	 outcome_neutral:true,simulator_invoked:false,terminal_outcome_present:false,holdouts_consumed:false,
+	 source_revision:$revision,source_tree_sha256:$hash,evidence_format:"evstream_v3",hashing:"route_and_global_sequence_neutral_v2",ordering:"ordered_stream",
+	 capacity_binary:{path:"/tmp/evscapacity",sha256:$hash},target_config:{path:"research/configs/v2-r2-sv1d-activation/activation-659-treatment.json",sha256:$hash},
+	 review:{path:"/tmp/review.json",sha256:$hash},workload:{profile:$profile,seed:$seed,event_count:$event_count,book_delta_events:$book_events,balance_change_events:$balance_events,opaque_scientific_events:$opaque_events,start_nano:$start,end_nano:$end,horizon:"24h"},
+	 report_sha256:$hash,profile_sha256:$hash,evidence_manifest_sha256:$hash,stream_sha256:$hash,stream_bytes:$stream_bytes,
+	 peak_output_bytes:$peak_output,peak_rss_bytes:$peak_rss,safety_margin_bytes:$safety_margin,required_free_bytes:$required_free,
+	 available_free_bytes:$initial_free,initial_available_free_bytes:$initial_free,minimum_free_bytes:$minimum_free,
+	 initial_memory_available_bytes:$final_memory,final_memory_available_bytes:$final_memory,wall_clock_seconds:1,
+	 resource_policy:{gomaxprocs:$gomaxprocs,memory_limit_bytes:$memory_limit,gomemlimit_bytes:$gomemlimit,cpu_limit_percent:$cpu_limit,minimum_free_bytes:$minimum_free,minimum_memory_available_bytes:$minimum_memory,host_memory_total_bytes:$host_memory_total,host_cpu_count:1,allowed_cpu_count:1,cpu_affinity:"0",max_wall_seconds:$max_wall}}' \
+	>"$capacity_shape_fixture"
+v2_r2_sv1d_require_capacity_attestation_shape "$capacity_shape_fixture" || {
+	echo "valid producer-shaped capacity attestation fixture was rejected" >&2
+	exit 1
+}
+jq '.outcome_neutral = false' "$capacity_shape_fixture" >"$temp_root/invalid-capacity-shape.json"
+if v2_r2_sv1d_require_capacity_attestation_shape "$temp_root/invalid-capacity-shape.json"; then
+	echo "capacity outcome-bearing shape fixture was accepted" >&2
 	exit 1
 fi
 

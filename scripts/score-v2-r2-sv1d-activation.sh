@@ -41,7 +41,8 @@ v2_r2_require_single_json_object "$provenance_path" || exit 1
 jq -e --arg contract "$v2_r2_sv1_activation_pair_contract" --arg candidate "$v2_r2_sv1_candidate_id" \
 	--arg revision "$head_revision" --arg tree_sha256 "$head_tree_sha256" \
 	--argjson seed "$v2_r2_sv1_activation_seed" --arg horizon "$v2_r2_sv1_activation_horizon" \
-	--arg evidence_format "$v2_r2_sv1_activation_evidence_format" --arg log_mode "$v2_r2_sv1_activation_log_mode" '
+	--arg evidence_format "$v2_r2_sv1_activation_evidence_format" --arg log_mode "$v2_r2_sv1_activation_log_mode" \
+	--arg capacity_contract "$v2_r2_sv1d_capacity_attestation_contract" '
 		type == "object" and .schema_version == 1 and .contract == $contract and .candidate == $candidate and
 		.candidate_revision == $revision and .candidate_tree_sha256 == $tree_sha256 and .seed == $seed and
 		.simulated_horizon == $horizon and .evidence_format == $evidence_format and .log_mode == $log_mode and
@@ -55,7 +56,7 @@ jq -e --arg contract "$v2_r2_sv1_activation_pair_contract" --arg candidate "$v2_
 		(.resource_policy.minimum_memory_available_bytes | type) == "number" and
 		.resource_policy.minimum_memory_available_bytes == (if ((.resource_policy.host_memory_total_bytes + 4) / 5) < (4 * 1024 * 1024 * 1024) then (4 * 1024 * 1024 * 1024) else ((.resource_policy.host_memory_total_bytes + 4) / 5 | floor) end) and
 		.resource_policy.max_wall_seconds == 900 and .resource_policy.analyzer_max_wall_seconds == 300 and
-		(.capacity | type) == "object" and .capacity.contract == "v2-r2-sv1d-24h-binary-capacity-v1"' "$provenance_path" >/dev/null || exit 1
+		(.capacity | type) == "object" and .capacity.contract == $capacity_contract' "$provenance_path" >/dev/null || exit 1
 
 config_checker="$root_dir/$v2_r2_sv1_config_checker_path"
 [[ -x "$config_checker" ]] || exit 1

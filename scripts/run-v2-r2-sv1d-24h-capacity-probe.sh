@@ -189,6 +189,17 @@ while kill -0 "$workload_pid" 2>/dev/null; do
 		terminate_workload "$workload_pid"
 		break
 	}
+	current_available_free_bytes=$(v2_r2_sv1d_capacity_free_bytes "$probe_root") || {
+		resource_guard_reason="synthetic capacity free-space measurement failed"
+		terminate_workload "$workload_pid"
+		break
+	}
+	required_free_during_run=$((current_output_bytes + safety_margin_bytes))
+	if (( current_available_free_bytes < minimum_free_bytes || current_available_free_bytes < required_free_during_run )); then
+		resource_guard_reason="synthetic capacity free disk crossed the registered safety floor"
+		terminate_workload "$workload_pid"
+		break
+	fi
 	if (( current_output_bytes > peak_output_bytes )); then
 		peak_output_bytes=$current_output_bytes
 		peak_output_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)

@@ -200,6 +200,64 @@ v2_r2_sv1d_capacity_verify_manifest() {
 	done < <(jq -r '.files[] | [.path, .bytes, .sha256] | @tsv' "$manifest")
 }
 
+v2_r2_sv1d_require_capacity_attestation_shape() {
+	[[ $# -eq 1 ]] || return 1
+	local attestation=$1 expected_host_memory_total expected_minimum_memory_available
+	[[ -s "$attestation" && ! -L "$attestation" ]] || return 1
+	expected_host_memory_total=$(jq -er '.resource_policy.host_memory_total_bytes | select(type == "number" and floor == . and . > 0)' "$attestation") || return 1
+	expected_minimum_memory_available=$(v2_r2_sv1d_required_memory_available_bytes "$expected_host_memory_total") || return 1
+	jq -e --arg contract "$v2_r2_sv1d_capacity_attestation_contract" \
+		--arg profile "$v2_r2_sv1d_capacity_workload_profile" --argjson workload_seed "$v2_r2_sv1d_capacity_workload_seed" \
+		--argjson event_count "$v2_r2_sv1d_capacity_event_count" --argjson book_events "$v2_r2_sv1d_capacity_book_delta_events" \
+		--argjson balance_events "$v2_r2_sv1d_capacity_balance_change_events" --argjson opaque_events "$v2_r2_sv1d_capacity_opaque_events" \
+		--argjson start "$v2_r2_sv1d_capacity_workload_start_nano" --argjson end "$v2_r2_sv1d_capacity_workload_end_nano" \
+		--argjson minimum_free "$v2_r2_sv1d_capacity_minimum_free_bytes" --argjson safety_margin "$v2_r2_sv1d_capacity_safety_margin_bytes" \
+		--argjson minimum_memory_available "$expected_minimum_memory_available" --argjson gomaxprocs "$v2_r2_sv1d_capacity_gomaxprocs" \
+		--argjson memory_limit "$v2_r2_sv1d_capacity_memory_limit_bytes" --argjson gomemlimit "$v2_r2_sv1d_capacity_gomemlimit_bytes" \
+		--argjson cpu_limit "$v2_r2_sv1_cpu_limit_percent" --argjson max_wall "$v2_r2_sv1d_capacity_max_wall_seconds" '
+		type == "object" and .schema_version == 1 and .contract == $contract and
+		.measurement == "synthetic_24h_binary_evidence_capacity_probe" and .capacity_only == true and
+		.outcome_neutral == true and .simulator_invoked == false and .terminal_outcome_present == false and
+		.holdouts_consumed == false and .evidence_format == "evstream_v3" and
+		.hashing == "route_and_global_sequence_neutral_v2" and .ordering == "ordered_stream" and
+		(.source_revision | type == "string" and test("^[0-9a-f]{40}$")) and
+		(.source_tree_sha256 | type == "string" and test("^[0-9a-f]{64}$")) and
+		(.capacity_binary | type == "object" and (.path | type == "string" and startswith("/")) and
+			(.sha256 | type == "string" and test("^[0-9a-f]{64}$"))) and
+		(.target_config | type == "object" and (.path | type == "string" and length > 0) and
+			(.sha256 | type == "string" and test("^[0-9a-f]{64}$"))) and
+		(.review | type == "object" and (.path | type == "string" and startswith("/")) and
+			(.sha256 | type == "string" and test("^[0-9a-f]{64}$"))) and
+		.workload.profile == $profile and .workload.seed == $workload_seed and
+		.workload.event_count == $event_count and .workload.book_delta_events == $book_events and
+		.workload.balance_change_events == $balance_events and .workload.opaque_scientific_events == $opaque_events and
+		.workload.start_nano == $start and .workload.end_nano == $end and .workload.horizon == "24h" and
+		(.report_sha256 | type == "string" and test("^[0-9a-f]{64}$")) and
+		(.profile_sha256 | type == "string" and test("^[0-9a-f]{64}$")) and
+		(.evidence_manifest_sha256 | type == "string" and test("^[0-9a-f]{64}$")) and
+		(.stream_sha256 | type == "string" and test("^[0-9a-f]{64}$")) and
+		(.stream_bytes | type == "number" and floor == . and . > 0) and
+		(.peak_output_bytes | type == "number" and floor == . and . > 0) and
+		(.peak_rss_bytes | type == "number" and floor == . and . > 0) and
+		(.safety_margin_bytes | type) == "number" and .safety_margin_bytes == $safety_margin and
+		(.required_free_bytes | type) == "number" and .required_free_bytes == (.peak_output_bytes + .safety_margin_bytes) and
+		(.available_free_bytes | type == "number" and . >= .required_free_bytes) and
+		(.initial_available_free_bytes | type == "number" and . >= $minimum_free) and
+		(.minimum_free_bytes | type == "number" and . == $minimum_free) and
+		(.initial_memory_available_bytes | type == "number" and . >= $minimum_memory_available) and
+		(.final_memory_available_bytes | type == "number" and . >= $minimum_memory_available) and
+		(.wall_clock_seconds | type == "number" and . >= 0 and . <= $max_wall) and
+		(.resource_policy | type == "object" and .gomaxprocs == $gomaxprocs and
+			.memory_limit_bytes == $memory_limit and .gomemlimit_bytes == $gomemlimit and
+			.cpu_limit_percent == $cpu_limit and .minimum_free_bytes == $minimum_free and
+			.minimum_memory_available_bytes == $minimum_memory_available and
+			(.host_memory_total_bytes | type == "number" and floor == . and . > 0) and
+			(.host_cpu_count | type == "number" and floor == . and . > 0) and
+			(.allowed_cpu_count | type == "number" and floor == . and . > 0) and
+			(.cpu_affinity | type == "string" and length > 0) and .max_wall_seconds == $max_wall)' \
+		"$attestation" >/dev/null
+}
+
 v2_r2_sv1d_require_capacity_attestation() {
 	[[ $# -eq 6 ]] || return 1
 	local attestation=$1 expected_revision=$2 expected_capacity_binary_sha256=$3 expected_config_sha256=$4
@@ -214,6 +272,7 @@ v2_r2_sv1d_require_capacity_attestation() {
 		"$expected_config_sha256" =~ ^[0-9a-f]{64}$ && "$expected_review_sha256" =~ ^[0-9a-f]{64}$ ]] || return 1
 	[[ -s "$attestation" && ! -L "$attestation" ]] || return 1
 	v2_r2_require_single_json_object "$attestation" || return 1
+	v2_r2_sv1d_require_capacity_attestation_shape "$attestation" || return 1
 	expected_tree=$(v2_r2_sv1d_git_tree_sha256 "$expected_revision") || return 1
 	expected_config_path="research/configs/v2-r2-sv1d-activation/activation-659-treatment.json"
 	expected_config="$root_dir/$expected_config_path"
@@ -316,7 +375,7 @@ v2_r2_sv1d_require_capacity_attestation() {
 		.resource_policy.cpu_affinity == $affinity and .resource_policy.max_wall_seconds == $max_wall and
 		(.peak_rss_bytes | type) == "number" and .peak_rss_bytes > 0 and .peak_rss_bytes <= $memory_limit and
 		.wall_clock_seconds >= 0 and .wall_clock_seconds <= $max_wall and
-		.current_free_bytes == $current_free and .current_memory_available_bytes == $current_memory' \
+		$current_free >= .required_free_bytes and $current_memory >= .resource_policy.minimum_memory_available_bytes' \
 		"$attestation" >/dev/null || return 1
 
 	jq -e --arg contract "$v2_r2_sv1d_capacity_workload_contract" --arg profile "$v2_r2_sv1d_capacity_workload_profile" \
