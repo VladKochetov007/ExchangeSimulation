@@ -250,6 +250,7 @@ jq -n '
 		 supplier_removal_counterfactual_valid:true,
 		 supplier_removal_time_weighted_counterfactual_valid:true,supplier_removal_snapshot_count:1,
 		 supplier_removal_observed_duration_ns:1,
+		 supplier_volume_share:0.1,
 		 supplier_depth_over_75_active_time_fraction:0.1,
 		 supplier_bid_depth_over_75_active_time_fraction:0.1,
 		 supplier_ask_depth_over_75_active_time_fraction:0.1,
