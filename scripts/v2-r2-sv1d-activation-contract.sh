@@ -241,11 +241,11 @@ v2_r2_sv1d_require_capacity_attestation_shape() {
 		(.peak_rss_bytes | type == "number" and floor == . and . > 0) and
 		(.safety_margin_bytes | type) == "number" and .safety_margin_bytes == $safety_margin and
 		(.required_free_bytes | type) == "number" and .required_free_bytes == (.peak_output_bytes + .safety_margin_bytes) and
-		(.available_free_bytes | type == "number" and . >= .required_free_bytes) and
-		(.initial_available_free_bytes | type == "number" and . >= $minimum_free) and
-		(.minimum_free_bytes | type == "number" and . == $minimum_free) and
-		(.initial_memory_available_bytes | type == "number" and . >= $minimum_memory_available) and
-		(.final_memory_available_bytes | type == "number" and . >= $minimum_memory_available) and
+		(.available_free_bytes | type) == "number" and .available_free_bytes >= .required_free_bytes and
+		(.initial_available_free_bytes | type) == "number" and .initial_available_free_bytes >= $minimum_free and
+		(.minimum_free_bytes | type) == "number" and .minimum_free_bytes == $minimum_free and
+		(.initial_memory_available_bytes | type) == "number" and .initial_memory_available_bytes >= $minimum_memory_available and
+		(.final_memory_available_bytes | type) == "number" and .final_memory_available_bytes >= $minimum_memory_available and
 		(.wall_clock_seconds | type == "number" and . >= 0 and . <= $max_wall) and
 		(.resource_policy | type == "object" and .gomaxprocs == $gomaxprocs and
 			.memory_limit_bytes == $memory_limit and .gomemlimit_bytes == $gomemlimit and
