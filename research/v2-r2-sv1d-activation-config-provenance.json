@@ -1,0 +1,132 @@
+{
+  "schema_version": 1,
+  "contract": "v2-r2-sv1d-activation-config-provenance-v1",
+  "candidate": "V2-R2-SV1D-ONE-SIDED-ELASTIC-LIQUIDITY",
+  "candidate_contract": "v2-r2-sv1d-activation-candidate-v1",
+  "seed": 659,
+  "source_revision": "30815245aa099ee01a6035dc5ff293f748e8d0e2",
+  "source_tree_sha256": "be475169c1ebca9d35aa3fdacc13ae042e6188ef8c68ac657bb9265bdd824e58",
+  "generated_from_clean_tree": true,
+  "source_configs": {
+    "research/configs/v2-r2-sv1c/activation-643.json": "f698946861c5de0fc80e1b5563284f91145848e67be2e6be372f03a4db6ccc6f",
+    "research/configs/v2-r2-sv1c/activation-643-control.json": "bb75dd593a962fcbd3f52518863827c1c5010b623c564619a1d9b21a564c0850"
+  },
+  "generator": {
+    "path": "scripts/render-v2-r2-sv1d-activation-configs.sh",
+    "sha256": "6e4f2db865e0bfc7664af7cea4cba5100407d44aa1a4acf2844976f160c853c3"
+  },
+  "contract_definition": {
+    "path": "scripts/v2-r2-sv1d-activation-contract.sh",
+    "sha256": "cce7ca70497b9d7ff43d5ffd044499d213b4e5f0c8ab91523112072e9c16e2eb"
+  },
+  "contract_loader": {
+    "path": "scripts/v2-r2-sv1-contract-loader.sh",
+    "sha256": "2e3125bee9740e445c2a3cc40c6be23d7c273c9ef0ce9a20e20a32ed8d356973"
+  },
+  "normalizer": {
+    "path": "bin/multivenue",
+    "revision": "30815245aa099ee01a6035dc5ff293f748e8d0e2",
+    "sha256": "f2ff1299404a884004c40ea1465ad58d504c3340fb2a250a49b9452eee2c3284",
+    "go_version": "go1.27.0",
+    "package": "exchange_sim/cmd/multivenue"
+  },
+  "bound_files": {
+    "research/v2-r2-sv1d-one-sided-elastic-successor-preregistration-2026-09-09.md": {
+      "path": "research/v2-r2-sv1d-one-sided-elastic-successor-preregistration-2026-09-09.md",
+      "sha256": "ff7e3f01fbead8f89667ec13636f3a9951eb96cd2b0841394eb1a6fc7d67ca43"
+    },
+    "research/v2-r2-sv1d-implementation-2026-09-09.md": {
+      "path": "research/v2-r2-sv1d-implementation-2026-09-09.md",
+      "sha256": "ae8c4e045af7f3f9975015cae7712a593d9a38cca12ee21296077ef1cece5066"
+    },
+    "scripts/run-v2-r2-sv1d-activation-probe.sh": {
+      "path": "scripts/run-v2-r2-sv1d-activation-probe.sh",
+      "sha256": "bfe64f16d9ae3f3b83f18bafdbbd7d81cdc2ab6aca9457d1d6b23b3b76265c8a"
+    },
+    "scripts/run-v2-r2-sv1d-24h-capacity-probe.sh": {
+      "path": "scripts/run-v2-r2-sv1d-24h-capacity-probe.sh",
+      "sha256": "11677f098576b71c02b623bbb633f20f3ba6db45bc3cf4a664a2628b4764905c"
+    },
+    "scripts/score-v2-r2-sv1d-activation.sh": {
+      "path": "scripts/score-v2-r2-sv1d-activation.sh",
+      "sha256": "ce75d02d7aa2d476a7b25f5f8c43d5cbcada12f51e306c5e3723f163b2b43dae"
+    },
+    "scripts/check-v2-r2-sv1d-activation-configs.sh": {
+      "path": "scripts/check-v2-r2-sv1d-activation-configs.sh",
+      "sha256": "c41876a0044a04c564d2fea0b4d7598d1893739c5afa8a98828486064522dfc0"
+    },
+    "scripts/test-v2-r2-sv1d-activation-config-contract.sh": {
+      "path": "scripts/test-v2-r2-sv1d-activation-config-contract.sh",
+      "sha256": "77fc71274cad831170aeada6a62343e94da7bc584b49bb21e5708dfacf106ea3"
+    },
+    "scripts/v2-r2-sv1-terminal-outcome.jq": {
+      "path": "scripts/v2-r2-sv1-terminal-outcome.jq",
+      "sha256": "a06f2e1661ef9a1a451e21c882fd496c1de35e8b1aae9fb7d6b83164edbc5372"
+    }
+  },
+  "contract_dependencies": {
+    "scripts/v2-r2-sv1-24h-contract.sh": {
+      "path": "scripts/v2-r2-sv1-24h-contract.sh",
+      "sha256": "d483259ea8b5208d2b34b08f66445fbb6b33a6e3b9af9facf4c5264853737092"
+    },
+    "scripts/v2-integrated-longrun-r2-contract.sh": {
+      "path": "scripts/v2-integrated-longrun-r2-contract.sh",
+      "sha256": "deef6138a7304f7833c1019928945bdc3cfc5beea06ee5c55b1ff58f943da242"
+    },
+    "scripts/v2-r2-sv1-terminal-outcome.jq": {
+      "path": "scripts/v2-r2-sv1-terminal-outcome.jq",
+      "sha256": "a06f2e1661ef9a1a451e21c882fd496c1de35e8b1aae9fb7d6b83164edbc5372"
+    },
+    "scripts/v2-r2-sv1-activation-status.sh": {
+      "path": "scripts/v2-r2-sv1-activation-status.sh",
+      "sha256": "12402cb05a8b20e0e4120aed99314d0965019fd8c46c200b4227092d2927ad6d"
+    }
+  },
+  "arms": {
+    "treatment": {
+      "path": "research/configs/v2-r2-sv1d-activation/activation-659-treatment.json",
+      "mode": "one_sided",
+      "cdf_roster": true
+    },
+    "mode-off": {
+      "path": "research/configs/v2-r2-sv1d-activation/activation-659-mode-off.json",
+      "mode": "two_sided_only",
+      "cdf_roster": true
+    },
+    "no-roster": {
+      "path": "research/configs/v2-r2-sv1d-activation/activation-659-no-roster.json",
+      "mode": "no_roster",
+      "cdf_roster": false
+    }
+  },
+  "registered_configs": {
+    "activation-659-treatment.json": "db28db59ad08312d8f18dca84af7b64a4e0140bb828c0a02e473f9fdc987c0ed",
+    "activation-659-mode-off.json": "08d7f4c640dad8e262a35042a372d7dcff3aae2f5662248a944a3e1e8417a1d4",
+    "activation-659-no-roster.json": "106fa5dc92d3c014aaf3da701f01b6e7a44302266a6d6f1e14c0082558446e25"
+  },
+  "expiry_calendar": [
+    {
+      "name": "short",
+      "listing_interval_nano": 3600000000000,
+      "time_to_expiry_nano": 7200000000000
+    },
+    {
+      "name": "medium",
+      "listing_interval_nano": 10800000000000,
+      "time_to_expiry_nano": 21600000000000
+    },
+    {
+      "name": "long",
+      "listing_interval_nano": 21600000000000,
+      "time_to_expiry_nano": 43200000000000
+    }
+  ],
+  "activation_contract": {
+    "seed": 659,
+    "horizon": "5m",
+    "evidence_format": "evstream_v3",
+    "log_mode": "full",
+    "holdouts_consumed": false
+  },
+  "holdouts_consumed": false
+}
