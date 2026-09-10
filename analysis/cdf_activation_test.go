@@ -939,7 +939,21 @@ func TestCDFBalanceSnapshotCannotForgeIntermediateFillState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	audit.processCDFFill(Event{SimTS: 10, VenueID: "north", ClientID: 7, payload: fillRaw}, map[cdfParticipantKey]*cdfSupplierState{{"north", 7}: state}, map[cdfFillKey]cdfFillEvidence{})
+	states := map[cdfParticipantKey]*cdfSupplierState{{"north", 7}: state}
+	audit.processCDFFill(Event{SimTS: 10, VenueID: "north", ClientID: 7, payload: fillRaw}, states, map[cdfFillKey]cdfFillEvidence{})
+	orders := map[cdfOrderKey]*cdfOrderState{{"north", 7, 11}: {
+		side: "BUY", price: fill.Price, originalQty: fill.Qty, remainingQty: fill.Qty,
+	}}
+	exchangeFill := cdfOrderFillEvidence{
+		OrderID: 11, TradeID: 12, Side: "BUY", Price: fill.Price, Qty: fill.Qty,
+		FeeAmount: fill.FeeAmount, FeeAsset: fill.FeeAsset, FilledQty: fill.Qty,
+		RemainingQty: 0, IsFull: true,
+	}
+	exchangeFillRaw, err := json.Marshal(exchangeFill)
+	if err != nil {
+		t.Fatal(err)
+	}
+	audit.processCDFOrderFill(Event{SimTS: 10, VenueID: "north", ClientID: 7, payload: exchangeFillRaw}, states, orders, map[cdfFillKey]cdfOrderFillEvidence{})
 	balances := cdfBalanceSnapshotEvidence{
 		Timestamp: 11, ClientID: 7,
 		SpotBalances: []cdfBalanceEvidence{
@@ -952,9 +966,94 @@ func TestCDFBalanceSnapshotCannotForgeIntermediateFillState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	audit.processCDFBalanceSnapshot(Event{SimTS: 11, VenueID: "north", ClientID: 7, payload: balancesRaw}, map[cdfParticipantKey]*cdfSupplierState{{"north", 7}: state})
+	audit.processCDFBalanceSnapshot(Event{SimTS: 11, VenueID: "north", ClientID: 7, payload: balancesRaw}, states)
 	if !hasCDFActivationFailure(audit.Checks, "supplier balance snapshot does not reconcile to prior exchange-matched fills") {
 		t.Fatalf("forged intermediate balance passed: %+v", audit.Checks)
+	}
+}
+
+func TestCDFStrictBalanceReconstructionIgnoresActorOnlyFill(t *testing.T) {
+	contract := RegisteredSV1DActivationContract().Suppliers[0]
+	state := &cdfSupplierState{
+		contract: contract, initialBaseBalance: contract.InitialBaseBalance, initialQuoteBalance: contract.InitialQuoteBalance,
+		audit: CDFSupplierActivationAudit{VenueID: "north", Role: contract.Role, ClientID: 7, InitialEquity: 1},
+	}
+	audit := &CDFActivationAudit{strictMechanics: true}
+	fill := cdfFillEvidence{
+		Role: contract.Role, ClientID: 7, Symbol: cdfActivationSymbol, OrderID: 11, TradeID: 12,
+		Timestamp: 10, Side: "BUY", Price: contract.ReferencePrice, Qty: contract.MinimumQualifyingQty,
+		FeeAmount: cdfFixtureFee(contract.ReferencePrice, contract.MinimumQualifyingQty, contract.BasePrecision, contract.MakerFeeBps),
+		FeeAsset:  contract.QuoteAsset, IsFull: true, PositionBefore: 0, PositionAfter: contract.MinimumQualifyingQty,
+	}
+	fillRaw, err := json.Marshal(fill)
+	if err != nil {
+		t.Fatal(err)
+	}
+	states := map[cdfParticipantKey]*cdfSupplierState{{"north", 7}: state}
+	audit.processCDFFill(Event{SimTS: 10, VenueID: "north", ClientID: 7, payload: fillRaw}, states, map[cdfFillKey]cdfFillEvidence{})
+	postFillBalances := cdfBalanceSnapshotEvidence{
+		Timestamp: 11, ClientID: 7,
+		SpotBalances: []cdfBalanceEvidence{
+			{Asset: contract.BaseAsset, Free: contract.InitialBaseBalance + fill.Qty, NetAsset: contract.InitialBaseBalance + fill.Qty},
+			{Asset: contract.QuoteAsset, Free: contract.InitialQuoteBalance - cdfFixtureNotional(fill.Price, fill.Qty, contract.BasePrecision) - fill.FeeAmount, NetAsset: contract.InitialQuoteBalance - cdfFixtureNotional(fill.Price, fill.Qty, contract.BasePrecision) - fill.FeeAmount},
+		},
+		PerpBalances: []cdfBalanceEvidence{}, Borrowed: map[string]int64{},
+	}
+	postFillRaw, err := json.Marshal(postFillBalances)
+	if err != nil {
+		t.Fatal(err)
+	}
+	audit.processCDFBalanceSnapshot(Event{SimTS: 11, VenueID: "north", ClientID: 7, payload: postFillRaw}, states)
+	if !hasCDFActivationFailure(audit.Checks, "supplier balance snapshot does not reconcile to prior exchange-matched fills") {
+		t.Fatalf("actor-only fill advanced authoritative balance state: %+v", audit.Checks)
+	}
+}
+
+func TestCDFStrictReconciliationRetainsTerminalGTCOrders(t *testing.T) {
+	contract := RegisteredSV1DActivationContract().Suppliers[0]
+	state := &cdfSupplierState{audit: CDFSupplierActivationAudit{VenueID: "north", Role: contract.Role, ClientID: 7}}
+	audit := &CDFActivationAudit{strictMechanics: true}
+	orders := map[cdfOrderKey]*cdfOrderState{{"north", 7, 11}: {
+		side: "BUY", price: contract.ReferencePrice, originalQty: 5, remainingQty: 3,
+	}}
+	audit.reconcileCDFFills(
+		map[cdfParticipantKey]*cdfSupplierState{{"north", 7}: state},
+		map[cdfFillKey]cdfFillEvidence{}, map[cdfFillKey]cdfOrderFillEvidence{}, orders,
+	)
+	if len(audit.Checks) != 0 || state.audit.OpenOrderCount != 1 || state.audit.OpenOrderQty != 3 {
+		t.Fatalf("terminal live GTC was rejected or not recorded: checks=%+v audit=%+v", audit.Checks, state.audit)
+	}
+}
+
+func TestCDFPostFillResponseAcceptsLaterObservation(t *testing.T) {
+	state := &cdfSupplierState{
+		fillResponses: []cdfFillResponseWindow{{
+			fillAt: 10, fillGlobalSeq: 3, positionAfter: 5,
+			preFillDecision: cdfDecisionEvidence{ObservationSequence: 1, ReferencePrice: 100, MarkPrice: 100, TargetPosition: 2, Position: 0, QuotePrice: 99, QuoteQty: 2},
+			preFillKnown:    true,
+		}},
+	}
+	audit := &CDFActivationAudit{strictMechanics: true}
+	audit.recordCDFPostFillResponse(Event{SimTS: 20, GlobalSequence: 5}, state, cdfDecisionEvidence{
+		ObservationSequence: 2, ReferencePrice: 101, MarkPrice: 101, Position: 5, TargetPosition: 0,
+		Action: "submit", Side: "SELL", QuotePrice: 102, QuoteQty: 5,
+	})
+	if state.audit.PostFillResponsiveCount != 1 || !state.fillResponses[0].responded {
+		t.Fatalf("later observation was not accepted as a post-fill response: %+v", state)
+	}
+}
+
+func TestCDFTradeIdentityCannotBeCountedTwice(t *testing.T) {
+	r := &CDFActivationAudit{}
+	payload, err := json.Marshal(cdfTradeEvidence{TradeID: 9, Price: 100, Qty: 3, Side: "SELL"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	event := Event{VenueID: "north", payload: payload}
+	r.processCDFTrade(event)
+	r.processCDFTrade(event)
+	if r.TotalVolumeQty != 3 || !hasCDFActivationFailure(r.Checks, "duplicate CDF trade identity") {
+		t.Fatalf("duplicate trade was not rejected: total=%d checks=%+v", r.TotalVolumeQty, r.Checks)
 	}
 }
 
