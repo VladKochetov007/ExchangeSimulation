@@ -2,7 +2,6 @@ package analysis
 
 import (
 	"fmt"
-	"sort"
 )
 
 // GlobalSequenceAudit summarizes validation of a rendered v2 evidence set.
@@ -21,36 +20,45 @@ func (r *Run) ValidateGlobalSequence(expectedEventFrames, expectedStreamFrames u
 	if r == nil {
 		return GlobalSequenceAudit{}, fmt.Errorf("analysis: nil run")
 	}
-	sequences := make([]uint64, 0, expectedEventFrames)
+	// Do not use the attested count as an allocation hint. The attestation is an
+	// input to this validator and may be malformed or adversarial; a corrupt
+	// count must not turn a small rendered directory into a huge allocation.
+	seen := make(map[uint64]struct{})
+	var eventCount uint64
+	var maximumSequence uint64
+	var validationFailure error
 	if err := r.Scan(ScanOptions{Workers: 1}, func(event Event) {
-		if event.GlobalSequence == 0 {
-			sequences = append(sequences, 0)
+		if validationFailure != nil {
 			return
 		}
-		sequences = append(sequences, event.GlobalSequence)
+		if eventCount == ^uint64(0) {
+			validationFailure = fmt.Errorf("analysis: rendered event count overflows uint64")
+			return
+		}
+		eventCount++
+		if event.GlobalSequence == 0 {
+			validationFailure = fmt.Errorf("analysis: rendered v2 event has no global frame sequence")
+			return
+		}
+		if _, duplicate := seen[event.GlobalSequence]; duplicate {
+			validationFailure = fmt.Errorf("analysis: duplicate rendered global frame sequence %d", event.GlobalSequence)
+			return
+		}
+		seen[event.GlobalSequence] = struct{}{}
+		if event.GlobalSequence > maximumSequence {
+			maximumSequence = event.GlobalSequence
+		}
 	}); err != nil {
 		return GlobalSequenceAudit{}, err
 	}
-	if uint64(len(sequences)) != expectedEventFrames {
-		return GlobalSequenceAudit{}, fmt.Errorf("analysis: rendered event count %d does not match binary attestation %d", len(sequences), expectedEventFrames)
+	if validationFailure != nil {
+		return GlobalSequenceAudit{}, validationFailure
 	}
-	for _, sequence := range sequences {
-		if sequence == 0 {
-			return GlobalSequenceAudit{}, fmt.Errorf("analysis: rendered v2 event has no global frame sequence")
-		}
-	}
-	sort.Slice(sequences, func(left, right int) bool { return sequences[left] < sequences[right] })
-	var maximumSequence uint64
-	for index, sequence := range sequences {
-		if index > 0 && sequence == sequences[index-1] {
-			return GlobalSequenceAudit{}, fmt.Errorf("analysis: duplicate rendered global frame sequence %d", sequence)
-		}
-		if sequence > maximumSequence {
-			maximumSequence = sequence
-		}
+	if eventCount != expectedEventFrames {
+		return GlobalSequenceAudit{}, fmt.Errorf("analysis: rendered event count %d does not match binary attestation %d", eventCount, expectedEventFrames)
 	}
 	if expectedStreamFrames > 0 && maximumSequence > expectedStreamFrames {
 		return GlobalSequenceAudit{}, fmt.Errorf("analysis: rendered global frame sequence %d exceeds binary stream frame count %d", maximumSequence, expectedStreamFrames)
 	}
-	return GlobalSequenceAudit{EventCount: uint64(len(sequences)), MaximumSequence: maximumSequence}, nil
+	return GlobalSequenceAudit{EventCount: eventCount, MaximumSequence: maximumSequence}, nil
 }

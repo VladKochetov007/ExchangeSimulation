@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 
 	"exchange_sim/simulation"
@@ -221,6 +222,35 @@ func TestAuditCDFLiquidityActivationRejectsUnboundProvenance(t *testing.T) {
 	}
 	if _, err := run.AuditCDFLiquidityActivation(CDFActivationOptions{Contract: RegisteredSV1DActivationContract(), AllowLegacyJSON: true}); err == nil {
 		t.Fatal("byte-mutated run config retained a valid provenance binding")
+	}
+}
+
+func TestCDFExpectedProvenanceRejectsSelfAuthoredIdentity(t *testing.T) {
+	expected := CDFExpectedProvenance{
+		ConfigSHA256:   strings.Repeat("a", 64),
+		SourceRevision: strings.Repeat("b", 40),
+		BinarySHA256:   strings.Repeat("c", 64),
+		BinaryGOOS:     "linux", BinaryGOARCH: "amd64", BinaryGOAMD64: "v1",
+	}
+	metadata := cdfActivationMetadata{
+		ConfigSHA256: expected.ConfigSHA256, GitRevision: expected.SourceRevision,
+		BinarySHA256: expected.BinarySHA256, BinaryGOOS: expected.BinaryGOOS,
+		BinaryGOARCH: expected.BinaryGOARCH, BinaryGOAMD64: expected.BinaryGOAMD64,
+	}
+	if err := expected.validate(); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateCDFExpectedProvenance(metadata, expected); err != nil {
+		t.Fatal(err)
+	}
+	metadata.BinarySHA256 = strings.Repeat("d", 64)
+	if err := validateCDFExpectedProvenance(metadata, expected); err == nil {
+		t.Fatal("metadata identity mismatch was accepted")
+	}
+	metadata.BinarySHA256 = expected.BinarySHA256
+	metadata.SourceModified = true
+	if err := validateCDFExpectedProvenance(metadata, expected); err == nil {
+		t.Fatal("modified source was accepted")
 	}
 }
 

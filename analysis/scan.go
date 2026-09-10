@@ -28,6 +28,10 @@ type Event struct {
 	// the versioned binary renderer. Zero means the historical JSON contract or
 	// a legacy rendered sidecar without a global frame identity.
 	GlobalSequence uint64
+	// LocalSequence is the per-route sequence carried by the v3 envelope. It is
+	// zero for historical JSON evidence and is required for strict source/render
+	// identity comparison.
+	LocalSequence uint64
 	// Ordinal is the one-based physical record position in File. It permits
 	// analyzers to distinguish causal order among same-timestamp records in one
 	// persisted log; SimTS alone is not sufficient at lifecycle boundaries.
@@ -77,6 +81,7 @@ type envelope struct {
 type dataLayer struct {
 	VenueID        string          `json:"venue_id"`
 	Symbol         string          `json:"symbol"`
+	Sequence       uint64          `json:"sequence"`
 	GlobalSequence uint64          `json:"global_sequence"`
 	Payload        json.RawMessage `json:"payload"`
 }
@@ -183,7 +188,7 @@ func scanFile(path string, keep map[string]bool, needles [][]byte, visit func(Ev
 		event := Event{
 			SimTS: env.SimTS, ClientID: env.ClientID, Name: env.Event,
 			VenueID: outer.VenueID, Symbol: outer.Symbol, File: path, Ordinal: ordinal,
-			GlobalSequence: outer.GlobalSequence, payload: outer.Payload,
+			GlobalSequence: outer.GlobalSequence, LocalSequence: outer.Sequence, payload: outer.Payload,
 		}
 		// Unwrap the derivative nesting: an inner payload means the fields sit
 		// one level down and the symbol travels with them.

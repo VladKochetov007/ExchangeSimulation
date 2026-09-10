@@ -2,6 +2,7 @@ package analysis
 
 import (
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -12,6 +13,7 @@ import (
 	"sort"
 	"strings"
 
+	"exchange_sim/evstream"
 	etypes "exchange_sim/types"
 )
 
@@ -25,6 +27,9 @@ type CDFActivationOptions struct {
 	Contract            CDFActivationContract
 	EvidenceDir         string
 	RenderedEvidenceDir string
+	// ExpectedProvenance is supplied by the launcher from independently resolved
+	// inputs. Strict audits compare self-reported run metadata to these values.
+	ExpectedProvenance CDFExpectedProvenance
 	// AllowLegacyJSON is reserved for historical fixture/reconstruction use.
 	// A real v2 successor audit must leave this false and provide a rendered
 	// binary evidence directory with its source stream present.
@@ -46,6 +51,18 @@ type CDFActivationContract struct {
 	MaximumSupplierVolumeShare        float64
 	MaximumSupplierDepthShare         float64
 	MaximumDepthDominanceTimeFraction float64
+	BinarySchemaEpoch                 uint32
+}
+
+// CDFExpectedProvenance is the external identity recorded before a strict run.
+// The analyzer does not derive these values from files in the run directory.
+type CDFExpectedProvenance struct {
+	ConfigSHA256   string
+	SourceRevision string
+	BinarySHA256   string
+	BinaryGOOS     string
+	BinaryGOARCH   string
+	BinaryGOAMD64  string
 }
 
 // CDFSupplierContract is one immutable finite-capital roster entry.
@@ -116,6 +133,7 @@ func RegisteredSV1DActivationContract() CDFActivationContract {
 		MaximumSupplierVolumeShare:        0.75,
 		MaximumSupplierDepthShare:         0.75,
 		MaximumDepthDominanceTimeFraction: 0.50,
+		BinarySchemaEpoch:                 3,
 	}
 }
 
@@ -252,6 +270,7 @@ type cdfActivationMetadata struct {
 	HypothesisID        string `json:"hypothesis_id"`
 	LogMode             string `json:"log_mode"`
 	EvidenceFormat      string `json:"evidence_format"`
+	SourceModified      bool   `json:"-"`
 }
 
 type cdfParticipantKey struct {
@@ -564,6 +583,15 @@ func (r *Run) AuditCDFLiquidityActivation(options CDFActivationOptions) (*CDFAct
 	if err != nil {
 		return nil, err
 	}
+	strictMechanics := config.EvidenceFormat == "evstream_v3" && config.EvidenceContractVersion >= 2 && !options.AllowLegacyJSON
+	if strictMechanics {
+		if err := options.ExpectedProvenance.validate(); err != nil {
+			return nil, fmt.Errorf("cdf activation expected provenance: %w", err)
+		}
+		if err := validateCDFExpectedProvenance(metadata, options.ExpectedProvenance); err != nil {
+			return nil, err
+		}
+	}
 	if config.EvidenceFormat == "evstream_v3" && config.EvidenceContractVersion >= 2 {
 		eventsPath := filepath.Join(evidenceDir, "events.evs")
 		_, eventsErr := os.Stat(eventsPath)
@@ -582,15 +610,15 @@ func (r *Run) AuditCDFLiquidityActivation(options CDFActivationOptions) (*CDFAct
 			if err := validateCDFCompletionArtifacts(evidenceDir, metadata); err != nil {
 				return nil, err
 			}
-			if err := validateCDFRenderedGlobalSequence(scanRun, evidenceDir, options.RenderedEvidenceDir); err != nil {
+			if err := validateCDFRenderedGlobalSequence(scanRun, evidenceDir, options.RenderedEvidenceDir, options.Contract.BinarySchemaEpoch); err != nil {
 				return nil, err
 			}
 		}
 	}
-	result.strictMechanics = config.EvidenceFormat == "evstream_v3" && config.EvidenceContractVersion >= 2 && !options.AllowLegacyJSON
+	result.strictMechanics = strictMechanics
 	result.Provenance = CDFActivationProvenance{
 		ConfigSHA256: metadata.ConfigSHA256, SourceRevision: metadata.GitRevision,
-		SourceModified: false, BinarySHA256: metadata.BinarySHA256, Seed: metadata.Seed,
+		SourceModified: metadata.SourceModified, BinarySHA256: metadata.BinarySHA256, Seed: metadata.Seed,
 		Horizon: metadata.SimulatedHorizon, SimulationStartNano: metadata.SimulationStartNano,
 		SimulationEndNano: metadata.SimulationEndNano, VenueIDs: append([]string(nil), config.VenueIDs...),
 		ExperimentID: config.ExperimentID, HypothesisID: config.HypothesisID,
@@ -644,6 +672,9 @@ func (c CDFActivationContract) validate() error {
 	}
 	if len(c.VenueIDs) == 0 || c.HistoricalSupplierCountPerVenue < 0 || len(c.Suppliers) == 0 {
 		return fmt.Errorf("venue and supplier rosters are required")
+	}
+	if c.BinarySchemaEpoch == 0 {
+		return fmt.Errorf("binary schema epoch is required")
 	}
 	if c.MaximumSupplierVolumeShare <= 0 || c.MaximumSupplierVolumeShare > 1 ||
 		c.MaximumSupplierDepthShare <= 0 || c.MaximumSupplierDepthShare > 1 ||
@@ -758,7 +789,29 @@ func loadCDFActivationIdentity(dir string) (cdfActivationConfig, cdfActivationMe
 		metadata.EvidenceFormat != config.EvidenceFormat || !sameCDFStrings(manifest.VenueIDs, config.VenueIDs) {
 		return cdfActivationConfig{}, cdfActivationMetadata{}, fmt.Errorf("cdf activation: metadata, manifest, and config identities disagree")
 	}
+	metadata.SourceModified = manifest.Build.Modified
 	return config, metadata, nil
+}
+
+func (p CDFExpectedProvenance) validate() error {
+	if !isCDFHex(p.ConfigSHA256, sha256.Size) || !isCDFHex(p.BinarySHA256, sha256.Size) ||
+		!isCDFHex(p.SourceRevision, 20) {
+		return fmt.Errorf("config, source, and binary identities must be hexadecimal digests")
+	}
+	if p.BinaryGOOS != "linux" || p.BinaryGOARCH != "amd64" || p.BinaryGOAMD64 != "v1" {
+		return fmt.Errorf("binary identity must be linux/amd64/v1")
+	}
+	return nil
+}
+
+func validateCDFExpectedProvenance(metadata cdfActivationMetadata, expected CDFExpectedProvenance) error {
+	if metadata.SourceModified || metadata.ConfigSHA256 != expected.ConfigSHA256 ||
+		metadata.GitRevision != expected.SourceRevision || metadata.BinarySHA256 != expected.BinarySHA256 ||
+		metadata.BinaryGOOS != expected.BinaryGOOS || metadata.BinaryGOARCH != expected.BinaryGOARCH ||
+		metadata.BinaryGOAMD64 != expected.BinaryGOAMD64 {
+		return fmt.Errorf("cdf activation: run provenance does not match the externally expected clean build identity")
+	}
+	return nil
 }
 
 type cdfBinaryEvidenceAttestation struct {
@@ -769,6 +822,7 @@ type cdfBinaryEvidenceAttestation struct {
 	StreamFrames         uint64 `json:"stream_frames"`
 	ExecutionStreamHash  string `json:"execution_stream_hash"`
 	EvidenceOnlyIncluded bool   `json:"evidence_only_in_stream"`
+	UnencodablePayloads  uint64 `json:"unencodable_payloads"`
 }
 
 type cdfRenderedEvidenceAttestation struct {
@@ -856,7 +910,17 @@ func sha256File(path string) (string, error) {
 	return hex.EncodeToString(digest[:]), nil
 }
 
-func validateCDFRenderedGlobalSequence(renderedRun *Run, evidenceDir, renderedDir string) error {
+type cdfEvidenceFrameIdentity struct {
+	globalSequence uint64
+	localSequence  uint64
+	simTS          int64
+	clientID       uint64
+	venueID        string
+	route          string
+	eventName      string
+}
+
+func validateCDFRenderedGlobalSequence(renderedRun *Run, evidenceDir, renderedDir string, expectedSchemaEpoch uint32) error {
 	raw, err := os.ReadFile(filepath.Join(evidenceDir, "binary-evidence-attestation.json"))
 	if err != nil {
 		return fmt.Errorf("cdf activation: read binary evidence attestation: %w", err)
@@ -867,8 +931,58 @@ func validateCDFRenderedGlobalSequence(renderedRun *Run, evidenceDir, renderedDi
 	}
 	if attestation.Domain != "canonical_binary_execution_frames" || attestation.Ordering != "ordered_stream" ||
 		!isCDFHex(attestation.ExecutionStreamHash, sha256.Size) || attestation.EventFrames == 0 ||
-		attestation.StreamFrames < attestation.EventFrames || !attestation.EvidenceOnlyIncluded {
+		attestation.StreamFrames < attestation.EventFrames || !attestation.EvidenceOnlyIncluded ||
+		attestation.UnencodablePayloads != 0 || expectedSchemaEpoch == 0 || attestation.SchemaEpoch != expectedSchemaEpoch {
 		return fmt.Errorf("cdf activation: binary evidence attestation is not a complete v2 successor attestation")
+	}
+	actualSource, err := os.Open(filepath.Join(evidenceDir, "events.evs"))
+	if err != nil {
+		return fmt.Errorf("cdf activation: open binary evidence source: %w", err)
+	}
+	defer actualSource.Close()
+	sourceReader, err := evstream.NewReader(actualSource, evstream.ReaderOptions{VerifyHash: true})
+	if err != nil {
+		return fmt.Errorf("cdf activation: read binary evidence source: %w", err)
+	}
+	if sourceReader.Codec() != evstream.CodecNone || sourceReader.SchemaEpoch() != expectedSchemaEpoch {
+		return fmt.Errorf("cdf activation: binary evidence source codec or schema epoch is not the registered contract")
+	}
+	sourceByGlobal := make(map[uint64]cdfEvidenceFrameIdentity)
+	var sourceEventCount uint64
+	if err := sourceReader.Range(func(frame evstream.Frame) error {
+		if len(frame.Payload) < 16 {
+			return fmt.Errorf("cdf activation: source frame %d payload is shorter than the v3 envelope", frame.Header.Seq)
+		}
+		routeRef := binary.LittleEndian.Uint32(frame.Payload[0:4])
+		eventRef := binary.LittleEndian.Uint32(frame.Payload[4:8])
+		localSequence := binary.LittleEndian.Uint64(frame.Payload[8:16])
+		if routeRef == 0 || eventRef == 0 || localSequence == 0 || frame.Header.Seq == 0 || frame.Venue == "" {
+			return fmt.Errorf("cdf activation: source frame %d has incomplete identity envelope", frame.Header.Seq)
+		}
+		route, routeOK := sourceReader.Lookup(routeRef)
+		eventName, eventOK := sourceReader.Lookup(eventRef)
+		if !routeOK || !eventOK || route == "" || eventName == "" {
+			return fmt.Errorf("cdf activation: source frame %d has unresolved route or event identity", frame.Header.Seq)
+		}
+		if _, duplicate := sourceByGlobal[frame.Header.Seq]; duplicate {
+			return fmt.Errorf("cdf activation: source has duplicate global frame sequence %d", frame.Header.Seq)
+		}
+		sourceByGlobal[frame.Header.Seq] = cdfEvidenceFrameIdentity{
+			globalSequence: frame.Header.Seq, localSequence: localSequence,
+			simTS: frame.Header.SimTS, clientID: frame.Header.ClientID,
+			venueID: frame.Venue, route: filepath.ToSlash(route), eventName: eventName,
+		}
+		sourceEventCount++
+		return nil
+	}); err != nil {
+		return fmt.Errorf("cdf activation: verify binary evidence source: %w", err)
+	}
+	if !sourceReader.Terminated() || sourceReader.Count() != attestation.StreamFrames || sourceEventCount != attestation.EventFrames {
+		return fmt.Errorf("cdf activation: binary source counts or completion trailer disagree with attestation")
+	}
+	sourceDigest := sourceReader.ExecutionHash()
+	if hex.EncodeToString(sourceDigest[:]) != attestation.ExecutionStreamHash {
+		return fmt.Errorf("cdf activation: binary source hash disagrees with attestation")
 	}
 	renderedRaw, err := os.ReadFile(filepath.Join(renderedDir, "rendered-binary-evidence-attestation.json"))
 	if err != nil {
@@ -893,8 +1007,51 @@ func validateCDFRenderedGlobalSequence(renderedRun *Run, evidenceDir, renderedDi
 	if actualRenderedDigest != rendered.RenderedDigest {
 		return fmt.Errorf("cdf activation: rendered evidence digest mismatch")
 	}
-	if _, err := renderedRun.ValidateGlobalSequence(attestation.EventFrames, attestation.StreamFrames); err != nil {
-		return fmt.Errorf("cdf activation: rendered global sequence: %w", err)
+	renderedByGlobal := make(map[uint64]cdfEvidenceFrameIdentity)
+	var renderedFailure error
+	venueRoot := filepath.Join(renderedDir, "venues")
+	if err := renderedRun.Scan(ScanOptions{Workers: 1}, func(event Event) {
+		if renderedFailure != nil {
+			return
+		}
+		if event.GlobalSequence == 0 || event.LocalSequence == 0 || event.VenueID == "" || event.Name == "" {
+			renderedFailure = fmt.Errorf("cdf activation: rendered event has incomplete global/local identity")
+			return
+		}
+		relative, err := filepath.Rel(venueRoot, event.File)
+		if err != nil {
+			renderedFailure = fmt.Errorf("cdf activation: derive rendered route: %w", err)
+			return
+		}
+		parts := strings.Split(filepath.ToSlash(relative), "/")
+		if len(parts) < 2 || parts[0] == "" || parts[0] != event.VenueID {
+			renderedFailure = fmt.Errorf("cdf activation: rendered event path is not venue-qualified")
+			return
+		}
+		identity := cdfEvidenceFrameIdentity{
+			globalSequence: event.GlobalSequence, localSequence: event.LocalSequence,
+			simTS: event.SimTS, clientID: event.ClientID, venueID: event.VenueID,
+			route: strings.Join(parts[1:], "/"), eventName: event.Name,
+		}
+		if _, duplicate := renderedByGlobal[event.GlobalSequence]; duplicate {
+			renderedFailure = fmt.Errorf("cdf activation: rendered evidence repeats global frame sequence %d", event.GlobalSequence)
+			return
+		}
+		renderedByGlobal[event.GlobalSequence] = identity
+	}); err != nil {
+		return fmt.Errorf("cdf activation: scan rendered evidence identities: %w", err)
+	}
+	if renderedFailure != nil {
+		return renderedFailure
+	}
+	if uint64(len(renderedByGlobal)) != attestation.EventFrames {
+		return fmt.Errorf("cdf activation: rendered identity count %d does not match binary event frames %d", len(renderedByGlobal), attestation.EventFrames)
+	}
+	for sequence, sourceIdentity := range sourceByGlobal {
+		renderedIdentity, exists := renderedByGlobal[sequence]
+		if !exists || renderedIdentity != sourceIdentity {
+			return fmt.Errorf("cdf activation: rendered event identity does not match binary source frame %d", sequence)
+		}
 	}
 	return nil
 }

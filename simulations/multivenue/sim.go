@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"runtime/debug"
 	"slices"
 	"strings"
@@ -2188,16 +2189,22 @@ type BuildInfo struct {
 	Time     string `json:"time"`
 	// Modified reports that the working tree had uncommitted changes when the
 	// binary was built, so the revision alone does not identify the source.
-	Modified bool `json:"modified"`
+	Modified bool   `json:"modified"`
+	GOOS     string `json:"goos"`
+	GOARCH   string `json:"goarch"`
+	GOAMD64  string `json:"goamd64,omitempty"`
 }
 
 // currentBuild reads the version-control stamp Go embeds at build time.
 func currentBuild() BuildInfo {
+	build := BuildInfo{Revision: "unknown", GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}
+	if runtime.GOARCH == "amd64" {
+		build.GOAMD64 = "v1"
+	}
 	info, ok := debug.ReadBuildInfo()
 	if !ok {
-		return BuildInfo{Revision: "unknown"}
+		return build
 	}
-	build := BuildInfo{Revision: "unknown"}
 	for _, setting := range info.Settings {
 		switch setting.Key {
 		case "vcs.revision":
@@ -2206,6 +2213,8 @@ func currentBuild() BuildInfo {
 			build.Time = setting.Value
 		case "vcs.modified":
 			build.Modified = setting.Value == "true"
+		case "GOAMD64":
+			build.GOAMD64 = setting.Value
 		}
 	}
 	return build

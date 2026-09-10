@@ -104,3 +104,16 @@ func TestValidateGlobalSequenceRejectsZeroAndDuplicate(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateGlobalSequenceDoesNotPreallocateFromUntrustedCount(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "events.jsonl")
+	line := `{"sim_ts":1,"event":"first","data":{"venue_id":"north","global_sequence":1,"payload":{}}}` + "\n"
+	if err := os.WriteFile(path, []byte(line), 0644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := (&Run{files: []string{path}}).ValidateGlobalSequence(^uint64(0), 1)
+	if err == nil || !strings.Contains(err.Error(), "rendered event count 1") {
+		t.Fatalf("validation error = %v, want bounded count mismatch", err)
+	}
+}
