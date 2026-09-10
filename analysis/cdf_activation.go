@@ -501,9 +501,10 @@ type cdfSnapshotKey struct {
 }
 
 type cdfSnapshotProof struct {
-	publishedAt int64
-	bids        []etypes.PriceLevel
-	asks        []etypes.PriceLevel
+	publishedAt    int64
+	globalSequence uint64
+	bids           []etypes.PriceLevel
+	asks           []etypes.PriceLevel
 }
 
 type cdfSubmission struct {
@@ -1216,6 +1217,7 @@ func (r *CDFActivationAudit) validateSupplierAccount(row AccountRow, supplier CD
 
 func (r *CDFActivationAudit) indexCDFSnapshots(run *Run) (map[cdfSnapshotKey]cdfSnapshotProof, map[string][]cdfDepthObservation, error) {
 	proofs := make(map[cdfSnapshotKey]cdfSnapshotProof)
+	sequences := make(map[string]map[uint64][16]byte)
 	depth := make(map[string][]cdfDepthObservation)
 	for _, path := range run.Files() {
 		if symbolFromPath(path) != cdfActivationLogName {
@@ -1246,11 +1248,24 @@ func (r *CDFActivationAudit) indexCDFSnapshots(run *Run) (map[cdfSnapshotKey]cdf
 				return
 			}
 			key := cdfSnapshotKey{event.VenueID, snapshot.SourceSequence, fingerprint}
+			venueSequences := sequences[event.VenueID]
+			if venueSequences == nil {
+				venueSequences = make(map[uint64][16]byte)
+				sequences[event.VenueID] = venueSequences
+			}
+			if priorFingerprint, exists := venueSequences[snapshot.SourceSequence]; exists && priorFingerprint != fingerprint {
+				r.addCheck(CDFActivationCheck{VenueID: event.VenueID, Ordinal: event.Ordinal, Failure: "CDF snapshot publication sequence is reused with a different fingerprint"})
+				return
+			}
+			venueSequences[snapshot.SourceSequence] = fingerprint
 			if _, duplicate := proofs[key]; duplicate {
 				r.addCheck(CDFActivationCheck{VenueID: event.VenueID, Ordinal: event.Ordinal, Failure: "duplicate public CDF snapshot identity"})
 				return
 			}
-			proofs[key] = cdfSnapshotProof{publishedAt: event.SimTS, bids: snapshot.PublicBids, asks: snapshot.PublicAsks}
+			proofs[key] = cdfSnapshotProof{
+				publishedAt: event.SimTS, globalSequence: event.GlobalSequence,
+				bids: snapshot.PublicBids, asks: snapshot.PublicAsks,
+			}
 		})
 		if err != nil {
 			return nil, nil, fmt.Errorf("cdf activation: scan public snapshots in %s: %w", path, err)
@@ -1570,6 +1585,10 @@ func (r *CDFActivationAudit) validateCDFObservation(
 	snapshot, exists := snapshots[cdfSnapshotKey{event.VenueID, decision.ObservationSequence, fingerprint}]
 	if !exists || snapshot.publishedAt != decision.ObservationTime {
 		r.addEventCheck(event, state, "CDF receipt fingerprint does not join a public CDF snapshot")
+		return false
+	}
+	if r.strictMechanics && (event.GlobalSequence == 0 || snapshot.globalSequence == 0 || snapshot.globalSequence >= event.GlobalSequence) {
+		r.addEventCheck(event, state, "CDF decision does not follow the globally ordered source snapshot frame")
 		return false
 	}
 	bestBid, bestBidQty := cdfBestBid(snapshot.bids)

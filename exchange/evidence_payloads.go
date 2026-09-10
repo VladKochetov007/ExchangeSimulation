@@ -18,13 +18,13 @@ type bookSnapshotEvidence struct {
 	PublicBids     []PriceLevel `json:"public_bids"`
 }
 
-// MarshalJSON keeps snapshots without a source sequence byte-for-byte
-// compatible with the historical JSON evidence shape. Successor binary
-// snapshots have a positive source sequence and retain the explicit public
-// projection needed by the strict analyzer, including empty (but present)
-// sides.
+// MarshalJSON keeps snapshots without successor-only fields byte-for-byte
+// compatible with the historical JSON evidence shape. The representation
+// boundary is selected by the exchange configuration at the logging call;
+// source sequence alone is not a safe discriminator because zero is a valid
+// successor value when a publication has no subscribers.
 func (b bookSnapshotEvidence) MarshalJSON() ([]byte, error) {
-	if b.SourceSequence == 0 {
+	if b.SourceSequence == 0 && b.PublicAsks == nil && b.PublicBids == nil {
 		return json.Marshal(struct {
 			Asks []PriceLevel `json:"asks"`
 			Bids []PriceLevel `json:"bids"`
@@ -41,6 +41,14 @@ func (b bookSnapshotEvidence) MarshalJSON() ([]byte, error) {
 		Asks: b.Asks, Bids: b.Bids, SourceSequence: b.SourceSequence,
 		PublicAsks: b.PublicAsks, PublicBids: b.PublicBids,
 	})
+}
+
+// legacyBookSnapshotEvidence is the historical JSON contract. It is kept as a
+// separate value rather than relying on runtime source metadata so a
+// subscriber cannot change the bytes of an old run.
+type legacyBookSnapshotEvidence struct {
+	Asks []PriceLevel `json:"asks"`
+	Bids []PriceLevel `json:"bids"`
 }
 
 // bookDeltaEvidence contains both public and hidden quantities. The public

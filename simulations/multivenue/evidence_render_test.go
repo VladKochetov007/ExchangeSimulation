@@ -107,6 +107,7 @@ func TestRenderBinaryEvidenceV2PreservesGlobalFrameSequence(t *testing.T) {
 	digest := sink.executionHash()
 	attestation, err := json.MarshalIndent(binaryEvidenceArtifactRecord{
 		Domain: "canonical_binary_execution_frames", Ordering: "ordered_stream",
+		SchemaEpoch: sink.writer.SchemaEpoch(),
 		EventFrames: sink.count(), StreamFrames: sink.writer.Count(),
 		ExecutionStreamHash: hex.EncodeToString(digest[:]), EvidenceOnlyIncluded: true,
 	}, "", "  ")
@@ -418,6 +419,7 @@ func TestBinaryEvidenceDifferentiallyPreservesScientificJSONPayloads(t *testing.
 	digest := binarySink.executionHash()
 	attestation, err := json.MarshalIndent(binaryEvidenceArtifactRecord{
 		Domain: "canonical_binary_execution_frames", Ordering: "ordered_stream",
+		SchemaEpoch: binarySink.writer.SchemaEpoch(),
 		EventFrames: binarySink.count(), StreamFrames: binarySink.writer.Count(),
 		ExecutionStreamHash: hex.EncodeToString(digest[:]), UnencodablePayloads: binarySink.unencodableCount(),
 	}, "", "  ")
@@ -489,6 +491,7 @@ func writeRenderMetadata(t *testing.T, inputDir string, sink *binaryEvidence, lo
 	digest := sink.executionHash()
 	attestation, err := json.MarshalIndent(binaryEvidenceArtifactRecord{
 		Domain: "canonical_binary_execution_frames", Ordering: "ordered_stream",
+		SchemaEpoch: sink.writer.SchemaEpoch(),
 		EventFrames: sink.count(), StreamFrames: sink.writer.Count(),
 		ExecutionStreamHash: hex.EncodeToString(digest[:]), UnencodablePayloads: sink.unencodableCount(),
 	}, "", "  ")

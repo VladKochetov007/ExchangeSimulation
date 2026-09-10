@@ -46,7 +46,9 @@ func binaryEvidenceReplacesRawLog() bool { return os.Getenv("EXSIM_BINARY_EVIDEN
 
 // newBinaryEvidence starts a binary sink writing to out.
 func newBinaryEvidence(out interface{ Write([]byte) (int, error) }) *binaryEvidence {
-	return &binaryEvidence{writer: evstream.NewWriter(out, evstream.WriterOptions{})}
+	return &binaryEvidence{writer: evstream.NewWriter(out, evstream.WriterOptions{
+		SchemaEpoch: binaryEvidenceSchemaEpoch,
+	})}
 }
 
 // sinkEnvelope carries the event name alongside the payload.

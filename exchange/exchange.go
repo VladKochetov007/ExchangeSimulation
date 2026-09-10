@@ -153,23 +153,24 @@ type DefaultExchange struct {
 	venueBalanceSequence uint64
 	// RequestPolicy meters and admits incoming requests. Nil leaves the venue
 	// unmetered, which is what scenarios without a published budget expect.
-	RequestPolicy                RequestPolicy
-	NextOrderID                  uint64
-	Matcher                      MatchingEngine
-	MDPublisher                  *MDPublisher
-	Clock                        Clock
-	Loggers                      map[string]Logger
-	instrumentLogFallback        Logger
-	BorrowingMgr                 *BorrowingManager
-	CollateralRate               int64
-	LiquidationFeeBps            int64
-	requireExactLinearAccounting bool
-	autoAnchorMarks              bool
-	deterministicIngress         bool
-	deterministicPhases          bool
-	markEMAWindow                int
-	markBandBps                  int64
-	autoAnchoredSymbols          map[string]bool
+	RequestPolicy                    RequestPolicy
+	NextOrderID                      uint64
+	Matcher                          MatchingEngine
+	MDPublisher                      *MDPublisher
+	Clock                            Clock
+	Loggers                          map[string]Logger
+	instrumentLogFallback            Logger
+	recordSnapshotProjectionEvidence bool
+	BorrowingMgr                     *BorrowingManager
+	CollateralRate                   int64
+	LiquidationFeeBps                int64
+	requireExactLinearAccounting     bool
+	autoAnchorMarks                  bool
+	deterministicIngress             bool
+	deterministicPhases              bool
+	markEMAWindow                    int
+	markBandBps                      int64
+	autoAnchoredSymbols              map[string]bool
 	// markEpochBySymbol binds each stored risk mark to the completed exchange
 	// mark pass that produced it. A cross-margin decision must not combine a
 	// caller-supplied trigger mark with an unavailable or older sibling mark.
@@ -262,6 +263,11 @@ type ExchangeConfig struct {
 	// BalanceSnapshotInterval is how often to log balance snapshots (default: 0 = disabled)
 	BalanceSnapshotInterval time.Duration
 
+	// RecordSnapshotProjectionEvidence selects the successor snapshot payload
+	// containing publication sequence and the exact public projection. It is
+	// false by default so historical JSON logging remains byte-compatible.
+	RecordSnapshotProjectionEvidence bool
+
 	// ForbidBorrowing is an immutable exchange-level safety boundary. It is used
 	// by strict scientific successors whose registered contract excludes debt.
 	ForbidBorrowing bool
@@ -315,27 +321,28 @@ func NewExchangeWithConfig(config ExchangeConfig) *DefaultExchange {
 			FeeRevenue:    make(map[string]int64),
 			InsuranceFund: make(map[string]int64),
 		},
-		conservation:                 newConservationTracker(),
-		NextOrderID:                  1,
-		Matcher:                      matcher,
-		MDPublisher:                  NewMDPublisher(),
-		Clock:                        config.Clock,
-		Loggers:                      make(map[string]Logger),
-		settlementPending:            make(map[string]expirySettlementPending),
-		tickerFactory:                config.TickerFactory,
-		deterministicIngress:         config.DeterministicIngress,
-		deterministicPhases:          config.DeterministicPhases,
-		requireExactLinearAccounting: config.RequireExactLinearPositionAccounting,
-		running:                      false,
-		shutdownCh:                   make(chan struct{}),
-		snapshotStopCh:               make(chan struct{}),
-		snapshotInterval:             config.SnapshotInterval,
-		snapshotPollInterval:         config.SnapshotPollInterval,
-		balanceSnapshotStopCh:        make(chan struct{}),
-		balanceSnapshotInterval:      config.BalanceSnapshotInterval,
-		forbidBorrowing:              config.ForbidBorrowing,
-		markEpochBySymbol:            make(map[string]uint64),
-		riskMarkSnapshots:            make(map[string]riskMarkSnapshot),
+		conservation:                     newConservationTracker(),
+		NextOrderID:                      1,
+		Matcher:                          matcher,
+		MDPublisher:                      NewMDPublisher(),
+		Clock:                            config.Clock,
+		Loggers:                          make(map[string]Logger),
+		recordSnapshotProjectionEvidence: config.RecordSnapshotProjectionEvidence,
+		settlementPending:                make(map[string]expirySettlementPending),
+		tickerFactory:                    config.TickerFactory,
+		deterministicIngress:             config.DeterministicIngress,
+		deterministicPhases:              config.DeterministicPhases,
+		requireExactLinearAccounting:     config.RequireExactLinearPositionAccounting,
+		running:                          false,
+		shutdownCh:                       make(chan struct{}),
+		snapshotStopCh:                   make(chan struct{}),
+		snapshotInterval:                 config.SnapshotInterval,
+		snapshotPollInterval:             config.SnapshotPollInterval,
+		balanceSnapshotStopCh:            make(chan struct{}),
+		balanceSnapshotInterval:          config.BalanceSnapshotInterval,
+		forbidBorrowing:                  config.ForbidBorrowing,
+		markEpochBySymbol:                make(map[string]uint64),
+		riskMarkSnapshots:                make(map[string]riskMarkSnapshot),
 	}
 	if policy, ok := ex.Positions.(interface{ SetRequireExactLinearPositionAccounting(bool) }); ok {
 		policy.SetRequireExactLinearPositionAccounting(config.RequireExactLinearPositionAccounting)
@@ -482,14 +489,25 @@ func (e *DefaultExchange) logSnapshots() {
 		sourceSequence := e.MDPublisher.Publish(symbol, MDSnapshot, &publicSnapshot, timestamp)
 
 		if log := e.getLogger(symbol); log != nil {
-			log.LogEvent(timestamp, 0, "BookSnapshot", bookSnapshotEvidence{
-				Bids:           book.Bids.GetSnapshot(),
-				Asks:           book.Asks.GetSnapshot(),
-				SourceSequence: sourceSequence,
-				PublicBids:     publicSnapshot.Bids,
-				PublicAsks:     publicSnapshot.Asks,
-			})
+			log.LogEvent(timestamp, 0, "BookSnapshot", e.snapshotEvidence(
+				book.Bids.GetSnapshot(), book.Asks.GetSnapshot(), publicSnapshot, sourceSequence,
+			))
 		}
+	}
+}
+
+func (e *DefaultExchange) snapshotEvidence(
+	bids, asks []PriceLevel, publicSnapshot BookSnapshot, sourceSequence uint64,
+) any {
+	if !e.recordSnapshotProjectionEvidence {
+		return legacyBookSnapshotEvidence{Asks: asks, Bids: bids}
+	}
+	return bookSnapshotEvidence{
+		Bids:           bids,
+		Asks:           asks,
+		SourceSequence: sourceSequence,
+		PublicBids:     publicSnapshot.Bids,
+		PublicAsks:     publicSnapshot.Asks,
 	}
 }
 

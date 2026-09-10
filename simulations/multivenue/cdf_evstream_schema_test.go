@@ -10,7 +10,7 @@ import (
 
 func TestCDFBinarySchemasRoundTripThroughRenderer(t *testing.T) {
 	var output bytes.Buffer
-	sink := &binaryEvidence{writer: evstream.NewWriter(&output, evstream.WriterOptions{})}
+	sink := &binaryEvidence{writer: evstream.NewWriter(&output, evstream.WriterOptions{SchemaEpoch: binaryEvidenceSchemaEpoch})}
 	decision := ElasticLiquiditySupplierDecision{
 		Role: "cdf_elastic_supplier_1", ClientID: 7, Symbol: "CDF/USD", DecisionTime: 100,
 		DecisionPhaseOffset: 2, ObservationTime: 90, ObservationAge: 10, ObservationSequence: 12,

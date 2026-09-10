@@ -2554,6 +2554,7 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 		ForbidBorrowing:                      s.Config.StrictRiskContract,
 		SnapshotInterval:                     s.Config.SnapshotInterval,
 		BalanceSnapshotInterval:              time.Minute,
+		RecordSnapshotProjectionEvidence:     s.Config.EvidenceFormat == binaryRepresentation,
 	})
 	matchingRule := s.Config.matchingRule(id)
 	if matchingRule == MatchingProRata {

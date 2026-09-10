@@ -3,6 +3,7 @@ package exchange
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"math/rand"
@@ -160,6 +161,44 @@ func TestBookSnapshotEvidenceV3CarriesSourceAndPublicProjection(t *testing.T) {
 	want, _ := json.Marshal(original)
 	if !bytes.Equal(rendered, want) {
 		t.Fatalf("rendered v3 snapshot %s, want %s", rendered, want)
+	}
+}
+
+func TestBookSnapshotEvidenceV3RenderingPreservesZeroSourceAndPublicPresence(t *testing.T) {
+	original := bookSnapshotEvidence{
+		Asks:       []PriceLevel{{Price: 102, VisibleQty: 5}},
+		Bids:       []PriceLevel{},
+		PublicAsks: []PriceLevel{},
+		PublicBids: nil,
+	}
+	frame, reader := roundTripFrame(t, original)
+	rendered, err := RenderPayloadJSONVersioned(frame.Header.SchemaID, frame.Header.SchemaVersion, frame.Payload, reader)
+	if err != nil {
+		t.Fatalf("render zero-source v3 snapshot: %v", err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(rendered, &fields); err != nil {
+		t.Fatalf("decode rendered snapshot: %v", err)
+	}
+	for _, field := range []string{"asks", "bids", "source_sequence", "public_asks", "public_bids"} {
+		if _, present := fields[field]; !present {
+			t.Fatalf("rendered v3 snapshot omitted %q: %s", field, rendered)
+		}
+	}
+	if string(fields["source_sequence"]) != "0" || string(fields["public_asks"]) != "[]" || string(fields["public_bids"]) != "null" {
+		t.Fatalf("rendered zero-source presence = %s, want source 0, public asks [], public bids null", rendered)
+	}
+}
+
+func TestDecodeBookSnapshotRejectsUntrustedLevelCountBeforeAllocation(t *testing.T) {
+	presence := make([]byte, evstream.PresenceBits(snapshotV3OptionalFields))
+	evstream.SetPresence(presence, snapshotAsksBit)
+	payload := evstream.AppendUint64(append([]byte(nil), presence...), 0)
+	payload = evstream.AppendUint32(payload, math.MaxUint32)
+	var decoded bookSnapshotEvidence
+	err := DecodeBookSnapshotVersioned(payload, 3, &decoded)
+	if !errors.Is(err, evstream.ErrCorrupt) {
+		t.Fatalf("malformed level count error = %v, want ErrCorrupt", err)
 	}
 }
 
@@ -349,7 +388,10 @@ func TestRenderPayloadJSONPreservesTypedAndOpaquePayloads(t *testing.T) {
 			OrderID: 3, PositionSide: "BOTH", Price: 4, Qty: 5, RealizedPnL: -6,
 			RemainingQty: 7, Role: "maker", Side: "SELL", Symbol: "ABC-PERP", TradeID: 8},
 		bookDeltaEvidence{HiddenQty: 1, Price: 2, Side: "BUY", TotalQty: 3, VisibleQty: 4},
-		bookSnapshotEvidence{Asks: []PriceLevel{{Price: 1, VisibleQty: 2}}, Bids: nil},
+		bookSnapshotEvidence{
+			Asks: []PriceLevel{{Price: 1, VisibleQty: 2}}, Bids: nil,
+			PublicAsks: []PriceLevel{}, PublicBids: nil,
+		},
 		VenueBalanceEvent{Timestamp: 1, Sequence: 2, TradeID: 3, Bucket: VenueFeeRevenue,
 			Asset: "USD", Reason: "taker_fee"},
 		etypes.BalanceChangeEvent{Timestamp: 1, ClientID: 2, Symbol: "ABC/USD", Reason: "fill",

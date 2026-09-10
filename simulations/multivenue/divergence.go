@@ -86,6 +86,12 @@ type checkpointRecord struct {
 
 const binaryRepresentation = "evstream_v3"
 
+// binaryEvidenceSchemaEpoch identifies the complete typed schema set used by
+// the successor stream. It changes when a compatible reader would need a new
+// schema contract, and makes a zero-valued attestation impossible to mistake
+// for an intentional schema identity.
+const binaryEvidenceSchemaEpoch uint32 = 3
+
 // traceRecord is one line of the narrow trace. Sequence is the sink's own
 // counter, which is the order events actually reached the log and therefore
 // the order the simulation produced them.

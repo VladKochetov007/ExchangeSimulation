@@ -74,7 +74,7 @@ func TestBinarySinkWritesTerminatedStreamAndRealCheckpoint(t *testing.T) {
 func TestBinarySinkSubstitutesUnencodablePayloadWithoutDroppingTail(t *testing.T) {
 	t.Setenv("EXSIM_BINARY_EVIDENCE", "file")
 	var output bytes.Buffer
-	sink := &binaryEvidence{writer: evstream.NewWriter(&output, evstream.WriterOptions{})}
+	sink := &binaryEvidence{writer: evstream.NewWriter(&output, evstream.WriterOptions{SchemaEpoch: binaryEvidenceSchemaEpoch})}
 	if err := sink.record(1, 1, "bad", "north", binaryUnencodablePayload{}, "general.jsonl", 1); err != nil {
 		t.Fatal(err)
 	}

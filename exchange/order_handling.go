@@ -472,13 +472,9 @@ func (e *DefaultExchange) Subscribe(clientID uint64, req *QueryRequest, gateway 
 	sourceSequence := e.MDPublisher.Publish(req.Symbol, MDSnapshot, &publicSnapshot, e.Clock.NowUnixNano())
 
 	if log := e.getLogger(req.Symbol); log != nil {
-		log.LogEvent(e.Clock.NowUnixNano(), clientID, "BookSnapshot", bookSnapshotEvidence{
-			Bids:           book.Bids.GetSnapshot(),
-			Asks:           book.Asks.GetSnapshot(),
-			SourceSequence: sourceSequence,
-			PublicBids:     publicSnapshot.Bids,
-			PublicAsks:     publicSnapshot.Asks,
-		})
+		log.LogEvent(e.Clock.NowUnixNano(), clientID, "BookSnapshot", e.snapshotEvidence(
+			book.Bids.GetSnapshot(), book.Asks.GetSnapshot(), publicSnapshot, sourceSequence,
+		))
 	}
 
 	return Response{RequestID: req.RequestID, Success: true}

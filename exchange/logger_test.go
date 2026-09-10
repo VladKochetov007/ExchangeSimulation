@@ -1,6 +1,7 @@
 package exchange
 
 import (
+	"bytes"
 	"encoding/json"
 	"testing"
 )
@@ -12,6 +13,36 @@ type recordingLogger struct {
 type logRecord struct {
 	event string
 	data  any
+}
+
+func TestSnapshotEvidenceRepresentationIsConfigurationBound(t *testing.T) {
+	ex := NewExchangeWithConfig(ExchangeConfig{})
+	legacy := ex.snapshotEvidence(
+		[]PriceLevel{{Price: 101, VisibleQty: 2}},
+		[]PriceLevel{{Price: 102, VisibleQty: 3}},
+		BookSnapshot{Bids: []PriceLevel{{Price: 101, VisibleQty: 2}}}, 17,
+	)
+	legacyRaw, err := json.Marshal(legacy)
+	if err != nil {
+		t.Fatalf("marshal legacy snapshot: %v", err)
+	}
+	if want := `{"asks":[{"price":102,"visible_qty":3,"hidden_qty":0}],"bids":[{"price":101,"visible_qty":2,"hidden_qty":0}]}`; !bytes.Equal(legacyRaw, []byte(want)) {
+		t.Fatalf("legacy snapshot = %s, want %s", legacyRaw, want)
+	}
+
+	ex.recordSnapshotProjectionEvidence = true
+	successor := ex.snapshotEvidence(
+		[]PriceLevel{{Price: 101, VisibleQty: 2}},
+		[]PriceLevel{{Price: 102, VisibleQty: 3}},
+		BookSnapshot{Bids: []PriceLevel{{Price: 101, VisibleQty: 2}}}, 17,
+	)
+	successorRaw, err := json.Marshal(successor)
+	if err != nil {
+		t.Fatalf("marshal successor snapshot: %v", err)
+	}
+	if !bytes.Contains(successorRaw, []byte(`"source_sequence":17`)) || !bytes.Contains(successorRaw, []byte(`"public_bids"`)) {
+		t.Fatalf("successor snapshot omitted successor fields: %s", successorRaw)
+	}
 }
 
 func (l *recordingLogger) LogEvent(_ int64, _ uint64, event string, data any) {

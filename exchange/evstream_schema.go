@@ -186,6 +186,23 @@ func DecodeBookSnapshot(payload []byte, into *bookSnapshotEvidence) error {
 // projection needed to join delayed observations without guessing the venue's
 // public level boundary.
 func DecodeBookSnapshotVersioned(payload []byte, schemaVersion uint16, into *bookSnapshotEvidence) error {
+	return DecodeBookSnapshotVersionedWithMaxLevels(payload, schemaVersion, into, DefaultMaxBookSnapshotLevels)
+}
+
+// DefaultMaxBookSnapshotLevels bounds allocations made while decoding an
+// untrusted evidence payload. The explicit override is available to callers
+// whose instrument contract permits deeper books; the default is deliberately
+// much larger than the exchange's public depth while remaining bounded.
+const DefaultMaxBookSnapshotLevels = 1 << 20
+
+// DecodeBookSnapshotVersionedWithMaxLevels decodes a snapshot with an explicit
+// per-side level limit. A count must also fit in the remaining payload before
+// any backing array is allocated, so malformed frames fail closed without
+// turning their advertised count into a memory request.
+func DecodeBookSnapshotVersionedWithMaxLevels(payload []byte, schemaVersion uint16, into *bookSnapshotEvidence, maxLevels int) error {
+	if maxLevels <= 0 {
+		return fmt.Errorf("%w: maximum snapshot level count must be positive", evstream.ErrCorrupt)
+	}
 	cursor := evstream.NewCursor(payload)
 	optionalFields := snapshotV1OptionalFields
 	if schemaVersion == 3 {
@@ -200,35 +217,57 @@ func DecodeBookSnapshotVersioned(payload []byte, schemaVersion uint16, into *boo
 	} else if schemaVersion != 1 {
 		return unsupportedSchemaVersion(SchemaBookSnapshot, schemaVersion)
 	}
-	into.Asks = readLevels(cursor, presence.Has(snapshotAsksBit), into.Asks)
-	into.Bids = readLevels(cursor, presence.Has(snapshotBidsBit), into.Bids)
+	var err error
+	into.Asks, err = readLevels(cursor, presence.Has(snapshotAsksBit), into.Asks, maxLevels)
+	if err != nil {
+		return err
+	}
+	into.Bids, err = readLevels(cursor, presence.Has(snapshotBidsBit), into.Bids, maxLevels)
+	if err != nil {
+		return err
+	}
 	if schemaVersion == 3 {
-		into.PublicAsks = readLevels(cursor, presence.Has(snapshotPublicAsksBit), into.PublicAsks)
-		into.PublicBids = readLevels(cursor, presence.Has(snapshotPublicBidsBit), into.PublicBids)
+		into.PublicAsks, err = readLevels(cursor, presence.Has(snapshotPublicAsksBit), into.PublicAsks, maxLevels)
+		if err != nil {
+			return err
+		}
+		into.PublicBids, err = readLevels(cursor, presence.Has(snapshotPublicBidsBit), into.PublicBids, maxLevels)
+		if err != nil {
+			return err
+		}
 	}
 	return finishCursor(cursor)
 }
 
-func readLevels(cursor *evstream.Cursor, present bool, reuse []PriceLevel) []PriceLevel {
+const encodedPriceLevelBytes = 3 * 8
+
+func readLevels(cursor *evstream.Cursor, present bool, reuse []PriceLevel, maxLevels int) ([]PriceLevel, error) {
 	if !present {
-		return nil
+		return nil, nil
 	}
-	count := int(cursor.Uint32())
+	count := cursor.Uint32()
 	if cursor.Err() != nil {
-		return nil
+		return nil, cursor.Err()
 	}
+	if uint64(count) > uint64(maxLevels) {
+		return nil, fmt.Errorf("%w: snapshot level count %d exceeds maximum %d", evstream.ErrCorrupt, count, maxLevels)
+	}
+	if uint64(count) > uint64(cursor.Remaining()/encodedPriceLevelBytes) {
+		return nil, fmt.Errorf("%w: snapshot level count %d exceeds payload capacity", evstream.ErrCorrupt, count)
+	}
+	levelCount := int(count)
 	out := reuse
-	if out == nil || cap(out) < count {
-		out = make([]PriceLevel, count)
+	if out == nil || cap(out) < levelCount {
+		out = make([]PriceLevel, levelCount)
 	} else {
-		out = out[:count]
+		out = out[:levelCount]
 	}
 	for i := range out {
 		out[i].Price = cursor.Int64()
 		out[i].VisibleQty = cursor.Int64()
 		out[i].HiddenQty = cursor.Int64()
 	}
-	return out
+	return out, nil
 }
 
 // --- VenueBalanceEvent ---
@@ -468,7 +507,20 @@ func RenderPayloadJSONVersioned(schemaID, schemaVersion uint16, payload []byte, 
 				SourceSequence uint64       `json:"source_sequence,omitempty"`
 			}{Asks: value.Asks, Bids: value.Bids, SourceSequence: value.SourceSequence})
 		}
-		return json.Marshal(value)
+		// Do not invoke the historical compatibility marshaler here. A v3
+		// binary payload must render every presence-bearing field, including a
+		// zero source sequence and nil public sides, or the binary-to-JSON map
+		// is no longer injective.
+		return json.Marshal(struct {
+			Asks           []PriceLevel `json:"asks"`
+			Bids           []PriceLevel `json:"bids"`
+			SourceSequence uint64       `json:"source_sequence"`
+			PublicAsks     []PriceLevel `json:"public_asks"`
+			PublicBids     []PriceLevel `json:"public_bids"`
+		}{
+			Asks: value.Asks, Bids: value.Bids, SourceSequence: value.SourceSequence,
+			PublicAsks: value.PublicAsks, PublicBids: value.PublicBids,
+		})
 	case SchemaVenueBalance:
 		var value VenueBalanceEvent
 		if err := DecodeVenueBalanceVersioned(payload, resolve, schemaVersion, &value); err != nil {
