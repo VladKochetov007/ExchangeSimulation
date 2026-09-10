@@ -194,3 +194,12 @@ The packet is still **NOT PROMOTED**. One fresh independent Sol-xhigh review
 of the complete final tree is required before the binary-capacity probe. No
 capacity measurement, seed-659 activation probe, development cell, freeze, or
 holdout is authorized; holdouts `619`, `631`, and `641` remain untouched.
+
+## Final exact-tree uncached repository gate — 2026-09-10
+
+The complete generated candidate at `b1f81cba9d9b2c7ca3e7139b0ba90d96a43a8fdb`
+passed the uncached full repository gate. The `simulations/multivenue`
+package took `1003.940s`, the complete shell contract/archive matrix passed,
+and `FULL_MAKE_FINAL_B1F81CB_EXIT=0` was recorded. This closes the local
+mechanical gate only; it is not a review acceptance and no world or evidence
+artifact was created.

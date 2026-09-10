@@ -305,3 +305,16 @@ This matrix is the final pre-review mechanical evidence packet. It contains
 no activation result: no capacity probe, seed-659 probe, development cell,
 freeze, or holdout has run. The fresh exact-tree independent review remains
 the next scientific promotion boundary.
+
+## Final exact-tree uncached repository gate — 2026-09-10
+
+The complete generated candidate at `b1f81cba9d9b2c7ca3e7139b0ba90d96a43a8fdb`
+was run once more with the uncached full repository command and the bounded
+Go 1.27 resource settings recorded above. Every Go package passed; the long
+`simulations/multivenue` package completed in `1003.940s`; all SV1C, SV1D,
+survival-summary, and integrated-long-run archive contract checks passed; and
+the final marker was `FULL_MAKE_FINAL_B1F81CB_EXIT=0`.
+
+This closes the local mechanical gate for the exact review tree. It does not
+constitute independent scientific acceptance and it produced no activation,
+capacity, development, freeze, or holdout evidence.
