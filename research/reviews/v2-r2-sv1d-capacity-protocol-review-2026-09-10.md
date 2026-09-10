@@ -51,3 +51,29 @@ The synthetic measurement is a storage/resource prerequisite only. It cannot
 authorize activation by itself; a fresh independent review of the corrected
 exact tree remains mandatory first.
 
+## Follow-up repair requirements — exact tree `e34f879` — 2026-09-10
+
+The subsequent independent review of exact tree `e34f879` rejected promotion
+again. Its findings are accepted as protocol defects, not scientific outcomes:
+
+1. The capacity validator compared live host values against
+   `current_free_bytes` and `current_memory_available_bytes`, but the producer
+   emitted the retained measurements as `available_free_bytes` and
+   `final_memory_available_bytes`. The self-validation therefore could never
+   succeed. The repair keeps retained final measurements distinct from the
+   live-host safety check and validates both through the shared contract.
+2. The activation producer recorded the new synthetic capacity contract while
+   the scorer still required the obsolete pre-amendment contract string. The
+   scorer must consume the shared contract constant.
+3. The capacity monitor checked disk only before and after generation. The
+   repair enforces both the absolute reserve and the current-output-plus-safety
+   requirement inside the monitoring loop.
+4. Positive producer-shaped capacity-attestation coverage was missing. The
+   repair adds a shared attestation-shape predicate and positive/negative
+   fixtures, and makes the existing positive activation-scoring fixtures
+   explicit in the static contract checks.
+
+No capacity, activation, development, freeze, or holdout run occurred from
+`e34f879`. The outcome-bearing capacity procedure remains absent from the
+active path. A further clean mechanical gate, provenance regeneration, and
+fresh exact-tree independent review are required before any capacity measure.

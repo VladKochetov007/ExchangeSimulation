@@ -397,3 +397,19 @@ development cell, freeze authorization, or holdout evidence.
 Because this report is a bound input to the immutable SV1D config provenance,
 the generated configs must be retired and regenerated from the subsequent clean
 documentation revision before the final exact-tree review.
+
+## Independent review repair checkpoint — 2026-09-10
+
+The fresh independent Sol-xhigh review of exact tree `e34f879` rejected
+promotion for three capacity-boundary defects; the complete finding is retained
+in `research/reviews/v2-r2-sv1d-capacity-protocol-review-2026-09-10.md`. No
+scientific or market run was performed from that tree.
+
+The repair at successor commit `d004dd9` adds a shared producer-shape
+attestation predicate and positive/negative contract fixtures, separates
+retained final resource measurements from live validation, changes the scorer
+to use `v2_r2_sv1d_capacity_attestation_contract`, and enforces disk reserve
+inside the synthetic workload monitor. It does not change R2 economics,
+calendar semantics, the CDF supplier, evidence encoding, or historical results.
+The repair must pass the clean shell/full mechanical gate and a new exact-tree
+independent review before a capacity workload is permitted.
