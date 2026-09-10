@@ -2150,3 +2150,35 @@ SV1C is now closed as **VALID EVIDENCE / NEGATIVE ACTIVATION**. No experiment
 is authorized: seed `659`, full development, freeze, and holdouts `619`, `631`,
 and `641` remain prohibited. Further simulation requires a separately named,
 preregistered successor mechanism and a new exact-tree activation review.
+
+## Append-only operational update: SV1D activation gate did not advance — 2026-09-10
+
+The exact SV1D candidate is clean and pushed at
+`0e024771863440202df5cc36d4276bfa35f4c109` on
+`feature/r2-cdf-survival-successor-sv1d`. Its capacity attestation passed and
+the bounded seed-659, five-minute three-arm activation probe was then run from
+the pinned Go 1.27 binaries. All three arms stopped at simulated
+`1735689661000000000` (00:01:01) on the same scheduled strict option-risk
+failure: south's `ABC/USD` book was empty for the underlying mark. The next
+public snapshot repopulated the book one simulated second later.
+
+The producer correctly emitted a nonterminal `SIMULATION_FAILURE` rather than
+promoting it to a terminal unavailable-price endpoint. Because the required
+complete arm artifacts were consequently absent, the runner wrote an immutable
+`INVALID_ARM_EVIDENCE` provenance record; this is neither a valid activation
+nor a valid negative activation. Treatment and mode-off evidence were
+byte-identical through the failure, and no treatment decision used the
+registered one-sided CDF mode. Lagrange's independent Sol-xhigh review
+confirmed a repair-required producer/activation-fixture defect and rejected
+any weakening of strict valuation, fallback price, forced activation, or SV1D
+economics.
+
+The forensic record is
+`research/v2-r2-sv1d-activation-gate-triage-2026-09-10.md`. The retained raw
+activation root is outside the repository at
+`/home/vlad/external-scratch/v2-r2-sv1d-activation-659-0e024771863440202df5cc36d4276bfa35f4c109`.
+No development cell, freeze, or holdout ran; holdouts `619`, `631`, and `641`
+remain untouched. The next task is to diagnose the shared empty-book reachability
+and activation producer path without changing the registered seed, strict-risk
+semantics, or SV1D economics. A fresh exact-tree review is required before any
+rerun.

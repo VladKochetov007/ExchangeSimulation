@@ -1960,3 +1960,36 @@ freeze, or holdout world ran; holdouts `619`, `631`, and `641` remain
 untouched. The async refs were fetched at the checkpoint and had no new
 commits beyond performance `b1847ac`, performance-port `39768df`, and
 economic red-team `e85e16c`.
+
+## Append-only audit update: SV1D activation was invalid and non-advancing — 2026-09-10
+
+The current SV1D scientific tree is clean and pushed at
+`0e024771863440202df5cc36d4276bfa35f4c109` on
+`feature/r2-cdf-survival-successor-sv1d`; its exact tree SHA-256 is
+`7de1eefb3b991f926d84266431afb4b5375388ccde6556226788856c60820e94`.
+The accepted candidate review, clean Go 1.27 binaries, and outcome-neutral
+binary-evidence capacity attestation were completed before execution.
+
+The registered seed-659 activation probe ran only its three development arms:
+treatment, same-roster mode-off, and no-roster. All three failed the producer
+contract at simulated 00:01:01 with a scheduled strict option-risk mark failure
+for an option on south `ABC/USD`. The public ABC/USD snapshot at event sequence
+`32780` was empty at that instant; the next one-second snapshot was two-sided.
+The terminal contract correctly rejected the nonterminal failure as a generic
+`SIMULATION_FAILURE`, and the runner wrote `INVALID_ARM_EVIDENCE` rather than
+publishing partial evidence as a scientific result.
+
+Lagrange's independent Sol-xhigh activation review classified this as a
+repair-required producer/activation-fixture defect and confirmed that it is not
+a valid activation or valid negative activation. The treatment had no
+`one_sided` CDF decision; treatment and mode-off streams were identical through
+the failure. Strict valuation was not weakened, no fallback mark or forced
+quote was introduced, and no economic configuration was changed.
+
+This boundary is recorded in
+`research/v2-r2-sv1d-activation-gate-triage-2026-09-10.md`. The shared empty-book
+reachability and producer path must be diagnosed before any rerun. No
+`dev-607`, `dev-613`, `dev-617`, freeze, or holdout run occurred; holdouts
+`619`, `631`, and `641` remain untouched. Historical R2 and SV1C artifacts and
+verdicts remain unchanged. The async performance feed remains reviewed through
+`b1847ac`; no auxiliary implementation was imported.
