@@ -96,3 +96,41 @@ The candidate may proceed only through the following bounded sequence:
    cell.
 
 No holdout is authorized by this note.
+
+## Post-review contract repair checkpoint — 2026-09-10
+
+An independent Sol-xhigh review by Schrodinger inspected the immutable
+pre-repair candidate at `2d31abb` (the review was read-only and did not run a
+world). It rejected promotion on three contract findings:
+
+| finding | intended invariant | repair |
+| --- | --- | --- |
+| terminal-negative comparison classification was unreachable because the scorer first required `valid == true` | a valid, reconstructible terminal valuation failure is valid negative evidence even though it makes no activation claim | `v2_r2_sv1d_classify_comparison` recognizes `UNAVAILABLE_TERMINAL_FAILURE` only when evidence/provenance are valid; the scorer consumes that single classifier and binds its published status to the embedded comparison |
+| capacity attestation closed only the cell while the measured namespace was the probe root | every measured direct root artifact must be enumerated and integrity-bound | the capacity runner and validator require the exact root shape (one cell plus `config.stderr.log`) and hash the root-level normalization stderr |
+| scorer provenance claims were not all bound to the embedded comparison | status, activation, paths, hashes, exit status, validity, and terminal-negative claims must agree with the comparison actually scored | scorer-side coherence validation now compares all published top-level and nested comparison claims against the reconstructed comparison and actual files |
+
+The rejected state was not given a review attestation and did not authorize
+capacity, activation, development, freeze, or holdout execution. The minimal
+semantic repair is committed in `789e2bf`; the deliberately retired and
+regenerated SV1D artifacts are separate mechanical commits. It preserves the
+R2 calendar, finite supplier economics, historical JSON evidence, and the
+SV1C predecessor's negative result.
+
+At the repaired candidate, before the final documentation-bound regeneration:
+
+- the SV1D config checker and expanded activation-contract fixture passed;
+- `go vet ./...` passed;
+- the uncached focused suite passed: `evstream` 0.178 s, `types` 0.012 s,
+  `exchange` 2.662 s, and `simulations/multivenue` 1002.515 s;
+- race gates passed for `exchange` (16.457 s), `tests` (42.743 s), and the
+  selected evidence/calendar/risk/CDF multivenue matrix (5.311 s);
+- the asynchronous performance, CDF-port, and economic-audit refs were
+  fetched at their recorded tips and had no newer commits;
+- no capacity probe, seed-659 activation probe, development cell, 24-hour
+  world, freeze, or holdout was run.
+
+The default ten-minute `make test` behavior remains a separately measured
+runtime concern because the existing fresh-process multivenue test exceeds
+that limit; the final candidate gate must record the explicit longer-timeout
+full make invocation and its result. The final exact-tree Sol-xhigh review is
+still required before any capacity measurement or activation probe.

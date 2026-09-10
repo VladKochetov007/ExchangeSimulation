@@ -202,3 +202,32 @@ review, checkpoint validator, evidence manifest, terminal outcome, binary
 hashes, and observed resource measurements. No capacity probe, activation
 probe, development cell, 24-hour world, or holdout has run from this
 revision.
+
+## Post-review contract repair checkpoint — 2026-09-10
+
+Schrodinger's independent Sol-xhigh review of the immutable pre-repair
+candidate at `2d31abb` rejected promotion. It identified three contract gaps:
+the scorer could not classify valid terminal-negative evidence because it
+required `valid == true` first; the capacity attestation did not close the
+measured probe root or bind its root-level normalization stderr; and the
+scorer did not bind all published provenance claims to the embedded comparison
+and its actual file/hash.
+
+The minimal repair is committed in `789e2bf`. The activation contract now has
+one classifier for ordinary and terminal-negative comparisons, the scorer
+requires coherence between recomputed and published comparison claims, and
+the capacity runner/validator enforce the exact probe-root inventory and
+`config.stderr.log` hash. The subsequent generated-config retirement and
+regeneration commits are mechanical provenance maintenance; the R2 calendar,
+finite CDF supplier economics, historical evidence, and SV1C negative control
+are unchanged.
+
+The repaired source passed the expanded SV1D checker/contract fixtures,
+`go vet ./...`, the uncached focused package suite (including multivenue in
+1002.515 seconds), exchange/tests/selected-multivenue race gates, and
+`git diff --check`. The default ten-minute `make test` timeout remains a
+known runtime limitation of the pre-existing fresh-process multivenue test;
+the final gate will use and record the explicit longer timeout. No review
+attestation, capacity measurement, seed-659 activation probe, development
+cell, 24-hour world, freeze, or holdout has been created from the repaired
+candidate.
