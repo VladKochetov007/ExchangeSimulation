@@ -126,7 +126,7 @@ func TestCDFSupplierValidSnapshotPreservesRiskMarkUntilRiskUpdate(t *testing.T) 
 	if supplier.riskMarkPrice != 777 {
 		t.Fatalf("valid snapshot cleared risk mark before risk update: got %d, want 777", supplier.riskMarkPrice)
 	}
-	if len(decisions) != 1 || decisions[0].Action != "wait" || decisions[0].Reason != "order_pending" || decisions[0].RiskMarkPrice != 777 {
+	if len(decisions) != 1 || decisions[0].Action != "wait" || decisions[0].Reason != "order_pending" || decisions[0].RiskMarkPrice != 777 || decisions[0].RiskMarkCurrent {
 		t.Fatalf("valid snapshot early-return decision = %+v, want pending with risk mark 777", decisions)
 	}
 }
@@ -207,7 +207,7 @@ func TestCDFSupplierQuotesMissingBidOnlyWithNoGrossInventory(t *testing.T) {
 		t.Fatalf("missing-bid order = %+v, want bounded buy of 50 at 700", orders[0])
 	}
 	decision := decisions[len(decisions)-1]
-	if decision.RiskMarkSource != "one_sided_ask_zero_inventory" || !decision.EquityAvailable {
+	if decision.RiskMarkSource != "one_sided_ask_zero_inventory" || !decision.EquityAvailable || !decision.RiskMarkCurrent {
 		t.Fatalf("missing-bid risk provenance = %+v", decision)
 	}
 }

@@ -25,7 +25,7 @@ func TestCDFBinarySchemasRoundTripThroughRenderer(t *testing.T) {
 		QuoteRequestID: 21, CancelRequestID: 22, QuoteSubmittedAt: 101, QuoteCashAvailable: 500,
 		QuoteCashReserved: 100, QuoteCashRequired: 104, InitialEquityQuote: 2_000,
 		EquityQuote: 1_990, PeakEquityQuote: 2_010, LossFromInitialQuote: 10, DrawdownQuote: 20,
-		MaxLossQuote: 100, EquityAvailable: true, RiskLimitTriggered: false,
+		MaxLossQuote: 100, EquityAvailable: true, RiskLimitTriggered: false, RiskMarkCurrent: true,
 	}
 	fill := ElasticLiquiditySupplierFill{
 		Role: "cdf_elastic_supplier_1", ClientID: 7, Symbol: "CDF/USD", OrderID: 20, TradeID: 55,

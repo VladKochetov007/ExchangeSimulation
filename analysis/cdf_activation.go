@@ -299,6 +299,9 @@ type cdfSupplierState struct {
 	referenceUpdatedAt     int64
 	referenceUpdateSet     bool
 	reconstructedRiskMark  int64
+	reconstructedEquity    int64
+	reconstructedPeak      int64
+	equityStateSet         bool
 	lastDecision           cdfDecisionEvidence
 	hasLastDecision        bool
 	fillResponses          []cdfFillResponseWindow
@@ -335,6 +338,7 @@ type cdfDecisionEvidence struct {
 	BestAskQty                     int64  `json:"best_ask_qty"`
 	MarkPrice                      int64  `json:"mark_price"`
 	RiskMarkPrice                  int64  `json:"risk_mark_price"`
+	RiskMarkCurrent                bool   `json:"risk_mark_current"`
 	LocalBookMode                  string `json:"local_book_mode"`
 	QuotePriceSource               string `json:"quote_price_source"`
 	RiskMarkSource                 string `json:"risk_mark_source"`
@@ -1226,6 +1230,9 @@ func (r *CDFActivationAudit) indexCDFAccounts(report Report, config cdfActivatio
 			contract: supplier, initialAccountSeen: true,
 			reconstructedReference: supplier.ReferencePrice,
 			reconstructedRiskMark:  supplier.ReferencePrice,
+			reconstructedEquity:    row.Account.Equity,
+			reconstructedPeak:      row.Account.Equity,
+			equityStateSet:         true,
 			audit: CDFSupplierActivationAudit{
 				VenueID: row.VenueID, Role: row.Role, ClientID: row.ClientID,
 				InitialEquity: row.Account.Equity, MinPosition: math.MaxInt64, MaxPosition: math.MinInt64,
@@ -1607,6 +1614,9 @@ func (r *CDFActivationAudit) processCDFDecision(
 		"equity_quote", "peak_equity_quote", "loss_from_initial_quote", "drawdown_quote",
 		"max_loss_quote", "equity_available", "risk_limit_triggered",
 	}
+	if r.strictMechanics {
+		required = append(required, "risk_mark_current")
+	}
 	if err := decodeRequiredJSON(event.Raw(), &decision, required...); err != nil {
 		r.addCheck(CDFActivationCheck{VenueID: event.VenueID, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "malformed CDF decision: " + err.Error()})
 		return
@@ -1646,22 +1656,6 @@ func (r *CDFActivationAudit) processCDFDecision(
 		decision.QuoteCashAvailable < 0 || decision.QuoteCashReserved < 0 {
 		r.addEventCheck(event, state, "CDF decision carries invalid finite cash or loss state")
 	}
-	expectedLoss, lossOK := checkedCDFSub(state.audit.InitialEquity, decision.EquityQuote)
-	if expectedLoss < 0 {
-		expectedLoss = 0
-	}
-	expectedDrawdown, drawdownOK := checkedCDFSub(decision.PeakEquityQuote, decision.EquityQuote)
-	if expectedDrawdown < 0 {
-		expectedDrawdown = 0
-	}
-	if decision.InitialEquityQuote != state.audit.InitialEquity || decision.PeakEquityQuote < decision.EquityQuote ||
-		!lossOK || !drawdownOK || decision.LossFromInitialQuote != expectedLoss || decision.DrawdownQuote != expectedDrawdown ||
-		decision.EquityAvailable && decision.RiskMarkPrice <= 0 {
-		r.addEventCheck(event, state, "CDF decision equity and loss evidence is internally inconsistent")
-	}
-	if !isCDFAction(decision.Action) || decision.Reason == "" {
-		r.addEventCheck(event, state, "CDF decision has an unknown action or empty reason")
-	}
 	joinedSnapshot := r.validateCDFObservation(event, state, decision, receipts, snapshots)
 	if joinedSnapshot {
 		state.audit.EligibleObservationCount++
@@ -1671,8 +1665,34 @@ func (r *CDFActivationAudit) processCDFDecision(
 			state.reconstructedReference = decision.ReferencePrice
 		}
 	}
+	mechanicsValid := true
 	if r.strictMechanics {
-		r.validateCDFDecisionMechanics(event, state, decision)
+		mechanicsValid = r.validateCDFDecisionMechanics(event, state, decision)
+	}
+	expectedPeak := decision.PeakEquityQuote
+	if r.strictMechanics {
+		expectedPeak = r.validateCDFDecisionEquity(event, state, decision, mechanicsValid)
+	}
+	expectedLoss, lossOK := checkedCDFSub(state.audit.InitialEquity, decision.EquityQuote)
+	if expectedLoss < 0 {
+		expectedLoss = 0
+	}
+	drawdownPeak := decision.PeakEquityQuote
+	if r.strictMechanics {
+		drawdownPeak = expectedPeak
+	}
+	expectedDrawdown, drawdownOK := checkedCDFSub(drawdownPeak, decision.EquityQuote)
+	if expectedDrawdown < 0 {
+		expectedDrawdown = 0
+	}
+	if decision.InitialEquityQuote != state.audit.InitialEquity || decision.PeakEquityQuote < decision.EquityQuote ||
+		!lossOK || !drawdownOK || decision.LossFromInitialQuote != expectedLoss || decision.DrawdownQuote != expectedDrawdown ||
+		decision.PeakEquityQuote != expectedPeak ||
+		decision.RiskMarkCurrent && (!decision.EquityAvailable || decision.RiskMarkPrice <= 0) {
+		r.addEventCheck(event, state, "CDF decision equity and loss evidence is internally inconsistent")
+	}
+	if !isCDFAction(decision.Action) || decision.Reason == "" {
+		r.addEventCheck(event, state, "CDF decision has an unknown action or empty reason")
 	}
 	r.recordCDFPostFillResponse(event, state, decision)
 	requestKey := cdfRequestKey{event.VenueID, event.ClientID, decision.QuoteRequestID}
@@ -1767,6 +1787,9 @@ func (r *CDFActivationAudit) validateCDFObservation(
 		return false
 	}
 	expectedMode := cdfLocalBookMode(bestBid, bestBidQty, bestAsk, bestAskQty, state.contract.TickSize)
+	if cdfDecisionIsUncomputed(decision) {
+		return true
+	}
 	if decision.LocalBookMode != expectedMode {
 		r.addEventCheck(event, state, "CDF decision local-book mode differs from its delayed public snapshot")
 		return false
@@ -1871,14 +1894,27 @@ func minCDFInt64(left, right int64) int64 {
 	return right
 }
 
-func (r *CDFActivationAudit) validateCDFDecisionMechanics(event Event, state *cdfSupplierState, decision cdfDecisionEvidence) {
+func (r *CDFActivationAudit) validateCDFDecisionMechanics(event Event, state *cdfSupplierState, decision cdfDecisionEvidence) bool {
+	valid := true
 	if decision.ReferencePrice <= 0 {
 		r.addEventCheck(event, state, "CDF decision has a non-positive private reference")
+		valid = false
 	}
 	expectedReference := state.reconstructedReference
 	expectedUpdatedAt := state.referenceUpdatedAt
 	expectedUpdateSet := state.referenceUpdateSet
 	anchor, hasAnchor := cdfLocalAnchor(decision, state.contract)
+	if cdfDecisionIsUncomputed(decision) {
+		if decision.ReferencePrice != expectedReference {
+			r.addEventCheck(event, state, "CDF private reference does not match the last computed actor state")
+			valid = false
+		}
+		if decision.RiskMarkPrice < 0 || decision.RiskMarkPrice != 0 && decision.RiskMarkPrice != state.reconstructedRiskMark {
+			r.addEventCheck(event, state, "CDF uncomputed decision does not preserve the last coherent risk mark")
+			valid = false
+		}
+		return valid
+	}
 	if hasAnchor {
 		expectedReference, expectedUpdatedAt, expectedUpdateSet = advanceCDFReference(
 			expectedReference, expectedUpdatedAt, expectedUpdateSet, anchor, decision.DecisionTime, state.contract.ReferenceHalfLife,
@@ -1886,26 +1922,34 @@ func (r *CDFActivationAudit) validateCDFDecisionMechanics(event Event, state *cd
 	}
 	if decision.ReferencePrice != expectedReference {
 		r.addEventCheck(event, state, "CDF private reference does not match the registered delayed-anchor update")
+		valid = false
 	}
-	state.reconstructedReference = expectedReference
-	state.referenceUpdatedAt = expectedUpdatedAt
-	state.referenceUpdateSet = expectedUpdateSet
+	if decision.ReferencePrice == expectedReference {
+		state.reconstructedReference = expectedReference
+		state.referenceUpdatedAt = expectedUpdatedAt
+		state.referenceUpdateSet = expectedUpdateSet
+	}
 
 	if !hasAnchor {
 		if decision.MarkPrice != 0 || decision.TargetPosition != 0 {
 			r.addEventCheck(event, state, "CDF decision reports mark or target without a valid local anchor")
+			valid = false
 		}
-		if decision.RiskMarkPrice != state.reconstructedRiskMark {
-			r.addEventCheck(event, state, "CDF decision risk mark does not preserve the last coherent mark")
+		if decision.RiskMarkCurrent || decision.RiskMarkSource != "" || decision.RiskMarkPrice < 0 ||
+			decision.RiskMarkPrice != 0 && decision.RiskMarkPrice != state.reconstructedRiskMark {
+			r.addEventCheck(event, state, "CDF decision risk mark is unavailable without a valid local anchor")
+			valid = false
 		}
-		return
+		return valid
 	}
 	if decision.MarkPrice != anchor {
 		r.addEventCheck(event, state, "CDF decision mark does not match its independently reconstructed local anchor")
+		valid = false
 	}
 	expectedTarget := cdfTargetPosition(expectedReference, anchor, state.contract)
 	if decision.TargetPosition != expectedTarget {
 		r.addEventCheck(event, state, "CDF decision target does not match the registered inventory elasticity")
+		valid = false
 	}
 	expectedRiskMark := anchor
 	expectedRiskSource := "two_sided_midpoint"
@@ -1913,7 +1957,7 @@ func (r *CDFActivationAudit) validateCDFDecisionMechanics(event Event, state *cd
 		grossInventory, ok := checkedCDFAdd(state.contract.InitialBaseBalance, decision.Position)
 		if !ok || grossInventory < 0 {
 			r.addEventCheck(event, state, "CDF one-sided risk mark cannot establish finite gross inventory")
-			return
+			return false
 		}
 		if decision.BestAsk > 0 && grossInventory > 0 {
 			expectedRiskMark = 0
@@ -1929,10 +1973,59 @@ func (r *CDFActivationAudit) validateCDFDecisionMechanics(event Event, state *cd
 	}
 	if decision.RiskMarkPrice != expectedRiskMark || decision.RiskMarkSource != expectedRiskSource {
 		r.addEventCheck(event, state, "CDF decision risk mark does not match the registered local-book risk rule")
+		valid = false
 	}
-	if expectedRiskMark > 0 {
+	if decision.RiskMarkCurrent && expectedRiskMark <= 0 {
+		r.addEventCheck(event, state, "CDF decision claims a current risk mark that the local book cannot provide")
+		valid = false
+	}
+	if valid && decision.RiskMarkCurrent && expectedRiskMark > 0 {
 		state.reconstructedRiskMark = expectedRiskMark
 	}
+	return valid
+}
+
+func cdfDecisionIsUncomputed(decision cdfDecisionEvidence) bool {
+	return !decision.RiskMarkCurrent && decision.MarkPrice == 0 && decision.TargetPosition == 0 &&
+		decision.QuotePriceSource == "" && decision.RiskMarkSource == ""
+}
+
+func (r *CDFActivationAudit) validateCDFDecisionEquity(event Event, state *cdfSupplierState, decision cdfDecisionEvidence, mechanicsValid bool) int64 {
+	if !state.equityStateSet {
+		state.reconstructedEquity = state.audit.InitialEquity
+		state.reconstructedPeak = state.audit.InitialEquity
+		state.equityStateSet = true
+	}
+	expectedEquity := state.reconstructedEquity
+	canReconstruct := mechanicsValid && decision.RiskMarkCurrent && decision.EquityAvailable && decision.RiskMarkPrice > 0 && decision.RiskMarkSource != ""
+	expectedCash, cashOK := checkedCDFAdd(state.initialQuoteBalance, state.fillQuoteDelta)
+	reportedCash, reportedCashOK := checkedCDFAdd(decision.QuoteCashAvailable, decision.QuoteCashReserved)
+	if !cashOK || !reportedCashOK || expectedCash != reportedCash {
+		r.addEventCheck(event, state, "CDF decision quote cash does not match the actor-visible fill ledger")
+	}
+	if canReconstruct {
+		var ok bool
+		expectedEquity, ok = cdfMarkedPositionEquity(decision.Position, decision.RiskMarkPrice,
+			expectedCash, 0, state.contract)
+		if !ok || expectedEquity != decision.EquityQuote {
+			r.addEventCheck(event, state, "CDF available equity does not match the marked position and quote cash")
+			expectedEquity = state.reconstructedEquity
+		}
+	} else if decision.EquityQuote != state.reconstructedEquity {
+		r.addEventCheck(event, state, "CDF unavailable equity changed without a verifiable mark")
+	}
+	expectedPeak := state.reconstructedPeak
+	if canReconstruct && expectedEquity > expectedPeak {
+		expectedPeak = expectedEquity
+	}
+	if decision.PeakEquityQuote != expectedPeak {
+		r.addEventCheck(event, state, "CDF peak equity is not the reconstructed monotone peak")
+	}
+	if canReconstruct {
+		state.reconstructedEquity = expectedEquity
+	}
+	state.reconstructedPeak = expectedPeak
+	return expectedPeak
 }
 
 func (r *CDFActivationAudit) recordCDFPostFillResponse(event Event, state *cdfSupplierState, decision cdfDecisionEvidence) {
@@ -2047,17 +2140,15 @@ func (r *CDFActivationAudit) processCDFFill(event Event, states map[cdfParticipa
 		r.addEventCheck(event, state, "CDF supplier fill fee does not match the registered maker fee")
 		return
 	}
-	if !r.strictMechanics {
-		baseDelta, quoteDelta, deltaOK := cdfExchangeFillBalanceDelta(fill.Side, notional, fill.Qty, fill.FeeAmount)
-		updatedBase, baseDeltaOK := checkedCDFAdd(state.fillBaseDelta, baseDelta)
-		updatedQuote, quoteDeltaOK := checkedCDFAdd(state.fillQuoteDelta, quoteDelta)
-		if !deltaOK || !baseDeltaOK || !quoteDeltaOK {
-			r.addEventCheck(event, state, "CDF supplier fill balance delta overflows")
-			return
-		}
-		state.fillBaseDelta = updatedBase
-		state.fillQuoteDelta = updatedQuote
+	baseDelta, quoteDelta, deltaOK := cdfExchangeFillBalanceDelta(fill.Side, notional, fill.Qty, fill.FeeAmount)
+	updatedBase, baseDeltaOK := checkedCDFAdd(state.fillBaseDelta, baseDelta)
+	updatedQuote, quoteDeltaOK := checkedCDFAdd(state.fillQuoteDelta, quoteDelta)
+	if !deltaOK || !baseDeltaOK || !quoteDeltaOK {
+		r.addEventCheck(event, state, "CDF supplier fill balance delta overflows")
+		return
 	}
+	state.fillBaseDelta = updatedBase
+	state.fillQuoteDelta = updatedQuote
 	observed[key] = fill
 	preFillDecision := state.lastDecision
 	preFillKnown := state.hasLastDecision
@@ -2896,6 +2987,27 @@ func cdfMarkedAccountEquity(row AccountRow, supplier CDFSupplierContract) (int64
 		}
 	}
 	return total, true
+}
+
+func cdfMarkedPositionEquity(position, riskMark, quoteAvailable, quoteReserved int64, supplier CDFSupplierContract) (int64, bool) {
+	if riskMark <= 0 || quoteAvailable < 0 || quoteReserved < 0 || supplier.BasePrecision <= 0 {
+		return 0, false
+	}
+	grossInventory, ok := checkedCDFAdd(supplier.InitialBaseBalance, position)
+	if !ok || grossInventory < 0 {
+		return 0, false
+	}
+	notional := new(big.Int).Mul(big.NewInt(grossInventory), big.NewInt(riskMark))
+	notional.Quo(notional, big.NewInt(supplier.BasePrecision))
+	cash, ok := checkedCDFAdd(quoteAvailable, quoteReserved)
+	if !ok {
+		return 0, false
+	}
+	equity := new(big.Int).Add(notional, big.NewInt(cash))
+	if !equity.IsInt64() {
+		return 0, false
+	}
+	return equity.Int64(), true
 }
 
 func cdfActivationNotional(price, quantity, basePrecision int64) (int64, bool) {

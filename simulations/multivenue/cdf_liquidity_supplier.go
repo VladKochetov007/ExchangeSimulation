@@ -196,6 +196,7 @@ type ElasticLiquiditySupplierDecision struct {
 	BestAskQty                     int64  `json:"best_ask_qty"`
 	MarkPrice                      int64  `json:"mark_price"`
 	RiskMarkPrice                  int64  `json:"risk_mark_price"`
+	RiskMarkCurrent                bool   `json:"risk_mark_current"`
 	LocalBookMode                  string `json:"local_book_mode"`
 	QuotePriceSource               string `json:"quote_price_source"`
 	RiskMarkSource                 string `json:"risk_mark_source"`
@@ -780,6 +781,7 @@ func (s *ElasticLiquiditySupplier) onTick(now time.Time) {
 	decision = s.baseDecision(now.UnixNano())
 	decision.MarkPrice, decision.ReferencePrice, decision.TargetPosition = localBook.anchorPrice, s.reference, target
 	decision.LocalBookMode, decision.RiskMarkSource = localBook.localBookMode, localBook.riskMarkSource
+	decision.RiskMarkCurrent = true
 	if s.riskLimitTriggered {
 		decision.Action, decision.Reason = s.withdrawIfNeeded("loss_limit")
 		decision.CancelRequestID = s.cancelRequestID

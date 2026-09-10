@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -581,7 +582,7 @@ func appendCDFParticipantEvents(
 	postDecision.QuoteSubmittedAt = postDecisionAt
 	postDecision.QuoteCashAvailable = supplier.InitialQuoteBalance - notional - fee
 	postDecision.QuoteCashRequired = 0
-	postDecision.EquityQuote = cdfFixtureTerminalEquity(supplier, supplier.InitialBaseBalance+quantity, supplier.InitialQuoteBalance-notional-fee)
+	postDecision.EquityQuote = cdfFixtureEquityAtMark(supplier, postDecision.RiskMarkPrice, supplier.InitialBaseBalance+quantity, supplier.InitialQuoteBalance-notional-fee)
 	postDecision.PeakEquityQuote = maxCDFTestInt64(initialEquity, postDecision.EquityQuote)
 	postDecision.LossFromInitialQuote = maxCDFTestInt64(0, initialEquity-postDecision.EquityQuote)
 	postDecision.DrawdownQuote = postDecision.PeakEquityQuote - postDecision.EquityQuote
@@ -647,7 +648,7 @@ func cdfFixtureDecision(
 		ObservationFingerprint: hex.EncodeToString(frontier.Fingerprint[:]),
 		ObservationDigest:      hex.EncodeToString(frontier.Digest[:]),
 		BestBid:                bestBid, BestBidQty: bestBidQty, BestAsk: bestAsk, BestAskQty: bestAskQty,
-		MarkPrice: mark, RiskMarkPrice: mark, LocalBookMode: mode,
+		MarkPrice: mark, RiskMarkPrice: mark, RiskMarkCurrent: true, LocalBookMode: mode,
 		QuotePriceSource: quoteSource, RiskMarkSource: riskSource,
 		ReferencePrice: supplier.ReferencePrice, Position: 0, TargetPosition: supplier.MinimumQualifyingQty,
 		InventoryLimit: supplier.MaxPosition, InitialBaseBalance: supplier.InitialBaseBalance,
@@ -730,6 +731,10 @@ func cdfFixtureInitialEquity(supplier CDFSupplierContract) int64 {
 
 func cdfFixtureTerminalEquity(supplier CDFSupplierContract, baseBalance, quoteBalance int64) int64 {
 	return cdfFixtureNotional(supplier.ReferencePrice, baseBalance, supplier.BasePrecision) + quoteBalance
+}
+
+func cdfFixtureEquityAtMark(supplier CDFSupplierContract, mark, baseBalance, quoteBalance int64) int64 {
+	return cdfFixtureNotional(mark, baseBalance, supplier.BasePrecision) + quoteBalance
 }
 
 func maxCDFTestInt64(left, right int64) int64 {
@@ -888,6 +893,98 @@ func TestCDFReferenceAndTargetReconstructionMatchesRegisteredFormulas(t *testing
 	contract := RegisteredSV1DActivationContract().Suppliers[0]
 	if got := cdfTargetPosition(300_000_000, 299_900_000, contract); got != 399_999_999 {
 		t.Fatalf("target position = %d, want 399999999", got)
+	}
+}
+
+func TestCDFMarkedPositionEquityUsesCheckedInventoryAndCash(t *testing.T) {
+	contract := RegisteredSV1DActivationContract().Suppliers[0]
+	mark := contract.ReferencePrice - contract.TickSize
+	position := contract.MinimumQualifyingQty
+	quoteAvailable := contract.InitialQuoteBalance - cdfFixtureNotional(mark, position, contract.BasePrecision)
+	quoteReserved := int64(17)
+	want := cdfFixtureNotional(mark, contract.InitialBaseBalance+position, contract.BasePrecision) + quoteAvailable + quoteReserved
+	if got, ok := cdfMarkedPositionEquity(position, mark, quoteAvailable, quoteReserved, contract); !ok || got != want {
+		t.Fatalf("marked position equity = (%d, %t), want (%d, true)", got, ok, want)
+	}
+	invalid := []struct {
+		name           string
+		position       int64
+		mark           int64
+		quoteAvailable int64
+		quoteReserved  int64
+	}{
+		{name: "non-positive mark", position: 0, mark: 0, quoteAvailable: 1, quoteReserved: 0},
+		{name: "negative available cash", position: 0, mark: mark, quoteAvailable: -1, quoteReserved: 0},
+		{name: "negative reserved cash", position: 0, mark: mark, quoteAvailable: 1, quoteReserved: -1},
+		{name: "inventory overflow", position: math.MaxInt64, mark: mark, quoteAvailable: 1, quoteReserved: 0},
+		{name: "cash overflow", position: 0, mark: mark, quoteAvailable: math.MaxInt64, quoteReserved: 1},
+	}
+	for _, test := range invalid {
+		t.Run(test.name, func(t *testing.T) {
+			if got, ok := cdfMarkedPositionEquity(test.position, test.mark, test.quoteAvailable, test.quoteReserved, contract); ok {
+				t.Fatalf("invalid marked equity = (%d, true)", got)
+			}
+		})
+	}
+}
+
+func TestCDFStrictDecisionStateDistinguishesCachedAndCurrentMarks(t *testing.T) {
+	contract := RegisteredSV1DActivationContract().Suppliers[0]
+	initialEquity := cdfFixtureInitialEquity(contract)
+	state := &cdfSupplierState{
+		contract:               contract,
+		initialBaseBalance:     contract.InitialBaseBalance,
+		initialQuoteBalance:    contract.InitialQuoteBalance,
+		reconstructedReference: contract.ReferencePrice,
+		reconstructedRiskMark:  contract.ReferencePrice,
+		reconstructedEquity:    initialEquity,
+		reconstructedPeak:      initialEquity,
+		equityStateSet:         true,
+		audit:                  CDFSupplierActivationAudit{Role: contract.Role, InitialEquity: initialEquity},
+	}
+	audit := &CDFActivationAudit{strictMechanics: true}
+	uncurrent := cdfDecisionEvidence{
+		ReferencePrice: contract.ReferencePrice, RiskMarkPrice: 0, RiskMarkCurrent: false,
+		EquityQuote: initialEquity, PeakEquityQuote: initialEquity,
+		QuoteCashAvailable: contract.InitialQuoteBalance,
+	}
+	if !audit.validateCDFDecisionMechanics(Event{VenueID: "north", ClientID: 7}, state, uncurrent) {
+		t.Fatalf("cached-equity decision was rejected: %+v", audit.Checks)
+	}
+	if got := audit.validateCDFDecisionEquity(Event{VenueID: "north", ClientID: 7}, state, uncurrent, true); got != initialEquity || len(audit.Checks) != 0 {
+		t.Fatalf("cached-equity decision changed state: peak=%d checks=%+v", got, audit.Checks)
+	}
+
+	quantity := contract.MinimumQualifyingQty
+	notional := cdfFixtureNotional(contract.ReferencePrice, quantity, contract.BasePrecision)
+	fee := cdfFixtureFee(contract.ReferencePrice, quantity, contract.BasePrecision, contract.MakerFeeBps)
+	state.fillQuoteDelta = -(notional + fee)
+	expectedCash := contract.InitialQuoteBalance + state.fillQuoteDelta
+	state.currentPosition = quantity
+	current := uncurrent
+	current.BestBid, current.BestBidQty = contract.ReferencePrice-contract.TickSize, quantity
+	current.BestAsk, current.BestAskQty = contract.ReferencePrice+contract.TickSize, quantity
+	current.MarkPrice, current.RiskMarkPrice, current.RiskMarkCurrent = contract.ReferencePrice, contract.ReferencePrice, true
+	current.EquityAvailable = true
+	current.LocalBookMode, current.RiskMarkSource = "two_sided", "two_sided_midpoint"
+	current.ReferencePrice, current.Position, current.TargetPosition = contract.ReferencePrice, quantity, contract.BaseHolding
+	current.GrossInventory = contract.InitialBaseBalance + quantity
+	current.QuoteCashAvailable, current.QuoteCashReserved = expectedCash, 0
+	current.EquityQuote = cdfFixtureEquityAtMark(contract, contract.ReferencePrice, current.GrossInventory, expectedCash)
+	current.PeakEquityQuote = maxCDFTestInt64(initialEquity, current.EquityQuote)
+	current.LossFromInitialQuote = maxCDFTestInt64(0, initialEquity-current.EquityQuote)
+	current.DrawdownQuote = current.PeakEquityQuote - current.EquityQuote
+	if !audit.validateCDFDecisionMechanics(Event{VenueID: "north", ClientID: 7}, state, current) {
+		t.Fatalf("current-mark decision mechanics were rejected: %+v", audit.Checks)
+	}
+	if got := audit.validateCDFDecisionEquity(Event{VenueID: "north", ClientID: 7}, state, current, true); got != current.PeakEquityQuote || len(audit.Checks) != 0 {
+		t.Fatalf("current-mark decision was rejected: peak=%d checks=%+v", got, audit.Checks)
+	}
+	forged := current
+	forged.QuoteCashAvailable++
+	audit.validateCDFDecisionEquity(Event{VenueID: "north", ClientID: 7}, state, forged, true)
+	if !hasCDFActivationFailure(audit.Checks, "CDF decision quote cash does not match the actor-visible fill ledger") {
+		t.Fatalf("forged actor cash passed: %+v", audit.Checks)
 	}
 }
 

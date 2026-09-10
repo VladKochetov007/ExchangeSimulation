@@ -40,7 +40,7 @@ func (d ElasticLiquiditySupplierDecision) SchemaID() uint16 {
 	return SchemaElasticLiquiditySupplierDecision
 }
 
-func (d ElasticLiquiditySupplierDecision) SchemaVersion() uint16 { return 1 }
+func (d ElasticLiquiditySupplierDecision) SchemaVersion() uint16 { return 2 }
 
 func (d ElasticLiquiditySupplierDecision) AppendPayloadInterning(dst []byte, in evstream.Interner) ([]byte, error) {
 	start := len(dst)
@@ -133,10 +133,15 @@ func (d ElasticLiquiditySupplierDecision) AppendPayloadInterning(dst []byte, in 
 	dst = evstream.AppendInt64(dst, d.DrawdownQuote)
 	dst = evstream.AppendInt64(dst, d.MaxLossQuote)
 	dst = evstream.AppendBool(dst, d.EquityAvailable)
-	return evstream.AppendBool(dst, d.RiskLimitTriggered), nil
+	dst = evstream.AppendBool(dst, d.RiskLimitTriggered)
+	return evstream.AppendBool(dst, d.RiskMarkCurrent), nil
 }
 
 func decodeElasticLiquiditySupplierDecision(payload []byte, resolve evstream.Resolver, into *ElasticLiquiditySupplierDecision) error {
+	return decodeElasticLiquiditySupplierDecisionVersioned(payload, resolve, into, 1)
+}
+
+func decodeElasticLiquiditySupplierDecisionVersioned(payload []byte, resolve evstream.Resolver, into *ElasticLiquiditySupplierDecision, schemaVersion uint16) error {
 	cursor := evstream.NewCursor(payload)
 	presence := cursor.Presence(cdfDecisionOptionalFields)
 	var stringRefs [10]uint32
@@ -184,6 +189,9 @@ func decodeElasticLiquiditySupplierDecision(payload []byte, resolve evstream.Res
 	into.MaxLossQuote = cursor.Int64()
 	into.EquityAvailable = cursor.Bool()
 	into.RiskLimitTriggered = cursor.Bool()
+	if schemaVersion >= 2 {
+		into.RiskMarkCurrent = cursor.Bool()
+	}
 	if err := cursor.Err(); err != nil {
 		return err
 	}
@@ -294,11 +302,11 @@ func decodeElasticLiquiditySupplierFill(payload []byte, resolve evstream.Resolve
 func renderCDFPayloadJSONVersioned(schemaID, schemaVersion uint16, payload []byte, resolve evstream.Resolver) ([]byte, bool, error) {
 	switch schemaID {
 	case SchemaElasticLiquiditySupplierDecision:
-		if schemaVersion != 1 {
+		if schemaVersion != 1 && schemaVersion != 2 {
 			return nil, true, fmt.Errorf("%w: unsupported CDF decision schema version %d", evstream.ErrCorrupt, schemaVersion)
 		}
 		var value ElasticLiquiditySupplierDecision
-		if err := decodeElasticLiquiditySupplierDecision(payload, resolve, &value); err != nil {
+		if err := decodeElasticLiquiditySupplierDecisionVersioned(payload, resolve, &value, schemaVersion); err != nil {
 			return nil, true, err
 		}
 		raw, err := json.Marshal(value)
