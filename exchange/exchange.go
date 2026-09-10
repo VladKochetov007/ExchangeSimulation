@@ -1075,6 +1075,10 @@ func (e *DefaultExchange) handleClientRequest(gateway *ClientGateway, req Reques
 
 	permit, rejection, admitted := e.admitRequest(gateway.ClientID, req)
 	if !admitted {
+		if req.Type == ReqCancelOrder && req.CancelReq != nil {
+			rejection.RequestID = req.CancelReq.RequestID
+			e.logCancelRejection(e.getLogger("_global"), gateway.ClientID, req.CancelReq, rejection)
+		}
 		gateway.enqueueResponse(rejection)
 		return
 	}

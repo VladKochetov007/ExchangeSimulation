@@ -175,6 +175,43 @@ func TestExchangeForcedCancellationIsLoggedWithoutActorRequest(t *testing.T) {
 	}
 }
 
+func TestCancelRejectionEvidenceIncludesOrderAndRequestIdentity(t *testing.T) {
+	ex := newPostOnlyTestExchange(t)
+	global := &recordingLogger{}
+	ex.SetLogger("_global", global)
+	response := ex.PlaceOrder(1, &OrderRequest{
+		RequestID: 73, Symbol: "ABC/USD", Side: Buy, Type: LimitOrder,
+		Price: 99, Qty: 2, TimeInForce: GTC, Visibility: Normal,
+	})
+	if !response.Success {
+		t.Fatalf("resting order rejected: %+v", response)
+	}
+	orderID := response.Data.(uint64)
+	if cancel := ex.CancelOrder(1, &CancelRequest{RequestID: 74, OrderID: orderID}); !cancel.Success {
+		t.Fatalf("initial cancellation rejected: %+v", cancel)
+	}
+	if retry := ex.CancelOrder(1, &CancelRequest{RequestID: 75, OrderID: orderID}); retry.Success || retry.Error != RejectOrderNotFound {
+		t.Fatalf("retry cancellation = %+v", retry)
+	}
+	var rejection map[string]any
+	for _, record := range global.records {
+		if record.event == "OrderCancelRejected" {
+			var ok bool
+			rejection, ok = record.data.(map[string]any)
+			if ok {
+				break
+			}
+		}
+	}
+	if rejection == nil {
+		t.Fatalf("cancel rejection evidence = %#v", global.records)
+	}
+	if rejection["order_id"] != orderID || rejection["request_id"] != uint64(75) ||
+		rejection["success"] != false || rejection["error"] != RejectOrderNotFound {
+		t.Fatalf("cancel rejection evidence = %#v", rejection)
+	}
+}
+
 func TestExchangeForcedCancellationCallSitesRetainTheirReason(t *testing.T) {
 	tests := []struct {
 		name   string

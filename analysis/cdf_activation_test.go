@@ -1246,6 +1246,136 @@ func TestCDFStrictTradeRequiresOrderIdentities(t *testing.T) {
 	}
 }
 
+func TestCDFOrderLifecycleRecordsFilledQuoteLifetime(t *testing.T) {
+	contract := RegisteredSV1DActivationContract().Suppliers[0]
+	quantity := contract.MinimumQualifyingQty
+	price := contract.ReferencePrice
+	fee := cdfFixtureFee(price, quantity, contract.BasePrecision, contract.MakerFeeBps)
+	state := &cdfSupplierState{
+		contract: contract,
+		audit:    CDFSupplierActivationAudit{VenueID: "north", Role: contract.Role, ClientID: 7},
+	}
+	orderKey := cdfOrderKey{venueID: "north", clientID: 7, orderID: 11}
+	orders := map[cdfOrderKey]*cdfOrderState{orderKey: {
+		side: "BUY", price: price, originalQty: quantity, remainingQty: quantity,
+		acceptedAt: 10, acceptedGlobalSeq: 1,
+	}}
+	fill := cdfOrderFillEvidence{
+		OrderID: 11, TradeID: 12, Side: "BUY", Price: price, Qty: quantity,
+		FeeAmount: fee, FeeAsset: contract.QuoteAsset, FilledQty: quantity, IsFull: true,
+	}
+	raw, err := json.Marshal(fill)
+	if err != nil {
+		t.Fatal(err)
+	}
+	audit := &CDFActivationAudit{strictMechanics: true, terminalOrders: make(map[cdfOrderKey]*cdfOrderState)}
+	audit.processCDFOrderFill(Event{SimTS: 20, GlobalSequence: 2, VenueID: "north", ClientID: 7, payload: raw},
+		map[cdfParticipantKey]*cdfSupplierState{{venueID: "north", clientID: 7}: state}, orders,
+		map[cdfFillKey]cdfOrderFillEvidence{})
+	if len(audit.Checks) != 0 || len(orders) != 0 {
+		t.Fatalf("filled lifecycle rejected or remained live: checks=%+v orders=%+v", audit.Checks, orders)
+	}
+	if state.audit.FilledOrderCount != 1 || state.audit.TotalQuoteLifetimeNano != 10 || state.audit.MaxQuoteLifetimeNano != 10 {
+		t.Fatalf("filled lifecycle metrics = %+v", state.audit)
+	}
+	if audit.terminalOrders[orderKey].terminalState != "filled" {
+		t.Fatalf("terminal order state = %+v", audit.terminalOrders[orderKey])
+	}
+}
+
+func TestCDFCancelRejectedFillRaceIsReconciled(t *testing.T) {
+	state := &cdfSupplierState{audit: CDFSupplierActivationAudit{VenueID: "north", Role: "cdf_supplier_1", ClientID: 7}}
+	orderKey := cdfOrderKey{venueID: "north", clientID: 7, orderID: 11}
+	audit := &CDFActivationAudit{
+		strictMechanics: true,
+		terminalOrders:  map[cdfOrderKey]*cdfOrderState{orderKey: {terminalState: "filled"}},
+	}
+	withdrawals := map[cdfRequestKey]*cdfWithdrawal{{venueID: "north", clientID: 7, requestID: 13}: {
+		event:    Event{SimTS: 10, GlobalSequence: 1},
+		decision: cdfDecisionEvidence{QuoteOrderID: 11, Action: "cancel", Reason: "reprice_for_inventory_or_touch"},
+	}}
+	payload, err := json.Marshal(cdfCancelRejectedEvidence{
+		OrderID: 11, RequestID: 13, Success: false, Error: etypes.RejectOrderNotFound,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	audit.processCDFCancelRejected(Event{SimTS: 20, GlobalSequence: 2, VenueID: "north", ClientID: 7, payload: payload},
+		map[cdfParticipantKey]*cdfSupplierState{{venueID: "north", clientID: 7}: state}, withdrawals,
+		map[cdfOrderKey]*cdfOrderState{})
+	if len(audit.Checks) != 0 || !withdrawals[cdfRequestKey{venueID: "north", clientID: 7, requestID: 13}].cancelRejected {
+		t.Fatalf("fill/cancel race was not reconciled: checks=%+v withdrawals=%+v", audit.Checks, withdrawals)
+	}
+	if state.audit.CancelRejectedCount != 1 || state.audit.WithdrawalCount != 0 {
+		t.Fatalf("race counters = %+v", state.audit)
+	}
+}
+
+func TestCDFOpenOrderIsRightCensoredAtTerminalHorizon(t *testing.T) {
+	state := &cdfSupplierState{audit: CDFSupplierActivationAudit{VenueID: "north", Role: "cdf_supplier_1", ClientID: 7}}
+	orderKey := cdfOrderKey{venueID: "north", clientID: 7, orderID: 11}
+	orders := map[cdfOrderKey]*cdfOrderState{orderKey: {
+		originalQty: 5, remainingQty: 3, acceptedAt: 10,
+	}}
+	audit := &CDFActivationAudit{strictMechanics: true, terminalOrders: make(map[cdfOrderKey]*cdfOrderState)}
+	audit.reconcileCDFFills(
+		map[cdfParticipantKey]*cdfSupplierState{{venueID: "north", clientID: 7}: state},
+		map[cdfFillKey]cdfFillEvidence{}, map[cdfFillKey]cdfOrderFillEvidence{}, orders, 30,
+	)
+	if len(audit.Checks) != 0 || state.audit.CensoredOrderCount != 1 || state.audit.CensoredQuoteLifetimeNano != 20 || state.audit.OpenOrderCount != 1 {
+		t.Fatalf("right-censored lifecycle = checks=%+v audit=%+v", audit.Checks, state.audit)
+	}
+}
+
+func TestCDFRepriceLifecycleSeparatesCancelFromReplacement(t *testing.T) {
+	contract := RegisteredSV1DActivationContract().Suppliers[0]
+	state := &cdfSupplierState{
+		contract: contract,
+		audit:    CDFSupplierActivationAudit{VenueID: "north", Role: contract.Role, ClientID: 7},
+	}
+	orderKey := cdfOrderKey{venueID: "north", clientID: 7, orderID: 11}
+	orders := map[cdfOrderKey]*cdfOrderState{orderKey: {
+		side: "BUY", price: contract.ReferencePrice, originalQty: 5, remainingQty: 5,
+		acceptedAt: 10, acceptedGlobalSeq: 1,
+	}}
+	withdrawalKey := cdfRequestKey{venueID: "north", clientID: 7, requestID: 13}
+	withdrawals := map[cdfRequestKey]*cdfWithdrawal{withdrawalKey: {
+		event:    Event{SimTS: 11, GlobalSequence: 2},
+		decision: cdfDecisionEvidence{QuoteOrderID: 11, Action: "cancel", Reason: "reprice_for_inventory_or_touch"},
+	}}
+	audit := &CDFActivationAudit{strictMechanics: true, terminalOrders: make(map[cdfOrderKey]*cdfOrderState)}
+	states := map[cdfParticipantKey]*cdfSupplierState{{venueID: "north", clientID: 7}: state}
+	cancelPayload, err := json.Marshal(cdfCancelledEvidence{OrderID: 11, RequestID: 13, RemainingQty: 5})
+	if err != nil {
+		t.Fatal(err)
+	}
+	audit.processCDFCancelled(Event{SimTS: 20, GlobalSequence: 3, VenueID: "north", ClientID: 7, payload: cancelPayload},
+		states, withdrawals, orders, nil, nil)
+	if len(audit.Checks) != 0 || state.audit.RepriceCancelCount != 1 || !state.pendingReprice {
+		t.Fatalf("reprice cancellation = checks=%+v state=%+v", audit.Checks, state)
+	}
+	replacementDecision := cdfDecisionEvidence{
+		ClientID: 7, Role: contract.Role, Symbol: cdfActivationSymbol, Action: "submit", Reason: "inventory_target_gap",
+		Side: "SELL", QuotePrice: contract.ReferencePrice + contract.TickSize, QuoteQty: 5,
+		QuoteRequestID: 17, MinimumQualifyingQty: contract.MinimumQualifyingQty,
+	}
+	submissionKey := cdfRequestKey{venueID: "north", clientID: 7, requestID: 17}
+	submissions := map[cdfRequestKey]*cdfSubmission{submissionKey: {
+		event: Event{SimTS: 21, GlobalSequence: 4}, decision: replacementDecision,
+	}}
+	acceptedPayload, err := json.Marshal(cdfAcceptedEvidence{
+		OrderID: 19, ClientID: 7, RequestID: 17, Side: "SELL", Type: "LIMIT", TimeInForce: "GTC",
+		PostOnly: true, Price: replacementDecision.QuotePrice, Qty: replacementDecision.QuoteQty,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	audit.processCDFAccepted(Event{SimTS: 22, GlobalSequence: 5, VenueID: "north", ClientID: 7, payload: acceptedPayload}, states, submissions, orders)
+	if len(audit.Checks) != 0 || state.audit.CompletedRepriceCount != 1 || state.pendingReprice {
+		t.Fatalf("replacement lifecycle = checks=%+v state=%+v", audit.Checks, state)
+	}
+}
+
 func mustCDFTestNotional(t *testing.T, price, quantity, precision int64) int64 {
 	t.Helper()
 	notional, ok := cdfActivationNotional(price, quantity, precision)

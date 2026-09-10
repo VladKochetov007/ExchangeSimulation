@@ -34,6 +34,18 @@ func (e *DefaultExchange) logExchangeForcedCancellation(book *OrderBook, order *
 	}
 }
 
+func (e *DefaultExchange) logCancelRejection(log Logger, clientID uint64, request *CancelRequest, response Response) {
+	if log == nil || request == nil {
+		return
+	}
+	log.LogEvent(e.Clock.NowUnixNano(), clientID, "OrderCancelRejected", map[string]any{
+		"order_id":   request.OrderID,
+		"request_id": response.RequestID,
+		"success":    response.Success,
+		"error":      response.Error,
+	})
+}
+
 // acceptedOrderEvidence keeps an accepted order's established flat wire schema
 // while retaining the client request that caused its admission. Order IDs alone
 // cannot join a pre-submission actor decision to an accepted venue request.
@@ -297,7 +309,9 @@ func (e *DefaultExchange) CancelOrder(clientID uint64, req *CancelRequest) Respo
 
 	client := e.Clients[clientID]
 	if client == nil {
-		return Response{RequestID: req.RequestID, Success: false, Error: RejectUnknownClient}
+		response := Response{RequestID: req.RequestID, Success: false, Error: RejectUnknownClient}
+		e.logCancelRejection(e.getLogger("_global"), clientID, req, response)
+		return response
 	}
 
 	var order *Order
@@ -311,23 +325,21 @@ func (e *DefaultExchange) CancelOrder(clientID uint64, req *CancelRequest) Respo
 	}
 
 	if order == nil {
-		return Response{RequestID: req.RequestID, Success: false, Error: RejectOrderNotFound}
+		response := Response{RequestID: req.RequestID, Success: false, Error: RejectOrderNotFound}
+		e.logCancelRejection(e.getLogger("_global"), clientID, req, response)
+		return response
 	}
 
 	log := e.getLogger(book.Symbol)
 
 	if order.ClientID != clientID {
 		resp := Response{RequestID: req.RequestID, Success: false, Error: RejectOrderNotOwned}
-		if log != nil {
-			log.LogEvent(e.Clock.NowUnixNano(), clientID, "OrderCancelRejected", resp)
-		}
+		e.logCancelRejection(log, clientID, req, resp)
 		return resp
 	}
 	if order.Status == Filled {
 		resp := Response{RequestID: req.RequestID, Success: false, Error: RejectOrderAlreadyFilled}
-		if log != nil {
-			log.LogEvent(e.Clock.NowUnixNano(), clientID, "OrderCancelRejected", resp)
-		}
+		e.logCancelRejection(log, clientID, req, resp)
 		return resp
 	}
 
