@@ -1270,7 +1270,6 @@ func (e *DefaultExchange) cancelUnfundedSpotPlanMaker(book *OrderBook, orderID u
 	if !ok || remaining < 0 {
 		return false
 	}
-	e.logExchangeForcedCancellation(book, order, remaining, exchangeForcedFeeReservationReason)
 	releaseReserved(client, book.Instrument, order)
 	if order.Side == Buy {
 		book.Bids.CancelOrder(order.ID)
@@ -1280,6 +1279,7 @@ func (e *DefaultExchange) cancelUnfundedSpotPlanMaker(book *OrderBook, orderID u
 	if order.Visibility != Hidden {
 		e.publishBookUpdate(book, order.Side, order.Price)
 	}
+	e.logExchangeForcedCancellation(book, order, remaining, exchangeForcedFeeReservationReason)
 	client.RemoveOrder(order.ID)
 	order.Status = Cancelled
 	if gateway := e.Gateways[order.ClientID]; gateway != nil && gateway.IsRunning() {
@@ -1428,7 +1428,6 @@ func (e *DefaultExchange) restoreForeignFeeReservation(book *OrderBook, order *O
 
 func (e *DefaultExchange) cancelUnfundedFeeRemainder(book *OrderBook, client *Client, order *Order) {
 	remaining := order.Qty - order.FilledQty
-	e.logExchangeForcedCancellation(book, order, remaining, exchangeForcedFeeReservationReason)
 	releaseReserved(client, book.Instrument, order)
 	if order.Parent != nil {
 		if order.Side == Buy {
@@ -1441,6 +1440,7 @@ func (e *DefaultExchange) cancelUnfundedFeeRemainder(book *OrderBook, client *Cl
 		}
 		client.RemoveOrder(order.ID)
 	}
+	e.logExchangeForcedCancellation(book, order, remaining, exchangeForcedFeeReservationReason)
 	order.Status = Cancelled
 	if gateway := e.Gateways[order.ClientID]; gateway != nil && gateway.IsRunning() {
 		gateway.enqueueResponse(Response{Success: true, Data: &ForcedCancelNotification{OrderID: order.ID, RemainingQty: remaining}})
@@ -1669,7 +1669,6 @@ func (e *DefaultExchange) restOrReleaseOrder(client *Client, book *OrderBook, or
 			// matcher. Preserve ledger consistency if a custom matcher violates
 			// that contract rather than indexing an order the book rejected.
 			remainingQty := order.Qty - order.FilledQty
-			e.logExchangeForcedCancellation(book, order, remainingQty, exchangeForcedBookAdmissionReason)
 			order.Status = Cancelled
 			if gateway := e.Gateways[order.ClientID]; gateway != nil && gateway.IsRunning() {
 				gateway.enqueueResponse(Response{Success: true, Data: &ForcedCancelNotification{
@@ -1677,6 +1676,7 @@ func (e *DefaultExchange) restOrReleaseOrder(client *Client, book *OrderBook, or
 				}})
 			}
 			releaseReserved(client, book.Instrument, order)
+			e.logExchangeForcedCancellation(book, order, remainingQty, exchangeForcedBookAdmissionReason)
 			putOrder(order)
 			return
 		}
@@ -1761,12 +1761,12 @@ func (e *DefaultExchange) cancelOwnCrossingQuotes(client *Client, book *OrderBoo
 		orderID := o.ID
 		visibility := o.Visibility
 		side, price := o.Side, o.Price
-		e.logExchangeForcedCancellation(book, o, remainingQty, exchangeForcedSTPReason)
 		releaseReserved(client, book.Instrument, o)
 		opposite.CancelOrder(orderID)
 		if visibility != Hidden {
 			e.publishBookUpdate(book, side, price)
 		}
+		e.logExchangeForcedCancellation(book, o, remainingQty, exchangeForcedSTPReason)
 		client.RemoveOrder(orderID)
 		putOrder(o)
 		if gw != nil && gw.IsRunning() {

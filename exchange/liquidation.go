@@ -84,7 +84,6 @@ func (e *DefaultExchange) cancelClientOrdersOnBook(client *Client, book *OrderBo
 			continue
 		}
 		remainingQty := order.Qty - order.FilledQty
-		e.logExchangeForcedCancellation(book, order, remainingQty, exchangeForcedLifecycleReason)
 		releaseReserved(client, instrument, order)
 		if order.Side == Buy {
 			book.Bids.CancelOrder(orderID)
@@ -94,6 +93,7 @@ func (e *DefaultExchange) cancelClientOrdersOnBook(client *Client, book *OrderBo
 		if order.Visibility != Hidden {
 			e.publishBookUpdate(book, order.Side, order.Price)
 		}
+		e.logExchangeForcedCancellation(book, order, remainingQty, exchangeForcedLifecycleReason)
 		client.RemoveOrder(orderID)
 		// The order left the live book due to an exchange-side lifecycle action
 		// (liquidation or pending expiry), not a fill. Retaining Open here would

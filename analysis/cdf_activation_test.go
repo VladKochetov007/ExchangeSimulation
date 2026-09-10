@@ -1357,7 +1357,7 @@ func TestCDFRepriceLifecycleSeparatesCancelFromReplacement(t *testing.T) {
 	replacementDecision := cdfDecisionEvidence{
 		ClientID: 7, Role: contract.Role, Symbol: cdfActivationSymbol, Action: "submit", Reason: "inventory_target_gap",
 		Side: "SELL", QuotePrice: contract.ReferencePrice + contract.TickSize, QuoteQty: 5,
-		QuoteRequestID: 17, MinimumQualifyingQty: contract.MinimumQualifyingQty,
+		QuoteRequestID: 17, ReplacesOrderID: 11, MinimumQualifyingQty: contract.MinimumQualifyingQty,
 	}
 	submissionKey := cdfRequestKey{venueID: "north", clientID: 7, requestID: 17}
 	submissions := map[cdfRequestKey]*cdfSubmission{submissionKey: {
@@ -1373,6 +1373,79 @@ func TestCDFRepriceLifecycleSeparatesCancelFromReplacement(t *testing.T) {
 	audit.processCDFAccepted(Event{SimTS: 22, GlobalSequence: 5, VenueID: "north", ClientID: 7, payload: acceptedPayload}, states, submissions, orders)
 	if len(audit.Checks) != 0 || state.audit.CompletedRepriceCount != 1 || state.pendingReprice {
 		t.Fatalf("replacement lifecycle = checks=%+v state=%+v", audit.Checks, state)
+	}
+}
+
+func TestCDFStrictRepriceRejectsUnlinkedReplacement(t *testing.T) {
+	contract := RegisteredSV1DActivationContract().Suppliers[0]
+	state := &cdfSupplierState{
+		contract:       contract,
+		audit:          CDFSupplierActivationAudit{VenueID: "north", Role: contract.Role, ClientID: 7},
+		pendingReprice: true, pendingRepriceOrderID: 11, pendingRepriceSide: "BUY",
+		pendingRepricePrice: contract.ReferencePrice, pendingRepriceQty: 5,
+	}
+	audit := &CDFActivationAudit{
+		strictMechanics:     true,
+		terminalOrders:      make(map[cdfOrderKey]*cdfOrderState),
+		liveOrderBySupplier: make(map[cdfParticipantKey]cdfOrderKey),
+	}
+	states := map[cdfParticipantKey]*cdfSupplierState{{venueID: "north", clientID: 7}: state}
+	decision := cdfDecisionEvidence{
+		ClientID: 7, Role: contract.Role, Symbol: cdfActivationSymbol, Action: "submit", Reason: "inventory_target_gap",
+		Side: "SELL", QuotePrice: contract.ReferencePrice + contract.TickSize, QuoteQty: 5,
+		QuoteRequestID: 17, MinimumQualifyingQty: contract.MinimumQualifyingQty,
+	}
+	submissions := map[cdfRequestKey]*cdfSubmission{{venueID: "north", clientID: 7, requestID: 17}: {
+		event: Event{SimTS: 21, GlobalSequence: 4}, decision: decision,
+	}}
+	payload, err := json.Marshal(cdfAcceptedEvidence{
+		OrderID: 19, ClientID: 7, RequestID: 17, Side: "SELL", Type: "LIMIT", TimeInForce: "GTC",
+		PostOnly: true, Price: decision.QuotePrice, Qty: decision.QuoteQty,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	audit.processCDFAccepted(Event{SimTS: 22, GlobalSequence: 5, VenueID: "north", ClientID: 7, payload: payload}, states, submissions, map[cdfOrderKey]*cdfOrderState{})
+	if !hasCDFActivationFailure(audit.Checks, "CDF replacement acceptance lacks the matching replaced-order identity") || state.audit.CompletedRepriceCount != 0 || !state.pendingReprice {
+		t.Fatalf("unlinked replacement was accepted as a completed reprice: checks=%+v state=%+v", audit.Checks, state)
+	}
+}
+
+func TestCDFStrictAuditRejectsMultipleLiveOrders(t *testing.T) {
+	contract := RegisteredSV1DActivationContract().Suppliers[0]
+	state := &cdfSupplierState{
+		contract: contract,
+		audit:    CDFSupplierActivationAudit{VenueID: "north", Role: contract.Role, ClientID: 7},
+	}
+	states := map[cdfParticipantKey]*cdfSupplierState{{venueID: "north", clientID: 7}: state}
+	audit := &CDFActivationAudit{
+		strictMechanics:     true,
+		terminalOrders:      make(map[cdfOrderKey]*cdfOrderState),
+		liveOrderBySupplier: make(map[cdfParticipantKey]cdfOrderKey),
+	}
+	orders := make(map[cdfOrderKey]*cdfOrderState)
+	submissions := make(map[cdfRequestKey]*cdfSubmission)
+	for _, lifecycle := range []struct{ requestID, orderID uint64 }{{17, 19}, {27, 29}} {
+		requestID, orderID := lifecycle.requestID, lifecycle.orderID
+		decision := cdfDecisionEvidence{
+			ClientID: 7, Role: contract.Role, Symbol: cdfActivationSymbol, Action: "submit", Reason: "inventory_target_gap",
+			Side: "BUY", QuotePrice: contract.ReferencePrice, QuoteQty: 5,
+			QuoteRequestID: requestID, MinimumQualifyingQty: contract.MinimumQualifyingQty,
+		}
+		submissions[cdfRequestKey{venueID: "north", clientID: 7, requestID: requestID}] = &cdfSubmission{
+			event: Event{SimTS: int64(requestID), GlobalSequence: requestID - 12}, decision: decision,
+		}
+		payload, err := json.Marshal(cdfAcceptedEvidence{
+			OrderID: orderID, ClientID: 7, RequestID: requestID, Side: "BUY", Type: "LIMIT", TimeInForce: "GTC",
+			PostOnly: true, Price: contract.ReferencePrice, Qty: 5,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		audit.processCDFAccepted(Event{SimTS: int64(requestID + 1), GlobalSequence: requestID - 11, VenueID: "north", ClientID: 7, payload: payload}, states, submissions, orders)
+	}
+	if !hasCDFActivationFailure(audit.Checks, "CDF supplier accepted order 29 while order 19 was still live") || len(orders) != 1 {
+		t.Fatalf("multiple live orders were not rejected: checks=%+v orders=%+v", audit.Checks, orders)
 	}
 }
 

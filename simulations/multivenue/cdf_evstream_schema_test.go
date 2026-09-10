@@ -22,7 +22,7 @@ func TestCDFBinarySchemasRoundTripThroughRenderer(t *testing.T) {
 		InitialBaseBalance: 20, GrossInventory: 22, GrossInventoryLimit: 30,
 		Action: "submit", Reason: "inventory_target", Side: "BUY", QuotePrice: 98, QuoteQty: 4,
 		MinimumQualifyingQty: 2, RegisteredMinimumExecutableQty: 1, QuoteOrderID: 20,
-		QuoteRequestID: 21, CancelRequestID: 22, QuoteSubmittedAt: 101, QuoteCashAvailable: 500,
+		QuoteRequestID: 21, CancelRequestID: 22, ReplacesOrderID: 19, QuoteSubmittedAt: 101, QuoteCashAvailable: 500,
 		QuoteCashReserved: 100, QuoteCashRequired: 104, InitialEquityQuote: 2_000,
 		EquityQuote: 1_990, PeakEquityQuote: 2_010, LossFromInitialQuote: 10, DrawdownQuote: 20,
 		MaxLossQuote: 100, EquityAvailable: true, RiskLimitTriggered: false, RiskMarkCurrent: true,

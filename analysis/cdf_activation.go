@@ -163,10 +163,11 @@ type CDFActivationAudit struct {
 	AntiCheatingSatisfied    bool                         `json:"anti_cheating_satisfied"`
 	Valid                    bool                         `json:"valid"`
 
-	strictMechanics    bool
-	trades             map[cdfTradeKey]cdfTradeEvidence
-	totalVolumeByVenue map[string]int64
-	terminalOrders     map[cdfOrderKey]*cdfOrderState
+	strictMechanics     bool
+	trades              map[cdfTradeKey]cdfTradeEvidence
+	totalVolumeByVenue  map[string]int64
+	terminalOrders      map[cdfOrderKey]*cdfOrderState
+	liveOrderBySupplier map[cdfParticipantKey]cdfOrderKey
 }
 
 type CDFActivationProvenance struct {
@@ -329,6 +330,7 @@ type cdfSupplierState struct {
 	hasLastDecision        bool
 	fillResponses          []cdfFillResponseWindow
 	pendingReprice         bool
+	pendingRepriceOrderID  uint64
 	pendingRepriceSide     string
 	pendingRepricePrice    int64
 	pendingRepriceQty      int64
@@ -386,6 +388,7 @@ type cdfDecisionEvidence struct {
 	QuoteOrderID                   uint64 `json:"quote_order_id"`
 	QuoteRequestID                 uint64 `json:"quote_request_id"`
 	CancelRequestID                uint64 `json:"cancel_request_id"`
+	ReplacesOrderID                uint64 `json:"replaces_order_id"`
 	QuoteSubmittedAt               int64  `json:"quote_submitted_at"`
 	QuoteCashAvailable             int64  `json:"quote_cash_available"`
 	QuoteCashReserved              int64  `json:"quote_cash_reserved"`
@@ -639,9 +642,10 @@ func (r *Run) AuditCDFLiquidityActivation(options CDFActivationOptions) (*CDFAct
 		return nil, err
 	}
 	result := &CDFActivationAudit{
-		trades:             make(map[cdfTradeKey]cdfTradeEvidence),
-		totalVolumeByVenue: make(map[string]int64),
-		terminalOrders:     make(map[cdfOrderKey]*cdfOrderState),
+		trades:              make(map[cdfTradeKey]cdfTradeEvidence),
+		totalVolumeByVenue:  make(map[string]int64),
+		terminalOrders:      make(map[cdfOrderKey]*cdfOrderState),
+		liveOrderBySupplier: make(map[cdfParticipantKey]cdfOrderKey),
 	}
 	config, metadata, err := loadCDFActivationIdentity(evidenceDir)
 	if err != nil {
@@ -1749,6 +1753,9 @@ func (r *CDFActivationAudit) processCDFDecision(
 	if !isCDFAction(decision.Action) || decision.Reason == "" {
 		r.addEventCheck(event, state, "CDF decision has an unknown action or empty reason")
 	}
+	if r.strictMechanics && !cdfDecisionReasonAllowed(decision.Action, decision.Reason) {
+		r.addEventCheck(event, state, "CDF decision reason is not a registered economic lifecycle reason")
+	}
 	r.recordCDFPostFillResponse(event, state, decision)
 	requestKey := cdfRequestKey{event.VenueID, event.ClientID, decision.QuoteRequestID}
 	switch decision.Action {
@@ -2405,16 +2412,54 @@ func (r *CDFActivationAudit) processCDFAccepted(event Event, states map[cdfParti
 		r.addEventCheck(event, state, "duplicate accepted CDF order identity")
 		return
 	}
-	if state.pendingReprice {
-		if accepted.Side != state.pendingRepriceSide || accepted.Price != state.pendingRepricePrice || accepted.Qty != state.pendingRepriceQty {
-			if !incrementCDFCounter(&state.audit.CompletedRepriceCount) {
-				r.addEventCheck(event, state, "completed CDF reprice counter overflows")
-			}
+	participantKey := cdfParticipantKey{event.VenueID, event.ClientID}
+	if r.liveOrderBySupplier == nil {
+		r.liveOrderBySupplier = make(map[cdfParticipantKey]cdfOrderKey)
+	}
+	if liveOrder, duplicate := r.liveOrderBySupplier[participantKey]; duplicate {
+		r.addEventCheck(event, state, fmt.Sprintf("CDF supplier accepted order %d while order %d was still live", accepted.OrderID, liveOrder.orderID))
+		return
+	}
+	for liveOrder := range orders {
+		if liveOrder.venueID == event.VenueID && liveOrder.clientID == event.ClientID {
+			r.addEventCheck(event, state, fmt.Sprintf("CDF supplier has multiple live orders %d and %d", liveOrder.orderID, accepted.OrderID))
+			return
 		}
-		state.pendingReprice = false
-		state.pendingRepriceSide = ""
-		state.pendingRepricePrice = 0
-		state.pendingRepriceQty = 0
+	}
+	if r.terminalOrders != nil {
+		if _, duplicate := r.terminalOrders[orderKey]; duplicate {
+			r.addEventCheck(event, state, "CDF order identity was reused after a terminal outcome")
+			return
+		}
+	}
+	if state.pendingReprice {
+		if r.strictMechanics {
+			if submission.decision.ReplacesOrderID != state.pendingRepriceOrderID {
+				r.addEventCheck(event, state, "CDF replacement acceptance lacks the matching replaced-order identity")
+			} else {
+				if accepted.Side == state.pendingRepriceSide && accepted.Price == state.pendingRepricePrice && accepted.Qty == state.pendingRepriceQty {
+					r.addEventCheck(event, state, "CDF replacement acceptance did not change quote terms")
+				} else if !incrementCDFCounter(&state.audit.CompletedRepriceCount) {
+					r.addEventCheck(event, state, "completed CDF reprice counter overflows")
+				}
+				state.pendingReprice = false
+				state.pendingRepriceOrderID = 0
+				state.pendingRepriceSide = ""
+				state.pendingRepricePrice = 0
+				state.pendingRepriceQty = 0
+			}
+		} else {
+			if accepted.Side != state.pendingRepriceSide || accepted.Price != state.pendingRepricePrice || accepted.Qty != state.pendingRepriceQty {
+				if !incrementCDFCounter(&state.audit.CompletedRepriceCount) {
+					r.addEventCheck(event, state, "completed CDF reprice counter overflows")
+				}
+			}
+			state.pendingReprice = false
+			state.pendingRepriceOrderID = 0
+			state.pendingRepriceSide = ""
+			state.pendingRepricePrice = 0
+			state.pendingRepriceQty = 0
+		}
 	}
 	submission.accepted = true
 	oneSidedCandidate := submission.decision.LocalBookMode == "one_sided" &&
@@ -2427,6 +2472,7 @@ func (r *CDFActivationAudit) processCDFAccepted(event Event, states map[cdfParti
 		decisionReason:    submission.decision.Reason,
 		oneSidedCandidate: oneSidedCandidate, minimumQualifying: submission.decision.MinimumQualifyingQty,
 	}
+	r.liveOrderBySupplier[participantKey] = orderKey
 	state.audit.AcceptedOrderCount++
 	r.AcceptedOrderCount++
 }
@@ -2529,6 +2575,7 @@ func (r *CDFActivationAudit) processCDFOrderFill(event Event, states map[cdfPart
 		order.terminalState = "filled"
 		r.rememberCDFTerminalOrder(orderKey, order)
 		delete(orders, orderKey)
+		r.forgetCDFLiveOrder(cdfParticipantKey{event.VenueID, event.ClientID}, orderKey)
 	}
 }
 
@@ -2593,6 +2640,7 @@ func (r *CDFActivationAudit) processCDFCancelled(
 		order.terminalState = "forced_cancelled"
 		r.rememberCDFTerminalOrder(orderKey, order)
 		delete(orders, orderKey)
+		r.forgetCDFLiveOrder(cdfParticipantKey{event.VenueID, event.ClientID}, orderKey)
 		if r.strictMechanics && publicDepth[event.VenueID] != nil {
 			r.recordCDFDepthObservation(event, states, orders, depth, publicDepth[event.VenueID])
 		}
@@ -2616,6 +2664,7 @@ func (r *CDFActivationAudit) processCDFCancelled(
 	delete(orders, orderKey)
 	order.terminalState = "cancelled"
 	r.rememberCDFTerminalOrder(orderKey, order)
+	r.forgetCDFLiveOrder(cdfParticipantKey{event.VenueID, event.ClientID}, orderKey)
 	if !incrementCDFCounter(&state.audit.WithdrawalCount) {
 		r.addEventCheck(event, state, "CDF withdrawal counter overflows")
 	}
@@ -2636,6 +2685,7 @@ func (r *CDFActivationAudit) processCDFCancelled(
 				r.addEventCheck(event, state, "CDF reprice cancellation arrived before the prior replacement")
 			}
 			state.pendingReprice = true
+			state.pendingRepriceOrderID = orderKey.orderID
 			state.pendingRepriceSide = order.side
 			state.pendingRepricePrice = order.price
 			state.pendingRepriceQty = order.remainingQty
@@ -2682,7 +2732,7 @@ func (r *CDFActivationAudit) processCDFCancelRejected(
 	} else if terminal := r.terminalOrders[orderKey]; terminal == nil {
 		r.addEventCheck(event, state, "CDF cancellation rejection has no live or previously resolved order")
 		return
-	} else if terminal.terminalState != "filled" ||
+	} else if terminal.terminalState != "filled" && terminal.terminalState != "forced_cancelled" ||
 		(rejected.Error != etypes.RejectOrderNotFound && rejected.Error != etypes.RejectOrderAlreadyFilled) {
 		r.addEventCheck(event, state, "CDF cancellation rejection does not match the resolved order terminal state")
 		return
@@ -2707,6 +2757,15 @@ func (r *CDFActivationAudit) rememberCDFTerminalOrder(key cdfOrderKey, order *cd
 	}
 	if _, duplicate := r.terminalOrders[key]; !duplicate {
 		r.terminalOrders[key] = order
+	}
+}
+
+func (r *CDFActivationAudit) forgetCDFLiveOrder(participant cdfParticipantKey, key cdfOrderKey) {
+	if r.liveOrderBySupplier == nil {
+		return
+	}
+	if liveOrder, exists := r.liveOrderBySupplier[participant]; exists && liveOrder == key {
+		delete(r.liveOrderBySupplier, participant)
 	}
 }
 
@@ -2955,6 +3014,7 @@ func (r *CDFActivationAudit) reconcileCDFFills(
 			}
 			order.terminalState = "censored"
 			r.rememberCDFTerminalOrder(key, order)
+			r.forgetCDFLiveOrder(cdfParticipantKey{key.venueID, key.clientID}, key)
 			state.audit.OpenOrderCount++
 			openOrderQty, ok := checkedCDFAdd(state.audit.OpenOrderQty, order.remainingQty)
 			if !ok {
@@ -3035,7 +3095,8 @@ func (r *CDFActivationAudit) finalizeCDFActivation(
 		state.audit.ActivationSatisfied = state.initialAccountSeen && state.terminalAccountSeen &&
 			state.audit.EligibleObservationCount > 0 && state.audit.AcceptedOrderCount > 0 &&
 			state.audit.FillCount > 0 && state.audit.PostFillBalanceSnapshotCount > 0 &&
-			state.audit.PostFillResponsiveCount > 0
+			state.audit.PostFillResponsiveCount > 0 &&
+			(state.audit.SuccessfulWithdrawalCount > 0 || state.audit.RepriceCancelCount > 0)
 		allSuppliersActivated = allSuppliersActivated && state.audit.ActivationSatisfied
 		expectedBase, baseOK := checkedCDFAdd(state.initialBaseBalance, state.exchangeBaseDelta)
 		expectedQuote, quoteOK := checkedCDFAdd(state.initialQuoteBalance, state.exchangeQuoteDelta)
@@ -3066,7 +3127,7 @@ func (r *CDFActivationAudit) finalizeCDFActivation(
 		r.Suppliers[index].EvidenceValid = !r.hasParticipantCheck(r.Suppliers[index].VenueID, r.Suppliers[index].ClientID)
 	}
 	r.EvidenceValid = len(r.Checks) == 0
-	r.ActivationSatisfied = r.EvidenceValid && allSuppliersActivated && r.WithdrawalCount > 0 &&
+	r.ActivationSatisfied = r.EvidenceValid && allSuppliersActivated &&
 		r.OneSidedDecisionCount > 0 && r.OneSidedRestorationCount > 0
 	r.AntiCheatingSatisfied = r.EvidenceValid && r.SupplierVolumeShare <= contract.MaximumSupplierVolumeShare &&
 		allVenueConcentrationSatisfied
@@ -3475,6 +3536,30 @@ func isCDFAction(action string) bool {
 	default:
 		return false
 	}
+}
+
+func cdfDecisionReasonAllowed(action, reason string) bool {
+	switch action {
+	case "wait":
+		switch reason {
+		case "subscribe", "order_pending", "cancel_pending", "awaiting_fresh_observation_after_close":
+			return true
+		}
+	case "submit":
+		return reason == "inventory_target_gap"
+	case "rest":
+		return reason == "quote_unchanged"
+	case "cancel":
+		return reason == "reprice_for_inventory_or_touch"
+	case "withdraw":
+		switch reason {
+		case "loss_limit", "equity_unavailable", "stale_or_missing_observation", "one_sided_or_locked_book",
+			"limit_or_touch_unavailable", "below_minimum_executable_qty", "position_gap_overflow",
+			"inventory_at_target", "quote_cash_limit":
+			return true
+		}
+	}
+	return false
 }
 
 func cdfSideCode(side string) uint8 {

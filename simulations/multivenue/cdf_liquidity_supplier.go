@@ -217,6 +217,7 @@ type ElasticLiquiditySupplierDecision struct {
 	QuoteOrderID                   uint64 `json:"quote_order_id,omitempty"`
 	QuoteRequestID                 uint64 `json:"quote_request_id,omitempty"`
 	CancelRequestID                uint64 `json:"cancel_request_id,omitempty"`
+	ReplacesOrderID                uint64 `json:"replaces_order_id,omitempty"`
 	QuoteSubmittedAt               int64  `json:"quote_submitted_at,omitempty"`
 	QuoteCashAvailable             int64  `json:"quote_cash_available,omitempty"`
 	QuoteCashReserved              int64  `json:"quote_cash_reserved"`
@@ -280,6 +281,7 @@ type ElasticLiquiditySupplier struct {
 	reference                      int64
 	lastReferenceUpdate            int64
 	quote                          elasticLiquidityQuote
+	lastClosedOrderID              uint64
 	pendingRequestID               uint64
 	cancelRequestID                uint64
 	cancelPending                  bool
@@ -518,6 +520,7 @@ func (s *ElasticLiquiditySupplier) observeCancelled(event actor.OrderCancelledEv
 		return
 	}
 	s.recordQuoteCloseObservation()
+	s.lastClosedOrderID = event.OrderID
 	s.quote = elasticLiquidityQuote{}
 	s.releaseQuoteReservation()
 	s.cancelPending = false
@@ -896,6 +899,8 @@ func (s *ElasticLiquiditySupplier) onTick(now time.Time) {
 	s.quote = elasticLiquidityQuote{requestID: requestID, side: desiredSide, price: desiredPrice, qty: quantity, submittedAt: now.UnixNano(), observationSequence: s.observationSequence, observationTimestamp: s.observationTime, oneSidedObservation: localBook.localBookMode == "one_sided"}
 	decision.Action, decision.Reason = "submit", "inventory_target_gap"
 	decision.QuoteRequestID, decision.QuoteSubmittedAt = requestID, now.UnixNano()
+	decision.ReplacesOrderID = s.lastClosedOrderID
+	s.lastClosedOrderID = 0
 	s.emitDecision(decision)
 }
 

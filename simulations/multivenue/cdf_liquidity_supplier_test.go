@@ -133,7 +133,11 @@ func TestCDFSupplierValidSnapshotPreservesRiskMarkUntilRiskUpdate(t *testing.T) 
 
 func TestCDFSupplierMissingSnapshotWithdrawsAndLaterValidSnapshotCanRecover(t *testing.T) {
 	gateway := newMetaGateway()
+	decisions := make([]ElasticLiquiditySupplierDecision, 0)
 	cfg := cdfSupplierUnitConfig()
+	cfg.DecisionObserver = func(decision ElasticLiquiditySupplierDecision) {
+		decisions = append(decisions, decision)
+	}
 	supplier := NewElasticLiquiditySupplier(1, gateway, cfg)
 	supplier.onTick(time.Unix(0, int64(time.Second)))
 	supplier.HandleEvent(context.Background(), cdfSupplierBookEvent(cfg.Symbol, int64(time.Second), 11, 1_200, 1_300, 100, 100))
@@ -156,6 +160,9 @@ func TestCDFSupplierMissingSnapshotWithdrawsAndLaterValidSnapshotCanRecover(t *t
 	supplier.onTick(time.Unix(0, int64(6*time.Second)))
 	if len(gateway.orders()) != 2 {
 		t.Fatalf("orders after valid recovery = %+v, want a new quote after withdrawal", gateway.orders())
+	}
+	if len(decisions) == 0 || decisions[len(decisions)-1].Action != "submit" || decisions[len(decisions)-1].ReplacesOrderID != 42 {
+		t.Fatalf("replacement decision = %+v, want explicit replacement of order 42", decisions)
 	}
 }
 

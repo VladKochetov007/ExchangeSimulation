@@ -18,7 +18,7 @@ const (
 )
 
 const (
-	cdfDecisionOptionalFields   = 11
+	cdfDecisionOptionalFields   = 12
 	cdfDecisionSideBit          = 0
 	cdfDecisionQuotePriceBit    = 1
 	cdfDecisionQuoteQtyBit      = 2
@@ -30,6 +30,7 @@ const (
 	cdfDecisionSubmittedAtBit   = 8
 	cdfDecisionCashAvailableBit = 9
 	cdfDecisionCashRequiredBit  = 10
+	cdfDecisionReplacesOrderBit = 11
 )
 
 // The CDF decision wire layout is intentionally explicit. Strings are
@@ -40,7 +41,7 @@ func (d ElasticLiquiditySupplierDecision) SchemaID() uint16 {
 	return SchemaElasticLiquiditySupplierDecision
 }
 
-func (d ElasticLiquiditySupplierDecision) SchemaVersion() uint16 { return 2 }
+func (d ElasticLiquiditySupplierDecision) SchemaVersion() uint16 { return 3 }
 
 func (d ElasticLiquiditySupplierDecision) AppendPayloadInterning(dst []byte, in evstream.Interner) ([]byte, error) {
 	start := len(dst)
@@ -77,6 +78,9 @@ func (d ElasticLiquiditySupplierDecision) AppendPayloadInterning(dst []byte, in 
 	}
 	if d.QuoteCashRequired != 0 {
 		evstream.SetPresence(dst[start:], cdfDecisionCashRequiredBit)
+	}
+	if d.ReplacesOrderID != 0 {
+		evstream.SetPresence(dst[start:], cdfDecisionReplacesOrderBit)
 	}
 
 	stringValues := [...]string{
@@ -134,7 +138,8 @@ func (d ElasticLiquiditySupplierDecision) AppendPayloadInterning(dst []byte, in 
 	dst = evstream.AppendInt64(dst, d.MaxLossQuote)
 	dst = evstream.AppendBool(dst, d.EquityAvailable)
 	dst = evstream.AppendBool(dst, d.RiskLimitTriggered)
-	return evstream.AppendBool(dst, d.RiskMarkCurrent), nil
+	dst = evstream.AppendBool(dst, d.RiskMarkCurrent)
+	return evstream.AppendUint64(dst, d.ReplacesOrderID), nil
 }
 
 func decodeElasticLiquiditySupplierDecision(payload []byte, resolve evstream.Resolver, into *ElasticLiquiditySupplierDecision) error {
@@ -192,6 +197,9 @@ func decodeElasticLiquiditySupplierDecisionVersioned(payload []byte, resolve evs
 	if schemaVersion >= 2 {
 		into.RiskMarkCurrent = cursor.Bool()
 	}
+	if schemaVersion >= 3 {
+		into.ReplacesOrderID = cursor.Uint64()
+	}
 	if err := cursor.Err(); err != nil {
 		return err
 	}
@@ -241,6 +249,9 @@ func decodeElasticLiquiditySupplierDecisionVersioned(payload []byte, resolve evs
 	}
 	if !presence.Has(cdfDecisionCashRequiredBit) {
 		into.QuoteCashRequired = 0
+	}
+	if !presence.Has(cdfDecisionReplacesOrderBit) {
+		into.ReplacesOrderID = 0
 	}
 	return finishCDFSchemaCursor(cursor)
 }
@@ -302,7 +313,7 @@ func decodeElasticLiquiditySupplierFill(payload []byte, resolve evstream.Resolve
 func renderCDFPayloadJSONVersioned(schemaID, schemaVersion uint16, payload []byte, resolve evstream.Resolver) ([]byte, bool, error) {
 	switch schemaID {
 	case SchemaElasticLiquiditySupplierDecision:
-		if schemaVersion != 1 && schemaVersion != 2 {
+		if schemaVersion != 1 && schemaVersion != 2 && schemaVersion != 3 {
 			return nil, true, fmt.Errorf("%w: unsupported CDF decision schema version %d", evstream.ErrCorrupt, schemaVersion)
 		}
 		var value ElasticLiquiditySupplierDecision

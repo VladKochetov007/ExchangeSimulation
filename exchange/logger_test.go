@@ -173,6 +173,18 @@ func TestExchangeForcedCancellationIsLoggedWithoutActorRequest(t *testing.T) {
 	if _, found := cancellation["request_id"]; found {
 		t.Fatalf("forced cancellation fabricated actor request: %#v", cancellation)
 	}
+	bookDeltaIndex, cancellationIndex := -1, -1
+	for index, record := range log.records {
+		if record.event == "BookDelta" && bookDeltaIndex < 0 {
+			bookDeltaIndex = index
+		}
+		if record.event == "OrderCancelled" && cancellationIndex < 0 {
+			cancellationIndex = index
+		}
+	}
+	if bookDeltaIndex < 0 || cancellationIndex <= bookDeltaIndex {
+		t.Fatalf("forced cancellation was logged before the public removal delta: %+v", log.records)
+	}
 }
 
 func TestCancelRejectionEvidenceIncludesOrderAndRequestIdentity(t *testing.T) {
