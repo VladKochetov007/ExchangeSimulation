@@ -3,8 +3,10 @@ package exchange
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"math"
 	"math/rand"
+	"reflect"
 	"testing"
 
 	"exchange_sim/evstream"
@@ -130,6 +132,70 @@ func TestBookSnapshotEvidenceRoundTrip(t *testing.T) {
 			t.Fatalf("decode: %v", err)
 		}
 		requireJSONPreserved(t, original, decoded)
+	}
+}
+
+func TestBookSnapshotEvidenceV3CarriesSourceAndPublicProjection(t *testing.T) {
+	original := bookSnapshotEvidence{
+		Asks:           []PriceLevel{{Price: 102, VisibleQty: 5, HiddenQty: 1}},
+		Bids:           []PriceLevel{{Price: 101, VisibleQty: 4, HiddenQty: 2}},
+		SourceSequence: 17,
+		PublicAsks:     []PriceLevel{{Price: 102, VisibleQty: 5}},
+		PublicBids:     []PriceLevel{{Price: 101, VisibleQty: 4}},
+	}
+	frame, reader := roundTripFrame(t, original)
+	if frame.Header.SchemaID != SchemaBookSnapshot || frame.Header.SchemaVersion != 3 {
+		t.Fatalf("snapshot schema = %d v%d, want %d v3", frame.Header.SchemaID, frame.Header.SchemaVersion, SchemaBookSnapshot)
+	}
+	var decoded bookSnapshotEvidence
+	if err := DecodeBookSnapshotVersioned(frame.Payload, frame.Header.SchemaVersion, &decoded); err != nil {
+		t.Fatalf("decode v3 snapshot: %v", err)
+	}
+	requireJSONPreserved(t, original, decoded)
+
+	rendered, err := RenderPayloadJSONVersioned(frame.Header.SchemaID, frame.Header.SchemaVersion, frame.Payload, reader)
+	if err != nil {
+		t.Fatalf("render v3 snapshot: %v", err)
+	}
+	want, _ := json.Marshal(original)
+	if !bytes.Equal(rendered, want) {
+		t.Fatalf("rendered v3 snapshot %s, want %s", rendered, want)
+	}
+}
+
+func TestBookSnapshotEvidenceLegacyVersionsRemainReadable(t *testing.T) {
+	asks := []PriceLevel{{Price: 102, VisibleQty: 5, HiddenQty: 1}}
+	bids := []PriceLevel{{Price: 101, VisibleQty: 4, HiddenQty: 2}}
+
+	legacyPayload := func(version uint16) []byte {
+		presence := make([]byte, evstream.PresenceBits(snapshotV1OptionalFields))
+		evstream.SetPresence(presence, snapshotAsksBit)
+		evstream.SetPresence(presence, snapshotBidsBit)
+		payload := append([]byte(nil), presence...)
+		if version == 2 {
+			payload = evstream.AppendUint64(payload, 23)
+		}
+		payload = appendLevels(payload, asks)
+		return appendLevels(payload, bids)
+	}
+
+	for _, version := range []uint16{1, 2} {
+		t.Run("v"+fmt.Sprint(version), func(t *testing.T) {
+			var decoded bookSnapshotEvidence
+			if err := DecodeBookSnapshotVersioned(legacyPayload(version), version, &decoded); err != nil {
+				t.Fatalf("decode legacy snapshot: %v", err)
+			}
+			if !reflect.DeepEqual(decoded.Asks, asks) || !reflect.DeepEqual(decoded.Bids, bids) {
+				t.Fatalf("decoded legacy sides = %+v / %+v", decoded.Asks, decoded.Bids)
+			}
+			wantSource := uint64(0)
+			if version == 2 {
+				wantSource = 23
+			}
+			if decoded.SourceSequence != wantSource || decoded.PublicAsks != nil || decoded.PublicBids != nil {
+				t.Fatalf("decoded legacy extensions = source %d public asks %#v bids %#v", decoded.SourceSequence, decoded.PublicAsks, decoded.PublicBids)
+			}
+		})
 	}
 }
 

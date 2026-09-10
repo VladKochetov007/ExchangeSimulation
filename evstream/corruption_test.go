@@ -88,6 +88,17 @@ func TestTrailerFrameCountAndMagicAreChecked(t *testing.T) {
 	}
 }
 
+func TestReservedStreamHeaderBytesAreRejected(t *testing.T) {
+	clean := writeCompleteProbeStream(t, 1)
+	for _, offset := range []int{13, 15, 20, 31} {
+		corrupt := append([]byte(nil), clean...)
+		corrupt[offset] = 1
+		if _, err := readProbeStream(corrupt, false); !errors.Is(err, evstream.ErrCorrupt) {
+			t.Fatalf("reserved header byte %d error = %v, want ErrCorrupt", offset, err)
+		}
+	}
+}
+
 func TestWriterRejectsAppendAfterClose(t *testing.T) {
 	var output bytes.Buffer
 	writer := evstream.NewWriter(&output, evstream.WriterOptions{})

@@ -90,6 +90,16 @@ func NewReader(in io.Reader, opts ReaderOptions) (*Reader, error) {
 	if string(header[0:8]) != Magic {
 		return nil, ErrBadMagic
 	}
+	for _, reserved := range header[13:16] {
+		if reserved != 0 {
+			return nil, fmt.Errorf("%w: nonzero stream-header reserved byte", ErrCorrupt)
+		}
+	}
+	for _, reserved := range header[20:32] {
+		if reserved != 0 {
+			return nil, fmt.Errorf("%w: nonzero stream-header reserved byte", ErrCorrupt)
+		}
+	}
 	major := binary.LittleEndian.Uint16(header[8:10])
 	if major != FormatMajor {
 		return nil, fmt.Errorf("%w: major %d, reader supports %d",

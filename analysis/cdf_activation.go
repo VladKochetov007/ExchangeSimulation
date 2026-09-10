@@ -1,0 +1,2825 @@
+package analysis
+
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"math"
+	"math/big"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+
+	etypes "exchange_sim/types"
+)
+
+const cdfActivationSymbol = "CDF/USD"
+const cdfActivationLogName = "CDF-USD"
+
+// CDFActivationOptions selects the immutable evidence and the scientific
+// contract used to audit it. RenderedEvidenceDir is optional for historical
+// JSON runs; binary runs point it at an independently verified rendering.
+type CDFActivationOptions struct {
+	Contract            CDFActivationContract
+	EvidenceDir         string
+	RenderedEvidenceDir string
+	// AllowLegacyJSON is reserved for historical fixture/reconstruction use.
+	// A real v2 successor audit must leave this false and provide a rendered
+	// binary evidence directory with its source stream present.
+	AllowLegacyJSON bool
+}
+
+// CDFActivationContract makes the evaluator reusable by successor campaigns
+// without teaching the analysis package about a central experiment registry.
+type CDFActivationContract struct {
+	HypothesisID                      string
+	ExperimentID                      string
+	Seed                              int64
+	Horizon                           string
+	SimulationStartNano               int64
+	SimulationEndNano                 int64
+	VenueIDs                          []string
+	HistoricalSupplierCountPerVenue   int
+	Suppliers                         []CDFSupplierContract
+	MaximumSupplierVolumeShare        float64
+	MaximumSupplierDepthShare         float64
+	MaximumDepthDominanceTimeFraction float64
+}
+
+// CDFSupplierContract is one immutable finite-capital roster entry.
+type CDFSupplierContract struct {
+	Role                           string `json:"role"`
+	Symbol                         string `json:"symbol"`
+	BaseAsset                      string `json:"base_asset"`
+	QuoteAsset                     string `json:"quote_asset"`
+	BasePrecision                  int64  `json:"base_precision"`
+	QuotePrecision                 int64  `json:"quote_precision"`
+	InitialBaseBalance             int64  `json:"initial_base_balance"`
+	InitialQuoteBalance            int64  `json:"initial_quote_balance"`
+	Interval                       int64  `json:"interval"`
+	DecisionPhaseOffset            int64  `json:"decision_phase_offset,omitempty"`
+	MaxObservationAge              int64  `json:"max_observation_age"`
+	ReferencePrice                 int64  `json:"reference_price"`
+	ReferenceHalfLife              int64  `json:"reference_half_life"`
+	BaseHolding                    int64  `json:"base_holding"`
+	ElasticityPerPercent           int64  `json:"elasticity_per_percent"`
+	MaxPosition                    int64  `json:"max_position"`
+	MaxInventory                   int64  `json:"max_inventory"`
+	MaxQuoteQty                    int64  `json:"max_quote_qty"`
+	MinimumExecutableQty           int64  `json:"minimum_executable_qty"`
+	MinimumQualifyingQty           int64  `json:"minimum_qualifying_qty"`
+	TickSize                       int64  `json:"tick_size"`
+	RegisteredMinimumExecutableQty int64  `json:"registered_minimum_executable_qty"`
+	QuoteOnOneSidedLocalBook       bool   `json:"quote_on_one_sided_local_book"`
+	MaxLossQuote                   int64  `json:"max_loss_quote"`
+	MakerFeeBps                    int64  `json:"maker_fee_bps"`
+}
+
+// RegisteredSV1DActivationContract returns the preregistered five-minute
+// treatment contract. Callers may supply another explicit contract to reuse
+// the evaluator for a later successor without modifying this package.
+func RegisteredSV1DActivationContract() CDFActivationContract {
+	const (
+		second = int64(1_000_000_000)
+		hour   = 3_600 * second
+	)
+	common := func(role string, baseBalance, quoteBalance, halfLife, elasticity, maxPosition, maxInventory, maxQuote, maxLoss, phase int64) CDFSupplierContract {
+		return CDFSupplierContract{
+			Role: role, Symbol: cdfActivationSymbol, BaseAsset: "CDF", QuoteAsset: "USD",
+			BasePrecision: 100_000_000, QuotePrecision: 100_000,
+			InitialBaseBalance: baseBalance, InitialQuoteBalance: quoteBalance,
+			Interval: 2 * second, DecisionPhaseOffset: phase, MaxObservationAge: 60 * second,
+			ReferencePrice: 300_000_000, ReferenceHalfLife: halfLife,
+			ElasticityPerPercent: elasticity, MaxPosition: maxPosition,
+			MaxInventory: maxInventory, MaxQuoteQty: maxQuote,
+			MinimumExecutableQty: 100_000, MinimumQualifyingQty: 1_000_000,
+			TickSize: 100_000, RegisteredMinimumExecutableQty: 100_000,
+			QuoteOnOneSidedLocalBook: true, MaxLossQuote: maxLoss, MakerFeeBps: 5,
+		}
+	}
+	return CDFActivationContract{
+		HypothesisID: "V2-R2-SV1D-ONE-SIDED-ELASTIC-LIQUIDITY",
+		ExperimentID: "v2-r2-sv1d-activation-659-treatment",
+		Seed:         659, Horizon: "5m",
+		SimulationStartNano:             1_735_689_600_000_000_000,
+		SimulationEndNano:               1_735_689_900_000_000_000,
+		VenueIDs:                        []string{"north", "central", "south"},
+		HistoricalSupplierCountPerVenue: 8,
+		Suppliers: []CDFSupplierContract{
+			common("cdf_elastic_supplier_1", 4_000_000_000, 18_000_000_000, 3*hour, 12_000_000_000, 4_000_000_000, 8_000_000_000, 40_000_000, 3_000_000_000, 0),
+			common("cdf_elastic_supplier_2", 5_000_000_000, 21_000_000_000, 4*hour, 15_000_000_000, 5_000_000_000, 10_000_000_000, 50_000_000, 3_600_000_000, 500_000_000),
+			common("cdf_elastic_supplier_3", 6_000_000_000, 24_000_000_000, 5*hour, 18_000_000_000, 6_000_000_000, 12_000_000_000, 60_000_000, 4_200_000_000, 1_000_000_000),
+			common("cdf_elastic_supplier_4", 7_000_000_000, 27_000_000_000, 6*hour, 21_000_000_000, 7_000_000_000, 14_000_000_000, 70_000_000, 4_800_000_000, 1_500_000_000),
+		},
+		MaximumSupplierVolumeShare:        0.75,
+		MaximumSupplierDepthShare:         0.75,
+		MaximumDepthDominanceTimeFraction: 0.50,
+	}
+}
+
+// CDFActivationAudit separates evidence integrity, mechanism activation, and
+// anti-cheating gates so a negative economic result is not mistaken for bad
+// evidence. Valid is deliberately the conjunction required for promotion.
+type CDFActivationAudit struct {
+	Provenance               CDFActivationProvenance      `json:"provenance"`
+	SupplierCount            int                          `json:"supplier_count"`
+	DecisionCount            int64                        `json:"decision_count"`
+	AcceptedOrderCount       int64                        `json:"accepted_order_count"`
+	FillCount                int64                        `json:"fill_count"`
+	WithdrawalCount          int64                        `json:"withdrawal_count"`
+	OneSidedDecisionCount    int64                        `json:"one_sided_decision_count"`
+	OneSidedRestorationCount int64                        `json:"one_sided_restoration_count"`
+	SupplierVolumeQty        int64                        `json:"supplier_volume_qty"`
+	TotalVolumeQty           int64                        `json:"total_volume_qty"`
+	SupplierVolumeShare      float64                      `json:"supplier_volume_share"`
+	Suppliers                []CDFSupplierActivationAudit `json:"suppliers"`
+	Venues                   []CDFVenueConcentrationAudit `json:"venues"`
+	Checks                   []CDFActivationCheck         `json:"checks,omitempty"`
+	EvidenceValid            bool                         `json:"evidence_valid"`
+	ActivationSatisfied      bool                         `json:"activation_satisfied"`
+	AntiCheatingSatisfied    bool                         `json:"anti_cheating_satisfied"`
+	Valid                    bool                         `json:"valid"`
+
+	strictMechanics bool
+}
+
+type CDFActivationProvenance struct {
+	ConfigSHA256        string   `json:"config_sha256"`
+	SourceRevision      string   `json:"source_revision"`
+	SourceModified      bool     `json:"source_modified"`
+	BinarySHA256        string   `json:"binary_sha256"`
+	Seed                int64    `json:"seed"`
+	Horizon             string   `json:"horizon"`
+	SimulationStartNano int64    `json:"simulation_start_nano"`
+	SimulationEndNano   int64    `json:"simulation_end_nano"`
+	VenueIDs            []string `json:"venue_ids"`
+	ExperimentID        string   `json:"experiment_id"`
+	HypothesisID        string   `json:"hypothesis_id"`
+	EvidenceFormat      string   `json:"evidence_format"`
+	LogMode             string   `json:"log_mode"`
+}
+
+type CDFSupplierActivationAudit struct {
+	VenueID                      string `json:"venue_id"`
+	Role                         string `json:"role"`
+	ClientID                     uint64 `json:"client_id"`
+	DecisionCount                int64  `json:"decision_count"`
+	EligibleObservationCount     int64  `json:"eligible_observation_count"`
+	AcceptedOrderCount           int64  `json:"accepted_order_count"`
+	FillCount                    int64  `json:"fill_count"`
+	BalanceSnapshotCount         int64  `json:"balance_snapshot_count"`
+	PostFillBalanceSnapshotCount int64  `json:"post_fill_balance_snapshot_count"`
+	PostFillResponsiveCount      int64  `json:"post_fill_responsive_count"`
+	WithdrawalCount              int64  `json:"withdrawal_count"`
+	InitialEquity                int64  `json:"initial_equity"`
+	TerminalEquity               int64  `json:"terminal_equity"`
+	PnL                          int64  `json:"pnl"`
+	MinPosition                  int64  `json:"min_position"`
+	MaxPosition                  int64  `json:"max_position"`
+	MaxGrossInventory            int64  `json:"max_gross_inventory"`
+	EvidenceValid                bool   `json:"evidence_valid"`
+	ActivationSatisfied          bool   `json:"activation_satisfied"`
+}
+
+type CDFVenueConcentrationAudit struct {
+	VenueID                  string  `json:"venue_id"`
+	SnapshotCount            int64   `json:"snapshot_count"`
+	BidActiveDurationNano    int64   `json:"bid_active_duration_nano"`
+	AskActiveDurationNano    int64   `json:"ask_active_duration_nano"`
+	BidDominantDurationNano  int64   `json:"bid_dominant_duration_nano"`
+	AskDominantDurationNano  int64   `json:"ask_dominant_duration_nano"`
+	BidDominanceTimeFraction float64 `json:"bid_dominance_time_fraction"`
+	AskDominanceTimeFraction float64 `json:"ask_dominance_time_fraction"`
+	OneSidedDurationNano     int64   `json:"one_sided_duration_nano"`
+	ConcentrationSatisfied   bool    `json:"concentration_satisfied"`
+}
+
+type CDFActivationCheck struct {
+	VenueID  string `json:"venue_id,omitempty"`
+	Role     string `json:"role,omitempty"`
+	ClientID uint64 `json:"client_id,omitempty"`
+	Ordinal  int64  `json:"ordinal,omitempty"`
+	Failure  string `json:"failure"`
+}
+
+type cdfActivationConfig struct {
+	VenueIDs                                []string              `json:"venue_ids"`
+	Seed                                    int64                 `json:"seed"`
+	LogMode                                 string                `json:"log_mode"`
+	EvidenceFormat                          string                `json:"evidence_format"`
+	EvidenceContractVersion                 int                   `json:"evidence_contract_version"`
+	ExperimentID                            string                `json:"experiment_id"`
+	HypothesisID                            string                `json:"hypothesis_id"`
+	ElasticSupplierCount                    int                   `json:"elastic_supplier_count"`
+	StrictPopulationAccounting              bool                  `json:"strict_population_accounting"`
+	StrictRiskContract                      bool                  `json:"strict_risk_contract"`
+	AutoBorrowSpot                          *bool                 `json:"auto_borrow_spot"`
+	CrossAssetSpotGraph                     bool                  `json:"cross_asset_spot_graph"`
+	CrossAssetCollateralMarks               bool                  `json:"cross_asset_collateral_marks"`
+	RecordElasticLiquiditySupplierDecisions bool                  `json:"record_elastic_liquidity_supplier_decisions"`
+	RecordMarketDataReceipts                bool                  `json:"record_market_data_receipts"`
+	MarketDataReceiptRoles                  []string              `json:"market_data_receipt_roles"`
+	ElasticLiquiditySuppliers               []CDFSupplierContract `json:"elastic_liquidity_suppliers"`
+}
+
+type cdfActivationManifest struct {
+	Config   json.RawMessage `json:"config"`
+	VenueIDs []string        `json:"venue_ids"`
+	Build    struct {
+		Revision string `json:"revision"`
+		Modified bool   `json:"modified"`
+		GOOS     string `json:"goos"`
+		GOARCH   string `json:"goarch"`
+		GOAMD64  string `json:"goamd64"`
+	} `json:"build"`
+}
+
+type cdfActivationMetadata struct {
+	Seed                int64  `json:"seed"`
+	SimulatedHorizon    string `json:"simulated_horizon"`
+	SimulationStartNano int64  `json:"simulation_start_nano"`
+	SimulationEndNano   int64  `json:"simulation_end_nano"`
+	ConfigSHA256        string `json:"config_sha256"`
+	BinarySHA256        string `json:"binary_sha256"`
+	BinaryPath          string `json:"binary_path"`
+	BinaryGOOS          string `json:"binary_goos"`
+	BinaryGOARCH        string `json:"binary_goarch"`
+	BinaryGOAMD64       string `json:"binary_goamd64"`
+	GitRevision         string `json:"git_revision"`
+	ConfigExperimentID  string `json:"config_experiment_id"`
+	HypothesisID        string `json:"hypothesis_id"`
+	LogMode             string `json:"log_mode"`
+	EvidenceFormat      string `json:"evidence_format"`
+}
+
+type cdfParticipantKey struct {
+	venueID  string
+	clientID uint64
+}
+
+type cdfSupplierState struct {
+	audit                  CDFSupplierActivationAudit
+	contract               CDFSupplierContract
+	lastFillAt             int64
+	lastFillPosition       int64
+	currentPosition        int64
+	fillBaseDelta          int64
+	fillQuoteDelta         int64
+	initialBaseBalance     int64
+	initialQuoteBalance    int64
+	terminalBaseBalance    int64
+	terminalQuoteBalance   int64
+	reconstructedReference int64
+	referenceUpdatedAt     int64
+	referenceUpdateSet     bool
+	reconstructedRiskMark  int64
+	lastDecision           cdfDecisionEvidence
+	hasLastDecision        bool
+	fillResponses          []cdfFillResponseWindow
+	initialAccountSeen     bool
+	terminalAccountSeen    bool
+}
+
+type cdfFillResponseWindow struct {
+	fillAt          int64
+	fillGlobalSeq   uint64
+	positionAfter   int64
+	preFillDecision cdfDecisionEvidence
+	preFillKnown    bool
+	responded       bool
+}
+
+type cdfDecisionEvidence struct {
+	Role                           string `json:"role"`
+	ClientID                       uint64 `json:"client_id"`
+	Symbol                         string `json:"symbol"`
+	DecisionTime                   int64  `json:"decision_time"`
+	DecisionPhaseOffset            int64  `json:"decision_phase_offset_nanos"`
+	ObservationTime                int64  `json:"observation_time"`
+	ObservationAge                 int64  `json:"observation_age"`
+	ObservationSequence            uint64 `json:"observation_sequence"`
+	ObservationLinkID              uint32 `json:"observation_link_id"`
+	ObservationOrdinal             uint64 `json:"observation_ordinal"`
+	ObservationDeliveredAt         int64  `json:"observation_delivered_at"`
+	ObservationFingerprint         string `json:"observation_fingerprint"`
+	ObservationDigest              string `json:"observation_digest"`
+	BestBid                        int64  `json:"best_bid"`
+	BestBidQty                     int64  `json:"best_bid_qty"`
+	BestAsk                        int64  `json:"best_ask"`
+	BestAskQty                     int64  `json:"best_ask_qty"`
+	MarkPrice                      int64  `json:"mark_price"`
+	RiskMarkPrice                  int64  `json:"risk_mark_price"`
+	LocalBookMode                  string `json:"local_book_mode"`
+	QuotePriceSource               string `json:"quote_price_source"`
+	RiskMarkSource                 string `json:"risk_mark_source"`
+	ReferencePrice                 int64  `json:"reference_price"`
+	Position                       int64  `json:"position"`
+	TargetPosition                 int64  `json:"target_position"`
+	InventoryLimit                 int64  `json:"inventory_limit"`
+	InitialBaseBalance             int64  `json:"initial_base_balance"`
+	GrossInventory                 int64  `json:"gross_inventory"`
+	GrossInventoryLimit            int64  `json:"gross_inventory_limit"`
+	Action                         string `json:"action"`
+	Reason                         string `json:"reason"`
+	Side                           string `json:"side"`
+	QuotePrice                     int64  `json:"quote_price"`
+	QuoteQty                       int64  `json:"quote_qty"`
+	MinimumQualifyingQty           int64  `json:"minimum_qualifying_qty"`
+	RegisteredMinimumExecutableQty int64  `json:"registered_minimum_executable_qty"`
+	QuoteOrderID                   uint64 `json:"quote_order_id"`
+	QuoteRequestID                 uint64 `json:"quote_request_id"`
+	CancelRequestID                uint64 `json:"cancel_request_id"`
+	QuoteSubmittedAt               int64  `json:"quote_submitted_at"`
+	QuoteCashAvailable             int64  `json:"quote_cash_available"`
+	QuoteCashReserved              int64  `json:"quote_cash_reserved"`
+	QuoteCashRequired              int64  `json:"quote_cash_required"`
+	InitialEquityQuote             int64  `json:"initial_equity_quote"`
+	EquityQuote                    int64  `json:"equity_quote"`
+	PeakEquityQuote                int64  `json:"peak_equity_quote"`
+	LossFromInitialQuote           int64  `json:"loss_from_initial_quote"`
+	DrawdownQuote                  int64  `json:"drawdown_quote"`
+	MaxLossQuote                   int64  `json:"max_loss_quote"`
+	EquityAvailable                bool   `json:"equity_available"`
+	RiskLimitTriggered             bool   `json:"risk_limit_triggered"`
+}
+
+type cdfFillEvidence struct {
+	Role           string `json:"role"`
+	ClientID       uint64 `json:"client_id"`
+	Symbol         string `json:"symbol"`
+	OrderID        uint64 `json:"order_id"`
+	TradeID        uint64 `json:"trade_id"`
+	Timestamp      int64  `json:"timestamp"`
+	Side           string `json:"side"`
+	Price          int64  `json:"price"`
+	Qty            int64  `json:"qty"`
+	FeeAmount      int64  `json:"fee_amount"`
+	FeeAsset       string `json:"fee_asset"`
+	IsFull         bool   `json:"is_full"`
+	PositionBefore int64  `json:"position_before"`
+	PositionAfter  int64  `json:"position_after"`
+}
+
+type cdfAcceptedEvidence struct {
+	OrderID     uint64 `json:"order_id"`
+	ClientID    uint64 `json:"client_id"`
+	RequestID   uint64 `json:"request_id"`
+	Side        string `json:"side"`
+	Type        string `json:"type"`
+	TimeInForce string `json:"time_in_force"`
+	PostOnly    bool   `json:"post_only"`
+	Price       int64  `json:"price"`
+	Qty         int64  `json:"qty"`
+}
+
+type cdfOrderFillEvidence struct {
+	OrderID      uint64 `json:"order_id"`
+	TradeID      uint64 `json:"trade_id"`
+	Side         string `json:"side"`
+	Price        int64  `json:"price"`
+	Qty          int64  `json:"qty"`
+	FeeAmount    int64  `json:"fee_amount"`
+	FeeAsset     string `json:"fee_asset"`
+	FilledQty    int64  `json:"filled_qty"`
+	RemainingQty int64  `json:"remaining_qty"`
+	IsFull       bool   `json:"is_full"`
+}
+
+type cdfCancelledEvidence struct {
+	OrderID      uint64 `json:"order_id"`
+	RequestID    uint64 `json:"request_id"`
+	RemainingQty int64  `json:"remaining_qty"`
+}
+
+type cdfRejectedEvidence struct {
+	RequestID uint64 `json:"request_id"`
+	Success   bool   `json:"success"`
+	Error     string `json:"error"`
+}
+
+type cdfTradeEvidence struct {
+	TradeID uint64 `json:"trade_id"`
+	Price   int64  `json:"price"`
+	Qty     int64  `json:"qty"`
+	Side    string `json:"side"`
+}
+
+type cdfBalanceEvidence struct {
+	Asset    string `json:"asset"`
+	Free     int64  `json:"free"`
+	Locked   int64  `json:"locked"`
+	Borrowed int64  `json:"borrowed"`
+	Interest int64  `json:"interest"`
+	NetAsset int64  `json:"net_asset"`
+}
+
+type cdfBalanceSnapshotEvidence struct {
+	Timestamp    int64                `json:"timestamp"`
+	ClientID     uint64               `json:"client_id"`
+	SpotBalances []cdfBalanceEvidence `json:"spot_balances"`
+	PerpBalances []cdfBalanceEvidence `json:"perp_balances"`
+	Borrowed     map[string]int64     `json:"borrowed"`
+}
+
+type cdfBorrowEvidence struct {
+	ClientID uint64 `json:"client_id"`
+	Asset    string `json:"asset"`
+	Amount   int64  `json:"amount"`
+}
+
+type cdfPublicSnapshotEvidence struct {
+	Bids           []etypes.PriceLevel `json:"bids"`
+	Asks           []etypes.PriceLevel `json:"asks"`
+	SourceSequence uint64              `json:"source_sequence"`
+	PublicBids     []etypes.PriceLevel `json:"public_bids"`
+	PublicAsks     []etypes.PriceLevel `json:"public_asks"`
+}
+
+type cdfBookDeltaEvidence struct {
+	Side       string `json:"side"`
+	Price      int64  `json:"price"`
+	VisibleQty int64  `json:"visible_qty"`
+	HiddenQty  int64  `json:"hidden_qty"`
+}
+
+type cdfPublicDepthState struct {
+	initialized bool
+	bids        map[int64]int64
+	asks        map[int64]int64
+}
+
+type cdfReceiptKey struct {
+	clientID uint64
+	linkID   uint32
+	ordinal  uint64
+}
+
+type cdfReceiptProof struct {
+	sourceVenue string
+	role        string
+	symbol      string
+	record      observationRecord
+	digest      [16]byte
+}
+
+type cdfRequestKey struct {
+	venueID   string
+	clientID  uint64
+	requestID uint64
+}
+
+type cdfOrderKey struct {
+	venueID  string
+	clientID uint64
+	orderID  uint64
+}
+
+type cdfFillKey struct {
+	venueID  string
+	clientID uint64
+	orderID  uint64
+	tradeID  uint64
+}
+
+type cdfGatewayDecision struct {
+	sourceVenue string
+	symbol      string
+	record      decisionRecord
+}
+
+type cdfReceiptIndex struct {
+	receipts  map[cdfReceiptKey]cdfReceiptProof
+	decisions map[cdfRequestKey]cdfGatewayDecision
+}
+
+type cdfSnapshotKey struct {
+	venueID     string
+	sequence    uint64
+	fingerprint [16]byte
+}
+
+type cdfSnapshotProof struct {
+	publishedAt int64
+	bids        []etypes.PriceLevel
+	asks        []etypes.PriceLevel
+}
+
+type cdfSubmission struct {
+	event    Event
+	decision cdfDecisionEvidence
+	accepted bool
+	rejected bool
+}
+
+type cdfWithdrawal struct {
+	event    Event
+	decision cdfDecisionEvidence
+	closed   bool
+}
+
+type cdfOrderState struct {
+	requestID         uint64
+	side              string
+	price             int64
+	remainingQty      int64
+	acceptedAt        int64
+	oneSidedCandidate bool
+	minimumQualifying int64
+	restored          bool
+}
+
+type cdfDepthObservation struct {
+	at          int64
+	bidDepth    int64
+	askDepth    int64
+	supplierBid int64
+	supplierAsk int64
+}
+
+// AuditCDFLiquidityActivation validates a complete treatment run without
+// interpreting holdouts or changing the simulator trajectory.
+func (r *Run) AuditCDFLiquidityActivation(options CDFActivationOptions) (*CDFActivationAudit, error) {
+	if r == nil {
+		return nil, fmt.Errorf("cdf activation: nil run")
+	}
+	if err := options.Contract.validate(); err != nil {
+		return nil, fmt.Errorf("cdf activation contract: %w", err)
+	}
+	evidenceDir := options.EvidenceDir
+	if evidenceDir == "" {
+		evidenceDir = r.Dir
+	}
+	if !options.AllowLegacyJSON && !sameCDFPath(r.Dir, evidenceDir) {
+		return nil, fmt.Errorf("cdf activation: report and evidence directories must be identical in strict mode")
+	}
+	scanRun, err := cdfActivationScanRun(r, options.RenderedEvidenceDir)
+	if err != nil {
+		return nil, err
+	}
+	result := &CDFActivationAudit{}
+	config, metadata, err := loadCDFActivationIdentity(evidenceDir)
+	if err != nil {
+		return nil, err
+	}
+	if config.EvidenceFormat == "evstream_v3" && config.EvidenceContractVersion >= 2 {
+		eventsPath := filepath.Join(evidenceDir, "events.evs")
+		_, eventsErr := os.Stat(eventsPath)
+		sourceStreamPresent := eventsErr == nil
+		if eventsErr != nil && !os.IsNotExist(eventsErr) {
+			return nil, fmt.Errorf("cdf activation: inspect binary evidence stream: %w", eventsErr)
+		}
+		if !sourceStreamPresent {
+			if !options.AllowLegacyJSON {
+				return nil, fmt.Errorf("cdf activation: v2 audit requires the canonical binary stream")
+			}
+		} else {
+			if options.RenderedEvidenceDir == "" {
+				return nil, fmt.Errorf("cdf activation: v2 audit requires independently rendered binary evidence")
+			}
+			if err := validateCDFCompletionArtifacts(evidenceDir, metadata); err != nil {
+				return nil, err
+			}
+			if err := validateCDFRenderedGlobalSequence(scanRun, evidenceDir, options.RenderedEvidenceDir); err != nil {
+				return nil, err
+			}
+		}
+	}
+	result.strictMechanics = config.EvidenceFormat == "evstream_v3" && config.EvidenceContractVersion >= 2 && !options.AllowLegacyJSON
+	result.Provenance = CDFActivationProvenance{
+		ConfigSHA256: metadata.ConfigSHA256, SourceRevision: metadata.GitRevision,
+		SourceModified: false, BinarySHA256: metadata.BinarySHA256, Seed: metadata.Seed,
+		Horizon: metadata.SimulatedHorizon, SimulationStartNano: metadata.SimulationStartNano,
+		SimulationEndNano: metadata.SimulationEndNano, VenueIDs: append([]string(nil), config.VenueIDs...),
+		ExperimentID: config.ExperimentID, HypothesisID: config.HypothesisID,
+		EvidenceFormat: config.EvidenceFormat, LogMode: config.LogMode,
+	}
+	result.validateConfiguration(config, metadata, options.Contract)
+	receipts, receiptAudit, err := loadCDFReceiptIndex(evidenceDir)
+	if err != nil {
+		return nil, fmt.Errorf("cdf activation receipts: %w", err)
+	}
+	if !receiptAudit.Valid {
+		result.addCheck(CDFActivationCheck{Failure: "market-data receipt contract is invalid"})
+	}
+	states := result.indexCDFAccounts(r.Report, config, options.Contract)
+	snapshots, depth, err := result.indexCDFSnapshots(scanRun)
+	if err != nil {
+		return nil, err
+	}
+	submissions := make(map[cdfRequestKey]*cdfSubmission)
+	withdrawals := make(map[cdfRequestKey]*cdfWithdrawal)
+	observedFills := make(map[cdfFillKey]cdfFillEvidence)
+	actualFills := make(map[cdfFillKey]cdfOrderFillEvidence)
+	orders := make(map[cdfOrderKey]*cdfOrderState)
+	if result.strictMechanics {
+		orderedEvents, err := collectCDFOrderedEvents(scanRun)
+		if err != nil {
+			return nil, err
+		}
+		if err := result.scanCDFOrdered(orderedEvents, states, receipts, snapshots, submissions, withdrawals, observedFills, orders, actualFills, depth); err != nil {
+			return nil, err
+		}
+	} else {
+		if err := result.scanCDFGeneral(scanRun, states, receipts, snapshots, submissions, withdrawals, observedFills); err != nil {
+			return nil, err
+		}
+		if err := result.scanCDFBooks(scanRun, states, submissions, withdrawals, orders, actualFills, depth); err != nil {
+			return nil, err
+		}
+	}
+	result.reconcileCDFFills(states, observedFills, actualFills, orders)
+	result.finalizeCDFActivation(states, submissions, withdrawals, depth, metadata.SimulationEndNano, options.Contract)
+	return result, nil
+}
+
+func (c CDFActivationContract) validate() error {
+	if c.HypothesisID == "" || c.ExperimentID == "" || c.Seed == 0 || c.Horizon == "" {
+		return fmt.Errorf("identity, seed, and horizon are required")
+	}
+	if c.SimulationStartNano <= 0 || c.SimulationEndNano <= c.SimulationStartNano {
+		return fmt.Errorf("invalid simulation interval")
+	}
+	if len(c.VenueIDs) == 0 || c.HistoricalSupplierCountPerVenue < 0 || len(c.Suppliers) == 0 {
+		return fmt.Errorf("venue and supplier rosters are required")
+	}
+	if c.MaximumSupplierVolumeShare <= 0 || c.MaximumSupplierVolumeShare > 1 ||
+		c.MaximumSupplierDepthShare <= 0 || c.MaximumSupplierDepthShare > 1 ||
+		c.MaximumDepthDominanceTimeFraction <= 0 || c.MaximumDepthDominanceTimeFraction > 1 {
+		return fmt.Errorf("concentration thresholds must be in (0,1]")
+	}
+	venues := make(map[string]struct{}, len(c.VenueIDs))
+	for _, venueID := range c.VenueIDs {
+		if venueID == "" {
+			return fmt.Errorf("empty venue ID")
+		}
+		if _, duplicate := venues[venueID]; duplicate {
+			return fmt.Errorf("duplicate venue ID %q", venueID)
+		}
+		venues[venueID] = struct{}{}
+	}
+	roles := make(map[string]struct{}, len(c.Suppliers))
+	for _, supplier := range c.Suppliers {
+		if !isNumberedRole(supplier.Role, "cdf_elastic_supplier_") || supplier.Symbol != cdfActivationSymbol ||
+			supplier.BaseAsset != "CDF" || supplier.QuoteAsset != "USD" || supplier.BasePrecision <= 0 ||
+			supplier.QuotePrecision <= 0 || supplier.InitialBaseBalance <= 0 || supplier.InitialQuoteBalance <= 0 ||
+			supplier.Interval <= 0 || supplier.MaxObservationAge <= 0 || supplier.ReferencePrice <= 0 ||
+			supplier.ReferenceHalfLife <= 0 || supplier.MaxPosition <= 0 || supplier.MaxInventory <= 0 ||
+			supplier.MaxQuoteQty <= 0 || supplier.MinimumExecutableQty <= 0 ||
+			supplier.MinimumQualifyingQty <= supplier.MinimumExecutableQty || supplier.TickSize <= 0 ||
+			supplier.RegisteredMinimumExecutableQty != supplier.MinimumExecutableQty ||
+			!supplier.QuoteOnOneSidedLocalBook || supplier.MaxLossQuote <= 0 || supplier.MakerFeeBps < 0 {
+			return fmt.Errorf("invalid finite supplier contract for %q", supplier.Role)
+		}
+		if _, duplicate := roles[supplier.Role]; duplicate {
+			return fmt.Errorf("duplicate supplier role %q", supplier.Role)
+		}
+		roles[supplier.Role] = struct{}{}
+	}
+	return nil
+}
+
+func cdfActivationScanRun(run *Run, renderedDir string) (*Run, error) {
+	if renderedDir == "" {
+		return run, nil
+	}
+	clone := *run
+	clone.files = nil
+	venueRoot := filepath.Join(renderedDir, "venues")
+	if err := filepath.WalkDir(venueRoot, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if !entry.IsDir() && strings.HasSuffix(path, ".jsonl") {
+			clone.files = append(clone.files, path)
+		}
+		return nil
+	}); err != nil {
+		return nil, fmt.Errorf("cdf activation: index rendered evidence: %w", err)
+	}
+	sort.Strings(clone.files)
+	return &clone, nil
+}
+
+func loadCDFActivationIdentity(dir string) (cdfActivationConfig, cdfActivationMetadata, error) {
+	manifestRaw, err := os.ReadFile(filepath.Join(dir, "manifest.json"))
+	if err != nil {
+		return cdfActivationConfig{}, cdfActivationMetadata{}, fmt.Errorf("cdf activation: read manifest: %w", err)
+	}
+	var manifest cdfActivationManifest
+	if err := json.Unmarshal(manifestRaw, &manifest); err != nil {
+		return cdfActivationConfig{}, cdfActivationMetadata{}, fmt.Errorf("cdf activation: decode manifest: %w", err)
+	}
+	if len(manifest.Config) == 0 || string(manifest.Config) == "null" {
+		return cdfActivationConfig{}, cdfActivationMetadata{}, fmt.Errorf("cdf activation: manifest has no config")
+	}
+	var config cdfActivationConfig
+	if err := json.Unmarshal(manifest.Config, &config); err != nil {
+		return cdfActivationConfig{}, cdfActivationMetadata{}, fmt.Errorf("cdf activation: decode config: %w", err)
+	}
+	runConfigRaw, err := os.ReadFile(filepath.Join(dir, "run-config.json"))
+	if err != nil {
+		return cdfActivationConfig{}, cdfActivationMetadata{}, fmt.Errorf("cdf activation: read run config: %w", err)
+	}
+	manifestCanonical, err := canonicalCDFActivationJSON(manifest.Config)
+	if err != nil {
+		return cdfActivationConfig{}, cdfActivationMetadata{}, err
+	}
+	runCanonical, err := canonicalCDFActivationJSON(runConfigRaw)
+	if err != nil {
+		return cdfActivationConfig{}, cdfActivationMetadata{}, err
+	}
+	if manifestCanonical != runCanonical {
+		return cdfActivationConfig{}, cdfActivationMetadata{}, fmt.Errorf("cdf activation: manifest and copied run config differ")
+	}
+	metadataRaw, err := os.ReadFile(filepath.Join(dir, "run-metadata.json"))
+	if err != nil {
+		return cdfActivationConfig{}, cdfActivationMetadata{}, fmt.Errorf("cdf activation: read run metadata: %w", err)
+	}
+	var metadata cdfActivationMetadata
+	if err := json.Unmarshal(metadataRaw, &metadata); err != nil {
+		return cdfActivationConfig{}, cdfActivationMetadata{}, fmt.Errorf("cdf activation: decode run metadata: %w", err)
+	}
+	configDigest := sha256.Sum256(runConfigRaw)
+	if metadata.ConfigSHA256 != hex.EncodeToString(configDigest[:]) {
+		return cdfActivationConfig{}, cdfActivationMetadata{}, fmt.Errorf("cdf activation: metadata config hash mismatch")
+	}
+	if !isCDFHex(metadata.ConfigSHA256, sha256.Size) || !isCDFHex(metadata.BinarySHA256, sha256.Size) ||
+		!isCDFHex(manifest.Build.Revision, 20) || manifest.Build.Modified ||
+		manifest.Build.GOOS != "linux" || manifest.Build.GOARCH != "amd64" || manifest.Build.GOAMD64 != "v1" {
+		return cdfActivationConfig{}, cdfActivationMetadata{}, fmt.Errorf("cdf activation: build provenance is not clean linux/amd64/v1")
+	}
+	if metadata.GitRevision != manifest.Build.Revision || metadata.BinaryGOOS != manifest.Build.GOOS ||
+		metadata.BinaryGOARCH != manifest.Build.GOARCH || metadata.BinaryGOAMD64 != manifest.Build.GOAMD64 ||
+		metadata.Seed != config.Seed || metadata.ConfigExperimentID != config.ExperimentID ||
+		metadata.HypothesisID != config.HypothesisID || metadata.LogMode != config.LogMode ||
+		metadata.EvidenceFormat != config.EvidenceFormat || !sameCDFStrings(manifest.VenueIDs, config.VenueIDs) {
+		return cdfActivationConfig{}, cdfActivationMetadata{}, fmt.Errorf("cdf activation: metadata, manifest, and config identities disagree")
+	}
+	return config, metadata, nil
+}
+
+type cdfBinaryEvidenceAttestation struct {
+	Domain               string `json:"domain"`
+	Ordering             string `json:"ordering"`
+	SchemaEpoch          uint32 `json:"schema_epoch"`
+	EventFrames          uint64 `json:"event_frames"`
+	StreamFrames         uint64 `json:"stream_frames"`
+	ExecutionStreamHash  string `json:"execution_stream_hash"`
+	EvidenceOnlyIncluded bool   `json:"evidence_only_in_stream"`
+}
+
+type cdfRenderedEvidenceAttestation struct {
+	Domain                 string `json:"domain"`
+	Ordering               string `json:"ordering"`
+	SourceExecutionHash    string `json:"source_execution_stream_hash"`
+	SourceEventFrames      uint64 `json:"source_event_frames"`
+	SourceStreamFrames     uint64 `json:"source_stream_frames"`
+	RenderedDigest         string `json:"rendered_digest"`
+	GlobalSequenceIncluded bool   `json:"global_sequence_included"`
+}
+
+type cdfRunStatus struct {
+	ExitStatus           int    `json:"exit_status"`
+	CompletionVerified   bool   `json:"completion_verified"`
+	SimulatedHorizon     string `json:"simulated_horizon"`
+	SimulationStartNano  int64  `json:"simulation_start_nano"`
+	SimulationEndNano    int64  `json:"simulation_end_nano"`
+	RunMetadataSHA256    string `json:"run_metadata_sha256"`
+	ManifestSHA256       string `json:"manifest_sha256"`
+	GreeksSHA256         string `json:"greeks_sha256"`
+	LatencySHA256        string `json:"latency_sha256"`
+	CheckpointsSHA256    string `json:"checkpoints_sha256"`
+	EvidenceManifestSHA  string `json:"evidence_manifest_sha256"`
+	BinaryAttestationSHA string `json:"binary_evidence_attestation_sha256"`
+}
+
+func validateCDFCompletionArtifacts(dir string, metadata cdfActivationMetadata) error {
+	raw, err := os.ReadFile(filepath.Join(dir, "run-status.json"))
+	if err != nil {
+		return fmt.Errorf("cdf activation: read run status: %w", err)
+	}
+	var status cdfRunStatus
+	if err := json.Unmarshal(raw, &status); err != nil {
+		return fmt.Errorf("cdf activation: decode run status: %w", err)
+	}
+	if status.ExitStatus != 0 || !status.CompletionVerified || status.SimulatedHorizon != metadata.SimulatedHorizon ||
+		status.SimulationStartNano != metadata.SimulationStartNano || status.SimulationEndNano != metadata.SimulationEndNano {
+		return fmt.Errorf("cdf activation: run status does not attest a complete registered horizon")
+	}
+	checks := []struct {
+		name string
+		path string
+		want string
+	}{
+		{"run metadata", "run-metadata.json", status.RunMetadataSHA256},
+		{"manifest", "manifest.json", status.ManifestSHA256},
+		{"greeks", "greeks.json", status.GreeksSHA256},
+		{"latency", "latency.json", status.LatencySHA256},
+		{"checkpoints", "checkpoints.jsonl", status.CheckpointsSHA256},
+		{"evidence manifest", "evidence-manifest.json", status.EvidenceManifestSHA},
+		{"binary evidence attestation", "binary-evidence-attestation.json", status.BinaryAttestationSHA},
+	}
+	for _, check := range checks {
+		if !isCDFHex(check.want, sha256.Size) {
+			return fmt.Errorf("cdf activation: run status has no valid %s hash", check.name)
+		}
+		actual, err := sha256File(filepath.Join(dir, check.path))
+		if err != nil {
+			return fmt.Errorf("cdf activation: hash %s: %w", check.name, err)
+		}
+		if actual != check.want {
+			return fmt.Errorf("cdf activation: run status %s hash mismatch", check.name)
+		}
+	}
+	if metadata.BinaryPath == "" {
+		return fmt.Errorf("cdf activation: run metadata has no simulator binary path")
+	}
+	binaryDigest, err := sha256File(metadata.BinaryPath)
+	if err != nil {
+		return fmt.Errorf("cdf activation: hash simulator binary: %w", err)
+	}
+	if binaryDigest != metadata.BinarySHA256 {
+		return fmt.Errorf("cdf activation: simulator binary hash mismatch")
+	}
+	return nil
+}
+
+func sha256File(path string) (string, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	digest := sha256.Sum256(raw)
+	return hex.EncodeToString(digest[:]), nil
+}
+
+func validateCDFRenderedGlobalSequence(renderedRun *Run, evidenceDir, renderedDir string) error {
+	raw, err := os.ReadFile(filepath.Join(evidenceDir, "binary-evidence-attestation.json"))
+	if err != nil {
+		return fmt.Errorf("cdf activation: read binary evidence attestation: %w", err)
+	}
+	var attestation cdfBinaryEvidenceAttestation
+	if err := json.Unmarshal(raw, &attestation); err != nil {
+		return fmt.Errorf("cdf activation: decode binary evidence attestation: %w", err)
+	}
+	if attestation.Domain != "canonical_binary_execution_frames" || attestation.Ordering != "ordered_stream" ||
+		!isCDFHex(attestation.ExecutionStreamHash, sha256.Size) || attestation.EventFrames == 0 ||
+		attestation.StreamFrames < attestation.EventFrames || !attestation.EvidenceOnlyIncluded {
+		return fmt.Errorf("cdf activation: binary evidence attestation is not a complete v2 successor attestation")
+	}
+	renderedRaw, err := os.ReadFile(filepath.Join(renderedDir, "rendered-binary-evidence-attestation.json"))
+	if err != nil {
+		return fmt.Errorf("cdf activation: read rendered evidence attestation: %w", err)
+	}
+	var rendered cdfRenderedEvidenceAttestation
+	if err := json.Unmarshal(renderedRaw, &rendered); err != nil {
+		return fmt.Errorf("cdf activation: decode rendered evidence attestation: %w", err)
+	}
+	if rendered.Domain != "rendered_binary_evidence" ||
+		rendered.Ordering != "venue_sequence_files_with_global_frame_identity" ||
+		rendered.SourceExecutionHash != attestation.ExecutionStreamHash ||
+		rendered.SourceEventFrames != attestation.EventFrames ||
+		rendered.SourceStreamFrames != attestation.StreamFrames ||
+		!rendered.GlobalSequenceIncluded || !isCDFHex(rendered.RenderedDigest, sha256.Size) {
+		return fmt.Errorf("cdf activation: rendered evidence attestation is not bound to the binary source")
+	}
+	actualRenderedDigest, err := digestRenderedEvidenceDirectory(renderedDir)
+	if err != nil {
+		return fmt.Errorf("cdf activation: digest rendered evidence: %w", err)
+	}
+	if actualRenderedDigest != rendered.RenderedDigest {
+		return fmt.Errorf("cdf activation: rendered evidence digest mismatch")
+	}
+	if _, err := renderedRun.ValidateGlobalSequence(attestation.EventFrames, attestation.StreamFrames); err != nil {
+		return fmt.Errorf("cdf activation: rendered global sequence: %w", err)
+	}
+	return nil
+}
+
+func (r *CDFActivationAudit) validateConfiguration(config cdfActivationConfig, metadata cdfActivationMetadata, contract CDFActivationContract) {
+	if config.HypothesisID != contract.HypothesisID || config.ExperimentID != contract.ExperimentID || config.Seed != contract.Seed ||
+		metadata.SimulatedHorizon != contract.Horizon || metadata.SimulationStartNano != contract.SimulationStartNano ||
+		metadata.SimulationEndNano != contract.SimulationEndNano {
+		r.addCheck(CDFActivationCheck{Failure: "run identity does not match the registered activation contract"})
+	}
+	if !sameCDFStrings(config.VenueIDs, contract.VenueIDs) {
+		r.addCheck(CDFActivationCheck{Failure: "venue roster does not match the registered activation contract"})
+	}
+	if config.LogMode != "full" || config.EvidenceFormat != "evstream_v3" || config.EvidenceContractVersion != 2 || !config.StrictPopulationAccounting ||
+		!config.StrictRiskContract || config.AutoBorrowSpot == nil || *config.AutoBorrowSpot || !config.CrossAssetSpotGraph ||
+		config.CrossAssetCollateralMarks || !config.RecordElasticLiquiditySupplierDecisions ||
+		!config.RecordMarketDataReceipts || !containsCDFString(config.MarketDataReceiptRoles, "cdf_elastic_supplier") {
+		r.addCheck(CDFActivationCheck{Failure: "successor strict-risk or evidence configuration is incomplete"})
+	}
+	if config.ElasticSupplierCount != contract.HistoricalSupplierCountPerVenue {
+		r.addCheck(CDFActivationCheck{Failure: "historical supplier count differs from the registered predecessor population"})
+	}
+	expected := make(map[string]CDFSupplierContract, len(contract.Suppliers))
+	for _, supplier := range contract.Suppliers {
+		expected[supplier.Role] = supplier
+	}
+	if len(config.ElasticLiquiditySuppliers) != len(expected) {
+		r.addCheck(CDFActivationCheck{Failure: "configured CDF supplier roster has the wrong size"})
+	}
+	seen := make(map[string]struct{}, len(config.ElasticLiquiditySuppliers))
+	for _, actual := range config.ElasticLiquiditySuppliers {
+		want, exists := expected[actual.Role]
+		if !exists || actual != want {
+			r.addCheck(CDFActivationCheck{Role: actual.Role, Failure: "configured CDF supplier differs from the registered finite roster"})
+		}
+		if _, duplicate := seen[actual.Role]; duplicate {
+			r.addCheck(CDFActivationCheck{Role: actual.Role, Failure: "duplicate configured CDF supplier role"})
+		}
+		seen[actual.Role] = struct{}{}
+	}
+	for role := range expected {
+		if _, exists := seen[role]; !exists {
+			r.addCheck(CDFActivationCheck{Role: role, Failure: "registered CDF supplier role is missing from config"})
+		}
+	}
+}
+
+func loadCDFReceiptIndex(dir string) (*cdfReceiptIndex, *MarketDataReceiptAudit, error) {
+	audit, err := AuditMarketDataReceipts(dir)
+	if err != nil {
+		return nil, nil, err
+	}
+	manifestRaw, err := os.ReadFile(filepath.Join(dir, "market-data-evidence-v2.json"))
+	if err != nil {
+		return nil, nil, err
+	}
+	var manifest marketDataEvidenceManifest
+	if err := json.Unmarshal(manifestRaw, &manifest); err != nil {
+		return nil, nil, err
+	}
+	receiptsRaw, digestMatches, err := readEvidenceFile(dir, manifest.Receipts.File, marketDataReceiptRecordBytes, manifest.Receipts.Records, manifest.Receipts.Digest)
+	if err != nil {
+		return nil, nil, err
+	}
+	if !digestMatches {
+		return nil, nil, fmt.Errorf("receipt digest mismatch")
+	}
+	decisionsRaw, digestMatches, err := readEvidenceFile(dir, manifest.Decisions.File, marketDataDecisionRecordBytes, manifest.Decisions.Records, manifest.Decisions.Digest)
+	if err != nil {
+		return nil, nil, err
+	}
+	if !digestMatches {
+		return nil, nil, fmt.Errorf("decision digest mismatch")
+	}
+	links := make(map[uint32]struct {
+		sourceVenue string
+		role        string
+	}, len(manifest.Links))
+	for _, row := range manifest.Links {
+		links[row.ID] = struct {
+			sourceVenue string
+			role        string
+		}{row.SourceVenue, row.Role}
+	}
+	symbols := make(map[uint32]string, len(manifest.Symbols))
+	for _, row := range manifest.Symbols {
+		symbols[row.ID] = row.Symbol
+	}
+	index := &cdfReceiptIndex{
+		receipts:  make(map[cdfReceiptKey]cdfReceiptProof, manifest.Receipts.Records),
+		decisions: make(map[cdfRequestKey]cdfGatewayDecision, manifest.Decisions.Records),
+	}
+	frontiers := make(map[linkKey][16]byte)
+	for offset := 0; offset < len(receiptsRaw); offset += marketDataReceiptRecordBytes {
+		raw := receiptsRaw[offset : offset+marketDataReceiptRecordBytes]
+		record := decodeObservation(raw)
+		key := linkKey{clientID: record.clientID, linkID: record.linkID}
+		chain := sha256.New()
+		previous := frontiers[key]
+		_, _ = chain.Write(previous[:])
+		_, _ = chain.Write(raw)
+		var digest [16]byte
+		copy(digest[:], chain.Sum(nil))
+		frontiers[key] = digest
+		catalog := links[record.linkID]
+		proofKey := cdfReceiptKey{record.clientID, record.linkID, record.ordinal}
+		if _, duplicate := index.receipts[proofKey]; duplicate {
+			return nil, nil, fmt.Errorf("duplicate receipt identity for client %d link %d ordinal %d", record.clientID, record.linkID, record.ordinal)
+		}
+		index.receipts[proofKey] = cdfReceiptProof{
+			sourceVenue: catalog.sourceVenue, role: catalog.role,
+			symbol: symbols[record.symbolID], record: record, digest: digest,
+		}
+	}
+	for offset := 0; offset < len(decisionsRaw); offset += marketDataDecisionRecordBytes {
+		record := decodeDecision(decisionsRaw[offset : offset+marketDataDecisionRecordBytes])
+		catalog := links[record.linkID]
+		key := cdfRequestKey{catalog.sourceVenue, record.clientID, record.requestID}
+		if _, duplicate := index.decisions[key]; duplicate {
+			return nil, nil, fmt.Errorf("duplicate gateway request identity for client %d request %d", record.clientID, record.requestID)
+		}
+		index.decisions[key] = cdfGatewayDecision{sourceVenue: catalog.sourceVenue, symbol: symbols[record.symbolID], record: record}
+	}
+	return index, audit, nil
+}
+
+func (r *CDFActivationAudit) indexCDFAccounts(report Report, config cdfActivationConfig, contract CDFActivationContract) map[cdfParticipantKey]*cdfSupplierState {
+	configured := make(map[string]CDFSupplierContract, len(config.ElasticLiquiditySuppliers))
+	for _, supplier := range config.ElasticLiquiditySuppliers {
+		configured[supplier.Role] = supplier
+	}
+	expectedVenues := make(map[string]struct{}, len(contract.VenueIDs))
+	for _, venueID := range contract.VenueIDs {
+		expectedVenues[venueID] = struct{}{}
+	}
+	states := make(map[cdfParticipantKey]*cdfSupplierState, len(contract.VenueIDs)*len(contract.Suppliers))
+	historicalInitial := make(map[string]map[string]struct{}, len(contract.VenueIDs))
+	historicalTerminal := make(map[string]map[string]struct{}, len(contract.VenueIDs))
+	initialRoleOwners := make(map[string]map[string]uint64, len(contract.VenueIDs))
+	terminalRoleOwners := make(map[string]map[string]uint64, len(contract.VenueIDs))
+	for _, row := range report.InitialAccounts {
+		if isNumberedRole(row.Role, "elastic_supplier_") {
+			registerCDFHistoricalRole(r, historicalInitial, row, expectedVenues)
+			continue
+		}
+		if !strings.HasPrefix(row.Role, "cdf_elastic_supplier_") {
+			continue
+		}
+		key := cdfParticipantKey{row.VenueID, row.ClientID}
+		if _, duplicate := states[key]; duplicate {
+			r.addCheck(CDFActivationCheck{VenueID: row.VenueID, Role: row.Role, ClientID: row.ClientID, Failure: "duplicate initial CDF supplier account"})
+			continue
+		}
+		supplier, exists := configured[row.Role]
+		if !exists {
+			r.addCheck(CDFActivationCheck{VenueID: row.VenueID, Role: row.Role, ClientID: row.ClientID, Failure: "CDF supplier account is outside the configured roster"})
+			continue
+		}
+		state := &cdfSupplierState{
+			contract: supplier, initialAccountSeen: true,
+			reconstructedReference: supplier.ReferencePrice,
+			reconstructedRiskMark:  supplier.ReferencePrice,
+			audit: CDFSupplierActivationAudit{
+				VenueID: row.VenueID, Role: row.Role, ClientID: row.ClientID,
+				InitialEquity: row.Account.Equity, MinPosition: math.MaxInt64, MaxPosition: math.MinInt64,
+			},
+		}
+		states[key] = state
+		registerCDFRoleOwner(r, initialRoleOwners, row, "initial")
+		if _, expected := expectedVenues[row.VenueID]; !expected {
+			r.addCheck(CDFActivationCheck{VenueID: row.VenueID, Role: row.Role, ClientID: row.ClientID, Failure: "CDF supplier account is outside the registered venue roster"})
+		}
+		r.validateSupplierAccount(row, supplier, true)
+		state.initialBaseBalance, _ = cdfAccountNetBalance(row.Account.SpotBalances, supplier.BaseAsset)
+		state.initialQuoteBalance, _ = cdfAccountNetBalance(row.Account.SpotBalances, supplier.QuoteAsset)
+	}
+	terminalSeen := make(map[cdfParticipantKey]struct{})
+	for _, row := range report.TerminalAccounts {
+		if isNumberedRole(row.Role, "elastic_supplier_") {
+			registerCDFHistoricalRole(r, historicalTerminal, row, expectedVenues)
+			continue
+		}
+		if !strings.HasPrefix(row.Role, "cdf_elastic_supplier_") {
+			continue
+		}
+		key := cdfParticipantKey{row.VenueID, row.ClientID}
+		if _, duplicate := terminalSeen[key]; duplicate {
+			r.addCheck(CDFActivationCheck{VenueID: row.VenueID, Role: row.Role, ClientID: row.ClientID, Failure: "duplicate terminal CDF supplier account"})
+			continue
+		}
+		terminalSeen[key] = struct{}{}
+		state := states[key]
+		if state == nil || state.audit.Role != row.Role {
+			r.addCheck(CDFActivationCheck{VenueID: row.VenueID, Role: row.Role, ClientID: row.ClientID, Failure: "terminal CDF supplier has no matching initial account"})
+			continue
+		}
+		state.terminalAccountSeen = true
+		registerCDFRoleOwner(r, terminalRoleOwners, row, "terminal")
+		state.audit.TerminalEquity = row.Account.Equity
+		pnl, ok := checkedCDFSub(row.Account.Equity, state.audit.InitialEquity)
+		if !ok {
+			r.addCheck(CDFActivationCheck{VenueID: row.VenueID, Role: row.Role, ClientID: row.ClientID, Failure: "supplier PnL overflows"})
+		} else {
+			state.audit.PnL = pnl
+		}
+		r.validateSupplierAccount(row, state.contract, false)
+		state.terminalBaseBalance, _ = cdfAccountNetBalance(row.Account.SpotBalances, state.contract.BaseAsset)
+		state.terminalQuoteBalance, _ = cdfAccountNetBalance(row.Account.SpotBalances, state.contract.QuoteAsset)
+	}
+	for _, venueID := range contract.VenueIDs {
+		for _, supplier := range contract.Suppliers {
+			found := false
+			for _, state := range states {
+				if state.audit.VenueID == venueID && state.audit.Role == supplier.Role {
+					found = true
+					break
+				}
+			}
+			if !found {
+				r.addCheck(CDFActivationCheck{VenueID: venueID, Role: supplier.Role, Failure: "registered CDF supplier account is missing"})
+			}
+		}
+		validateCDFHistoricalRoster(r, historicalInitial[venueID], venueID, contract.HistoricalSupplierCountPerVenue, "initial")
+		validateCDFHistoricalRoster(r, historicalTerminal[venueID], venueID, contract.HistoricalSupplierCountPerVenue, "terminal")
+	}
+	for _, state := range states {
+		if !state.terminalAccountSeen {
+			r.addCheck(CDFActivationCheck{VenueID: state.audit.VenueID, Role: state.audit.Role, ClientID: state.audit.ClientID, Failure: "CDF supplier is missing terminal account evidence"})
+		}
+	}
+	r.SupplierCount = len(states)
+	return states
+}
+
+func registerCDFHistoricalRole(result *CDFActivationAudit, roster map[string]map[string]struct{}, row AccountRow, venues map[string]struct{}) {
+	if _, expected := venues[row.VenueID]; !expected {
+		result.addCheck(CDFActivationCheck{VenueID: row.VenueID, Role: row.Role, ClientID: row.ClientID, Failure: "historical supplier is outside the registered venue roster"})
+	}
+	if roster[row.VenueID] == nil {
+		roster[row.VenueID] = make(map[string]struct{})
+	}
+	if _, duplicate := roster[row.VenueID][row.Role]; duplicate {
+		result.addCheck(CDFActivationCheck{VenueID: row.VenueID, Role: row.Role, ClientID: row.ClientID, Failure: "duplicate historical supplier role"})
+	}
+	roster[row.VenueID][row.Role] = struct{}{}
+}
+
+func registerCDFRoleOwner(result *CDFActivationAudit, owners map[string]map[string]uint64, row AccountRow, phase string) {
+	if owners[row.VenueID] == nil {
+		owners[row.VenueID] = make(map[string]uint64)
+	}
+	if previous, duplicate := owners[row.VenueID][row.Role]; duplicate && previous != row.ClientID {
+		result.addCheck(CDFActivationCheck{VenueID: row.VenueID, Role: row.Role, ClientID: row.ClientID, Failure: phase + " CDF supplier role is owned by multiple clients"})
+	}
+	owners[row.VenueID][row.Role] = row.ClientID
+}
+
+func validateCDFHistoricalRoster(result *CDFActivationAudit, roles map[string]struct{}, venueID string, expected int, phase string) {
+	if len(roles) != expected {
+		result.addCheck(CDFActivationCheck{VenueID: venueID, Failure: fmt.Sprintf("%s historical supplier roster has %d roles, want %d", phase, len(roles), expected)})
+	}
+	for ordinal := 1; ordinal <= expected; ordinal++ {
+		role := fmt.Sprintf("elastic_supplier_%d", ordinal)
+		if _, exists := roles[role]; !exists {
+			result.addCheck(CDFActivationCheck{VenueID: venueID, Role: role, Failure: phase + " historical supplier role is missing"})
+		}
+	}
+}
+
+func (r *CDFActivationAudit) validateSupplierAccount(row AccountRow, supplier CDFSupplierContract, initial bool) {
+	phase := "terminal"
+	if initial {
+		phase = "initial"
+	}
+	if row.Account.Equity == 0 {
+		r.addCheck(CDFActivationCheck{VenueID: row.VenueID, Role: row.Role, ClientID: row.ClientID, Failure: phase + " supplier equity is absent or zero"})
+	}
+	balances := make(map[string]Balance, len(row.Account.SpotBalances))
+	for _, balance := range row.Account.SpotBalances {
+		if balance.Asset == "" {
+			r.addCheck(CDFActivationCheck{VenueID: row.VenueID, Role: row.Role, ClientID: row.ClientID, Failure: phase + " supplier has an unnamed spot balance"})
+			continue
+		}
+		if _, duplicate := balances[balance.Asset]; duplicate {
+			r.addCheck(CDFActivationCheck{VenueID: row.VenueID, Role: row.Role, ClientID: row.ClientID, Failure: phase + " supplier has duplicate spot balance assets"})
+		}
+		balances[balance.Asset] = balance
+		if balance.Borrowed != 0 {
+			r.addCheck(CDFActivationCheck{VenueID: row.VenueID, Role: row.Role, ClientID: row.ClientID, Failure: phase + " supplier carries borrowed spot debt"})
+		}
+	}
+	if initial {
+		if balances[supplier.BaseAsset].NetAsset != supplier.InitialBaseBalance || balances[supplier.QuoteAsset].NetAsset != supplier.InitialQuoteBalance {
+			r.addCheck(CDFActivationCheck{VenueID: row.VenueID, Role: row.Role, ClientID: row.ClientID, Failure: "supplier initial balances differ from the finite registered endowment"})
+		}
+	} else {
+		base, basePresent := balances[supplier.BaseAsset]
+		quote, quotePresent := balances[supplier.QuoteAsset]
+		baseDisplacement, displacementOK := checkedCDFSub(base.NetAsset, supplier.InitialBaseBalance)
+		if !basePresent || !quotePresent || base.NetAsset < 0 || base.NetAsset > supplier.MaxInventory ||
+			quote.NetAsset < 0 || !displacementOK || cdfAbsExceeds(baseDisplacement, supplier.MaxPosition) {
+			r.addCheck(CDFActivationCheck{VenueID: row.VenueID, Role: row.Role, ClientID: row.ClientID, Failure: "terminal supplier balances exceed finite inventory or cash limits"})
+		}
+	}
+	for _, balance := range row.Account.PerpBalances {
+		if balance.NetAsset != 0 || balance.Borrowed != 0 {
+			r.addCheck(CDFActivationCheck{VenueID: row.VenueID, Role: row.Role, ClientID: row.ClientID, Failure: phase + " supplier has nonzero derivative collateral"})
+		}
+	}
+	for _, position := range row.Account.Positions {
+		if position.Size != 0 {
+			r.addCheck(CDFActivationCheck{VenueID: row.VenueID, Role: row.Role, ClientID: row.ClientID, Failure: phase + " supplier has a derivative position"})
+		}
+	}
+	markedEquity, markedEquityOK := cdfMarkedAccountEquity(row, supplier)
+	if !markedEquityOK || markedEquity != row.Account.Equity {
+		r.addCheck(CDFActivationCheck{VenueID: row.VenueID, Role: row.Role, ClientID: row.ClientID, Failure: phase + " supplier equity does not reconcile to finite marked spot balances"})
+	}
+}
+
+func (r *CDFActivationAudit) indexCDFSnapshots(run *Run) (map[cdfSnapshotKey]cdfSnapshotProof, map[string][]cdfDepthObservation, error) {
+	proofs := make(map[cdfSnapshotKey]cdfSnapshotProof)
+	depth := make(map[string][]cdfDepthObservation)
+	for _, path := range run.Files() {
+		if symbolFromPath(path) != cdfActivationLogName {
+			continue
+		}
+		var callbackFailure error
+		err := run.Scan(ScanOptions{Events: []string{"BookSnapshot"}, Files: []string{path}, FilesSelected: true, Workers: 1}, func(event Event) {
+			if callbackFailure != nil {
+				return
+			}
+			var snapshot cdfPublicSnapshotEvidence
+			if err := decodeRequiredJSON(event.Raw(), &snapshot, "bids", "asks", "source_sequence", "public_bids", "public_asks"); err != nil {
+				r.addCheck(CDFActivationCheck{VenueID: event.VenueID, Ordinal: event.Ordinal, Failure: "malformed public CDF snapshot: " + err.Error()})
+				return
+			}
+			if snapshot.SourceSequence == 0 || snapshot.Bids == nil || snapshot.Asks == nil || snapshot.PublicBids == nil || snapshot.PublicAsks == nil || !validCDFSnapshotProjection(snapshot) {
+				r.addCheck(CDFActivationCheck{VenueID: event.VenueID, Ordinal: event.Ordinal, Failure: "public CDF snapshot lacks explicit sequence or side presence"})
+				return
+			}
+			message := &etypes.MarketDataMsg{
+				Type: etypes.MDSnapshot, Symbol: cdfActivationSymbol,
+				SeqNum: snapshot.SourceSequence, Timestamp: event.SimTS,
+				Data: &etypes.BookSnapshot{Bids: snapshot.PublicBids, Asks: snapshot.PublicAsks},
+			}
+			fingerprint, err := etypes.MarketDataFingerprint(message)
+			if err != nil {
+				callbackFailure = fmt.Errorf("fingerprint CDF snapshot: %w", err)
+				return
+			}
+			key := cdfSnapshotKey{event.VenueID, snapshot.SourceSequence, fingerprint}
+			if _, duplicate := proofs[key]; duplicate {
+				r.addCheck(CDFActivationCheck{VenueID: event.VenueID, Ordinal: event.Ordinal, Failure: "duplicate public CDF snapshot identity"})
+				return
+			}
+			proofs[key] = cdfSnapshotProof{publishedAt: event.SimTS, bids: snapshot.PublicBids, asks: snapshot.PublicAsks}
+		})
+		if err != nil {
+			return nil, nil, fmt.Errorf("cdf activation: scan public snapshots in %s: %w", path, err)
+		}
+		if callbackFailure != nil {
+			return nil, nil, callbackFailure
+		}
+	}
+	if len(proofs) == 0 {
+		r.addCheck(CDFActivationCheck{Failure: "no public CDF snapshot evidence"})
+	}
+	return proofs, depth, nil
+}
+
+var cdfOrderedEventNames = []string{
+	"elastic_liquidity_supplier_decision", "elastic_liquidity_supplier_fill", "balance_snapshot", "borrow",
+	"BookSnapshot", "BookDelta", "Trade", "OrderAccepted", "OrderRejected", "OrderFill", "OrderCancelled",
+}
+
+func collectCDFOrderedEvents(run *Run) ([]Event, error) {
+	if run == nil {
+		return nil, fmt.Errorf("cdf activation: nil evidence run")
+	}
+	events := make([]Event, 0)
+	if err := run.Scan(ScanOptions{Events: cdfOrderedEventNames, Workers: 1}, func(event Event) {
+		if filepath.Base(event.File) == "general.jsonl" {
+			switch event.Name {
+			case "elastic_liquidity_supplier_decision", "elastic_liquidity_supplier_fill", "balance_snapshot", "borrow":
+				events = append(events, event)
+			}
+			return
+		}
+		if symbolFromPath(event.File) != cdfActivationLogName {
+			return
+		}
+		switch event.Name {
+		case "BookSnapshot", "BookDelta", "Trade", "OrderAccepted", "OrderRejected", "OrderFill", "OrderCancelled":
+			events = append(events, event)
+		}
+	}); err != nil {
+		return nil, fmt.Errorf("cdf activation: collect ordered evidence: %w", err)
+	}
+	for _, event := range events {
+		if event.GlobalSequence == 0 {
+			return nil, fmt.Errorf("cdf activation: strict evidence event %s/%s#%d has no global frame sequence", event.VenueID, event.Name, event.Ordinal)
+		}
+	}
+	sort.Slice(events, func(left, right int) bool {
+		if events[left].GlobalSequence != events[right].GlobalSequence {
+			return events[left].GlobalSequence < events[right].GlobalSequence
+		}
+		if events[left].File != events[right].File {
+			return events[left].File < events[right].File
+		}
+		return events[left].Ordinal < events[right].Ordinal
+	})
+	for index := 1; index < len(events); index++ {
+		if events[index].GlobalSequence == events[index-1].GlobalSequence {
+			return nil, fmt.Errorf("cdf activation: duplicate global frame sequence %d in selected evidence", events[index].GlobalSequence)
+		}
+	}
+	return events, nil
+}
+
+func (r *CDFActivationAudit) scanCDFOrdered(
+	events []Event,
+	states map[cdfParticipantKey]*cdfSupplierState,
+	receipts *cdfReceiptIndex,
+	snapshots map[cdfSnapshotKey]cdfSnapshotProof,
+	submissions map[cdfRequestKey]*cdfSubmission,
+	withdrawals map[cdfRequestKey]*cdfWithdrawal,
+	observedFills map[cdfFillKey]cdfFillEvidence,
+	orders map[cdfOrderKey]*cdfOrderState,
+	actualFills map[cdfFillKey]cdfOrderFillEvidence,
+	depth map[string][]cdfDepthObservation,
+) error {
+	publicDepth := make(map[string]*cdfPublicDepthState)
+	bookSnapshotCount := 0
+	for _, event := range events {
+		switch event.Name {
+		case "elastic_liquidity_supplier_decision":
+			r.processCDFDecision(event, states, receipts, snapshots, submissions, withdrawals)
+		case "elastic_liquidity_supplier_fill":
+			r.processCDFFill(event, states, observedFills)
+		case "balance_snapshot":
+			r.processCDFBalanceSnapshot(event, states)
+		case "borrow":
+			r.processCDFBorrow(event, states)
+		case "BookSnapshot":
+			bookSnapshotCount++
+			r.processCDFDepthSnapshot(event, states, orders, depth, publicDepth)
+		case "BookDelta":
+			r.processCDFDepthDelta(event, states, orders, depth, publicDepth)
+		case "Trade":
+			r.processCDFTrade(event)
+		case "OrderAccepted":
+			r.processCDFAccepted(event, states, submissions, orders)
+		case "OrderRejected":
+			r.processCDFRejected(event, states, submissions)
+		case "OrderFill":
+			r.processCDFOrderFill(event, states, orders, actualFills)
+		case "OrderCancelled":
+			r.processCDFCancelled(event, states, withdrawals, orders)
+		}
+	}
+	if bookSnapshotCount == 0 {
+		r.addCheck(CDFActivationCheck{Failure: "no rendered CDF/USD book evidence"})
+	}
+	return nil
+}
+
+func (r *CDFActivationAudit) scanCDFGeneral(
+	run *Run,
+	states map[cdfParticipantKey]*cdfSupplierState,
+	receipts *cdfReceiptIndex,
+	snapshots map[cdfSnapshotKey]cdfSnapshotProof,
+	submissions map[cdfRequestKey]*cdfSubmission,
+	withdrawals map[cdfRequestKey]*cdfWithdrawal,
+	observedFills map[cdfFillKey]cdfFillEvidence,
+) error {
+	for _, path := range run.Files() {
+		if filepath.Base(path) != "general.jsonl" {
+			continue
+		}
+		lastTimestamp := int64(math.MinInt64)
+		err := run.Scan(ScanOptions{
+			Events: []string{"elastic_liquidity_supplier_decision", "elastic_liquidity_supplier_fill", "balance_snapshot", "borrow"},
+			Files:  []string{path}, FilesSelected: true, Workers: 1,
+		}, func(event Event) {
+			if event.SimTS < lastTimestamp {
+				r.addCheck(CDFActivationCheck{VenueID: event.VenueID, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "CDF general evidence timestamps regress"})
+			}
+			lastTimestamp = event.SimTS
+			switch event.Name {
+			case "elastic_liquidity_supplier_decision":
+				r.processCDFDecision(event, states, receipts, snapshots, submissions, withdrawals)
+			case "elastic_liquidity_supplier_fill":
+				r.processCDFFill(event, states, observedFills)
+			case "balance_snapshot":
+				r.processCDFBalanceSnapshot(event, states)
+			case "borrow":
+				r.processCDFBorrow(event, states)
+			}
+		})
+		if err != nil {
+			return fmt.Errorf("cdf activation: scan supplier evidence in %s: %w", path, err)
+		}
+	}
+	return nil
+}
+
+func (r *CDFActivationAudit) processCDFDecision(
+	event Event,
+	states map[cdfParticipantKey]*cdfSupplierState,
+	receipts *cdfReceiptIndex,
+	snapshots map[cdfSnapshotKey]cdfSnapshotProof,
+	submissions map[cdfRequestKey]*cdfSubmission,
+	withdrawals map[cdfRequestKey]*cdfWithdrawal,
+) {
+	var decision cdfDecisionEvidence
+	required := []string{
+		"role", "client_id", "symbol", "decision_time", "decision_phase_offset_nanos",
+		"observation_time", "observation_age", "observation_sequence", "observation_link_id",
+		"observation_ordinal", "observation_delivered_at", "observation_fingerprint", "observation_digest",
+		"best_bid", "best_bid_qty", "best_ask", "best_ask_qty", "mark_price", "risk_mark_price",
+		"local_book_mode", "quote_price_source", "risk_mark_source", "reference_price", "position",
+		"target_position", "inventory_limit", "initial_base_balance", "gross_inventory",
+		"gross_inventory_limit", "action", "reason", "minimum_qualifying_qty",
+		"registered_minimum_executable_qty", "quote_cash_reserved", "initial_equity_quote",
+		"equity_quote", "peak_equity_quote", "loss_from_initial_quote", "drawdown_quote",
+		"max_loss_quote", "equity_available", "risk_limit_triggered",
+	}
+	if err := decodeRequiredJSON(event.Raw(), &decision, required...); err != nil {
+		r.addCheck(CDFActivationCheck{VenueID: event.VenueID, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "malformed CDF decision: " + err.Error()})
+		return
+	}
+	key := cdfParticipantKey{event.VenueID, event.ClientID}
+	state := states[key]
+	if state == nil || decision.ClientID != event.ClientID || decision.Role != state.audit.Role || decision.Symbol != cdfActivationSymbol {
+		r.addCheck(CDFActivationCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "CDF decision identity is outside the registered participant roster"})
+		return
+	}
+	state.audit.DecisionCount++
+	r.DecisionCount++
+	if decision.DecisionTime != event.SimTS || decision.DecisionPhaseOffset != state.contract.DecisionPhaseOffset {
+		r.addEventCheck(event, state, "CDF decision timestamp or phase offset disagrees with the registered schedule")
+	}
+	if decision.InventoryLimit != state.contract.MaxPosition || decision.InitialBaseBalance != state.contract.InitialBaseBalance ||
+		decision.GrossInventoryLimit != state.contract.MaxInventory || decision.MinimumQualifyingQty != state.contract.MinimumQualifyingQty ||
+		decision.RegisteredMinimumExecutableQty != state.contract.RegisteredMinimumExecutableQty || decision.MaxLossQuote != state.contract.MaxLossQuote {
+		r.addEventCheck(event, state, "CDF decision limits disagree with the registered finite roster")
+	}
+	grossInventory, ok := checkedCDFAdd(state.contract.InitialBaseBalance, decision.Position)
+	if !ok || grossInventory != decision.GrossInventory || grossInventory < 0 || grossInventory > state.contract.MaxInventory ||
+		cdfAbsExceeds(decision.Position, state.contract.MaxPosition) || cdfAbsExceeds(decision.TargetPosition, state.contract.MaxPosition) ||
+		decision.Position != state.currentPosition {
+		r.addEventCheck(event, state, "CDF decision inventory or position exceeds finite limits")
+	}
+	if decision.GrossInventory > state.audit.MaxGrossInventory {
+		state.audit.MaxGrossInventory = decision.GrossInventory
+	}
+	if decision.Position < state.audit.MinPosition {
+		state.audit.MinPosition = decision.Position
+	}
+	if decision.Position > state.audit.MaxPosition {
+		state.audit.MaxPosition = decision.Position
+	}
+	if decision.LossFromInitialQuote < 0 || decision.DrawdownQuote < 0 || decision.MaxLossQuote <= 0 ||
+		decision.QuoteCashAvailable < 0 || decision.QuoteCashReserved < 0 {
+		r.addEventCheck(event, state, "CDF decision carries invalid finite cash or loss state")
+	}
+	expectedLoss, lossOK := checkedCDFSub(state.audit.InitialEquity, decision.EquityQuote)
+	if expectedLoss < 0 {
+		expectedLoss = 0
+	}
+	expectedDrawdown, drawdownOK := checkedCDFSub(decision.PeakEquityQuote, decision.EquityQuote)
+	if expectedDrawdown < 0 {
+		expectedDrawdown = 0
+	}
+	if decision.InitialEquityQuote != state.audit.InitialEquity || decision.PeakEquityQuote < decision.EquityQuote ||
+		!lossOK || !drawdownOK || decision.LossFromInitialQuote != expectedLoss || decision.DrawdownQuote != expectedDrawdown ||
+		decision.EquityAvailable && decision.RiskMarkPrice <= 0 {
+		r.addEventCheck(event, state, "CDF decision equity and loss evidence is internally inconsistent")
+	}
+	if !isCDFAction(decision.Action) || decision.Reason == "" {
+		r.addEventCheck(event, state, "CDF decision has an unknown action or empty reason")
+	}
+	joinedSnapshot := r.validateCDFObservation(event, state, decision, receipts, snapshots)
+	if joinedSnapshot {
+		state.audit.EligibleObservationCount++
+		if !r.strictMechanics && (decision.ReferencePrice <= 0 || !cdfBetweenInclusive(decision.ReferencePrice, state.reconstructedReference, decision.MarkPrice)) {
+			r.addEventCheck(event, state, "CDF private reference moved outside its prior value and delayed local anchor")
+		} else if !r.strictMechanics {
+			state.reconstructedReference = decision.ReferencePrice
+		}
+	}
+	if r.strictMechanics {
+		r.validateCDFDecisionMechanics(event, state, decision)
+	}
+	r.recordCDFPostFillResponse(event, state, decision)
+	requestKey := cdfRequestKey{event.VenueID, event.ClientID, decision.QuoteRequestID}
+	switch decision.Action {
+	case "submit":
+		if !joinedSnapshot || decision.QuoteRequestID == 0 || decision.QuoteSubmittedAt != decision.DecisionTime ||
+			(decision.Side != "BUY" && decision.Side != "SELL") || decision.QuotePrice <= 0 ||
+			decision.QuotePrice%state.contract.TickSize != 0 || decision.QuoteQty < state.contract.MinimumExecutableQty ||
+			decision.QuoteQty > state.contract.MaxQuoteQty || decision.QuoteCashRequired < 0 {
+			r.addEventCheck(event, state, "CDF submit decision is not a bounded executable passive quote")
+		}
+		r.validateCDFSubmitEconomics(event, state, decision)
+		if _, duplicate := submissions[requestKey]; duplicate {
+			r.addEventCheck(event, state, "duplicate CDF submission request identity")
+		} else {
+			submissions[requestKey] = &cdfSubmission{event: event, decision: decision}
+		}
+		gateway, exists := receipts.decisions[requestKey]
+		if !exists || gateway.symbol != cdfActivationSymbol || gateway.record.decisionAt != decision.DecisionTime ||
+			gateway.record.frontierOrdinal != decision.ObservationOrdinal || gateway.record.frontierDeliveredAt != decision.ObservationDeliveredAt ||
+			hex.EncodeToString(gateway.record.frontierDigest[:]) != decision.ObservationDigest ||
+			gateway.record.price != decision.QuotePrice || gateway.record.qty != decision.QuoteQty ||
+			gateway.record.side != cdfSideCode(decision.Side) {
+			r.addEventCheck(event, state, "CDF submit decision does not match its actor-gateway decision record")
+		}
+	case "cancel":
+		if decision.QuoteOrderID == 0 || decision.CancelRequestID == 0 {
+			r.addEventCheck(event, state, "CDF cancel decision lacks order or request identity")
+			break
+		}
+		cancelKey := cdfRequestKey{event.VenueID, event.ClientID, decision.CancelRequestID}
+		if _, duplicate := withdrawals[cancelKey]; duplicate {
+			r.addEventCheck(event, state, "duplicate CDF cancellation request identity")
+		} else {
+			withdrawals[cancelKey] = &cdfWithdrawal{event: event, decision: decision}
+		}
+	}
+	state.lastDecision = decision
+	state.hasLastDecision = true
+}
+
+func (r *CDFActivationAudit) validateCDFObservation(
+	event Event,
+	state *cdfSupplierState,
+	decision cdfDecisionEvidence,
+	receipts *cdfReceiptIndex,
+	snapshots map[cdfSnapshotKey]cdfSnapshotProof,
+) bool {
+	if decision.ObservationSequence == 0 || decision.ObservationLinkID == 0 || decision.ObservationOrdinal == 0 {
+		if decision.Action != "wait" || decision.Reason != "subscribe" {
+			r.addEventCheck(event, state, "actionable CDF decision has no delivered observation frontier")
+		}
+		return false
+	}
+	if !isCDFHex(decision.ObservationFingerprint, 16) || !isCDFHex(decision.ObservationDigest, 16) {
+		r.addEventCheck(event, state, "CDF decision has an empty or malformed observation fingerprint/frontier digest")
+		return false
+	}
+	proof, exists := receipts.receipts[cdfReceiptKey{event.ClientID, decision.ObservationLinkID, decision.ObservationOrdinal}]
+	if !exists || proof.sourceVenue != event.VenueID || proof.role != "cdf_elastic_supplier" || proof.symbol != cdfActivationSymbol ||
+		proof.record.sequence != decision.ObservationSequence || proof.record.publishedAt != decision.ObservationTime ||
+		proof.record.deliveredAt != decision.ObservationDeliveredAt || hex.EncodeToString(proof.record.fingerprint[:]) != decision.ObservationFingerprint ||
+		hex.EncodeToString(proof.digest[:]) != decision.ObservationDigest {
+		r.addEventCheck(event, state, "CDF decision does not join its exact delayed receipt frontier")
+		return false
+	}
+	if decision.ObservationTime > decision.ObservationDeliveredAt || decision.ObservationDeliveredAt > decision.DecisionTime ||
+		decision.ObservationAge != decision.DecisionTime-decision.ObservationTime || decision.ObservationAge < 0 {
+		r.addEventCheck(event, state, "CDF decision observation timing is non-causal")
+		return false
+	}
+	if (decision.Action == "submit" || decision.Action == "rest") && decision.ObservationAge > state.contract.MaxObservationAge {
+		r.addEventCheck(event, state, "CDF quote uses an observation older than the registered maximum")
+		return false
+	}
+	fingerprintBytes, _ := hex.DecodeString(decision.ObservationFingerprint)
+	var fingerprint [16]byte
+	copy(fingerprint[:], fingerprintBytes)
+	snapshot, exists := snapshots[cdfSnapshotKey{event.VenueID, decision.ObservationSequence, fingerprint}]
+	if !exists || snapshot.publishedAt != decision.ObservationTime {
+		r.addEventCheck(event, state, "CDF receipt fingerprint does not join a public CDF snapshot")
+		return false
+	}
+	bestBid, bestBidQty := cdfBestBid(snapshot.bids)
+	bestAsk, bestAskQty := cdfBestAsk(snapshot.asks)
+	if decision.BestBid != bestBid || decision.BestBidQty != bestBidQty || decision.BestAsk != bestAsk || decision.BestAskQty != bestAskQty {
+		r.addEventCheck(event, state, "CDF decision touch differs from its delayed public snapshot")
+		return false
+	}
+	expectedMode := cdfLocalBookMode(bestBid, bestBidQty, bestAsk, bestAskQty, state.contract.TickSize)
+	if decision.LocalBookMode != expectedMode {
+		r.addEventCheck(event, state, "CDF decision local-book mode differs from its delayed public snapshot")
+		return false
+	}
+	if expectedMode == "one_sided" {
+		r.OneSidedDecisionCount++
+		if decision.Action == "submit" && decision.QuotePriceSource == "one_sided_missing_side_blended" &&
+			!validCDFMissingSideQuote(decision, state.contract) {
+			r.addEventCheck(event, state, "one-sided CDF quote violates the registered missing-side price contract")
+			return false
+		}
+	}
+	return true
+}
+
+func cdfLocalBookMode(bestBid, bestBidQty, bestAsk, bestAskQty, tickSize int64) string {
+	if bestBid > 0 && bestAsk > 0 && bestBid < bestAsk {
+		return "two_sided"
+	}
+	if (bestBid > 0 && bestBidQty > 0 && bestAsk == 0 && bestAskQty == 0 && cdfPositiveTickPrice(bestBid, tickSize)) ||
+		(bestAsk > 0 && bestAskQty > 0 && bestBid == 0 && bestBidQty == 0 && cdfPositiveTickPrice(bestAsk, tickSize)) {
+		return "one_sided"
+	}
+	return ""
+}
+
+func cdfPositiveTickPrice(price, tickSize int64) bool {
+	return price > 0 && tickSize > 0 && price%tickSize == 0
+}
+
+func cdfLocalAnchor(decision cdfDecisionEvidence, contract CDFSupplierContract) (int64, bool) {
+	if decision.LocalBookMode == "two_sided" {
+		if decision.BestBid <= 0 || decision.BestAsk <= 0 || decision.BestBid >= decision.BestAsk {
+			return 0, false
+		}
+		return etypes.Midpoint(decision.BestBid, decision.BestAsk), true
+	}
+	if decision.LocalBookMode == "one_sided" {
+		if decision.BestBid > 0 && decision.BestBidQty > 0 && decision.BestAsk == 0 && decision.BestAskQty == 0 && cdfPositiveTickPrice(decision.BestBid, contract.TickSize) {
+			return decision.BestBid, true
+		}
+		if decision.BestAsk > 0 && decision.BestAskQty > 0 && decision.BestBid == 0 && decision.BestBidQty == 0 && cdfPositiveTickPrice(decision.BestAsk, contract.TickSize) {
+			return decision.BestAsk, true
+		}
+	}
+	return 0, false
+}
+
+func advanceCDFReference(reference, updatedAt int64, updateSet bool, anchor, now, halfLife int64) (int64, int64, bool) {
+	if anchor <= 0 || halfLife <= 0 {
+		return reference, updatedAt, updateSet
+	}
+	if !updateSet {
+		return reference, now, true
+	}
+	elapsedNanos, ok := checkedCDFSub(now, updatedAt)
+	updatedAt = now
+	if !ok {
+		return reference, updatedAt, true
+	}
+	elapsedSeconds := float64(elapsedNanos) / 1_000_000_000.0
+	if elapsedSeconds <= 0 {
+		return reference, updatedAt, true
+	}
+	halfLifeSeconds := float64(halfLife) / 1_000_000_000.0
+	alpha := 1 - math.Exp(-math.Ln2*elapsedSeconds/halfLifeSeconds)
+	revised := float64(reference) + alpha*(float64(anchor)-float64(reference))
+	if math.IsNaN(revised) || math.IsInf(revised, 0) || revised <= 0 {
+		return reference, updatedAt, true
+	}
+	return int64(revised), updatedAt, true
+}
+
+func cdfTargetPosition(reference, anchor int64, contract CDFSupplierContract) int64 {
+	if anchor <= 0 || reference <= 0 {
+		return contract.BaseHolding
+	}
+	percentAbove := (float64(anchor)/float64(reference) - 1) * 100
+	target := float64(contract.BaseHolding) - percentAbove*float64(contract.ElasticityPerPercent)
+	if math.IsNaN(target) || math.IsInf(target, 0) {
+		return contract.BaseHolding
+	}
+	minimumPosition, maximumPosition := -contract.MaxPosition, contract.MaxPosition
+	if contract.MaxInventory > 0 {
+		minimumPosition = maxCDFInt64(minimumPosition, -contract.InitialBaseBalance)
+		maximumPosition = minCDFInt64(maximumPosition, contract.MaxInventory-contract.InitialBaseBalance)
+	}
+	return int64(math.Max(float64(minimumPosition), math.Min(float64(maximumPosition), target)))
+}
+
+func maxCDFInt64(left, right int64) int64 {
+	if left > right {
+		return left
+	}
+	return right
+}
+
+func minCDFInt64(left, right int64) int64 {
+	if left < right {
+		return left
+	}
+	return right
+}
+
+func (r *CDFActivationAudit) validateCDFDecisionMechanics(event Event, state *cdfSupplierState, decision cdfDecisionEvidence) {
+	if decision.ReferencePrice <= 0 {
+		r.addEventCheck(event, state, "CDF decision has a non-positive private reference")
+	}
+	expectedReference := state.reconstructedReference
+	expectedUpdatedAt := state.referenceUpdatedAt
+	expectedUpdateSet := state.referenceUpdateSet
+	anchor, hasAnchor := cdfLocalAnchor(decision, state.contract)
+	if hasAnchor {
+		expectedReference, expectedUpdatedAt, expectedUpdateSet = advanceCDFReference(
+			expectedReference, expectedUpdatedAt, expectedUpdateSet, anchor, decision.DecisionTime, state.contract.ReferenceHalfLife,
+		)
+	}
+	if decision.ReferencePrice != expectedReference {
+		r.addEventCheck(event, state, "CDF private reference does not match the registered delayed-anchor update")
+	}
+	state.reconstructedReference = expectedReference
+	state.referenceUpdatedAt = expectedUpdatedAt
+	state.referenceUpdateSet = expectedUpdateSet
+
+	if !hasAnchor {
+		if decision.MarkPrice != 0 || decision.TargetPosition != 0 {
+			r.addEventCheck(event, state, "CDF decision reports mark or target without a valid local anchor")
+		}
+		if decision.RiskMarkPrice != state.reconstructedRiskMark {
+			r.addEventCheck(event, state, "CDF decision risk mark does not preserve the last coherent mark")
+		}
+		return
+	}
+	if decision.MarkPrice != anchor {
+		r.addEventCheck(event, state, "CDF decision mark does not match its independently reconstructed local anchor")
+	}
+	expectedTarget := cdfTargetPosition(expectedReference, anchor, state.contract)
+	if decision.TargetPosition != expectedTarget {
+		r.addEventCheck(event, state, "CDF decision target does not match the registered inventory elasticity")
+	}
+	expectedRiskMark := anchor
+	expectedRiskSource := "two_sided_midpoint"
+	if decision.LocalBookMode == "one_sided" {
+		grossInventory, ok := checkedCDFAdd(state.contract.InitialBaseBalance, decision.Position)
+		if !ok || grossInventory < 0 {
+			r.addEventCheck(event, state, "CDF one-sided risk mark cannot establish finite gross inventory")
+			return
+		}
+		if decision.BestAsk > 0 && grossInventory > 0 {
+			expectedRiskMark = 0
+			expectedRiskSource = "one_sided_ask_unavailable"
+		} else if grossInventory == 0 {
+			expectedRiskSource = "one_sided_bid_zero_inventory"
+			if decision.BestAsk > 0 {
+				expectedRiskSource = "one_sided_ask_zero_inventory"
+			}
+		} else {
+			expectedRiskSource = "one_sided_bid"
+		}
+	}
+	if decision.RiskMarkPrice != expectedRiskMark || decision.RiskMarkSource != expectedRiskSource {
+		r.addEventCheck(event, state, "CDF decision risk mark does not match the registered local-book risk rule")
+	}
+	if expectedRiskMark > 0 {
+		state.reconstructedRiskMark = expectedRiskMark
+	}
+}
+
+func (r *CDFActivationAudit) recordCDFPostFillResponse(event Event, state *cdfSupplierState, decision cdfDecisionEvidence) {
+	for index := range state.fillResponses {
+		response := &state.fillResponses[index]
+		if response.responded || !cdfEventAfter(event, response.fillAt, response.fillGlobalSeq) || decision.Position != response.positionAfter {
+			continue
+		}
+		if !r.strictMechanics {
+			response.responded = true
+			state.audit.PostFillResponsiveCount++
+			continue
+		}
+		if response.preFillKnown && decision.ObservationSequence == response.preFillDecision.ObservationSequence &&
+			decision.ReferencePrice == response.preFillDecision.ReferencePrice && decision.MarkPrice == response.preFillDecision.MarkPrice {
+			if decision.Action == "wait" && decision.Reason == "inventory_at_target" {
+				response.responded = true
+			} else if decision.Action == "submit" || decision.Action == "rest" || decision.Action == "cancel" || decision.Action == "withdraw" {
+				quoteChanged := decision.Side != response.preFillDecision.Side || decision.QuotePrice != response.preFillDecision.QuotePrice ||
+					decision.QuoteQty != response.preFillDecision.QuoteQty || decision.QuoteOrderID != response.preFillDecision.QuoteOrderID ||
+					decision.QuoteRequestID != response.preFillDecision.QuoteRequestID
+				response.responded = quoteChanged
+			}
+		}
+		if response.responded {
+			state.audit.PostFillResponsiveCount++
+		}
+	}
+}
+
+func cdfEventAfter(event Event, timestamp int64, globalSequence uint64) bool {
+	if globalSequence != 0 && event.GlobalSequence != 0 {
+		return event.GlobalSequence > globalSequence
+	}
+	return event.SimTS > timestamp
+}
+
+func (r *CDFActivationAudit) validateCDFSubmitEconomics(event Event, state *cdfSupplierState, decision cdfDecisionEvidence) {
+	gap, gapOK := checkedCDFSub(decision.TargetPosition, decision.Position)
+	if !gapOK || gap == 0 || decision.QuoteQty > cdfAbs(gap) ||
+		gap > 0 && decision.Side != "BUY" || gap < 0 && decision.Side != "SELL" {
+		r.addEventCheck(event, state, "CDF submit side or quantity does not follow its finite inventory target gap")
+	}
+	switch decision.QuotePriceSource {
+	case "two_sided_touch":
+		if decision.LocalBookMode != "two_sided" || decision.Side == "BUY" && decision.QuotePrice != decision.BestBid ||
+			decision.Side == "SELL" && decision.QuotePrice != decision.BestAsk {
+			r.addEventCheck(event, state, "two-sided CDF quote does not rest at its delayed local touch")
+		}
+	case "one_sided_missing_side_blended":
+		if decision.LocalBookMode != "one_sided" || !validCDFMissingSideQuote(decision, state.contract) {
+			r.addEventCheck(event, state, "one-sided CDF quote does not follow the registered missing-side rule")
+		}
+	case "one_sided_present_touch":
+		if decision.LocalBookMode != "one_sided" || decision.Side == "BUY" && decision.QuotePrice != decision.BestBid ||
+			decision.Side == "SELL" && decision.QuotePrice != decision.BestAsk {
+			r.addEventCheck(event, state, "one-sided CDF quote does not rest at its delayed present touch")
+		}
+	default:
+		r.addEventCheck(event, state, "CDF submit has an unknown local quote-price source")
+	}
+	if decision.Side == "BUY" {
+		notional, notionalOK := cdfActivationNotional(decision.QuotePrice, decision.QuoteQty, state.contract.BasePrecision)
+		fee, feeOK := cdfActivationFee(notional, state.contract.MakerFeeBps)
+		required, requiredOK := checkedCDFAdd(notional, fee)
+		if !notionalOK || !feeOK || !requiredOK || decision.QuoteCashRequired != required || required > decision.QuoteCashAvailable {
+			r.addEventCheck(event, state, "CDF buy quote exceeds or misstates finite quote cash")
+		}
+	} else if decision.QuoteCashRequired != 0 {
+		r.addEventCheck(event, state, "CDF sell quote carries a nonzero quote-cash requirement")
+	}
+}
+
+func (r *CDFActivationAudit) processCDFFill(event Event, states map[cdfParticipantKey]*cdfSupplierState, observed map[cdfFillKey]cdfFillEvidence) {
+	var fill cdfFillEvidence
+	if err := decodeRequiredJSON(event.Raw(), &fill,
+		"role", "client_id", "symbol", "order_id", "trade_id", "timestamp", "side", "price", "qty",
+		"fee_amount", "fee_asset", "is_full", "position_before", "position_after"); err != nil {
+		r.addCheck(CDFActivationCheck{VenueID: event.VenueID, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "malformed CDF supplier fill: " + err.Error()})
+		return
+	}
+	state := states[cdfParticipantKey{event.VenueID, event.ClientID}]
+	if state == nil || fill.ClientID != event.ClientID || fill.Role != state.audit.Role || fill.Symbol != cdfActivationSymbol || fill.Timestamp != event.SimTS {
+		r.addCheck(CDFActivationCheck{VenueID: event.VenueID, Role: fill.Role, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "CDF supplier fill identity is invalid"})
+		return
+	}
+	key := cdfFillKey{event.VenueID, event.ClientID, fill.OrderID, fill.TradeID}
+	if _, duplicate := observed[key]; duplicate {
+		r.addEventCheck(event, state, "duplicate CDF supplier fill identity")
+		return
+	}
+	if fill.OrderID == 0 || fill.TradeID == 0 || fill.Price <= 0 || fill.Qty <= 0 || fill.FeeAmount < 0 ||
+		fill.FeeAsset != state.contract.QuoteAsset {
+		r.addEventCheck(event, state, "CDF supplier fill has invalid order, quantity, price, or fee")
+		return
+	}
+	expectedPosition := fill.PositionBefore
+	var ok bool
+	if fill.Side == "BUY" {
+		expectedPosition, ok = checkedCDFAdd(fill.PositionBefore, fill.Qty)
+	} else if fill.Side == "SELL" {
+		expectedPosition, ok = checkedCDFSub(fill.PositionBefore, fill.Qty)
+	} else {
+		ok = false
+	}
+	expectedGrossInventory, grossOK := checkedCDFAdd(state.contract.InitialBaseBalance, fill.PositionAfter)
+	if !ok || !grossOK || fill.PositionBefore != state.currentPosition || expectedPosition != fill.PositionAfter ||
+		cdfAbsExceeds(fill.PositionAfter, state.contract.MaxPosition) || expectedGrossInventory < 0 || expectedGrossInventory > state.contract.MaxInventory {
+		r.addEventCheck(event, state, "CDF supplier fill position transition is invalid")
+		return
+	}
+	notional, notionalOK := cdfActivationNotional(fill.Price, fill.Qty, state.contract.BasePrecision)
+	expectedFee, feeOK := cdfActivationFee(notional, state.contract.MakerFeeBps)
+	if !notionalOK || !feeOK || fill.FeeAmount != expectedFee || fill.FeeAsset != state.contract.QuoteAsset {
+		r.addEventCheck(event, state, "CDF supplier fill fee does not match the registered maker fee")
+		return
+	}
+	var baseDelta, quoteDelta int64
+	if fill.Side == "BUY" {
+		baseDelta = fill.Qty
+		quoteDelta, ok = checkedCDFAdd(notional, fill.FeeAmount)
+		if ok {
+			quoteDelta = -quoteDelta
+		}
+	} else if fill.Side == "SELL" {
+		baseDelta = -fill.Qty
+		quoteDelta, ok = checkedCDFSub(notional, fill.FeeAmount)
+	} else {
+		ok = false
+	}
+	if !ok {
+		r.addEventCheck(event, state, "CDF supplier fill balance delta overflows")
+		return
+	}
+	updatedBase, baseDeltaOK := checkedCDFAdd(state.fillBaseDelta, baseDelta)
+	updatedQuote, quoteDeltaOK := checkedCDFAdd(state.fillQuoteDelta, quoteDelta)
+	if !baseDeltaOK || !quoteDeltaOK {
+		r.addEventCheck(event, state, "CDF supplier fill balance delta overflows")
+		return
+	}
+	observed[key] = fill
+	preFillDecision := state.lastDecision
+	preFillKnown := state.hasLastDecision
+	state.fillBaseDelta = updatedBase
+	state.fillQuoteDelta = updatedQuote
+	state.audit.FillCount++
+	state.lastFillAt = event.SimTS
+	state.lastFillPosition = fill.PositionAfter
+	state.currentPosition = fill.PositionAfter
+	state.fillResponses = append(state.fillResponses, cdfFillResponseWindow{
+		fillAt: event.SimTS, fillGlobalSeq: event.GlobalSequence, positionAfter: fill.PositionAfter,
+		preFillDecision: preFillDecision, preFillKnown: preFillKnown,
+	})
+	r.FillCount++
+	var sumOK bool
+	r.SupplierVolumeQty, sumOK = checkedCDFAdd(r.SupplierVolumeQty, fill.Qty)
+	if !sumOK {
+		r.addEventCheck(event, state, "aggregate CDF supplier volume overflows")
+	}
+}
+
+func (r *CDFActivationAudit) processCDFBalanceSnapshot(event Event, states map[cdfParticipantKey]*cdfSupplierState) {
+	state := states[cdfParticipantKey{event.VenueID, event.ClientID}]
+	if state == nil {
+		return
+	}
+	var snapshot cdfBalanceSnapshotEvidence
+	if err := decodeRequiredJSON(event.Raw(), &snapshot, "timestamp", "client_id", "spot_balances", "perp_balances", "borrowed"); err != nil {
+		r.addEventCheck(event, state, "malformed supplier balance snapshot: "+err.Error())
+		return
+	}
+	if snapshot.ClientID != event.ClientID || snapshot.Timestamp != event.SimTS || snapshot.SpotBalances == nil || snapshot.PerpBalances == nil || snapshot.Borrowed == nil {
+		r.addEventCheck(event, state, "supplier balance snapshot identity or presence contract is invalid")
+		return
+	}
+	foundBase, foundQuote := false, false
+	seenAssets := make(map[string]struct{}, len(snapshot.SpotBalances))
+	for _, balance := range snapshot.SpotBalances {
+		if balance.Asset == "" {
+			r.addEventCheck(event, state, "supplier balance snapshot contains an unnamed asset")
+			continue
+		}
+		if _, duplicate := seenAssets[balance.Asset]; duplicate {
+			r.addEventCheck(event, state, "supplier balance snapshot contains duplicate asset rows")
+		}
+		seenAssets[balance.Asset] = struct{}{}
+		if balance.Asset == state.contract.BaseAsset {
+			foundBase = true
+		}
+		if balance.Asset == state.contract.QuoteAsset {
+			foundQuote = true
+		}
+		net, ok := checkedCDFAdd(balance.Free, balance.Locked)
+		if ok {
+			net, ok = checkedCDFSub(net, balance.Borrowed)
+		}
+		if ok {
+			net, ok = checkedCDFSub(net, balance.Interest)
+		}
+		if !ok || net != balance.NetAsset || balance.Free < 0 || balance.Locked < 0 || balance.Borrowed != 0 || balance.Interest != 0 {
+			r.addEventCheck(event, state, "supplier spot balance snapshot violates no-debt arithmetic")
+		}
+		if balance.Asset != state.contract.BaseAsset && balance.Asset != state.contract.QuoteAsset && balance.NetAsset != 0 {
+			r.addEventCheck(event, state, "supplier balance snapshot contains unregistered nonzero asset")
+		}
+	}
+	expectedBase, baseOK := checkedCDFAdd(state.initialBaseBalance, state.fillBaseDelta)
+	expectedQuote, quoteOK := checkedCDFAdd(state.initialQuoteBalance, state.fillQuoteDelta)
+	actualBase, actualBaseOK := cdfAccountNetBalanceFromCDFBalances(snapshot.SpotBalances, state.contract.BaseAsset)
+	actualQuote, actualQuoteOK := cdfAccountNetBalanceFromCDFBalances(snapshot.SpotBalances, state.contract.QuoteAsset)
+	if !baseOK || !quoteOK || !actualBaseOK || !actualQuoteOK || actualBase != expectedBase || actualQuote != expectedQuote {
+		r.addEventCheck(event, state, "supplier balance snapshot does not reconcile to prior exchange-matched fills")
+	}
+	for _, balance := range snapshot.PerpBalances {
+		if balance.Free != 0 || balance.Locked != 0 || balance.Borrowed != 0 || balance.Interest != 0 || balance.NetAsset != 0 {
+			r.addEventCheck(event, state, "supplier balance snapshot has nonzero derivative collateral")
+		}
+	}
+	for _, amount := range snapshot.Borrowed {
+		if amount != 0 {
+			r.addEventCheck(event, state, "supplier balance snapshot has aggregate debt")
+		}
+	}
+	if !foundBase || !foundQuote {
+		r.addEventCheck(event, state, "supplier balance snapshot lacks configured assets")
+	}
+	state.audit.BalanceSnapshotCount++
+	postFill := false
+	if len(state.fillResponses) > 0 {
+		lastFill := state.fillResponses[len(state.fillResponses)-1]
+		postFill = cdfEventAfter(event, lastFill.fillAt, lastFill.fillGlobalSeq)
+	}
+	if postFill {
+		state.audit.PostFillBalanceSnapshotCount++
+	}
+}
+
+func cdfAccountNetBalanceFromCDFBalances(balances []cdfBalanceEvidence, asset string) (int64, bool) {
+	for _, balance := range balances {
+		if balance.Asset == asset {
+			return balance.NetAsset, true
+		}
+	}
+	return 0, false
+}
+
+func (r *CDFActivationAudit) processCDFBorrow(event Event, states map[cdfParticipantKey]*cdfSupplierState) {
+	state := states[cdfParticipantKey{event.VenueID, event.ClientID}]
+	if state == nil {
+		return
+	}
+	var borrow cdfBorrowEvidence
+	if err := decodeRequiredJSON(event.Raw(), &borrow, "client_id", "asset", "amount"); err != nil {
+		r.addEventCheck(event, state, "malformed supplier borrow evidence: "+err.Error())
+		return
+	}
+	if borrow.ClientID != event.ClientID || borrow.Amount != 0 {
+		r.addEventCheck(event, state, "CDF supplier used borrowing-backed liquidity")
+	}
+}
+
+func (r *CDFActivationAudit) scanCDFBooks(
+	run *Run,
+	states map[cdfParticipantKey]*cdfSupplierState,
+	submissions map[cdfRequestKey]*cdfSubmission,
+	withdrawals map[cdfRequestKey]*cdfWithdrawal,
+	orders map[cdfOrderKey]*cdfOrderState,
+	actualFills map[cdfFillKey]cdfOrderFillEvidence,
+	depth map[string][]cdfDepthObservation,
+) error {
+	bookCount := 0
+	publicDepth := make(map[string]*cdfPublicDepthState)
+	for _, path := range run.Files() {
+		if symbolFromPath(path) != cdfActivationLogName {
+			continue
+		}
+		bookCount++
+		lastTimestamp := int64(math.MinInt64)
+		err := run.Scan(ScanOptions{
+			Events: []string{"BookSnapshot", "BookDelta", "Trade", "OrderAccepted", "OrderRejected", "OrderFill", "OrderCancelled"},
+			Files:  []string{path}, FilesSelected: true, Workers: 1,
+		}, func(event Event) {
+			if event.SimTS < lastTimestamp {
+				r.addCheck(CDFActivationCheck{VenueID: event.VenueID, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "CDF book evidence timestamps regress"})
+			}
+			lastTimestamp = event.SimTS
+			switch event.Name {
+			case "BookSnapshot":
+				r.processCDFDepthSnapshot(event, states, orders, depth, publicDepth)
+			case "BookDelta":
+				r.processCDFDepthDelta(event, states, orders, depth, publicDepth)
+			case "Trade":
+				r.processCDFTrade(event)
+			case "OrderAccepted":
+				r.processCDFAccepted(event, states, submissions, orders)
+			case "OrderRejected":
+				r.processCDFRejected(event, states, submissions)
+			case "OrderFill":
+				r.processCDFOrderFill(event, states, orders, actualFills)
+			case "OrderCancelled":
+				r.processCDFCancelled(event, states, withdrawals, orders)
+			}
+		})
+		if err != nil {
+			return fmt.Errorf("cdf activation: scan CDF book in %s: %w", path, err)
+		}
+	}
+	if bookCount == 0 {
+		r.addCheck(CDFActivationCheck{Failure: "no rendered CDF/USD book evidence"})
+	}
+	return nil
+}
+
+func (r *CDFActivationAudit) processCDFAccepted(event Event, states map[cdfParticipantKey]*cdfSupplierState, submissions map[cdfRequestKey]*cdfSubmission, orders map[cdfOrderKey]*cdfOrderState) {
+	state := states[cdfParticipantKey{event.VenueID, event.ClientID}]
+	if state == nil {
+		return
+	}
+	var accepted cdfAcceptedEvidence
+	if err := decodeRequiredJSON(event.Raw(), &accepted, "order_id", "client_id", "request_id", "side", "type", "time_in_force", "post_only", "price", "qty"); err != nil {
+		r.addEventCheck(event, state, "malformed CDF OrderAccepted evidence: "+err.Error())
+		return
+	}
+	requestKey := cdfRequestKey{event.VenueID, event.ClientID, accepted.RequestID}
+	submission := submissions[requestKey]
+	if submission == nil || accepted.ClientID != event.ClientID || accepted.OrderID == 0 || accepted.Type != "LIMIT" ||
+		accepted.TimeInForce != "GTC" || !accepted.PostOnly || accepted.Side != submission.decision.Side ||
+		accepted.Price != submission.decision.QuotePrice || accepted.Qty != submission.decision.QuoteQty || event.SimTS < submission.event.SimTS {
+		r.addEventCheck(event, state, "accepted CDF order does not match a prior bounded passive submission")
+		return
+	}
+	if submission.accepted || submission.rejected {
+		r.addEventCheck(event, state, "CDF submission has duplicate acceptance/rejection outcomes")
+		return
+	}
+	orderKey := cdfOrderKey{event.VenueID, event.ClientID, accepted.OrderID}
+	if _, duplicate := orders[orderKey]; duplicate {
+		r.addEventCheck(event, state, "duplicate accepted CDF order identity")
+		return
+	}
+	submission.accepted = true
+	oneSidedCandidate := submission.decision.LocalBookMode == "one_sided" &&
+		submission.decision.QuotePriceSource == "one_sided_missing_side_blended" &&
+		submission.decision.QuoteQty >= submission.decision.MinimumQualifyingQty
+	orders[orderKey] = &cdfOrderState{
+		requestID: accepted.RequestID, side: accepted.Side, price: accepted.Price,
+		remainingQty: accepted.Qty, acceptedAt: event.SimTS,
+		oneSidedCandidate: oneSidedCandidate, minimumQualifying: submission.decision.MinimumQualifyingQty,
+	}
+	state.audit.AcceptedOrderCount++
+	r.AcceptedOrderCount++
+}
+
+func (r *CDFActivationAudit) processCDFRejected(event Event, states map[cdfParticipantKey]*cdfSupplierState, submissions map[cdfRequestKey]*cdfSubmission) {
+	state := states[cdfParticipantKey{event.VenueID, event.ClientID}]
+	if state == nil {
+		return
+	}
+	var rejected cdfRejectedEvidence
+	if err := decodeRequiredJSON(event.Raw(), &rejected, "request_id", "success", "error"); err != nil {
+		r.addEventCheck(event, state, "malformed CDF OrderRejected evidence: "+err.Error())
+		return
+	}
+	submission := submissions[cdfRequestKey{event.VenueID, event.ClientID, rejected.RequestID}]
+	if submission == nil || rejected.Success || rejected.Error == "" || event.SimTS < submission.event.SimTS {
+		r.addEventCheck(event, state, "CDF order rejection has no matching prior submission")
+		return
+	}
+	if submission.accepted || submission.rejected {
+		r.addEventCheck(event, state, "CDF submission has duplicate acceptance/rejection outcomes")
+		return
+	}
+	submission.rejected = true
+}
+
+func (r *CDFActivationAudit) processCDFOrderFill(event Event, states map[cdfParticipantKey]*cdfSupplierState, orders map[cdfOrderKey]*cdfOrderState, actual map[cdfFillKey]cdfOrderFillEvidence) {
+	state := states[cdfParticipantKey{event.VenueID, event.ClientID}]
+	if state == nil {
+		return
+	}
+	var fill cdfOrderFillEvidence
+	if err := decodeRequiredJSON(event.Raw(), &fill,
+		"order_id", "trade_id", "side", "price", "qty", "fee_amount", "fee_asset", "filled_qty", "remaining_qty", "is_full"); err != nil {
+		r.addEventCheck(event, state, "malformed exchange OrderFill evidence: "+err.Error())
+		return
+	}
+	orderKey := cdfOrderKey{event.VenueID, event.ClientID, fill.OrderID}
+	order := orders[orderKey]
+	if order == nil || fill.TradeID == 0 || fill.Side != order.side || fill.Price != order.price || fill.Qty <= 0 ||
+		fill.Qty > order.remainingQty || fill.FilledQty <= 0 || fill.RemainingQty < 0 || event.SimTS < order.acceptedAt {
+		r.addEventCheck(event, state, "exchange OrderFill does not match a live accepted CDF order")
+		return
+	}
+	key := cdfFillKey{event.VenueID, event.ClientID, fill.OrderID, fill.TradeID}
+	if _, duplicate := actual[key]; duplicate {
+		r.addEventCheck(event, state, "duplicate exchange OrderFill identity")
+		return
+	}
+	actual[key] = fill
+	order.remainingQty -= fill.Qty
+	if order.remainingQty != fill.RemainingQty || fill.IsFull != (fill.RemainingQty == 0) {
+		r.addEventCheck(event, state, "exchange OrderFill remaining quantity is inconsistent")
+	}
+	if order.remainingQty == 0 {
+		delete(orders, orderKey)
+	}
+}
+
+func (r *CDFActivationAudit) processCDFCancelled(event Event, states map[cdfParticipantKey]*cdfSupplierState, withdrawals map[cdfRequestKey]*cdfWithdrawal, orders map[cdfOrderKey]*cdfOrderState) {
+	state := states[cdfParticipantKey{event.VenueID, event.ClientID}]
+	if state == nil {
+		return
+	}
+	var cancelled cdfCancelledEvidence
+	if err := decodeRequiredJSON(event.Raw(), &cancelled, "order_id", "request_id", "remaining_qty"); err != nil {
+		r.addEventCheck(event, state, "malformed CDF OrderCancelled evidence: "+err.Error())
+		return
+	}
+	withdrawal := withdrawals[cdfRequestKey{event.VenueID, event.ClientID, cancelled.RequestID}]
+	orderKey := cdfOrderKey{event.VenueID, event.ClientID, cancelled.OrderID}
+	order := orders[orderKey]
+	if withdrawal == nil || order == nil || withdrawal.decision.QuoteOrderID != cancelled.OrderID ||
+		cancelled.RemainingQty != order.remainingQty || event.SimTS < withdrawal.event.SimTS {
+		r.addEventCheck(event, state, "CDF cancellation does not close a live order and prior withdrawal decision")
+		return
+	}
+	if withdrawal.closed {
+		r.addEventCheck(event, state, "duplicate CDF cancellation outcome")
+		return
+	}
+	withdrawal.closed = true
+	delete(orders, orderKey)
+	state.audit.WithdrawalCount++
+	r.WithdrawalCount++
+}
+
+func (r *CDFActivationAudit) processCDFTrade(event Event) {
+	var trade cdfTradeEvidence
+	if err := decodeRequiredJSON(event.Raw(), &trade, "trade_id", "price", "qty", "side"); err != nil {
+		r.addCheck(CDFActivationCheck{VenueID: event.VenueID, Ordinal: event.Ordinal, Failure: "malformed CDF trade evidence: " + err.Error()})
+		return
+	}
+	if trade.TradeID == 0 || trade.Price <= 0 || trade.Qty <= 0 || (trade.Side != "BUY" && trade.Side != "SELL") {
+		r.addCheck(CDFActivationCheck{VenueID: event.VenueID, Ordinal: event.Ordinal, Failure: "CDF trade evidence has invalid identity, price, quantity, or side"})
+		return
+	}
+	var ok bool
+	r.TotalVolumeQty, ok = checkedCDFAdd(r.TotalVolumeQty, trade.Qty)
+	if !ok {
+		r.addCheck(CDFActivationCheck{VenueID: event.VenueID, Ordinal: event.Ordinal, Failure: "aggregate CDF trade volume overflows"})
+	}
+}
+
+func (r *CDFActivationAudit) processCDFDepthSnapshot(event Event, states map[cdfParticipantKey]*cdfSupplierState, orders map[cdfOrderKey]*cdfOrderState, depth map[string][]cdfDepthObservation, publicDepth map[string]*cdfPublicDepthState) {
+	var snapshot cdfPublicSnapshotEvidence
+	if err := decodeRequiredJSON(event.Raw(), &snapshot, "bids", "asks", "source_sequence", "public_bids", "public_asks"); err != nil {
+		return
+	}
+	if snapshot.SourceSequence == 0 || snapshot.Bids == nil || snapshot.Asks == nil || snapshot.PublicBids == nil || snapshot.PublicAsks == nil || !validCDFSnapshotProjection(snapshot) {
+		r.addCheck(CDFActivationCheck{VenueID: event.VenueID, Ordinal: event.Ordinal, Failure: "public CDF snapshot lacks a verified public projection"})
+		return
+	}
+	state, ok := newCDFPublicDepthState(snapshot.PublicBids, snapshot.PublicAsks)
+	if !ok {
+		r.addCheck(CDFActivationCheck{VenueID: event.VenueID, Ordinal: event.Ordinal, Failure: "public CDF depth is negative or overflows"})
+		return
+	}
+	publicDepth[event.VenueID] = state
+	r.recordCDFDepthObservation(event, states, orders, depth, state)
+}
+
+func (r *CDFActivationAudit) processCDFDepthDelta(event Event, states map[cdfParticipantKey]*cdfSupplierState, orders map[cdfOrderKey]*cdfOrderState, depth map[string][]cdfDepthObservation, publicDepth map[string]*cdfPublicDepthState) {
+	state := publicDepth[event.VenueID]
+	if state == nil || !state.initialized {
+		r.addCheck(CDFActivationCheck{VenueID: event.VenueID, Ordinal: event.Ordinal, Failure: "CDF BookDelta precedes a complete public snapshot"})
+		return
+	}
+	var delta cdfBookDeltaEvidence
+	if err := decodeRequiredJSON(event.Raw(), &delta, "side", "price", "visible_qty", "hidden_qty"); err != nil {
+		r.addCheck(CDFActivationCheck{VenueID: event.VenueID, Ordinal: event.Ordinal, Failure: "malformed public CDF delta: " + err.Error()})
+		return
+	}
+	if delta.Price <= 0 || delta.VisibleQty < 0 || delta.HiddenQty < 0 || delta.Side != "BUY" && delta.Side != "SELL" {
+		r.addCheck(CDFActivationCheck{VenueID: event.VenueID, Ordinal: event.Ordinal, Failure: "public CDF delta has invalid side, price, or quantity"})
+		return
+	}
+	levels := state.bids
+	if delta.Side == "SELL" {
+		levels = state.asks
+	}
+	if delta.VisibleQty == 0 {
+		delete(levels, delta.Price)
+	} else {
+		levels[delta.Price] = delta.VisibleQty
+	}
+	r.recordCDFDepthObservation(event, states, orders, depth, state)
+}
+
+func (r *CDFActivationAudit) recordCDFDepthObservation(event Event, states map[cdfParticipantKey]*cdfSupplierState, orders map[cdfOrderKey]*cdfOrderState, depth map[string][]cdfDepthObservation, publicDepth *cdfPublicDepthState) {
+	bidDepth, bidOK := totalCDFDepthMap(publicDepth.bids)
+	askDepth, askOK := totalCDFDepthMap(publicDepth.asks)
+	if !bidOK || !askOK {
+		r.addCheck(CDFActivationCheck{VenueID: event.VenueID, Ordinal: event.Ordinal, Failure: "public CDF depth overflows"})
+		return
+	}
+	observation := cdfDepthObservation{at: event.SimTS, bidDepth: bidDepth, askDepth: askDepth}
+	for key, order := range orders {
+		if key.venueID != event.VenueID || states[cdfParticipantKey{key.venueID, key.clientID}] == nil {
+			continue
+		}
+		if order.side == "BUY" {
+			observation.supplierBid, bidOK = checkedCDFAdd(observation.supplierBid, order.remainingQty)
+		} else {
+			observation.supplierAsk, askOK = checkedCDFAdd(observation.supplierAsk, order.remainingQty)
+		}
+		if !bidOK || !askOK {
+			r.addCheck(CDFActivationCheck{VenueID: event.VenueID, Ordinal: event.Ordinal, Failure: "supplier resting depth overflows"})
+			return
+		}
+		if order.oneSidedCandidate && !order.restored && event.SimTS > order.acceptedAt &&
+			cdfDepthRestoresOrder(publicDepth, order.side, order.price, order.minimumQualifying) {
+			order.restored = true
+			r.OneSidedRestorationCount++
+		}
+	}
+	if observation.supplierBid > bidDepth || observation.supplierAsk > askDepth {
+		r.addCheck(CDFActivationCheck{VenueID: event.VenueID, Ordinal: event.Ordinal, Failure: "reconstructed supplier depth exceeds public displayed depth"})
+	}
+	depth[event.VenueID] = append(depth[event.VenueID], observation)
+}
+
+func (r *CDFActivationAudit) reconcileCDFFills(states map[cdfParticipantKey]*cdfSupplierState, observed map[cdfFillKey]cdfFillEvidence, actual map[cdfFillKey]cdfOrderFillEvidence, orders map[cdfOrderKey]*cdfOrderState) {
+	for key, supplierFill := range observed {
+		exchangeFill, exists := actual[key]
+		state := states[cdfParticipantKey{key.venueID, key.clientID}]
+		if !exists || exchangeFill.Side != supplierFill.Side || exchangeFill.Price != supplierFill.Price ||
+			exchangeFill.Qty != supplierFill.Qty || exchangeFill.FeeAmount != supplierFill.FeeAmount ||
+			exchangeFill.FeeAsset != supplierFill.FeeAsset || exchangeFill.IsFull != supplierFill.IsFull {
+			r.addCheck(CDFActivationCheck{VenueID: key.venueID, Role: state.audit.Role, ClientID: key.clientID, Failure: "supplier fill does not match exchange OrderFill evidence"})
+		}
+	}
+	for key := range actual {
+		if _, exists := observed[key]; !exists {
+			state := states[cdfParticipantKey{key.venueID, key.clientID}]
+			r.addCheck(CDFActivationCheck{VenueID: key.venueID, Role: state.audit.Role, ClientID: key.clientID, Failure: "exchange OrderFill has no supplier inventory transition"})
+		}
+	}
+	for key, order := range orders {
+		state := states[cdfParticipantKey{key.venueID, key.clientID}]
+		r.addCheck(CDFActivationCheck{VenueID: key.venueID, Role: state.audit.Role, ClientID: key.clientID, Failure: fmt.Sprintf("accepted CDF order %d remains unresolved with quantity %d", key.orderID, order.remainingQty)})
+	}
+}
+
+func (r *CDFActivationAudit) finalizeCDFActivation(
+	states map[cdfParticipantKey]*cdfSupplierState,
+	submissions map[cdfRequestKey]*cdfSubmission,
+	withdrawals map[cdfRequestKey]*cdfWithdrawal,
+	depth map[string][]cdfDepthObservation,
+	terminalAt int64,
+	contract CDFActivationContract,
+) {
+	for _, submission := range submissions {
+		if !submission.accepted && !submission.rejected {
+			r.addCheck(CDFActivationCheck{VenueID: submission.event.VenueID, ClientID: submission.event.ClientID, Ordinal: submission.event.Ordinal, Failure: "CDF submission has no terminal acceptance/rejection outcome"})
+		}
+	}
+	for _, withdrawal := range withdrawals {
+		if !withdrawal.closed {
+			r.addCheck(CDFActivationCheck{VenueID: withdrawal.event.VenueID, ClientID: withdrawal.event.ClientID, Ordinal: withdrawal.event.Ordinal, Failure: "CDF cancellation decision has no terminal OrderCancelled outcome"})
+		}
+	}
+	allSuppliersActivated := len(states) == len(contract.VenueIDs)*len(contract.Suppliers)
+	keys := make([]cdfParticipantKey, 0, len(states))
+	for key := range states {
+		keys = append(keys, key)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		if keys[i].venueID != keys[j].venueID {
+			return keys[i].venueID < keys[j].venueID
+		}
+		return keys[i].clientID < keys[j].clientID
+	})
+	for _, key := range keys {
+		state := states[key]
+		if state.audit.MinPosition == math.MaxInt64 {
+			state.audit.MinPosition = 0
+			state.audit.MaxPosition = 0
+		}
+		state.audit.ActivationSatisfied = state.initialAccountSeen && state.terminalAccountSeen &&
+			state.audit.EligibleObservationCount > 0 && state.audit.AcceptedOrderCount > 0 &&
+			state.audit.FillCount > 0 && state.audit.PostFillBalanceSnapshotCount > 0 &&
+			state.audit.PostFillResponsiveCount > 0
+		allSuppliersActivated = allSuppliersActivated && state.audit.ActivationSatisfied
+		expectedBase, baseOK := checkedCDFAdd(state.initialBaseBalance, state.fillBaseDelta)
+		expectedQuote, quoteOK := checkedCDFAdd(state.initialQuoteBalance, state.fillQuoteDelta)
+		if !baseOK || !quoteOK || expectedBase != state.terminalBaseBalance || expectedQuote != state.terminalQuoteBalance {
+			r.addCheck(CDFActivationCheck{VenueID: state.audit.VenueID, Role: state.audit.Role, ClientID: state.audit.ClientID, Failure: "terminal supplier balances do not reconcile to finite initial capital and exchange-matched fills"})
+		}
+		r.Suppliers = append(r.Suppliers, state.audit)
+	}
+	if r.TotalVolumeQty <= 0 || r.SupplierVolumeQty < 0 || r.SupplierVolumeQty > r.TotalVolumeQty {
+		r.addCheck(CDFActivationCheck{Failure: "CDF volume denominator is missing or inconsistent with supplier fills"})
+	} else {
+		r.SupplierVolumeShare = float64(r.SupplierVolumeQty) / float64(r.TotalVolumeQty)
+	}
+	allVenueConcentrationSatisfied := true
+	for _, venueID := range contract.VenueIDs {
+		venue := measureCDFVenueConcentration(venueID, depth[venueID], terminalAt, contract)
+		allVenueConcentrationSatisfied = allVenueConcentrationSatisfied && venue.ConcentrationSatisfied
+		r.Venues = append(r.Venues, venue)
+	}
+	for index := range r.Suppliers {
+		r.Suppliers[index].EvidenceValid = !r.hasParticipantCheck(r.Suppliers[index].VenueID, r.Suppliers[index].ClientID)
+	}
+	r.EvidenceValid = len(r.Checks) == 0
+	r.ActivationSatisfied = r.EvidenceValid && allSuppliersActivated && r.WithdrawalCount > 0 &&
+		r.OneSidedDecisionCount > 0 && r.OneSidedRestorationCount > 0
+	r.AntiCheatingSatisfied = r.EvidenceValid && r.SupplierVolumeShare <= contract.MaximumSupplierVolumeShare &&
+		allVenueConcentrationSatisfied
+	r.Valid = r.EvidenceValid && r.ActivationSatisfied && r.AntiCheatingSatisfied
+}
+
+func measureCDFVenueConcentration(venueID string, observations []cdfDepthObservation, terminalAt int64, contract CDFActivationContract) CDFVenueConcentrationAudit {
+	result := CDFVenueConcentrationAudit{VenueID: venueID, SnapshotCount: int64(len(observations))}
+	if len(observations) == 0 {
+		return result
+	}
+	sort.SliceStable(observations, func(i, j int) bool { return observations[i].at < observations[j].at })
+	for index, observation := range observations {
+		end := terminalAt
+		if index+1 < len(observations) {
+			end = observations[index+1].at
+		}
+		if end <= observation.at {
+			continue
+		}
+		duration := end - observation.at
+		if observation.bidDepth > 0 {
+			result.BidActiveDurationNano += duration
+			if float64(observation.supplierBid)/float64(observation.bidDepth) > contract.MaximumSupplierDepthShare {
+				result.BidDominantDurationNano += duration
+			}
+		}
+		if observation.askDepth > 0 {
+			result.AskActiveDurationNano += duration
+			if float64(observation.supplierAsk)/float64(observation.askDepth) > contract.MaximumSupplierDepthShare {
+				result.AskDominantDurationNano += duration
+			}
+		}
+		if (observation.bidDepth > 0) != (observation.askDepth > 0) {
+			result.OneSidedDurationNano += duration
+		}
+	}
+	if result.BidActiveDurationNano > 0 {
+		result.BidDominanceTimeFraction = float64(result.BidDominantDurationNano) / float64(result.BidActiveDurationNano)
+	}
+	if result.AskActiveDurationNano > 0 {
+		result.AskDominanceTimeFraction = float64(result.AskDominantDurationNano) / float64(result.AskActiveDurationNano)
+	}
+	result.ConcentrationSatisfied = result.BidActiveDurationNano > 0 && result.AskActiveDurationNano > 0 &&
+		result.BidDominanceTimeFraction <= contract.MaximumDepthDominanceTimeFraction &&
+		result.AskDominanceTimeFraction <= contract.MaximumDepthDominanceTimeFraction
+	return result
+}
+
+func validCDFMissingSideQuote(decision cdfDecisionEvidence, contract CDFSupplierContract) bool {
+	if decision.QuoteQty < contract.MinimumQualifyingQty {
+		return false
+	}
+	expectedPrice, ok := expectedCDFMissingSideQuote(decision, contract)
+	return ok && decision.QuotePrice == expectedPrice
+}
+
+func expectedCDFMissingSideQuote(decision cdfDecisionEvidence, contract CDFSupplierContract) (int64, bool) {
+	if decision.ReferencePrice <= 0 || contract.TickSize <= 0 {
+		return 0, false
+	}
+	switch {
+	case decision.BestBid > 0 && decision.BestBidQty > 0 && decision.BestAsk == 0 && decision.BestAskQty == 0 && decision.Side == "SELL":
+		lowerBound, ok := checkedCDFAdd(decision.BestBid, contract.TickSize)
+		if !ok {
+			return 0, false
+		}
+		candidate := maxCDFInt64(etypes.Midpoint(decision.ReferencePrice, decision.BestBid), lowerBound)
+		return ceilCDFToTick(candidate, contract.TickSize)
+	case decision.BestAsk > 0 && decision.BestAskQty > 0 && decision.BestBid == 0 && decision.BestBidQty == 0 && decision.Side == "BUY":
+		upperBound, ok := checkedCDFSub(decision.BestAsk, contract.TickSize)
+		if !ok || upperBound <= 0 {
+			return 0, false
+		}
+		candidate := minCDFInt64(etypes.Midpoint(decision.ReferencePrice, decision.BestAsk), upperBound)
+		return floorCDFToTick(candidate, contract.TickSize)
+	default:
+		return 0, false
+	}
+}
+
+func floorCDFToTick(price, tick int64) (int64, bool) {
+	if price <= 0 || tick <= 0 {
+		return 0, false
+	}
+	quotient := price / tick
+	if quotient <= 0 || quotient > math.MaxInt64/tick {
+		return 0, false
+	}
+	return quotient * tick, true
+}
+
+func ceilCDFToTick(price, tick int64) (int64, bool) {
+	if price <= 0 || tick <= 0 {
+		return 0, false
+	}
+	quotient := price / tick
+	if price%tick != 0 {
+		if quotient == math.MaxInt64 {
+			return 0, false
+		}
+		quotient++
+	}
+	if quotient <= 0 || quotient > math.MaxInt64/tick {
+		return 0, false
+	}
+	return quotient * tick, true
+}
+
+// validCDFSnapshotProjection proves that the explicit public view is the
+// visible projection of the complete snapshot. The proof is intentionally
+// strict: the complete snapshot is capped by the venue's level limit, so a
+// hidden-only level consuming that limit would make the public tail
+// unprovable from the god view. Rejecting that record is safer than silently
+// inferring a public book from incomplete evidence.
+func validCDFSnapshotProjection(snapshot cdfPublicSnapshotEvidence) bool {
+	fullBids, bidsOK := cdfVisibleProjection(snapshot.Bids)
+	fullAsks, asksOK := cdfVisibleProjection(snapshot.Asks)
+	publicBids, publicBidsOK := cdfPublicProjection(snapshot.PublicBids)
+	publicAsks, publicAsksOK := cdfPublicProjection(snapshot.PublicAsks)
+	return bidsOK && asksOK && publicBidsOK && publicAsksOK &&
+		sameCDFPriceLevels(fullBids, publicBids) &&
+		sameCDFPriceLevels(fullAsks, publicAsks)
+}
+
+func cdfVisibleProjection(levels []etypes.PriceLevel) ([]etypes.PriceLevel, bool) {
+	projected := make([]etypes.PriceLevel, 0, len(levels))
+	seenPrices := make(map[int64]struct{}, len(levels))
+	for _, level := range levels {
+		if level.Price <= 0 || level.VisibleQty < 0 || level.HiddenQty < 0 {
+			return nil, false
+		}
+		if _, duplicate := seenPrices[level.Price]; duplicate {
+			return nil, false
+		}
+		seenPrices[level.Price] = struct{}{}
+		levelQuantity, ok := checkedCDFAdd(level.VisibleQty, level.HiddenQty)
+		if !ok || levelQuantity <= 0 {
+			return nil, false
+		}
+		if level.VisibleQty > 0 {
+			projected = append(projected, etypes.PriceLevel{Price: level.Price, VisibleQty: level.VisibleQty})
+		}
+	}
+	return projected, true
+}
+
+func cdfPublicProjection(levels []etypes.PriceLevel) ([]etypes.PriceLevel, bool) {
+	projected := make([]etypes.PriceLevel, 0, len(levels))
+	seenPrices := make(map[int64]struct{}, len(levels))
+	for _, level := range levels {
+		if level.Price <= 0 || level.VisibleQty <= 0 || level.HiddenQty != 0 {
+			return nil, false
+		}
+		if _, duplicate := seenPrices[level.Price]; duplicate {
+			return nil, false
+		}
+		seenPrices[level.Price] = struct{}{}
+		projected = append(projected, level)
+	}
+	return projected, true
+}
+
+func sameCDFPriceLevels(left, right []etypes.PriceLevel) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index].Price != right[index].Price ||
+			left[index].VisibleQty != right[index].VisibleQty ||
+			left[index].HiddenQty != right[index].HiddenQty {
+			return false
+		}
+	}
+	return true
+}
+
+func newCDFPublicDepthState(bids, asks []etypes.PriceLevel) (*cdfPublicDepthState, bool) {
+	state := &cdfPublicDepthState{initialized: true, bids: make(map[int64]int64, len(bids)), asks: make(map[int64]int64, len(asks))}
+	for _, side := range []struct {
+		levels []etypes.PriceLevel
+		book   map[int64]int64
+	}{{bids, state.bids}, {asks, state.asks}} {
+		for _, level := range side.levels {
+			if level.Price <= 0 || level.VisibleQty < 0 || level.HiddenQty < 0 {
+				return nil, false
+			}
+			quantity, ok := checkedCDFAdd(side.book[level.Price], level.VisibleQty)
+			if !ok {
+				return nil, false
+			}
+			if quantity > 0 {
+				side.book[level.Price] = quantity
+			}
+		}
+	}
+	return state, true
+}
+
+func totalCDFDepthMap(levels map[int64]int64) (int64, bool) {
+	var total int64
+	for price, quantity := range levels {
+		if price <= 0 || quantity < 0 {
+			return 0, false
+		}
+		var ok bool
+		total, ok = checkedCDFAdd(total, quantity)
+		if !ok {
+			return 0, false
+		}
+	}
+	return total, true
+}
+
+func cdfDepthRestoresOrder(depth *cdfPublicDepthState, side string, price, minimumQty int64) bool {
+	levels := depth.bids
+	if side == "SELL" {
+		levels = depth.asks
+	}
+	return levels[price] >= minimumQty
+}
+
+func cdfAccountNetBalance(balances []Balance, asset string) (int64, bool) {
+	for _, balance := range balances {
+		if balance.Asset == asset {
+			return balance.NetAsset, true
+		}
+	}
+	return 0, false
+}
+
+func cdfMarkedAccountEquity(row AccountRow, supplier CDFSupplierContract) (int64, bool) {
+	var total int64
+	for _, balance := range row.Account.SpotBalances {
+		if balance.NetAsset == 0 {
+			continue
+		}
+		var precision int64
+		switch balance.Asset {
+		case supplier.BaseAsset:
+			precision = supplier.BasePrecision
+		case supplier.QuoteAsset:
+			precision = supplier.QuotePrecision
+		default:
+			return 0, false
+		}
+		mark := row.Marks[balance.Asset]
+		if mark <= 0 || precision <= 0 {
+			return 0, false
+		}
+		value := new(big.Int).Mul(big.NewInt(balance.NetAsset), big.NewInt(mark))
+		value.Quo(value, big.NewInt(precision))
+		if !value.IsInt64() {
+			return 0, false
+		}
+		var ok bool
+		total, ok = checkedCDFAdd(total, value.Int64())
+		if !ok {
+			return 0, false
+		}
+	}
+	return total, true
+}
+
+func cdfActivationNotional(price, quantity, basePrecision int64) (int64, bool) {
+	if price <= 0 || quantity <= 0 || basePrecision <= 0 {
+		return 0, false
+	}
+	notional := new(big.Int).Mul(big.NewInt(price), big.NewInt(quantity))
+	notional.Quo(notional, big.NewInt(basePrecision))
+	if !notional.IsInt64() {
+		return 0, false
+	}
+	return notional.Int64(), true
+}
+
+func cdfActivationFee(notional, basisPoints int64) (int64, bool) {
+	if notional < 0 || basisPoints < 0 || basisPoints > 10_000 {
+		return 0, false
+	}
+	fee := new(big.Int).Mul(big.NewInt(notional), big.NewInt(basisPoints))
+	fee.Quo(fee, big.NewInt(10_000))
+	if !fee.IsInt64() {
+		return 0, false
+	}
+	return fee.Int64(), true
+}
+
+func cdfBestBid(levels []etypes.PriceLevel) (int64, int64) {
+	var price, quantity int64
+	for _, level := range levels {
+		if level.Price <= 0 || level.VisibleQty <= 0 || level.Price < price {
+			continue
+		}
+		if level.Price > price {
+			price, quantity = level.Price, level.VisibleQty
+			continue
+		}
+		quantity, _ = checkedCDFAdd(quantity, level.VisibleQty)
+	}
+	return price, quantity
+}
+
+func cdfBestAsk(levels []etypes.PriceLevel) (int64, int64) {
+	var price, quantity int64
+	for _, level := range levels {
+		if level.Price <= 0 || level.VisibleQty <= 0 || price != 0 && level.Price > price {
+			continue
+		}
+		if price == 0 || level.Price < price {
+			price, quantity = level.Price, level.VisibleQty
+			continue
+		}
+		quantity, _ = checkedCDFAdd(quantity, level.VisibleQty)
+	}
+	return price, quantity
+}
+
+func canonicalCDFActivationJSON(raw []byte) (string, error) {
+	var value any
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return "", fmt.Errorf("cdf activation: canonicalize JSON: %w", err)
+	}
+	canonical, err := json.Marshal(value)
+	if err != nil {
+		return "", fmt.Errorf("cdf activation: encode canonical JSON: %w", err)
+	}
+	return string(canonical), nil
+}
+
+func isCDFHex(value string, bytes int) bool {
+	if len(value) != bytes*2 {
+		return false
+	}
+	_, err := hex.DecodeString(value)
+	return err == nil
+}
+
+func sameCDFStrings(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
+}
+
+func sameCDFPath(left, right string) bool {
+	leftAbsolute, leftErr := filepath.Abs(left)
+	rightAbsolute, rightErr := filepath.Abs(right)
+	if leftErr != nil || rightErr != nil {
+		return false
+	}
+	return filepath.Clean(leftAbsolute) == filepath.Clean(rightAbsolute)
+}
+
+func containsCDFString(values []string, wanted string) bool {
+	for _, value := range values {
+		if value == wanted {
+			return true
+		}
+	}
+	return false
+}
+
+func isNumberedRole(role, prefix string) bool {
+	if !strings.HasPrefix(role, prefix) || len(role) == len(prefix) {
+		return false
+	}
+	for _, character := range role[len(prefix):] {
+		if character < '0' || character > '9' {
+			return false
+		}
+	}
+	return role[len(prefix):] != "0"
+}
+
+func isCDFAction(action string) bool {
+	switch action {
+	case "wait", "submit", "rest", "cancel", "withdraw":
+		return true
+	default:
+		return false
+	}
+}
+
+func cdfSideCode(side string) uint8 {
+	if side == "BUY" {
+		return uint8(etypes.Buy)
+	}
+	if side == "SELL" {
+		return uint8(etypes.Sell)
+	}
+	return math.MaxUint8
+}
+
+func checkedCDFAdd(left, right int64) (int64, bool) {
+	if right > 0 && left > math.MaxInt64-right || right < 0 && left < math.MinInt64-right {
+		return 0, false
+	}
+	return left + right, true
+}
+
+func checkedCDFSub(left, right int64) (int64, bool) {
+	if right == math.MinInt64 {
+		if left >= 0 {
+			return 0, false
+		}
+		return left - right, true
+	}
+	return checkedCDFAdd(left, -right)
+}
+
+func cdfAbsExceeds(value, limit int64) bool {
+	if limit < 0 || value == math.MinInt64 {
+		return true
+	}
+	if value < 0 {
+		value = -value
+	}
+	return value > limit
+}
+
+func cdfAbs(value int64) int64 {
+	if value == math.MinInt64 {
+		return math.MaxInt64
+	}
+	if value < 0 {
+		return -value
+	}
+	return value
+}
+
+func cdfBetweenInclusive(value, first, second int64) bool {
+	if first > second {
+		first, second = second, first
+	}
+	return value >= first && value <= second
+}
+
+func (r *CDFActivationAudit) addCheck(check CDFActivationCheck) {
+	r.Checks = append(r.Checks, check)
+}
+
+func (r *CDFActivationAudit) addEventCheck(event Event, state *cdfSupplierState, failure string) {
+	r.addCheck(CDFActivationCheck{
+		VenueID: event.VenueID, Role: state.audit.Role, ClientID: event.ClientID,
+		Ordinal: event.Ordinal, Failure: failure,
+	})
+}
+
+func (r *CDFActivationAudit) hasParticipantCheck(venueID string, clientID uint64) bool {
+	for _, check := range r.Checks {
+		if check.VenueID == venueID && check.ClientID == clientID {
+			return true
+		}
+	}
+	return false
+}

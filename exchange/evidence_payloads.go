@@ -1,5 +1,7 @@
 package exchange
 
+import "encoding/json"
+
 // These payload types are the typed boundary shared by the JSON evidence
 // logger and the successor binary evidence stream. Keeping the declarations
 // separate from order admission and settlement makes the representation change
@@ -9,8 +11,36 @@ package exchange
 // sides are intentionally distinct in the binary schema, matching JSON null
 // versus [].
 type bookSnapshotEvidence struct {
-	Asks []PriceLevel `json:"asks"`
-	Bids []PriceLevel `json:"bids"`
+	Asks           []PriceLevel `json:"asks"`
+	Bids           []PriceLevel `json:"bids"`
+	SourceSequence uint64       `json:"source_sequence,omitempty"`
+	PublicAsks     []PriceLevel `json:"public_asks"`
+	PublicBids     []PriceLevel `json:"public_bids"`
+}
+
+// MarshalJSON keeps snapshots without a source sequence byte-for-byte
+// compatible with the historical JSON evidence shape. Successor binary
+// snapshots have a positive source sequence and retain the explicit public
+// projection needed by the strict analyzer, including empty (but present)
+// sides.
+func (b bookSnapshotEvidence) MarshalJSON() ([]byte, error) {
+	if b.SourceSequence == 0 {
+		return json.Marshal(struct {
+			Asks []PriceLevel `json:"asks"`
+			Bids []PriceLevel `json:"bids"`
+		}{Asks: b.Asks, Bids: b.Bids})
+	}
+	type successorSnapshot struct {
+		Asks           []PriceLevel `json:"asks"`
+		Bids           []PriceLevel `json:"bids"`
+		SourceSequence uint64       `json:"source_sequence"`
+		PublicAsks     []PriceLevel `json:"public_asks"`
+		PublicBids     []PriceLevel `json:"public_bids"`
+	}
+	return json.Marshal(successorSnapshot{
+		Asks: b.Asks, Bids: b.Bids, SourceSequence: b.SourceSequence,
+		PublicAsks: b.PublicAsks, PublicBids: b.PublicBids,
+	})
 }
 
 // bookDeltaEvidence contains both public and hidden quantities. The public

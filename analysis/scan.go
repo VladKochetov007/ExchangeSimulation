@@ -24,6 +24,10 @@ type Event struct {
 	VenueID  string
 	Symbol   string
 	File     string
+	// GlobalSequence is the evstream frame sequence when the event came from
+	// the versioned binary renderer. Zero means the historical JSON contract or
+	// a legacy rendered sidecar without a global frame identity.
+	GlobalSequence uint64
 	// Ordinal is the one-based physical record position in File. It permits
 	// analyzers to distinguish causal order among same-timestamp records in one
 	// persisted log; SimTS alone is not sufficient at lifecycle boundaries.
@@ -71,9 +75,10 @@ type envelope struct {
 }
 
 type dataLayer struct {
-	VenueID string          `json:"venue_id"`
-	Symbol  string          `json:"symbol"`
-	Payload json.RawMessage `json:"payload"`
+	VenueID        string          `json:"venue_id"`
+	Symbol         string          `json:"symbol"`
+	GlobalSequence uint64          `json:"global_sequence"`
+	Payload        json.RawMessage `json:"payload"`
 }
 
 // ScanOptions narrows a scan before any decoding happens, which is what keeps a
@@ -178,7 +183,7 @@ func scanFile(path string, keep map[string]bool, needles [][]byte, visit func(Ev
 		event := Event{
 			SimTS: env.SimTS, ClientID: env.ClientID, Name: env.Event,
 			VenueID: outer.VenueID, Symbol: outer.Symbol, File: path, Ordinal: ordinal,
-			payload: outer.Payload,
+			GlobalSequence: outer.GlobalSequence, payload: outer.Payload,
 		}
 		// Unwrap the derivative nesting: an inner payload means the fields sit
 		// one level down and the symbol travels with them.

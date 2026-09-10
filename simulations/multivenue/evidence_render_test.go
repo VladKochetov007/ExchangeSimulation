@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"exchange_sim/evstream"
 	"exchange_sim/exchange"
 	"exchange_sim/simulations/feesim"
 	etypes "exchange_sim/types"
@@ -75,6 +76,155 @@ func TestRenderBinaryEvidenceMergesEvidenceOnlySidecarsByVenueSequence(t *testin
 	}
 	if !bytes.Equal(actual, actualTwo) {
 		t.Fatal("reconstruction is not deterministic")
+	}
+}
+
+func TestRenderBinaryEvidenceV2PreservesGlobalFrameSequence(t *testing.T) {
+	inputDir := t.TempDir()
+	eventsPath := filepath.Join(inputDir, "events.evs")
+	eventsFile, err := os.Create(eventsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sink := newBinaryEvidence(eventsFile)
+	if err := sink.record(10, 7, "first", "north", map[string]int{"value": 1}, "first.jsonl", 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := sink.record(20, 8, "second", "north", map[string]int{"value": 2}, "second.jsonl", 2); err != nil {
+		t.Fatal(err)
+	}
+	if err := sink.finish(); err != nil {
+		t.Fatal(err)
+	}
+	if err := eventsFile.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	manifest := []byte(`{"schema_version":2,"config":{"log_mode":"none","evidence_format":"evstream_v3","evidence_contract_version":2}}`)
+	if err := os.WriteFile(filepath.Join(inputDir, "manifest.json"), append(manifest, '\n'), 0644); err != nil {
+		t.Fatal(err)
+	}
+	digest := sink.executionHash()
+	attestation, err := json.MarshalIndent(binaryEvidenceArtifactRecord{
+		Domain: "canonical_binary_execution_frames", Ordering: "ordered_stream",
+		EventFrames: sink.count(), StreamFrames: sink.writer.Count(),
+		ExecutionStreamHash: hex.EncodeToString(digest[:]), EvidenceOnlyIncluded: true,
+	}, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(inputDir, "binary-evidence-attestation.json"), append(attestation, '\n'), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	stream, err := os.ReadFile(eventsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader, err := evstream.NewReader(bytes.NewReader(stream), evstream.ReaderOptions{VerifyHash: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantGlobalSequence := make(map[string]uint64)
+	if err := reader.Range(func(frame evstream.Frame) error {
+		_, record, err := renderBinaryFrameVersioned(reader, frame, true)
+		if err != nil {
+			return err
+		}
+		var event renderPersistedEvent
+		if err := json.Unmarshal(record.raw, &event); err != nil {
+			return err
+		}
+		wantGlobalSequence[event.Event] = frame.Header.Seq
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	outDir := filepath.Join(t.TempDir(), "rendered")
+	if _, err := RenderBinaryEvidence(inputDir, outDir); err != nil {
+		t.Fatalf("render v2 evidence: %v", err)
+	}
+	for _, eventName := range []string{"first", "second"} {
+		raw, err := os.ReadFile(filepath.Join(outDir, "venues", "north", eventName+".jsonl"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var rendered []renderPersistedEvent
+		if err := decodeJSONLines(raw, &rendered); err != nil {
+			t.Fatal(err)
+		}
+		if len(rendered) != 1 || rendered[0].Event != eventName || rendered[0].Data.GlobalSequence != wantGlobalSequence[eventName] {
+			t.Fatalf("rendered %s = %+v, want global sequence %d", eventName, rendered, wantGlobalSequence[eventName])
+		}
+	}
+}
+
+func TestRenderBinaryEvidenceV2RejectsLegacySidecars(t *testing.T) {
+	inputDir := t.TempDir()
+	venueDir := filepath.Join(inputDir, "venues", "north")
+	if err := os.MkdirAll(venueDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	eventsFile, err := os.Create(filepath.Join(inputDir, "events.evs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sink := newBinaryEvidence(eventsFile)
+	if err := sink.record(1, 7, "event", "north", map[string]int{"value": 1}, "general.jsonl", 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := sink.finish(); err != nil {
+		t.Fatal(err)
+	}
+	if err := eventsFile.Close(); err != nil {
+		t.Fatal(err)
+	}
+	sidecar := []byte(`{"client_id":8,"data":{"venue_id":"north","sequence":2,"payload":{"value":2}},"event":"sidecar","sim_ts":2}`)
+	if err := os.WriteFile(filepath.Join(venueDir, "general.jsonl"), append(sidecar, '\n'), 0644); err != nil {
+		t.Fatal(err)
+	}
+	writeRenderMetadata(t, inputDir, sink, "full", sidecar)
+	manifest := []byte(`{"schema_version":2,"config":{"log_mode":"full","evidence_format":"evstream_v3","evidence_contract_version":2}}`)
+	if err := os.WriteFile(filepath.Join(inputDir, "manifest.json"), append(manifest, '\n'), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := RenderBinaryEvidence(inputDir, filepath.Join(t.TempDir(), "rendered")); err == nil {
+		t.Fatal("v2 renderer accepted a legacy JSON sidecar")
+	}
+}
+
+func TestRenderBinaryEvidenceRejectsSchemaEpochAttestationMismatch(t *testing.T) {
+	inputDir := t.TempDir()
+	eventsPath := filepath.Join(inputDir, "events.evs")
+	eventsFile, err := os.Create(eventsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sink := newBinaryEvidence(eventsFile)
+	if err := sink.record(1, 7, "event", "north", map[string]int{"value": 1}, "general.jsonl", 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := sink.finish(); err != nil {
+		t.Fatal(err)
+	}
+	if err := eventsFile.Close(); err != nil {
+		t.Fatal(err)
+	}
+	writeRenderMetadata(t, inputDir, sink, "none")
+	manifest := []byte(`{"schema_version":2,"config":{"log_mode":"none","evidence_format":"evstream_v3","evidence_contract_version":2}}`)
+	if err := os.WriteFile(filepath.Join(inputDir, "manifest.json"), append(manifest, '\n'), 0644); err != nil {
+		t.Fatal(err)
+	}
+	stream, err := os.ReadFile(eventsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stream[16] = 1
+	if err := os.WriteFile(eventsPath, stream, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := RenderBinaryEvidence(inputDir, filepath.Join(t.TempDir(), "rendered")); err == nil {
+		t.Fatal("renderer accepted a schema epoch that disagrees with its attestation")
 	}
 }
 

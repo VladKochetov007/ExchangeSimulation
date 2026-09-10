@@ -390,6 +390,9 @@ func (w *Writer) ExecutionHash() [sha256.Size]byte {
 // Count returns the number of frames written, including dictionary frames.
 func (w *Writer) Count() uint64 { return w.seq }
 
+// SchemaEpoch returns the schema-set identity written into the stream header.
+func (w *Writer) SchemaEpoch() uint32 { return w.epoch }
+
 // Index returns the block directory built while writing. Valid after Flush.
 func (w *Writer) Index() *Index { return &w.index }
 

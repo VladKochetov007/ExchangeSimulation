@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"testing"
@@ -213,13 +214,16 @@ func TestVersionedBinaryReplacementIncludesEvidenceOnlyInCanonicalStream(t *test
 	}
 	var names []string
 	if err := reader.Range(func(frame evstream.Frame) error {
-		_, rendered, err := renderBinaryFrame(reader, frame)
+		_, rendered, err := renderBinaryFrameVersioned(reader, frame, true)
 		if err != nil {
 			return err
 		}
 		var event renderPersistedEvent
 		if err := json.Unmarshal(rendered.raw, &event); err != nil {
 			return err
+		}
+		if event.Data.GlobalSequence != frame.Header.Seq {
+			return fmt.Errorf("global sequence = %d, want frame sequence %d", event.Data.GlobalSequence, frame.Header.Seq)
 		}
 		names = append(names, event.Event)
 		return nil

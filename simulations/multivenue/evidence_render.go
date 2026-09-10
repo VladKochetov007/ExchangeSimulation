@@ -24,6 +24,17 @@ type BinaryRenderReport struct {
 	DictionaryFrames uint64 `json:"dictionary_frames"`
 	Routes           int    `json:"routes"`
 	ExecutionHash    string `json:"execution_stream_hash"`
+	RenderedDigest   string `json:"rendered_digest"`
+}
+
+type renderedBinaryEvidenceAttestation struct {
+	Domain                 string `json:"domain"`
+	Ordering               string `json:"ordering"`
+	SourceExecutionHash    string `json:"source_execution_stream_hash"`
+	SourceEventFrames      uint64 `json:"source_event_frames"`
+	SourceStreamFrames     uint64 `json:"source_stream_frames"`
+	RenderedDigest         string `json:"rendered_digest"`
+	GlobalSequenceIncluded bool   `json:"global_sequence_included"`
 }
 
 type renderRouteKey struct {
@@ -37,9 +48,10 @@ type renderRecord struct {
 }
 
 type renderEventData struct {
-	VenueID  string          `json:"venue_id"`
-	Sequence uint64          `json:"sequence"`
-	Payload  json.RawMessage `json:"payload"`
+	VenueID        string          `json:"venue_id"`
+	Sequence       uint64          `json:"sequence"`
+	GlobalSequence uint64          `json:"global_sequence,omitempty"`
+	Payload        json.RawMessage `json:"payload"`
 }
 
 type renderPersistedEvent struct {
@@ -95,6 +107,9 @@ func RenderBinaryEvidence(inputDir, outDir string) (BinaryRenderReport, error) {
 	if err != nil {
 		return BinaryRenderReport{}, err
 	}
+	if contract.Config.EvidenceContractVersion >= 2 && len(routes) != 0 {
+		return BinaryRenderReport{}, fmt.Errorf("multivenue: successor binary evidence has legacy JSON sidecars")
+	}
 	eventsFile, err := os.Open(filepath.Join(inputAbs, "events.evs"))
 	if err != nil {
 		return BinaryRenderReport{}, fmt.Errorf("multivenue: open binary evidence: %w", err)
@@ -107,7 +122,7 @@ func RenderBinaryEvidence(inputDir, outDir string) (BinaryRenderReport, error) {
 
 	var eventFrames uint64
 	if err := reader.Range(func(frame evstream.Frame) error {
-		key, record, err := renderBinaryFrame(reader, frame)
+		key, record, err := renderBinaryFrameVersioned(reader, frame, contract.Config.EvidenceContractVersion >= 2)
 		if err != nil {
 			return err
 		}
@@ -128,15 +143,36 @@ func RenderBinaryEvidence(inputDir, outDir string) (BinaryRenderReport, error) {
 	if err := validateRenderRecords(routes); err != nil {
 		return BinaryRenderReport{}, err
 	}
+	if err := validateRenderedGlobalSequences(routes, eventFrames, contract.Config.EvidenceContractVersion); err != nil {
+		return BinaryRenderReport{}, err
+	}
 	if err := writeRenderedRoutes(outAbs, routes); err != nil {
 		return BinaryRenderReport{}, err
 	}
 	digest := reader.ExecutionHash()
+	renderedDigest := digestRenderedRoutes(routes)
+	renderedAttestation := renderedBinaryEvidenceAttestation{
+		Domain:                 "rendered_binary_evidence",
+		Ordering:               "venue_sequence_files_with_global_frame_identity",
+		SourceExecutionHash:    hex.EncodeToString(digest[:]),
+		SourceEventFrames:      eventFrames,
+		SourceStreamFrames:     reader.Count(),
+		RenderedDigest:         renderedDigest,
+		GlobalSequenceIncluded: contract.Config.EvidenceContractVersion >= 2,
+	}
+	rawAttestation, err := json.MarshalIndent(renderedAttestation, "", "  ")
+	if err != nil {
+		return BinaryRenderReport{}, fmt.Errorf("multivenue: marshal rendered evidence attestation: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(outAbs, "rendered-binary-evidence-attestation.json"), append(rawAttestation, '\n'), 0644); err != nil {
+		return BinaryRenderReport{}, fmt.Errorf("multivenue: write rendered evidence attestation: %w", err)
+	}
 	return BinaryRenderReport{
 		EventFrames:      eventFrames,
 		DictionaryFrames: reader.Count() - eventFrames,
 		Routes:           len(routes),
 		ExecutionHash:    hex.EncodeToString(digest[:]),
+		RenderedDigest:   renderedDigest,
 	}, nil
 }
 
@@ -176,6 +212,7 @@ func validateBinaryAttestation(inputDir string, eventFrames uint64, reader *evst
 	digest := reader.ExecutionHash()
 	executionHash := hex.EncodeToString(digest[:])
 	if attestation.Domain != "canonical_binary_execution_frames" || attestation.Ordering != "ordered_stream" ||
+		attestation.SchemaEpoch != reader.SchemaEpoch() ||
 		attestation.EventFrames != eventFrames || attestation.StreamFrames != reader.Count() ||
 		attestation.ExecutionStreamHash != executionHash {
 		return fmt.Errorf("multivenue: binary attestation does not match reconstructed stream")
@@ -204,6 +241,10 @@ func validateBinaryAttestation(inputDir string, eventFrames uint64, reader *evst
 }
 
 func renderBinaryFrame(reader *evstream.Reader, frame evstream.Frame) (renderRouteKey, renderRecord, error) {
+	return renderBinaryFrameVersioned(reader, frame, false)
+}
+
+func renderBinaryFrameVersioned(reader *evstream.Reader, frame evstream.Frame, includeGlobalSequence bool) (renderRouteKey, renderRecord, error) {
 	if len(frame.Payload) < 16 {
 		return renderRouteKey{}, renderRecord{}, fmt.Errorf("multivenue: frame %d payload too short for v3 envelope", frame.Header.Seq)
 	}
@@ -236,15 +277,19 @@ func renderBinaryFrame(reader *evstream.Reader, frame evstream.Frame) (renderRou
 	if err != nil {
 		return renderRouteKey{}, renderRecord{}, fmt.Errorf("multivenue: frame %d (%s): %w", frame.Header.Seq, eventName, err)
 	}
+	data := renderEventData{
+		VenueID:  frame.Venue,
+		Sequence: sequence,
+		Payload:  payload,
+	}
+	if includeGlobalSequence {
+		data.GlobalSequence = frame.Header.Seq
+	}
 	raw, err := json.Marshal(renderPersistedEvent{
 		ClientID: frame.Header.ClientID,
-		Data: renderEventData{
-			VenueID:  frame.Venue,
-			Sequence: sequence,
-			Payload:  payload,
-		},
-		Event: eventName,
-		SimTS: frame.Header.SimTS,
+		Data:     data,
+		Event:    eventName,
+		SimTS:    frame.Header.SimTS,
 	})
 	if err != nil {
 		return renderRouteKey{}, renderRecord{}, fmt.Errorf("multivenue: frame %d JSON rendering: %w", frame.Header.Seq, err)
@@ -390,6 +435,64 @@ func validateRenderRecords(routes map[renderRouteKey][]renderRecord) error {
 		}
 	}
 	return nil
+}
+
+func validateRenderedGlobalSequences(routes map[renderRouteKey][]renderRecord, eventFrames uint64, contractVersion int) error {
+	if contractVersion < 2 {
+		return nil
+	}
+	seen := make(map[uint64]struct{}, eventFrames)
+	for key, records := range routes {
+		for _, record := range records {
+			var event renderPersistedEvent
+			if err := json.Unmarshal(record.raw, &event); err != nil {
+				return fmt.Errorf("multivenue: decode rendered %s/%s: %w", key.venue, key.route, err)
+			}
+			globalSequence := event.Data.GlobalSequence
+			if globalSequence == 0 {
+				return fmt.Errorf("multivenue: rendered %s/%s has no global frame sequence", key.venue, key.route)
+			}
+			if _, duplicate := seen[globalSequence]; duplicate {
+				return fmt.Errorf("multivenue: duplicate global frame sequence %d", globalSequence)
+			}
+			seen[globalSequence] = struct{}{}
+		}
+	}
+	if uint64(len(seen)) != eventFrames {
+		return fmt.Errorf("multivenue: rendered global sequence count %d does not match event frames %d", len(seen), eventFrames)
+	}
+	return nil
+}
+
+func digestRenderedRoutes(routes map[renderRouteKey][]renderRecord) string {
+	keys := make([]renderRouteKey, 0, len(routes))
+	for key := range routes {
+		keys = append(keys, key)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		if keys[i].venue != keys[j].venue {
+			return keys[i].venue < keys[j].venue
+		}
+		return keys[i].route < keys[j].route
+	})
+	hasher := sha256.New()
+	var scratch [8]byte
+	for _, key := range keys {
+		hasher.Write([]byte(key.venue))
+		hasher.Write([]byte{0})
+		hasher.Write([]byte(key.route))
+		hasher.Write([]byte{0})
+		records := append([]renderRecord(nil), routes[key]...)
+		sort.Slice(records, func(i, j int) bool { return records[i].sequence < records[j].sequence })
+		for _, record := range records {
+			binary.BigEndian.PutUint64(scratch[:], record.sequence)
+			hasher.Write(scratch[:])
+			binary.BigEndian.PutUint64(scratch[:], uint64(len(record.raw)))
+			hasher.Write(scratch[:])
+			hasher.Write(record.raw)
+		}
+	}
+	return hex.EncodeToString(hasher.Sum(nil))
 }
 
 func writeRenderedRoutes(outDir string, routes map[renderRouteKey][]renderRecord) error {

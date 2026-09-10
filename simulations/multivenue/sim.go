@@ -2010,6 +2010,7 @@ func (s *Sim) closeEvidence() error {
 		binaryArtifact := binaryEvidenceArtifactRecord{
 			Domain:               "canonical_binary_execution_frames",
 			Ordering:             "ordered_stream",
+			SchemaEpoch:          s.checkpoints.binary.writer.SchemaEpoch(),
 			EventFrames:          s.checkpoints.binary.count(),
 			StreamFrames:         s.checkpoints.binary.writer.Count(),
 			ExecutionStreamHash:  hex.EncodeToString(digest[:]),
@@ -2088,6 +2089,7 @@ type evidenceArtifactRecord struct {
 type binaryEvidenceArtifactRecord struct {
 	Domain               string `json:"domain"`
 	Ordering             string `json:"ordering"`
+	SchemaEpoch          uint32 `json:"schema_epoch"`
 	EventFrames          uint64 `json:"event_frames"`
 	StreamFrames         uint64 `json:"stream_frames"`
 	ExecutionStreamHash  string `json:"execution_stream_hash"`
