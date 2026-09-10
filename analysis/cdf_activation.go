@@ -1104,7 +1104,7 @@ func validateCDFRenderedGlobalSequence(renderedRun *Run, evidenceDir, renderedDi
 			globalSequence: event.GlobalSequence, localSequence: event.LocalSequence,
 			simTS: event.SimTS, clientID: event.ClientID, venueID: event.VenueID,
 			route: strings.Join(parts[1:], "/"), eventName: event.Name,
-			payloadDigest: sha256.Sum256(event.Raw()),
+			payloadDigest: sha256.Sum256(event.FrameRaw()),
 		}
 		if _, duplicate := renderedByGlobal[event.GlobalSequence]; duplicate {
 			renderedFailure = fmt.Errorf("cdf activation: rendered evidence repeats global frame sequence %d", event.GlobalSequence)

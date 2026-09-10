@@ -50,6 +50,25 @@ func TestScanPreservesRenderedGlobalSequence(t *testing.T) {
 	}
 }
 
+func TestScanPreservesWrappedFramePayloadForStrictIdentity(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "wrapped.jsonl")
+	line := `{"sim_ts":1,"client_id":2,"event":"Trade","data":{"venue_id":"north","global_sequence":37,"payload":{"symbol":"ABC-PERP","payload":{"value":3}}}}` + "\n"
+	if err := os.WriteFile(path, []byte(line), 0644); err != nil {
+		t.Fatal(err)
+	}
+	var scanned Event
+	if err := (&Run{files: []string{path}}).Scan(ScanOptions{Workers: 1}, func(event Event) { scanned = event }); err != nil {
+		t.Fatal(err)
+	}
+	if string(scanned.Raw()) != `{"value":3}` {
+		t.Fatalf("innermost payload = %s, want domain payload", scanned.Raw())
+	}
+	if string(scanned.FrameRaw()) != `{"symbol":"ABC-PERP","payload":{"value":3}}` {
+		t.Fatalf("frame payload = %s, want the logger wrapper", scanned.FrameRaw())
+	}
+}
+
 func TestValidateGlobalSequenceAllowsDictionaryGapsAcrossFiles(t *testing.T) {
 	dir := t.TempDir()
 	first := filepath.Join(dir, "a.jsonl")

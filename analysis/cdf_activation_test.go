@@ -57,7 +57,7 @@ func TestCDFStrictRenderedEvidenceRejectsPayloadMutation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	payload := map[string]int{"value": 1}
+	payload := map[string]any{"symbol": "ABC-PERP", "payload": map[string]int{"value": 1}}
 	payloadRaw, err := json.Marshal(payload)
 	if err != nil {
 		t.Fatal(err)
@@ -96,7 +96,9 @@ func TestCDFStrictRenderedEvidenceRejectsPayloadMutation(t *testing.T) {
 	}
 	writeRendered := func(value int) {
 		t.Helper()
-		renderedPayload, marshalErr := json.Marshal(map[string]int{"value": value})
+		renderedPayload, marshalErr := json.Marshal(map[string]any{
+			"symbol": "ABC-PERP", "payload": map[string]int{"value": value},
+		})
 		if marshalErr != nil {
 			t.Fatal(marshalErr)
 		}

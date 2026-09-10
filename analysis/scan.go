@@ -37,7 +37,13 @@ type Event struct {
 	// persisted log; SimTS alone is not sufficient at lifecycle boundaries.
 	Ordinal int64
 
-	payload json.RawMessage
+	// payload is the innermost event body used by domain analyzers. framePayload
+	// preserves the exact data.payload object emitted by the logger, including
+	// the symbol wrapper used for derivative events. Binary evidence commits to
+	// that outer payload, so strict source/render identity must not hash the
+	// analyzer convenience view instead.
+	payload      json.RawMessage
+	framePayload json.RawMessage
 }
 
 // Decode unmarshals the event's innermost payload.
@@ -45,6 +51,16 @@ func (e *Event) Decode(target any) error { return json.Unmarshal(e.payload, targ
 
 // Raw returns the innermost payload without decoding it.
 func (e *Event) Raw() json.RawMessage { return e.payload }
+
+// FrameRaw returns the exact data.payload object represented by this event.
+// It differs from Raw for dynamically scoped derivative records whose logger
+// adds a symbol/payload wrapper around the domain body.
+func (e *Event) FrameRaw() json.RawMessage {
+	if len(e.framePayload) > 0 {
+		return e.framePayload
+	}
+	return e.payload
+}
 
 // decodeRequiredJSON decodes a payload and verifies that the fields which carry
 // its identity and outcome are present. json.Unmarshal intentionally leaves a
@@ -188,7 +204,8 @@ func scanFile(path string, keep map[string]bool, needles [][]byte, visit func(Ev
 		event := Event{
 			SimTS: env.SimTS, ClientID: env.ClientID, Name: env.Event,
 			VenueID: outer.VenueID, Symbol: outer.Symbol, File: path, Ordinal: ordinal,
-			GlobalSequence: outer.GlobalSequence, LocalSequence: outer.Sequence, payload: outer.Payload,
+			GlobalSequence: outer.GlobalSequence, LocalSequence: outer.Sequence,
+			payload: outer.Payload, framePayload: outer.Payload,
 		}
 		// Unwrap the derivative nesting: an inner payload means the fields sit
 		// one level down and the symbol travels with them.
