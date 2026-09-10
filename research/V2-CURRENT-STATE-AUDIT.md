@@ -800,3 +800,35 @@ CDF successor, if scientifically justified, requires a new name, an
 independently motivated finite roster and preregistration, fresh exact-tree
 review, and a new development-only activation probe. Holdouts `619/631/641`
 remain untouched.
+
+## Append-only checkpoint: SV1D asynchronous closure — 2026-09-10
+
+The separate `origin/feature/r2-cdf-survival-successor-sv1d` branch was
+inspected read-only through pushed tip `039f008f1aa9f3a748bf3fac33d0bbb7a2e1892e`.
+It remains outside the authoritative scientific tree. Its seed-659 activation
+attempt is **INVALID ARM EVIDENCE / NON-ADVANCING GATE**, not a valid
+activation-negative result.
+
+The registered five-minute treatment, same-roster mode-off control, and
+no-roster control all stopped at simulated `00:01:01` on a scheduled South
+option-risk pass because the underlying CDF/USD book was transiently empty.
+The producer correctly rejected the nonterminal `SIMULATION_FAILURE`: none of
+the three arms reached a valid registered endpoint, and no arm had a
+`local_book_mode == "one_sided"` supplier decision. Treatment and mode-off
+execution streams were identical. The retained activation root and its
+Lagrange Sol-xhigh review classify this as a repair-required producer/fixture
+boundary, not evidence for or against the CDF supplier hypothesis.
+
+The SV1D capacity-protocol review also rejected an earlier outcome-bearing
+capacity procedure. The branch replaced it with a preregistered synthetic,
+outcome-neutral `evstream_v3` workload, but that capacity path and the invalid
+activation result remain branch-local. No SV1D code, binary, capacity
+attestation, development cell, freeze, or holdout was imported or launched on
+this branch. Holdouts `619/631/641` remain untouched.
+
+The only permitted continuation for SV1D is source-level diagnosis and a
+minimal non-economic producer/fixture repair, followed by focused/full gates
+and a fresh exact-tree independent review. Any change to risk semantics,
+fallback valuation, roster economics, warm-up, or seed is a new successor
+amendment. The authoritative branch remains at `22c414d`; its R2 candidate is
+closed as `NON-VIABLE AT THE 24H MARKET-SURVIVAL GATE`.

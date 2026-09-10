@@ -973,3 +973,24 @@ finish and their contracts pass.
   independently motivated preregistered successor; selecting the seven
   successful instances or weakening the all-roster criterion would be post hoc
   rescue. No new CDF code is being imported here.
+
+## Append-only operational update: SV1D asynchronous closure — 2026-09-10
+
+The newer `feature/r2-cdf-survival-successor-sv1d` branch was inspected
+without switching or merging it, through pushed tip `039f008`. Its seed-659
+five-minute activation attempt is **INVALID ARM EVIDENCE / NON-ADVANCING
+GATE**: treatment, same-roster mode-off, and no-roster arms all reached an
+early scheduled South option-risk failure while the underlying CDF/USD book
+was transiently empty. None reached a valid endpoint, none recorded a
+one-sided supplier decision, and treatment/mode-off execution streams were
+identical. Lagrange's independent review rejects interpreting this as either
+activation or a valid negative result.
+
+The branch also rejected its first outcome-bearing capacity procedure and
+re-registered a synthetic outcome-neutral binary workload. Neither that
+capacity path nor SV1D code is part of the authoritative branch. No main-tree
+development cell, freeze, or holdout was run; `619/631/641` remain untouched.
+The next permissible SV1D action is source-level diagnosis plus a minimal
+non-economic producer/fixture repair, then exact-tree review and a fresh
+seed-659 activation probe only if the repaired contract can produce a valid
+endpoint. Do not weaken strict valuation or force one-sided activation.

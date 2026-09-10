@@ -712,3 +712,24 @@ preserve finite capital, delayed local information, explicit inventory/PnL
 risk, withdrawal ability, and no forced two-sided quoting or hidden anchor.
 The current scientific branch remains at `90d0ffb` for simulator correctness;
 SV1C source changes are not part of that candidate.
+
+## Asynchronous CDF successor checkpoint — SV1D invalid activation gate (2026-09-10)
+
+The separate branch `origin/feature/r2-cdf-survival-successor-sv1d` was
+inspected through `039f008f1aa9f3a748bf3fac33d0bbb7a2e1892e`; no code was
+merged into the scientific branch. Its seed-659 treatment, same-roster
+mode-off control, and no-roster control are classified **INVALID ARM
+EVIDENCE / NON-ADVANCING GATE**. All three stopped at an early scheduled
+South option-risk check after a transient empty CDF/USD underlying book. The
+strict mark failure is contract-correct, while the producer path did not
+reach the registered terminal endpoint. No arm observed a one-sided supplier
+decision; treatment and mode-off execution streams were identical.
+
+Lagrange's independent Sol-xhigh review accepts the diagnosis and rejects both
+a CDF activation claim and a valid activation-negative claim. A separate
+SV1D capacity review also rejected the earlier outcome-bearing capacity
+procedure; its synthetic replacement is outcome-neutral and branch-local. The
+SV1D hypothesis remains untested. The only next action is a minimal
+non-economic producer/fixture repair with focused/full tests and fresh exact-
+tree review. Any risk, fallback, roster, seed, or warm-up change requires a
+new successor amendment. Holdouts `619/631/641` remain untouched.
