@@ -337,3 +337,32 @@ terminal state. The repair must add a library-level deterministic generator,
 command adapter, readback/corruption tests, and a fail-closed shell contract
 that rejects simulator invocation, seed-659 workload generation, terminal
 artifacts, and holdout identifiers before a fresh exact-tree review.
+
+## Outcome-neutral capacity implementation checkpoint — 2026-09-10
+
+The protocol repair is implemented in the successor checkpoint as the
+reusable `evstream/synthetic` package and the `cmd/evscapacity` adapter. The
+package emits the preregistered `sv1d-production-mix-v1` profile through the
+production `evstream_v3` writer and global hash projection, then reopens the
+stream with the production reader to verify termination, frame counts, global
+ordering, and both projected and raw hashes. It has no simulator, exchange,
+actor, matching, risk, lifecycle, terminal, or survival dependency. The
+adapter uses exclusive output creation and writes only the stream, report,
+profile, and binary-evidence attestation requested by the shell runner.
+
+The shell runner now measures that command under the registered CPU, RAM,
+address-space, disk, and available-memory guards. It binds the seed-659
+treatment config only as an immutable path/SHA-256 launch identity; it never
+normalizes or executes that config. The closed synthetic cell inventory,
+manifest hashes, binary hash, profile, stream hash/size, stdout/stderr hashes,
+resource measurements, and exact-tree review identity are validated before the
+outer attestation is published. Activation/scoring provenance now records the
+`evscapacity` binary separately from the future market binary.
+
+Unit and compatibility coverage currently passes for deterministic generation,
+reserved activation-seed rejection, stream corruption rejection, and equality
+between the synthetic and production global hash projections. This checkpoint
+has not measured the registered 26.1-million-event workload, created a review
+attestation, run a capacity probe, run seed 659, consumed a development cell,
+authorized freeze, or touched a holdout. The implementation remains subject
+to a clean-tree mechanical gate and one fresh independent Sol-xhigh review.

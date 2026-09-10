@@ -24,6 +24,7 @@ LATENCY_ARB_BINARY=$(BIN_DIR)/latency_arb
 SIMPLESIM_BINARY=$(BIN_DIR)/simplesim
 MICROSTRUCTURE_V1_BINARY=$(BIN_DIR)/microstructure_v1
 LIQUIDITY_REPORT_BINARY=$(BIN_DIR)/liquidity_report
+EVSCAPACITY_BINARY=$(BIN_DIR)/evscapacity
 
 # Coverage output
 COVERAGE_FILE=coverage.out
@@ -44,7 +45,7 @@ help:
 ##@ Building
 
 ## build: Build all binaries
-build: $(MULTISIM_BINARY) $(SIM_BINARY) $(LATENCY_ARB_BINARY) $(SIMPLESIM_BINARY) $(MICROSTRUCTURE_V1_BINARY) $(LIQUIDITY_REPORT_BINARY) $(ABCUSD_BINARY) $(RANDOMWALK_BINARY)
+build: $(MULTISIM_BINARY) $(SIM_BINARY) $(LATENCY_ARB_BINARY) $(SIMPLESIM_BINARY) $(MICROSTRUCTURE_V1_BINARY) $(LIQUIDITY_REPORT_BINARY) $(ABCUSD_BINARY) $(RANDOMWALK_BINARY) $(EVSCAPACITY_BINARY)
 	@echo "✓ All binaries built successfully"
 
 $(BIN_DIR):
@@ -81,6 +82,10 @@ $(ABCUSD_BINARY): $(BIN_DIR)
 $(RANDOMWALK_BINARY): $(BIN_DIR)
 	@echo "Building randomwalk..."
 	@$(GOBUILD) -o $(RANDOMWALK_BINARY) ./cmd/randomwalk
+
+$(EVSCAPACITY_BINARY): $(BIN_DIR)
+	@echo "Building evscapacity..."
+	@$(GOBUILD) -o $(EVSCAPACITY_BINARY) ./cmd/evscapacity
 
 ## rebuild: Clean and rebuild all binaries
 rebuild: clean build

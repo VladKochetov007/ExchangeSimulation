@@ -2,6 +2,7 @@ package multivenue
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"os"
@@ -9,7 +10,30 @@ import (
 	"testing"
 
 	"exchange_sim/evstream"
+	"exchange_sim/evstream/synthetic"
 )
+
+func TestSyntheticCapacityUsesProductionGlobalHashProjection(t *testing.T) {
+	header := evstream.AppendFrameHeader(nil, evstream.FrameHeader{
+		Length:        evstream.FrameHeaderSize + 32,
+		Seq:           41,
+		SimTS:         1735689600000000000,
+		SchemaID:      evstream.FirstUserSchema,
+		SchemaVersion: 1,
+		VenueRef:      3,
+		ClientID:      7,
+	})
+	frame := append(header, make([]byte, 32)...)
+	frame[evstream.FrameHeaderSize+8] = 1
+	frame[evstream.FrameHeaderSize+16] = 1
+	production := sha256.New()
+	syntheticDigest := sha256.New()
+	hashGlobalBinaryExecutionFrame(production, frame)
+	synthetic.HashGlobalFrame(syntheticDigest, frame)
+	if !bytes.Equal(production.Sum(nil), syntheticDigest.Sum(nil)) {
+		t.Fatal("synthetic capacity hash projection diverged from production global sink")
+	}
+}
 
 type binaryUnencodablePayload struct{}
 

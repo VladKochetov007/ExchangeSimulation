@@ -48,7 +48,32 @@ rg -F 'comparison_classification=$(v2_r2_sv1d_classify_comparison "$comparison_p
 rg -F 'v2_r2_sv1d_require_scoring_comparison_claims' "$root_dir/scripts/score-v2-r2-sv1d-activation.sh" >/dev/null
 rg -F 'evidence_valid: $comparison_evidence_valid' "$runner" >/dev/null
 rg -F 'terminal_negative: $comparison_terminal_negative' "$runner" >/dev/null
-rg -F 'config_stderr_sha256' "$contract" "$capacity_runner" >/dev/null
+rg -F 'outcome_neutral' "$contract" "$capacity_runner" >/dev/null
+rg -F 'v2_r2_sv1d_capacity_binary' "$contract" "$capacity_runner" >/dev/null
+[[ "$v2_r2_sv1d_capacity_workload_seed" == 2026091001 &&
+	"$v2_r2_sv1d_capacity_event_count" == 26100000 &&
+	"$v2_r2_sv1d_capacity_book_delta_events" == 20880000 &&
+	"$v2_r2_sv1d_capacity_balance_change_events" == 2610000 &&
+	"$v2_r2_sv1d_capacity_opaque_events" == 2610000 ]] || {
+	echo "synthetic capacity profile constants changed without a contract amendment" >&2
+	exit 1
+}
+if rg -F -- '-seed 659' "$capacity_runner" >/dev/null; then
+	echo "synthetic capacity runner attempts to consume activation seed 659" >&2
+	exit 1
+fi
+if rg -F 'multivenue' "$capacity_runner" >/dev/null; then
+	echo "synthetic capacity runner must not mention or invoke the market simulator" >&2
+	exit 1
+fi
+if rg -F -- '-config' "$capacity_runner" >/dev/null || rg -F -- '-duration' "$capacity_runner" >/dev/null; then
+	echo "synthetic capacity runner contains simulator launch flags" >&2
+	exit 1
+fi
+if rg -F 'terminal-outcome' "$capacity_runner" >/dev/null || rg -F 'greeks.json' "$capacity_runner" >/dev/null; then
+	echo "synthetic capacity runner contains terminal-world artifacts" >&2
+	exit 1
+fi
 rg -F 'v2_r2_sv1d_require_arm_record_matches' "$contract" "$root_dir/scripts/score-v2-r2-sv1d-activation.sh" >/dev/null
 rg -F 'arm_artifacts_valid' "$contract" "$root_dir/scripts/run-v2-r2-sv1d-activation-probe.sh" >/dev/null
 rg -F 'mode-off' "$root_dir/scripts/score-v2-r2-sv1d-activation.sh" >/dev/null
@@ -105,7 +130,6 @@ fi
 
 capacity_root_fixture="$temp_root/capacity-root"
 mkdir -p -- "$capacity_root_fixture/$(v2_r2_sv1d_capacity_probe_cell)"
-printf '%s' '' >"$capacity_root_fixture/config.stderr.log"
 v2_r2_sv1d_capacity_require_root "$capacity_root_fixture" "$(v2_r2_sv1d_capacity_probe_cell)" || {
 	echo "closed capacity root fixture was rejected" >&2
 	exit 1

@@ -88,11 +88,16 @@ v2_r2_require_sv1b_review_attestation "$review_path" "$head_revision" || exit 1
 
 capacity_path=$(jq -er '.capacity.path | select(type == "string")' "$provenance_path") || exit 1
 capacity_sha256=$(jq -er '.capacity.sha256 | select(type == "string" and test("^[0-9a-f]{64}$"))' "$provenance_path") || exit 1
+capacity_binary_path=$(jq -er '.capacity.binary_path | select(type == "string")' "$provenance_path") || exit 1
+capacity_binary_sha256=$(jq -er '.capacity.binary_sha256 | select(type == "string" and test("^[0-9a-f]{64}$"))' "$provenance_path") || exit 1
 capacity_config_sha256=$(jq -er '.capacity.config_sha256 | select(type == "string" and test("^[0-9a-f]{64}$"))' "$provenance_path") || exit 1
 [[ "$capacity_path" == "$(v2_r2_sv1d_capacity_attestation_path "$head_revision")" ]] || exit 1
 [[ "$(v2_r2_sv1d_sha256_file "$capacity_path")" == "$capacity_sha256" ]] || exit 1
+[[ "$capacity_binary_path" == "$v2_r2_sv1d_capacity_binary" ]] || exit 1
+v2_r2_sv1d_require_pinned_binary "$capacity_binary_path" "$head_revision" "$capacity_binary_sha256" \
+	"$v2_r2_sv1d_capacity_binary_package" || exit 1
 [[ "$capacity_config_sha256" == "$(v2_r2_sv1d_sha256_file "$v2_r2_sv1d_capacity_config")" ]] || exit 1
-v2_r2_sv1d_require_capacity_attestation "$capacity_path" "$head_revision" "$binary_sha256" \
+v2_r2_sv1d_require_capacity_attestation "$capacity_path" "$head_revision" "$capacity_binary_sha256" \
 	"$capacity_config_sha256" "$review_path" "$review_sha256" || exit 1
 
 config_manifest_path=$(jq -er '.config_provenance_manifest_path | select(type == "string")' "$provenance_path") || exit 1
