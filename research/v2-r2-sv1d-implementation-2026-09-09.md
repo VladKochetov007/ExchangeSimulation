@@ -413,3 +413,24 @@ inside the synthetic workload monitor. It does not change R2 economics,
 calendar semantics, the CDF supplier, evidence encoding, or historical results.
 The repair must pass the clean shell/full mechanical gate and a new exact-tree
 independent review before a capacity workload is permitted.
+
+## Final path-contract repair and uncached gate — 2026-09-10
+
+The first post-repair full gate reached every long multivenue case but exposed
+one repository-policy defect in the newly added positive capacity-attestation
+fixture: its tracked JSON construction embedded `/tmp` paths. The correction
+at `623ecae` changed those fixture paths to repository-safe placeholders; the
+follow-up at `448c684` restored the producer contract's required absolute-path
+shape without embedding a system-temporary path. The generated SV1D configs
+were retired and regenerated at `2225c88`/`fa53f21`, preserving the same
+economics and binding the corrected test contract.
+
+At exact generated tree `fa53f21`, the clean checker, positive and negative
+SV1D activation-contract fixtures, shell syntax checks, and `git diff --check`
+all passed. The uncached bounded repository gate then completed with
+`FULL_MAKE_FINAL_PATH_REPAIR_EXIT=0` in 1036 seconds; multivenue completed in
+1001.630 seconds. The expected malformed-input diagnostics remained negative
+fixtures and all integrated-long-run, archive, SV1C, and SV1D contract suites
+passed. No capacity workload, simulator world, activation seed, development
+cell, freeze, or holdout was run. The final exact-tree independent Sol-xhigh
+review remains mandatory before any capacity measurement.
