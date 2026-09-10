@@ -125,7 +125,15 @@ v2_r2_sv1d_capacity_memory_available_bytes() {
 }
 
 v2_r2_sv1d_capacity_expected_cell_files() {
-	v2_r2_sv1d_expected_arm_root_files
+	# The capacity runner records its own resource attestation and does not
+	# produce activation-only run-status.json or the arm-level status hashes.
+	# Keep this artifact contract separate so a capacity measurement cannot
+	# accidentally pass by inheriting an incompatible activation layout.
+	printf '%s\n' \
+		run-config.json run-metadata.json manifest.json greeks.json latency.json checkpoints.jsonl \
+		events.evs binary-evidence-attestation.json evidence-manifest.json evidence-only-artifact-hash.json terminal-outcome.json \
+		market-data-evidence-v2.json market-data-schedules-v2.bin market-data-receipts-v2.bin \
+		market-data-decisions-v2.bin market-data-actions-v2.bin simulator.stdout.log simulator.stderr.log | LC_ALL=C sort
 }
 
 v2_r2_sv1d_capacity_require_cell() {
