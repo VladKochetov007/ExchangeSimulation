@@ -70,6 +70,16 @@ fi
 	echo "SV1D memory floor did not preserve the four-GiB minimum" >&2
 	exit 1
 }
+activation_expected_files=$(v2_r2_sv1d_expected_arm_root_files)
+capacity_expected_files=$(v2_r2_sv1d_capacity_expected_cell_files)
+grep -Fxq run-status.json <<<"$activation_expected_files" || {
+	echo "activation artifact contract unexpectedly lost run-status.json" >&2
+	exit 1
+}
+if grep -Fxq run-status.json <<<"$capacity_expected_files"; then
+	echo "capacity artifact contract must not require activation run-status.json" >&2
+	exit 1
+fi
 capacity_fixture="$temp_root/capacity.json"
 jq -n '{elastic_liquidity_suppliers:[{initial_base_balance:100,initial_quote_balance:1000,max_position:150,max_inventory:250,max_quote_qty:1,max_loss_quote:10}]}' >"$capacity_fixture"
 v2_r2_sv1d_require_activation_capacity "$capacity_fixture" || {
