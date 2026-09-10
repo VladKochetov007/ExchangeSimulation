@@ -863,6 +863,33 @@ v2_r2_sv1d_require_mode_pair_comparison() {
 	' "$comparison_path" >/dev/null
 }
 
+v2_r2_sv1d_require_scoring_comparison_claims() {
+	[[ $# -eq 11 ]] || return 1
+	local provenance_path=$1 output_root=$2 comparison_path=$3 comparison_sha256=$4 expected_status=$5
+	local expected_activation=$6 comparison_valid=$7 comparison_evidence_valid=$8 comparison_anticheating=$9
+	local comparison_activation=${10} comparison_terminal_negative=${11}
+	[[ "$comparison_sha256" =~ ^[0-9a-f]{64}$ ]] || return 1
+	for boolean_value in "$expected_activation" "$comparison_valid" "$comparison_evidence_valid" "$comparison_anticheating" "$comparison_activation" "$comparison_terminal_negative"; do
+		[[ "$boolean_value" == true || "$boolean_value" == false ]] || return 1
+	done
+	[[ -f "$comparison_path" && ! -L "$comparison_path" && "$(v2_r2_sv1d_sha256_file "$comparison_path")" == "$comparison_sha256" ]] || return 1
+	v2_r2_require_single_json_object "$provenance_path" || return 1
+	jq -e --arg output_root "$output_root" --arg comparison_path "$comparison_path" --arg comparison_sha256 "$comparison_sha256" \
+		--arg expected_status "$expected_status" --argjson expected_activation "$expected_activation" \
+		--argjson comparison_valid "$comparison_valid" --argjson comparison_evidence_valid "$comparison_evidence_valid" \
+		--argjson comparison_anticheating "$comparison_anticheating" --argjson comparison_activation "$comparison_activation" \
+		--argjson comparison_terminal_negative "$comparison_terminal_negative" '
+		type == "object" and .output_root == $output_root and .status == $expected_status and
+			.activation_satisfied == $expected_activation and .comparison.path == $comparison_path and
+			.comparison.recorded_path == $comparison_path and .comparison.sha256 == $comparison_sha256 and
+			.comparison.exit_status == 0 and .comparison.object_valid == true and
+			.comparison.valid == $comparison_valid and .comparison.evidence_valid == $comparison_evidence_valid and
+			.comparison.anti_cheating_satisfied == $comparison_anticheating and
+			.comparison.activation_satisfied == $comparison_activation and
+			.comparison.terminal_negative == $comparison_terminal_negative
+	' "$provenance_path" >/dev/null
+}
+
 v2_r2_sv1d_classify_comparison() {
 	[[ $# -eq 2 ]] || return 1
 	local comparison_path=$1 expected_supplier_count=$2

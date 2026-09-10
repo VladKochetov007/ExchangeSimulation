@@ -177,47 +177,9 @@ case "$score_status" in
 		expected_provenance_activation=false
 		;;
 esac
-provenance_output_root=$(jq -er '.output_root | select(type == "string")' "$provenance_path") || exit 1
-provenance_comparison_path=$(jq -er '.comparison.path | select(type == "string")' "$provenance_path") || exit 1
-provenance_recorded_path=$(jq -er '.comparison.recorded_path | select(type == "string")' "$provenance_path") || exit 1
-provenance_comparison_sha256=$(jq -er '.comparison.sha256 | select(type == "string" and test("^[0-9a-f]{64}$"))' "$provenance_path") || exit 1
-provenance_comparison_exit_status=$(jq -er '.comparison.exit_status | select(type == "number" and floor == .)' "$provenance_path") || exit 1
-provenance_comparison_object_valid=$(jq -r 'if .comparison.object_valid == true then "true" else "false" end' "$provenance_path") || exit 1
-provenance_comparison_valid=$(jq -r 'if .comparison.valid == true then "true" else "false" end' "$provenance_path") || exit 1
-provenance_comparison_evidence_valid=$(jq -r 'if .comparison.evidence_valid == true then "true" else "false" end' "$provenance_path") || exit 1
-provenance_comparison_anticheating=$(jq -r 'if .comparison.anti_cheating_satisfied == true then "true" else "false" end' "$provenance_path") || exit 1
-provenance_comparison_activation=$(jq -r 'if .comparison.activation_satisfied == true then "true" else "false" end' "$provenance_path") || exit 1
-provenance_comparison_terminal_negative=$(jq -r 'if .comparison.terminal_negative == true then "true" else "false" end' "$provenance_path") || exit 1
-provenance_status=$(jq -er '.status | select(type == "string")' "$provenance_path") || exit 1
-provenance_activation=$(jq -r 'if .activation_satisfied == true then "true" else "false" end' "$provenance_path") || exit 1
-jq -e --arg output_root "$output_root" --arg provenance_output_root "$provenance_output_root" \
-	--arg comparison_path "$comparison_path" --arg provenance_comparison_path "$provenance_comparison_path" \
-	--arg provenance_recorded_path "$provenance_recorded_path" --arg comparison_sha256 "$comparison_sha256" \
-	--arg provenance_comparison_sha256 "$provenance_comparison_sha256" --arg expected_status "$expected_provenance_status" \
-	--arg provenance_status "$provenance_status" --argjson expected_activation "$expected_provenance_activation" \
-	--argjson provenance_activation "$provenance_activation" --argjson comparison_valid "$comparison_valid" \
-	--argjson comparison_evidence_valid "$comparison_evidence_valid" --argjson comparison_anticheating "$comparison_anticheating" \
-	--argjson comparison_activation "$comparison_activation" --argjson comparison_terminal_negative "$comparison_terminal_negative" \
-	--argjson provenance_comparison_object_valid "$provenance_comparison_object_valid" \
-	--argjson provenance_comparison_valid "$provenance_comparison_valid" \
-	--argjson provenance_comparison_evidence_valid "$provenance_comparison_evidence_valid" \
-	--argjson provenance_comparison_anticheating "$provenance_comparison_anticheating" \
-	--argjson provenance_comparison_activation "$provenance_comparison_activation" \
-	--argjson provenance_comparison_terminal_negative "$provenance_comparison_terminal_negative" \
-	--argjson provenance_comparison_exit_status "$provenance_comparison_exit_status" '
-	type == "object" and .output_root == $output_root and .output_root == $provenance_output_root and
-		.status == $expected_status and .status == $provenance_status and .activation_satisfied == $expected_activation and
-		.activation_satisfied == $provenance_activation and .comparison.path == $comparison_path and
-		.comparison.path == $provenance_comparison_path and .comparison.recorded_path == $provenance_recorded_path and
-		.comparison.sha256 == $comparison_sha256 and .comparison.sha256 == $provenance_comparison_sha256 and
-		.comparison.exit_status == 0 and $provenance_comparison_exit_status == 0 and
-		.comparison.object_valid == true and $provenance_comparison_object_valid == true and
-		.comparison.valid == $comparison_valid and .comparison.valid == $provenance_comparison_valid and
-		.comparison.evidence_valid == $comparison_evidence_valid and .comparison.evidence_valid == $provenance_comparison_evidence_valid and
-		.comparison.anti_cheating_satisfied == $comparison_anticheating and .comparison.anti_cheating_satisfied == $provenance_comparison_anticheating and
-		.comparison.activation_satisfied == $comparison_activation and .comparison.activation_satisfied == $provenance_comparison_activation and
-		.comparison.terminal_negative == $comparison_terminal_negative and .comparison.terminal_negative == $provenance_comparison_terminal_negative' \
-	"$provenance_path" >/dev/null || exit 1
+v2_r2_sv1d_require_scoring_comparison_claims "$provenance_path" "$output_root" "$comparison_path" "$comparison_sha256" \
+	"$expected_provenance_status" "$expected_provenance_activation" "$comparison_valid" "$comparison_evidence_valid" \
+	"$comparison_anticheating" "$comparison_activation" "$comparison_terminal_negative" || exit 1
 
 score_tmp="$score_path.tmp-$$"
 activation_provenance_sha256=$(v2_r2_sv1d_sha256_file "$provenance_path") || exit 1

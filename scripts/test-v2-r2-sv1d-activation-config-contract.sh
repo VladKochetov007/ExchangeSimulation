@@ -45,6 +45,9 @@ rg -F '.capacity.path' "$scorer" >/dev/null
 rg -F 'host_memory_total_bytes' "$contract" "$root_dir/scripts/run-v2-r2-sv1d-activation-probe.sh" "$root_dir/scripts/score-v2-r2-sv1d-activation.sh" >/dev/null
 rg -F 'host_memory_total_bytes: $comparison_host_memory_total' "$root_dir/scripts/run-v2-r2-sv1d-activation-probe.sh" >/dev/null
 rg -F 'comparison_classification=$(v2_r2_sv1d_classify_comparison "$comparison_path" "$expected_supplier_count")' "$root_dir/scripts/score-v2-r2-sv1d-activation.sh" >/dev/null
+rg -F 'v2_r2_sv1d_require_scoring_comparison_claims' "$root_dir/scripts/score-v2-r2-sv1d-activation.sh" >/dev/null
+rg -F 'evidence_valid: $comparison_evidence_valid' "$runner" >/dev/null
+rg -F 'terminal_negative: $comparison_terminal_negative' "$runner" >/dev/null
 rg -F 'config_stderr_sha256' "$contract" "$capacity_runner" >/dev/null
 rg -F 'v2_r2_sv1d_require_arm_record_matches' "$contract" "$root_dir/scripts/score-v2-r2-sv1d-activation.sh" >/dev/null
 rg -F 'arm_artifacts_valid' "$contract" "$root_dir/scripts/run-v2-r2-sv1d-activation-probe.sh" >/dev/null
@@ -191,6 +194,118 @@ IFS=$'\t' read -r terminal_score_status terminal_score_reason <<<"$terminal_clas
 jq '.control_run_status_sha256 = ("0" * 64)' "$terminal_comparison" >"$temp_root/terminal-comparison-bad-hash.json"
 if v2_r2_sv1d_require_comparison_provenance "$temp_root/terminal-comparison-bad-hash.json" "$(printf '%064d' 0)" "$(printf '%040d' 0)" "$terminal_treatment" "$terminal_control"; then
 	echo "terminal comparison hash mutation was accepted" >&2
+	exit 1
+fi
+
+write_scoring_provenance_fixture() {
+	[[ $# -eq 4 ]] || return 1
+	local case_name=$1 comparison_path=$2 expected_status=$3 expected_activation=$4
+	local provenance_path="$temp_root/$case_name-provenance.json" output_root="$temp_root/$case_name-output"
+	local comparison_sha256 comparison_valid comparison_evidence_valid comparison_anticheating comparison_activation comparison_terminal_negative
+	comparison_sha256=$(v2_r2_sv1d_sha256_file "$comparison_path") || return 1
+	comparison_valid=$(jq -r 'if ((.valid | type) == "boolean" and .valid) then "true" else "false" end' "$comparison_path") || return 1
+	comparison_evidence_valid=$(jq -r 'if ((.evidence_valid | type) == "boolean" and .evidence_valid) then "true" else "false" end' "$comparison_path") || return 1
+	comparison_anticheating=$(jq -r 'if ((.anti_cheating_satisfied | type) == "boolean" and .anti_cheating_satisfied) then "true" else "false" end' "$comparison_path") || return 1
+	comparison_activation=$(jq -r 'if ((.activation_satisfied | type) == "boolean" and .activation_satisfied) then "true" else "false" end' "$comparison_path") || return 1
+	comparison_terminal_negative=$(jq -r 'if .status == "UNAVAILABLE_TERMINAL_FAILURE" then "true" else "false" end' "$comparison_path") || return 1
+	jq -n --arg output_root "$output_root" --arg status "$expected_status" --arg comparison_path "$comparison_path" \
+		--arg comparison_sha256 "$comparison_sha256" --argjson activation "$expected_activation" \
+		--argjson valid "$comparison_valid" --argjson evidence_valid "$comparison_evidence_valid" \
+		--argjson anti_cheating "$comparison_anticheating" --argjson comparison_activation "$comparison_activation" \
+		--argjson terminal_negative "$comparison_terminal_negative" \
+		'{schema_version:1,output_root:$output_root,status:$status,activation_satisfied:$activation,
+		 comparison:{path:$comparison_path,recorded_path:$comparison_path,sha256:$comparison_sha256,
+		   exit_status:0,object_valid:true,valid:$valid,evidence_valid:$evidence_valid,
+		   anti_cheating_satisfied:$anti_cheating,activation_satisfied:$comparison_activation,
+		   terminal_negative:$terminal_negative}}' >"$provenance_path"
+	printf '%s\n' "$provenance_path"
+}
+
+accepted_comparison="$temp_root/accepted-comparison.json"
+jq -n '
+	def supplier($active):
+		{valid:true,evidence_valid:true,anti_cheating_satisfied:true,
+		 configured_max_position:100,max_position:50,min_position:-50,
+		 configured_max_inventory:100,max_gross_base_balance:50,max_inventory_utilization:0.5,
+		 configured_max_quote_qty:100,max_quote_qty:50,max_borrowed:0,
+		 configured_minimum_qualifying_qty:10,filled_qty:(if $active then 10 else 0 end),
+		 fill_caused_risk_transition:$active,fill_count:(if $active then 1 else 0 end),
+		 trading_pnl:(if $active then 1 else 0 end),
+		 inventory_responsive_decision_count:(if $active then 1 else 0 end)};
+	def venue:
+		{supplier_removal_counterfactual_valid:true,
+		 supplier_removal_time_weighted_counterfactual_valid:true,snapshot_count:1,
+		 supplier_removal_snapshot_count:1,supplier_removal_observed_duration_ns:1,
+		 supplier_depth_over_75_active_time_fraction:0.1,
+		 supplier_bid_depth_over_75_active_time_fraction:0.1,
+		 supplier_ask_depth_over_75_active_time_fraction:0.1,
+		 supplier_bid_time_weighted_resting_depth_share:0.1,
+		 supplier_ask_time_weighted_resting_depth_share:0.1,
+		 supplier_only_bid_time_weighted_fraction:0.1,
+		 supplier_only_ask_time_weighted_fraction:0.1,
+		 supplier_removal_qualified_bid_absence_active_time_fraction:0.1,
+		 supplier_removal_qualified_ask_absence_active_time_fraction:0.1};
+	def run($active):
+		{valid:true,evidence_valid:true,anti_cheating_satisfied:true,supplier_count:1,snapshot_count:1,
+		 supplier_removal_counterfactual_valid:true,
+		 supplier_removal_time_weighted_counterfactual_valid:true,supplier_removal_snapshot_count:1,
+		 supplier_removal_observed_duration_ns:1,
+		 supplier_depth_over_75_active_time_fraction:0.1,
+		 supplier_bid_depth_over_75_active_time_fraction:0.1,
+		 supplier_ask_depth_over_75_active_time_fraction:0.1,
+		 supplier_bid_time_weighted_resting_depth_share:0.1,
+		 supplier_ask_time_weighted_resting_depth_share:0.1,
+		 supplier_only_bid_time_weighted_fraction:0.1,
+		 supplier_only_ask_time_weighted_fraction:0.1,
+		 supplier_removal_qualified_bid_absence_active_time_fraction:0.1,
+		 supplier_removal_qualified_ask_absence_active_time_fraction:0.1,
+		 suppliers:[supplier($active)],venues:[venue,venue,venue],activation_satisfied:$active};
+	{schema_version:1,status:"COMPLETED",valid:true,evidence_valid:true,activation_satisfied:true,
+	 anti_cheating_satisfied:true,liquidation_evidence_valid:true,provenance:{valid:true},
+	 survival_effect_satisfied:true,
+	 treatment:(run(true)+{one_sided_decision_count:1,one_sided_missing_side_accepted_count:1,
+		 one_sided_restoration_count:1}),control:(run(false)+{one_sided_decision_count:0})}' \
+	>"$accepted_comparison"
+
+assert_scoring_fixture() {
+	[[ $# -eq 6 ]] || return 1
+	local case_name=$1 comparison_path=$2 expected_classification=$3 expected_status=$4 expected_activation=$5 expected_supplier_count=$6
+	local provenance_path classification score_status score_reason
+	provenance_path=$(write_scoring_provenance_fixture "$case_name" "$comparison_path" "$expected_status" "$expected_activation") || return 1
+	v2_r2_sv1d_require_scoring_comparison_claims "$provenance_path" "$temp_root/$case_name-output" "$comparison_path" \
+		"$(v2_r2_sv1d_sha256_file "$comparison_path")" "$expected_status" "$expected_activation" \
+		"$(jq -r 'if ((.valid | type) == "boolean" and .valid) then "true" else "false" end' "$comparison_path")" \
+		"$(jq -r 'if ((.evidence_valid | type) == "boolean" and .evidence_valid) then "true" else "false" end' "$comparison_path")" \
+		"$(jq -r 'if ((.anti_cheating_satisfied | type) == "boolean" and .anti_cheating_satisfied) then "true" else "false" end' "$comparison_path")" \
+		"$(jq -r 'if ((.activation_satisfied | type) == "boolean" and .activation_satisfied) then "true" else "false" end' "$comparison_path")" \
+		"$(jq -r 'if .status == "UNAVAILABLE_TERMINAL_FAILURE" then "true" else "false" end' "$comparison_path")" || return 1
+	classification=$(v2_r2_sv1d_classify_comparison "$comparison_path" "$expected_supplier_count") || return 1
+	IFS=$'\t' read -r score_status score_reason <<<"$classification"
+	[[ "$score_status" == "$expected_classification" ]] || return 1
+	printf '✓ runner/scorer provenance boundary: %s\n' "$case_name"
+}
+
+assert_scoring_fixture accepted "$accepted_comparison" SV1D_ACTIVATION_ACCEPTED ACTIVATION_CONTRACT_SATISFIED true 1
+jq '.activation_satisfied=false | .survival_effect_satisfied=false' "$accepted_comparison" >"$temp_root/ordinary-negative-comparison.json"
+assert_scoring_fixture ordinary-negative "$temp_root/ordinary-negative-comparison.json" \
+	SV1D_ACTIVATION_NOT_SATISFIED ACTIVATION_CONTRACT_NOT_SATISFIED false 1
+jq '.anti_cheating_satisfied=false' "$accepted_comparison" >"$temp_root/anti-cheating-comparison.json"
+assert_scoring_fixture anti-cheating-negative "$temp_root/anti-cheating-comparison.json" \
+	SV1D_ACTIVATION_REJECTED_ANTI_CHEATING ACTIVATION_CONTRACT_NOT_SATISFIED false 1
+assert_scoring_fixture terminal-negative "$terminal_comparison" \
+	SV1D_ACTIVATION_NOT_SATISFIED_TERMINAL_FAILURE ACTIVATION_CONTRACT_NOT_SATISFIED false 1
+
+accepted_provenance=$(write_scoring_provenance_fixture accepted-mutation "$accepted_comparison" ACTIVATION_CONTRACT_SATISFIED true)
+jq '.comparison.evidence_valid=false' "$accepted_provenance" >"$temp_root/accepted-provenance-bad-evidence.json"
+if v2_r2_sv1d_require_scoring_comparison_claims "$temp_root/accepted-provenance-bad-evidence.json" "$temp_root/accepted-mutation-output" \
+	"$accepted_comparison" "$(v2_r2_sv1d_sha256_file "$accepted_comparison")" ACTIVATION_CONTRACT_SATISFIED true true true true true false; then
+	echo "scoring provenance evidence mutation was accepted" >&2
+	exit 1
+fi
+jq '.status="ACTIVATION_CONTRACT_NOT_SATISFIED"' "$accepted_provenance" >"$temp_root/accepted-provenance-bad-status.json"
+if v2_r2_sv1d_require_scoring_comparison_claims "$temp_root/accepted-provenance-bad-status.json" "$temp_root/accepted-mutation-output" \
+	"$accepted_comparison" "$(v2_r2_sv1d_sha256_file "$accepted_comparison")" ACTIVATION_CONTRACT_SATISFIED true true true true true true false; then
+	echo "scoring provenance status mutation was accepted" >&2
 	exit 1
 fi
 

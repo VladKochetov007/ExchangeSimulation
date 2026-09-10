@@ -541,6 +541,8 @@ comparison_analyzer_wall_seconds=0
 comparison_analyzer_exit_status=125
 comparison_analyzer_stderr_path=""
 comparison_analyzer_stderr_sha256=""
+comparison_evidence_valid=false
+comparison_terminal_negative=false
 if [[ "$(jq -r '.status' "$treatment_dir/terminal-outcome.json")" == completed &&
 	"$(jq -r '.status' "$mode_off_dir/terminal-outcome.json")" == completed ]]; then
 	comparison_tmp="$comparison_path.tmp-$$"
@@ -695,9 +697,11 @@ comparison_valid=false
 comparison_activation=false
 comparison_anticheating=false
 if [[ "$comparison_object_valid" == true ]]; then
-	comparison_valid=$(jq -r '(.valid // false) | if . then "true" else "false" end' "$comparison_record_path") || comparison_valid=false
-	comparison_activation=$(jq -r '(.activation_satisfied // false) | if . then "true" else "false" end' "$comparison_record_path") || comparison_activation=false
-	comparison_anticheating=$(jq -r '(.anti_cheating_satisfied // false) | if . then "true" else "false" end' "$comparison_record_path") || comparison_anticheating=false
+	comparison_valid=$(jq -r 'if ((.valid | type) == "boolean" and .valid) then "true" else "false" end' "$comparison_record_path") || comparison_valid=false
+	comparison_evidence_valid=$(jq -r 'if ((.evidence_valid | type) == "boolean" and .evidence_valid) then "true" else "false" end' "$comparison_record_path") || comparison_evidence_valid=false
+	comparison_activation=$(jq -r 'if ((.activation_satisfied | type) == "boolean" and .activation_satisfied) then "true" else "false" end' "$comparison_record_path") || comparison_activation=false
+	comparison_anticheating=$(jq -r 'if ((.anti_cheating_satisfied | type) == "boolean" and .anti_cheating_satisfied) then "true" else "false" end' "$comparison_record_path") || comparison_anticheating=false
+	comparison_terminal_negative=$(jq -r 'if .status == "UNAVAILABLE_TERMINAL_FAILURE" then "true" else "false" end' "$comparison_record_path") || comparison_terminal_negative=false
 fi
 expected_supplier_count=$(jq -er '(.elastic_liquidity_suppliers | length) * (.venue_ids | length)' "$v2_r2_sv1_activation_config")
 pair_contract_satisfied=false
@@ -786,7 +790,8 @@ jq -n --arg contract "$v2_r2_sv1_activation_pair_contract" --arg candidate "$v2_
 	--argjson activation_satisfied "$pair_contract_satisfied" --argjson comparison_valid "$comparison_valid" \
 	--argjson comparison_object_valid "$comparison_object_valid" --argjson comparison_status "$comparison_status" \
 	--arg comparison_path "$comparison_path" --arg recorded_path "$comparison_record_path" --arg comparison_sha256 "$comparison_sha256" \
-	--argjson comparison_activation "$comparison_activation" --argjson comparison_anticheating "$comparison_anticheating" \
+	--argjson comparison_evidence_valid "$comparison_evidence_valid" --argjson comparison_activation "$comparison_activation" \
+	--argjson comparison_anticheating "$comparison_anticheating" --argjson comparison_terminal_negative "$comparison_terminal_negative" \
 	--arg analyzer_stderr_path "$comparison_analyzer_stderr_path" --arg analyzer_stderr_sha256 "$comparison_analyzer_stderr_sha256" \
 	--argjson comparison_resource_executed "$comparison_resource_executed" \
 	--argjson comparison_resource_guard_failed "$comparison_resource_guard_failed" \
@@ -825,7 +830,8 @@ jq -n --arg contract "$v2_r2_sv1_activation_pair_contract" --arg candidate "$v2_
 		 capacity: {path: $capacity_path, sha256: $capacity_sha256, config_sha256: $capacity_config_sha256, contract: $capacity_contract},
 	 comparison: {path: $comparison_path, recorded_path: $recorded_path, sha256: $comparison_sha256,
 	   exit_status: $comparison_status, object_valid: $comparison_object_valid, valid: $comparison_valid,
-	   activation_satisfied: $comparison_activation, anti_cheating_satisfied: $comparison_anticheating,
+	   evidence_valid: $comparison_evidence_valid, activation_satisfied: $comparison_activation,
+	   anti_cheating_satisfied: $comparison_anticheating, terminal_negative: $comparison_terminal_negative,
 	   analyzer_stderr_path: (if $analyzer_stderr_path == "" then null else $analyzer_stderr_path end),
 	   analyzer_stderr_sha256: (if $analyzer_stderr_sha256 == "" then null else $analyzer_stderr_sha256 end),
 	   resource: {executed: $comparison_resource_executed, exit_status: $comparison_analyzer_exit_status,
