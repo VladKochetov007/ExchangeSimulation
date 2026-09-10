@@ -43,7 +43,11 @@ type checkpointSink struct {
 	binaryFile *os.File
 	binaryBuf  *bufio.Writer
 	replaceRaw bool
-	mu         sync.Mutex
+	// includeEvidenceOnly is enabled only by the versioned successor contract.
+	// It makes LogEvidenceOnly rows part of the same ordered stream instead of
+	// leaving participant-state evidence in an unordered JSON sidecar.
+	includeEvidenceOnly bool
+	mu                  sync.Mutex
 
 	intervalNano int64
 	checkpoints  io.WriteCloser
@@ -311,6 +315,10 @@ func (s *checkpointSink) failLocked(err error) {
 
 func (s *checkpointSink) replacesRawLog() bool {
 	return s != nil && s.binary != nil && s.replaceRaw
+}
+
+func (s *checkpointSink) includesEvidenceOnly() bool {
+	return s != nil && s.binary != nil && s.includeEvidenceOnly
 }
 
 // close flushes a final checkpoint so a run that ends between boundaries is

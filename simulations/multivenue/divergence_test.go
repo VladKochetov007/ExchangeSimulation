@@ -9,6 +9,7 @@ import (
 	"os"
 	"testing"
 
+	"exchange_sim/evstream"
 	"exchange_sim/simulations/feesim"
 )
 
@@ -186,5 +187,46 @@ func TestBinaryReplacementKeepsOnlySequencedEvidenceOnlySidecars(t *testing.T) {
 	}
 	if record.Event != "sidecar_event" || record.Data.Sequence != 2 {
 		t.Fatalf("sidecar record = %+v, want sidecar_event sequence 2", record)
+	}
+}
+
+func TestVersionedBinaryReplacementIncludesEvidenceOnlyInCanonicalStream(t *testing.T) {
+	var output bytes.Buffer
+	sink := &checkpointSink{
+		binary:              newBinaryEvidence(&output),
+		replaceRaw:          true,
+		includeEvidenceOnly: true,
+	}
+	var sequence uint64
+	logger := venueLogger{venueID: "north", route: "general.jsonl", sink: sink, sequence: &sequence}
+	logger.LogEvent(1, 7, "hashed_event", map[string]int{"value": 1})
+	logger.LogEvidenceOnly(2, 7, "elastic_liquidity_supplier_decision", map[string]any{"action": "wait"})
+	if err := sink.close(); err != nil {
+		t.Fatal(err)
+	}
+	if sink.events != 2 || sequence != 2 {
+		t.Fatalf("versioned binary counts events=%d sequence=%d, want 2/2", sink.events, sequence)
+	}
+	reader, err := evstream.NewReader(bytes.NewReader(output.Bytes()), evstream.ReaderOptions{VerifyHash: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	if err := reader.Range(func(frame evstream.Frame) error {
+		_, rendered, err := renderBinaryFrame(reader, frame)
+		if err != nil {
+			return err
+		}
+		var event renderPersistedEvent
+		if err := json.Unmarshal(rendered.raw, &event); err != nil {
+			return err
+		}
+		names = append(names, event.Event)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !reader.Terminated() || len(names) != 2 || names[0] != "hashed_event" || names[1] != "elastic_liquidity_supplier_decision" {
+		t.Fatalf("canonical versioned evidence names=%v terminated=%t", names, reader.Terminated())
 	}
 }

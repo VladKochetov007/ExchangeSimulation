@@ -52,8 +52,9 @@ type renderPersistedEvent struct {
 type renderRunContract struct {
 	SchemaVersion int `json:"schema_version"`
 	Config        struct {
-		LogMode        string `json:"log_mode"`
-		EvidenceFormat string `json:"evidence_format"`
+		LogMode                 string `json:"log_mode"`
+		EvidenceFormat          string `json:"evidence_format"`
+		EvidenceContractVersion int    `json:"evidence_contract_version"`
 	} `json:"config"`
 }
 
@@ -121,7 +122,7 @@ func RenderBinaryEvidence(inputDir, outDir string) (BinaryRenderReport, error) {
 	if !reader.Terminated() {
 		return BinaryRenderReport{}, fmt.Errorf("multivenue: binary evidence has no completion trailer")
 	}
-	if err := validateBinaryAttestation(inputAbs, eventFrames, reader, sidecarDigest, contract.Config.LogMode); err != nil {
+	if err := validateBinaryAttestation(inputAbs, eventFrames, reader, sidecarDigest, contract.Config.LogMode, contract.Config.EvidenceContractVersion); err != nil {
 		return BinaryRenderReport{}, err
 	}
 	if err := validateRenderRecords(routes); err != nil {
@@ -154,10 +155,16 @@ func readRenderRunContract(inputDir string) (renderRunContract, error) {
 	if contract.Config.LogMode != "full" && contract.Config.LogMode != "none" {
 		return renderRunContract{}, fmt.Errorf("multivenue: manifest has unsupported log mode %q", contract.Config.LogMode)
 	}
+	if contract.Config.EvidenceContractVersion == 0 {
+		contract.Config.EvidenceContractVersion = 1
+	}
+	if contract.Config.EvidenceContractVersion < 1 || contract.Config.EvidenceContractVersion > 2 {
+		return renderRunContract{}, fmt.Errorf("multivenue: manifest has unsupported evidence contract version %d", contract.Config.EvidenceContractVersion)
+	}
 	return contract, nil
 }
 
-func validateBinaryAttestation(inputDir string, eventFrames uint64, reader *evstream.Reader, sidecarDigest renderArtifactDigest, logMode string) error {
+func validateBinaryAttestation(inputDir string, eventFrames uint64, reader *evstream.Reader, sidecarDigest renderArtifactDigest, logMode string, contractVersion int) error {
 	raw, err := os.ReadFile(filepath.Join(inputDir, "binary-evidence-attestation.json"))
 	if err != nil {
 		return fmt.Errorf("multivenue: read binary evidence attestation: %w", err)
@@ -173,10 +180,13 @@ func validateBinaryAttestation(inputDir string, eventFrames uint64, reader *evst
 		attestation.ExecutionStreamHash != executionHash {
 		return fmt.Errorf("multivenue: binary attestation does not match reconstructed stream")
 	}
+	if contractVersion >= 2 && !attestation.EvidenceOnlyIncluded {
+		return fmt.Errorf("multivenue: successor binary attestation omits evidence-only frames")
+	}
 	if attestation.UnencodablePayloads != 0 {
 		return fmt.Errorf("multivenue: binary evidence contains %d unencodable payloads", attestation.UnencodablePayloads)
 	}
-	if logMode == "full" {
+	if logMode == "full" && contractVersion < 2 {
 		raw, err := os.ReadFile(filepath.Join(inputDir, "evidence-only-artifact-hash.json"))
 		if err != nil {
 			return fmt.Errorf("multivenue: read evidence-only attestation: %w", err)
@@ -217,8 +227,12 @@ func renderBinaryFrame(reader *evstream.Reader, frame evstream.Frame) (renderRou
 	if frame.Venue == "" {
 		return renderRouteKey{}, renderRecord{}, fmt.Errorf("multivenue: frame %d has no venue", frame.Header.Seq)
 	}
-	payload, err := exchange.RenderPayloadJSONVersioned(
+	payload, handled, err := renderCDFPayloadJSONVersioned(
 		frame.Header.SchemaID, frame.Header.SchemaVersion, frame.Payload[16:], reader)
+	if !handled {
+		payload, err = exchange.RenderPayloadJSONVersioned(
+			frame.Header.SchemaID, frame.Header.SchemaVersion, frame.Payload[16:], reader)
+	}
 	if err != nil {
 		return renderRouteKey{}, renderRecord{}, fmt.Errorf("multivenue: frame %d (%s): %w", frame.Header.Seq, eventName, err)
 	}

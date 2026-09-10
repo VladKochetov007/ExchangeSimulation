@@ -104,6 +104,11 @@ type Config struct {
 	// jsonl preserves the historical contract; evstream_v3 is the successor
 	// contract whose completed stream can replace the high-volume raw JSONL.
 	EvidenceFormat string `json:"evidence_format,omitempty"`
+	// EvidenceContractVersion distinguishes the historical evstream prototype
+	// from the successor contract that includes evidence-only participant
+	// telemetry in the canonical ordered stream. Zero retains the prototype
+	// version for configurations that predate the promoted contract.
+	EvidenceContractVersion int `json:"evidence_contract_version,omitempty"`
 	// DatedFutureDeliveryFeePolicy is an analyzer-side declaration retained in
 	// the run config so the strict settlement audit can reconstruct the fee
 	// contract without importing simulator implementation details.
@@ -701,6 +706,15 @@ func (c *Config) normalize() error {
 	if c.EvidenceFormat != "jsonl" && c.EvidenceFormat != binaryRepresentation {
 		return fmt.Errorf("multivenue: unsupported evidence format %q", c.EvidenceFormat)
 	}
+	if c.EvidenceContractVersion == 0 && c.EvidenceFormat == binaryRepresentation {
+		c.EvidenceContractVersion = 1
+	}
+	if c.EvidenceContractVersion < 0 || c.EvidenceContractVersion > 2 {
+		return fmt.Errorf("multivenue: unsupported evidence contract version %d", c.EvidenceContractVersion)
+	}
+	if c.EvidenceFormat == "jsonl" && c.EvidenceContractVersion > 1 {
+		return fmt.Errorf("multivenue: evidence contract version %d requires %s evidence", c.EvidenceContractVersion, binaryRepresentation)
+	}
 	switch c.MakerAnchor {
 	case "", "own_mid", "consensus":
 	default:
@@ -758,7 +772,7 @@ func (c *Config) normalize() error {
 	if c.RecordOptionLiabilityUserDecisions && c.LogMode != "full" {
 		return errors.New("multivenue: option-liability decisions require full persisted evidence")
 	}
-	if c.RecordElasticLiquiditySupplierDecisions && c.LogMode != "full" {
+	if c.RecordElasticLiquiditySupplierDecisions && c.LogMode != "full" && !(c.EvidenceFormat == binaryRepresentation && c.EvidenceContractVersion >= 2) {
 		return errors.New("multivenue: elastic-liquidity-supplier decisions require full persisted evidence")
 	}
 	if len(c.ElasticLiquiditySuppliers) != 0 {
@@ -770,6 +784,15 @@ func (c *Config) normalize() error {
 		}
 		if !c.StrictPopulationAccounting {
 			return errors.New("multivenue: elastic liquidity suppliers require strict population accounting")
+		}
+		if c.EvidenceFormat != binaryRepresentation || c.EvidenceContractVersion < 2 {
+			return fmt.Errorf("multivenue: elastic liquidity suppliers require evidence contract version 2 in %s", binaryRepresentation)
+		}
+		if !c.RecordElasticLiquiditySupplierDecisions || !c.RecordMarketDataReceipts {
+			return errors.New("multivenue: elastic liquidity suppliers require decision and market-data evidence")
+		}
+		if !slices.Contains(c.MarketDataReceiptRoles, "cdf_elastic_supplier") {
+			return errors.New("multivenue: elastic liquidity suppliers require cdf_elastic_supplier market-data receipts")
 		}
 		seenRoles := make(map[string]struct{}, len(c.ElasticLiquiditySuppliers))
 		for _, supplier := range c.ElasticLiquiditySuppliers {
@@ -1985,12 +2008,13 @@ func (s *Sim) closeEvidence() error {
 		}
 		digest := s.checkpoints.binary.executionHash()
 		binaryArtifact := binaryEvidenceArtifactRecord{
-			Domain:              "canonical_binary_execution_frames",
-			Ordering:            "ordered_stream",
-			EventFrames:         s.checkpoints.binary.count(),
-			StreamFrames:        s.checkpoints.binary.writer.Count(),
-			ExecutionStreamHash: hex.EncodeToString(digest[:]),
-			UnencodablePayloads: s.checkpoints.binary.unencodableCount(),
+			Domain:               "canonical_binary_execution_frames",
+			Ordering:             "ordered_stream",
+			EventFrames:          s.checkpoints.binary.count(),
+			StreamFrames:         s.checkpoints.binary.writer.Count(),
+			ExecutionStreamHash:  hex.EncodeToString(digest[:]),
+			EvidenceOnlyIncluded: s.checkpoints.includesEvidenceOnly(),
+			UnencodablePayloads:  s.checkpoints.binary.unencodableCount(),
 		}
 		raw, err := json.MarshalIndent(binaryArtifact, "", "  ")
 		if err != nil {
@@ -1999,7 +2023,7 @@ func (s *Sim) closeEvidence() error {
 		if err := simulation.WriteFileAtomically(filepath.Join(s.Config.LogDir, "binary-evidence-attestation.json"), append(raw, '\n')); err != nil {
 			return fmt.Errorf("write binary evidence attestation: %w", err)
 		}
-		if s.Config.LogMode == "full" {
+		if s.Config.LogMode == "full" && !s.checkpoints.includesEvidenceOnly() {
 			sidecarArtifact := evidenceArtifactRecord{
 				Domain:   "persisted_json_log_evidence_only",
 				Ordering: "unordered_multiset",
@@ -2062,12 +2086,13 @@ type evidenceArtifactRecord struct {
 }
 
 type binaryEvidenceArtifactRecord struct {
-	Domain              string `json:"domain"`
-	Ordering            string `json:"ordering"`
-	EventFrames         uint64 `json:"event_frames"`
-	StreamFrames        uint64 `json:"stream_frames"`
-	ExecutionStreamHash string `json:"execution_stream_hash"`
-	UnencodablePayloads uint64 `json:"unencodable_payloads,omitempty"`
+	Domain               string `json:"domain"`
+	Ordering             string `json:"ordering"`
+	EventFrames          uint64 `json:"event_frames"`
+	StreamFrames         uint64 `json:"stream_frames"`
+	ExecutionStreamHash  string `json:"execution_stream_hash"`
+	EvidenceOnlyIncluded bool   `json:"evidence_only_in_stream,omitempty"`
+	UnencodablePayloads  uint64 `json:"unencodable_payloads,omitempty"`
 }
 
 type venueLogEvent struct {
@@ -2113,9 +2138,10 @@ func (l venueLogger) LogEvent(simTime int64, clientID uint64, eventName string, 
 	l.inner.LogEvent(simTime, clientID, eventName, venueLogEvent{VenueID: l.venueID, Payload: event})
 }
 
-// LogEvidenceOnly persists an observation without adding it to the ordered
-// execution-stream hash. It is reserved for instrumentation which must not
-// change the simulated trajectory or logging-on/off execution digest.
+// LogEvidenceOnly persists an observation without adding it to the historical
+// execution-stream hash. The versioned successor contract deliberately routes
+// it into the canonical binary stream so participant evidence has the same
+// global order and attestation as venue events.
 func (l venueLogger) LogEvidenceOnly(simTime int64, clientID uint64, eventName string, event any) {
 	if l.sequenceMu != nil {
 		l.sequenceMu.Lock()
@@ -2125,6 +2151,12 @@ func (l venueLogger) LogEvidenceOnly(simTime int64, clientID uint64, eventName s
 	if l.sequence != nil {
 		(*l.sequence)++
 		sequence = *l.sequence
+	}
+	if l.sink.includesEvidenceOnly() {
+		l.sink.observe(simTime, clientID, eventName, l.venueID, event, l.route, sequence)
+		if l.sink.replacesRawLog() {
+			return
+		}
 	}
 	if l.inner == nil {
 		return
@@ -2254,6 +2286,7 @@ func NewSim(simTime time.Duration, cfg Config) (*Sim, error) {
 	sim.checkpoints = sink
 	if sink != nil {
 		sink.finalSimTime = sim.terminalNano
+		sink.includeEvidenceOnly = cfg.EvidenceFormat == binaryRepresentation && cfg.EvidenceContractVersion >= 2
 	}
 	if cfg.RecordMarketDataReceipts {
 		recorder, err := simulation.NewMarketDataReceiptRecorder(cfg.LogDir)

@@ -298,7 +298,10 @@ func TestCDFSupplierRosterIsOptInAndSeparateFromHistoricalSuppliers(t *testing.T
 		QuoteOnOneSidedLocalBook: true, MaxLossQuote: 3_000_000_000, MakerFeeBps: 5,
 	}
 	successor, err := NewSim(time.Second, Config{
-		LogDir: t.TempDir(), LogMode: "none", CrossAssetSpotGraph: true, ElasticSupplierCount: 8,
+		LogDir: t.TempDir(), LogMode: "none", EvidenceFormat: binaryRepresentation, EvidenceContractVersion: 2,
+		RecordElasticLiquiditySupplierDecisions: true, RecordMarketDataReceipts: true,
+		MarketDataReceiptRoles: []string{"cdf_elastic_supplier"},
+		CrossAssetSpotGraph:    true, ElasticSupplierCount: 8,
 		StrictPopulationAccounting: true, StrictRiskContract: true, AutoBorrowSpot: boolPointer(false),
 		ElasticLiquiditySuppliers: []ElasticLiquiditySupplierSpec{spec},
 		LatencyProfiles: map[string]LatencyProfile{
