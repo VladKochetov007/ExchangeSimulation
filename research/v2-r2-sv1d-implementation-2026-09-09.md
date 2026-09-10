@@ -366,3 +366,34 @@ has not measured the registered 26.1-million-event workload, created a review
 attestation, run a capacity probe, run seed 659, consumed a development cell,
 authorized freeze, or touched a holdout. The implementation remains subject
 to a clean-tree mechanical gate and one fresh independent Sol-xhigh review.
+
+## Neutral-capacity successor mechanical gate — 2026-09-10
+
+At source tree `5f496a6a30cae983ce030c5b07168edc2133530e`, after the
+neutral-capacity implementation and generated-config regeneration, the clean
+bounded full gate completed successfully with:
+
+```text
+PATH=/usr/local/go/bin:$PATH GOTOOLCHAIN=local GOMAXPROCS=2 \
+GOMEMLIMIT=8GiB GOFLAGS="-count=1 -timeout=30m" make test
+```
+
+Every Go package passed; `simulations/multivenue` completed in `1001.397s`;
+the integrated long-run, SV1/SV1B/SV1C/SV1D, survival, score, terminal, and
+archive contract suites passed. The malformed-fixture rejection sentences
+printed by the negative contract cases were expected diagnostics. No capacity
+workload or simulator world was launched by this gate.
+
+The exact-tree static and concurrency checks also passed: `go vet ./...`, the
+bounded race matrix for `exchange`, `analysis`, `cmd/mvanalyze`,
+`cmd/prunegate`, and `tests`, and the selected multivenue binary-evidence,
+calendar, cross-margin, strict-risk, and CDF supplier race subset. The
+fresh-process suite with `MULTIVENUE_DETERMINISM=1` passed in `213.841s`,
+covering execution identity, binary evidence, perp-exposure evidence, and
+router neutrality. No race report was emitted. The current tree remained
+clean after the checks, with no capacity attestation, activation output,
+development cell, freeze authorization, or holdout evidence.
+
+Because this report is a bound input to the immutable SV1D config provenance,
+the generated configs must be retired and regenerated from the subsequent clean
+documentation revision before the final exact-tree review.
