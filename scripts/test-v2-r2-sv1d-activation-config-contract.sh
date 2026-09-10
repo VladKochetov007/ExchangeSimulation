@@ -44,7 +44,8 @@ rg -F 'capacity: {path:' "$runner" >/dev/null
 rg -F '.capacity.path' "$scorer" >/dev/null
 rg -F 'host_memory_total_bytes' "$contract" "$root_dir/scripts/run-v2-r2-sv1d-activation-probe.sh" "$root_dir/scripts/score-v2-r2-sv1d-activation.sh" >/dev/null
 rg -F 'host_memory_total_bytes: $comparison_host_memory_total' "$root_dir/scripts/run-v2-r2-sv1d-activation-probe.sh" >/dev/null
-rg -F 'comparison_valid" == true' "$root_dir/scripts/score-v2-r2-sv1d-activation.sh" >/dev/null
+rg -F 'comparison_classification=$(v2_r2_sv1d_classify_comparison "$comparison_path" "$expected_supplier_count")' "$root_dir/scripts/score-v2-r2-sv1d-activation.sh" >/dev/null
+rg -F 'config_stderr_sha256' "$contract" "$capacity_runner" >/dev/null
 rg -F 'v2_r2_sv1d_require_arm_record_matches' "$contract" "$root_dir/scripts/score-v2-r2-sv1d-activation.sh" >/dev/null
 rg -F 'arm_artifacts_valid' "$contract" "$root_dir/scripts/run-v2-r2-sv1d-activation-probe.sh" >/dev/null
 rg -F 'mode-off' "$root_dir/scripts/score-v2-r2-sv1d-activation.sh" >/dev/null
@@ -96,6 +97,19 @@ if v2_r2_sv1d_require_capacity_attestation "$temp_root/malformed-capacity-attest
 	"$(git -C "$root_dir" rev-parse HEAD)" "$(printf '%064d' 0)" "$(printf '%064d' 0)" \
 	"$temp_root/missing-review.json" "$(printf '%064d' 0)"; then
 	echo "malformed capacity attestation was accepted" >&2
+	exit 1
+fi
+
+capacity_root_fixture="$temp_root/capacity-root"
+mkdir -p -- "$capacity_root_fixture/$(v2_r2_sv1d_capacity_probe_cell)"
+printf '%s' '' >"$capacity_root_fixture/config.stderr.log"
+v2_r2_sv1d_capacity_require_root "$capacity_root_fixture" "$(v2_r2_sv1d_capacity_probe_cell)" || {
+	echo "closed capacity root fixture was rejected" >&2
+	exit 1
+}
+printf '%s\n' 'unexpected' >"$capacity_root_fixture/unexpected.log"
+if v2_r2_sv1d_capacity_require_root "$capacity_root_fixture" "$(v2_r2_sv1d_capacity_probe_cell)"; then
+	echo "capacity root sibling mutation was accepted" >&2
 	exit 1
 fi
 
@@ -165,6 +179,13 @@ jq -n --arg contract "$v2_r2_sv1_activation_contract" --argjson seed "$v2_r2_sv1
 	>"$terminal_comparison"
 v2_r2_sv1d_require_comparison_provenance "$terminal_comparison" "$(printf '%064d' 0)" "$(printf '%040d' 0)" "$terminal_treatment" "$terminal_control" || {
 	echo "valid terminal comparison fixture was rejected" >&2
+	exit 1
+}
+terminal_classification=$(v2_r2_sv1d_classify_comparison "$terminal_comparison" 1)
+IFS=$'\t' read -r terminal_score_status terminal_score_reason <<<"$terminal_classification"
+[[ "$terminal_score_status" == SV1D_ACTIVATION_NOT_SATISFIED_TERMINAL_FAILURE &&
+	"$terminal_score_reason" == "the registered treatment/control pair reached a valid terminal valuation failure; no activation claim is made" ]] || {
+	echo "valid terminal comparison was not classified as a valid negative outcome" >&2
 	exit 1
 }
 jq '.control_run_status_sha256 = ("0" * 64)' "$terminal_comparison" >"$temp_root/terminal-comparison-bad-hash.json"

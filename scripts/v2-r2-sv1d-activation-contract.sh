@@ -136,6 +136,23 @@ v2_r2_sv1d_capacity_expected_cell_files() {
 		market-data-decisions-v2.bin market-data-actions-v2.bin simulator.stdout.log simulator.stderr.log | LC_ALL=C sort
 }
 
+v2_r2_sv1d_capacity_require_root() {
+	[[ $# -eq 2 ]] || return 1
+	local probe_root=$1 probe_cell=$2 actual_directories actual_files
+	[[ "$probe_root" == /* && "$probe_root" != */ && "$probe_root" != *$'\n'* && "$probe_root" != *$'\t'* ]] || return 1
+	[[ "$probe_cell" != /* && "$probe_cell" != */ && "$probe_cell" != *$'\n'* && "$probe_cell" != *$'\t'* ]] || return 1
+	[[ -d "$probe_root" && ! -L "$probe_root" && "$(realpath -e -- "$probe_root")" == "$probe_root" ]] || return 1
+	if find "$probe_root" -mindepth 1 -maxdepth 1 \( -type l -o -type p -o -type s -o -type b -o -type c \) -print -quit 2>/dev/null | grep -q .; then
+		return 1
+	fi
+	actual_directories=$(find "$probe_root" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | LC_ALL=C sort)
+	[[ "$actual_directories" == "$probe_cell" ]] || return 1
+	actual_files=$(find "$probe_root" -mindepth 1 -maxdepth 1 -type f -printf '%f\n' | LC_ALL=C sort)
+	[[ "$actual_files" == config.stderr.log ]] || return 1
+	[[ -f "$probe_root/config.stderr.log" && ! -L "$probe_root/config.stderr.log" ]] || return 1
+	[[ -d "$probe_root/$probe_cell" && ! -L "$probe_root/$probe_cell" && "$(realpath -e -- "$probe_root/$probe_cell")" == "$probe_root/$probe_cell" ]] || return 1
+}
+
 v2_r2_sv1d_capacity_require_cell() {
 	[[ $# -eq 1 ]] || return 1
 	local cell=$1 expected_files actual_files actual_directories file_path
@@ -172,7 +189,7 @@ v2_r2_sv1d_require_capacity_attestation() {
 	local measurement_config_path launch_config_path probe_root probe_cell checkpoint_validator
 	local checkpoint_validator_revision checkpoint_validator_sha256
 	local expected_host_memory_total expected_minimum_memory_available
-	local current_available_free_bytes current_memory_available_bytes actual_manifest_sha256
+	local current_available_free_bytes current_memory_available_bytes actual_manifest_sha256 actual_config_stderr_sha256
 	local current_host_cpu_count current_allowed_cpu_count current_cpu_affinity
 	[[ "$expected_revision" =~ ^[0-9a-f]{40}$ && "$expected_binary_sha256" =~ ^[0-9a-f]{64}$ &&
 		"$expected_config_sha256" =~ ^[0-9a-f]{64}$ && "$expected_review_sha256" =~ ^[0-9a-f]{64}$ ]] || return 1
@@ -198,6 +215,7 @@ v2_r2_sv1d_require_capacity_attestation() {
 	[[ "$probe_root" == "$(v2_r2_sv1d_capacity_probe_root "$expected_revision")" ]] || return 1
 	probe_cell=$(jq -er '.probe_cell | select(type == "string" and length > 0)' "$attestation") || return 1
 	[[ "$probe_cell" == "$(v2_r2_sv1d_capacity_probe_cell)" && "$probe_cell" != */* && "$probe_cell" != *$'\n'* && "$probe_cell" != *$'\t'* ]] || return 1
+	v2_r2_sv1d_capacity_require_root "$probe_root" "$probe_cell" || return 1
 	v2_r2_sv1d_capacity_require_cell "$probe_root/$probe_cell" || return 1
 	[[ "$(v2_r2_sv1d_sha256_file "$probe_root/$probe_cell/run-config.json")" == "$expected_config_sha256" ]] || return 1
 
@@ -213,6 +231,7 @@ v2_r2_sv1d_require_capacity_attestation() {
 	IFS=$'\t' read -r current_host_cpu_count current_allowed_cpu_count current_cpu_affinity < <(v2_r2_sv1d_cpu_policy) || return 1
 	current_available_free_bytes=$(v2_r2_sv1d_capacity_free_bytes "$probe_root") || return 1
 	current_memory_available_bytes=$(v2_r2_sv1d_capacity_memory_available_bytes) || return 1
+	actual_config_stderr_sha256=$(v2_r2_sv1d_sha256_file "$probe_root/config.stderr.log") || return 1
 	actual_manifest_sha256=$(v2_r2_sv1d_sha256_file "$probe_root/$probe_cell/evidence-manifest.json") || return 1
 	jq -e --arg contract "$v2_r2_sv1d_capacity_attestation_contract" --arg revision "$expected_revision" \
 		--arg tree "$expected_tree" --arg binary_sha256 "$expected_binary_sha256" --arg config_path "$expected_config_path" \
@@ -230,7 +249,7 @@ v2_r2_sv1d_require_capacity_attestation() {
 		--argjson host_cpu "$current_host_cpu_count" --argjson allowed_cpu "$current_allowed_cpu_count" --arg affinity "$current_cpu_affinity" \
 		--argjson max_wall "$v2_r2_sv1d_capacity_max_wall_seconds" \
 		--argjson current_free "$current_available_free_bytes" --argjson current_memory "$current_memory_available_bytes" \
-		--arg manifest_sha256 "$actual_manifest_sha256" '
+		--arg manifest_sha256 "$actual_manifest_sha256" --arg config_stderr_sha256 "$actual_config_stderr_sha256" '
 		type == "object" and .schema_version == 1 and .contract == $contract and
 		.measurement == "full_24h_binary_evidence_capacity_probe" and .evidence_format == "evstream_v3" and .log_mode == "full" and
 		.source_revision == $revision and .source_tree_sha256 == $tree and .binary_sha256 == $binary_sha256 and
@@ -250,6 +269,7 @@ v2_r2_sv1d_require_capacity_attestation() {
 		(.initial_memory_available_bytes | type) == "number" and .initial_memory_available_bytes >= $minimum_memory_available and
 		(.final_memory_available_bytes | type) == "number" and .final_memory_available_bytes >= $minimum_memory_available and
 		(.evidence_manifest_sha256 | type) == "string" and .evidence_manifest_sha256 == $manifest_sha256 and
+		(.config_stderr_sha256 | type) == "string" and .config_stderr_sha256 == $config_stderr_sha256 and
 		(.simulator_stdout_sha256 | type) == "string" and (.simulator_stdout_sha256 | test("^[0-9a-f]{64}$")) and
 		(.simulator_stderr_sha256 | type) == "string" and (.simulator_stderr_sha256 | test("^[0-9a-f]{64}$")) and
 		(.wall_clock_seconds | type) == "number" and floor == . and .wall_clock_seconds >= 0 and .wall_clock_seconds <= $max_wall and
@@ -841,4 +861,37 @@ v2_r2_sv1d_require_mode_pair_comparison() {
 			.survival_effect_satisfied == true and .activation_satisfied == true and
 			.anti_cheating_satisfied == true
 	' "$comparison_path" >/dev/null
+}
+
+v2_r2_sv1d_classify_comparison() {
+	[[ $# -eq 2 ]] || return 1
+	local comparison_path=$1 expected_supplier_count=$2
+	v2_r2_require_single_json_object "$comparison_path" || return 1
+	local comparison_valid comparison_evidence_valid comparison_anticheating comparison_provenance_valid comparison_terminal_negative
+	comparison_valid=$(jq -r 'if ((.valid | type) == "boolean" and .valid) then "true" else "false" end' "$comparison_path") || return 1
+	comparison_evidence_valid=$(jq -r 'if ((.evidence_valid | type) == "boolean" and .evidence_valid) then "true" else "false" end' "$comparison_path") || return 1
+	comparison_anticheating=$(jq -r 'if ((.anti_cheating_satisfied | type) == "boolean" and .anti_cheating_satisfied) then "true" else "false" end' "$comparison_path") || return 1
+	comparison_provenance_valid=$(jq -r 'if (.provenance == null or .provenance.valid == true) then "true" else "false" end' "$comparison_path") || return 1
+	comparison_terminal_negative=$(jq -r 'if .status == "UNAVAILABLE_TERMINAL_FAILURE" then "true" else "false" end' "$comparison_path") || return 1
+	local score_status="SV1D_ACTIVATION_INVALID_EVIDENCE"
+	local score_reason="comparison was not a valid reconstructed same-roster pair"
+	# A terminal valuation failure is valid negative evidence even though it
+	# deliberately carries valid=false and makes no activation claim.
+	if [[ "$comparison_evidence_valid" == true && "$comparison_provenance_valid" == true &&
+		( "$comparison_valid" == true || "$comparison_terminal_negative" == true ) ]]; then
+		if [[ "$comparison_terminal_negative" == true ]]; then
+			score_status="SV1D_ACTIVATION_NOT_SATISFIED_TERMINAL_FAILURE"
+			score_reason="the registered treatment/control pair reached a valid terminal valuation failure; no activation claim is made"
+		elif [[ "$comparison_anticheating" != true ]]; then
+			score_status="SV1D_ACTIVATION_REJECTED_ANTI_CHEATING"
+			score_reason="reconstructed evidence was valid but a preregistered anti-cheating or concentration predicate failed"
+		elif v2_r2_sv1d_require_mode_pair_comparison "$comparison_path" "$expected_supplier_count"; then
+			score_status="SV1D_ACTIVATION_ACCEPTED"
+			score_reason="all supplier instances, one-sided restoration, paired survival effect, and anti-cheating predicates passed"
+		else
+			score_status="SV1D_ACTIVATION_NOT_SATISFIED"
+			score_reason="reconstructed evidence is valid but the preregistered activation or survival predicate did not pass"
+		fi
+	fi
+	printf '%s\t%s\n' "$score_status" "$score_reason"
 }

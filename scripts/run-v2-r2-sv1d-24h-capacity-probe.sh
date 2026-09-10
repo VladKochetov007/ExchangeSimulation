@@ -307,6 +307,10 @@ v2_r2_require_binary_checkpoint_stream_exact "$probe_cell/checkpoints.jsonl" \
 	"$probe_cell/binary-evidence-attestation.json" || exit 1
 v2_r2_write_evidence_manifest "$probe_cell" || exit 1
 v2_r2_verify_evidence_manifest "$probe_cell" || exit 1
+v2_r2_sv1d_capacity_require_root "$probe_root" "$(basename -- "$probe_cell")" || {
+	echo "SV1D capacity output root contains an unexpected sibling artifact" >&2
+	exit 1
+}
 
 final_available_free_bytes=$(v2_r2_sv1d_capacity_free_bytes "$probe_root") || exit 1
 final_memory_available_bytes=$(memory_available_bytes) || exit 1
@@ -325,6 +329,7 @@ source_tree_sha256=$(v2_r2_sv1d_git_tree_sha256 "$head_revision") || exit 1
 evidence_manifest_sha256=$(v2_r2_sv1d_sha256_file "$probe_cell/evidence-manifest.json") || exit 1
 stdout_sha256=$(v2_r2_sv1d_sha256_file "$probe_cell/simulator.stdout.log") || exit 1
 stderr_sha256=$(v2_r2_sv1d_sha256_file "$probe_cell/simulator.stderr.log") || exit 1
+config_stderr_sha256=$(v2_r2_sv1d_sha256_file "$probe_root/config.stderr.log") || exit 1
 attestation_tmp="$attestation.tmp-$$"
 [[ ! -e "$attestation_tmp" && ! -L "$attestation_tmp" ]] || exit 1
 jq -n --arg contract "$v2_r2_sv1d_capacity_attestation_contract" --arg revision "$head_revision" \
@@ -333,6 +338,7 @@ jq -n --arg contract "$v2_r2_sv1d_capacity_attestation_contract" --arg revision 
 	--arg probe_root "$probe_root" --arg probe_cell "$(basename -- "$probe_cell")" \
 	--arg validator_path "$checkpoint_validator" --arg validator_revision "$head_revision" --arg validator_sha256 "$checkpoint_validator_sha256" \
 	--arg evidence_manifest_sha256 "$evidence_manifest_sha256" --arg stdout_sha256 "$stdout_sha256" --arg stderr_sha256 "$stderr_sha256" \
+	--arg config_stderr_sha256 "$config_stderr_sha256" \
 	--arg peak_output_at "$peak_output_at" --arg peak_rss_at "$peak_rss_at" \
 	--argjson seed "$v2_r2_sv1d_capacity_seed" --arg horizon "$v2_r2_sv1d_capacity_horizon" \
 	--argjson start "$v2_r2_sv1d_capacity_simulation_start_nano" --argjson end "$v2_r2_sv1d_capacity_simulation_end_nano" \
@@ -353,7 +359,7 @@ jq -n --arg contract "$v2_r2_sv1d_capacity_attestation_contract" --arg revision 
 	 review: {path: $review_path, sha256: $review_sha256},
 	 checkpoint_validator: {path: $validator_path, revision: $validator_revision, sha256: $validator_sha256},
 	 probe_root: $probe_root, probe_cell: $probe_cell, evidence_manifest_sha256: $evidence_manifest_sha256,
-	 simulator_stdout_sha256: $stdout_sha256, simulator_stderr_sha256: $stderr_sha256,
+	 simulator_stdout_sha256: $stdout_sha256, simulator_stderr_sha256: $stderr_sha256, config_stderr_sha256: $config_stderr_sha256,
 	 peak_output_bytes: $peak_output, safety_margin_bytes: $safety_margin, required_free_bytes: $required_free,
 	 initial_available_free_bytes: $initial_free, available_free_bytes: $available_free,
 	 initial_memory_available_bytes: $initial_memory, final_memory_available_bytes: $final_memory,
