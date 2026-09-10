@@ -455,3 +455,16 @@ manifest, report, profile, workload, resource, and full jq predicates execute
 unchanged. The repair does not alter R2 economics, CDF behavior, binary
 evidence, or historical results. A clean full gate, provenance regeneration,
 and another exact-tree independent review are required before capacity work.
+
+## Full-validator repair mechanical gate — 2026-09-10
+
+At exact source tree `974ba52`, the clean SV1D config checker, complete
+producer-shaped full-attestation fixture (including manifest/readback files),
+negative mutation fixture, shell syntax checks, and `git diff --check` passed.
+The uncached bounded `make test` then completed with
+`FULL_MAKE_FULL_VALIDATOR_REPAIR_EXIT=0` in 1037 seconds; multivenue completed
+in 1001.976 seconds. All Go packages and integrated-long-run, archive, SV1C,
+SV1D, survival, terminal, and negative contract fixtures passed. No capacity
+workload, simulator world, activation seed, development cell, freeze, or
+holdout was run. A final exact-tree independent Sol-xhigh review remains
+mandatory before any capacity measurement.
