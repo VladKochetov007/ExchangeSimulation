@@ -72,6 +72,14 @@ v2_r2_require_sv1b_review_attestation "$review_attestation" "$head_revision" || 
 	exit 1
 }
 review_attestation_sha256=$(v2_r2_sv1d_sha256_file "$review_attestation")
+capacity_attestation=$(v2_r2_sv1d_capacity_attestation_path "$head_revision") || exit 1
+capacity_config_sha256=$(v2_r2_sv1d_sha256_file "$v2_r2_sv1d_capacity_config") || exit 1
+v2_r2_sv1d_require_capacity_attestation "$capacity_attestation" "$head_revision" "$binary_sha256" \
+	"$capacity_config_sha256" "$review_attestation" "$review_attestation_sha256" || {
+	echo "SV1D activation requires a valid binary-evidence capacity attestation: $capacity_attestation" >&2
+	exit 1
+}
+capacity_attestation_sha256=$(v2_r2_sv1d_sha256_file "$capacity_attestation") || exit 1
 
 IFS=$'\t' read -r host_cpu_count allowed_cpu_count cpu_affinity < <(v2_r2_sv1d_cpu_policy) || exit 1
 command -v taskset >/dev/null 2>&1 || exit 1
@@ -436,13 +444,16 @@ write_invalid_provenance() {
 	jq -n --arg contract "$v2_r2_sv1_activation_contract" --arg candidate "$v2_r2_sv1_candidate_id" \
 		--arg revision "$head_revision" --arg status "$status" --arg reason "$reason" --arg output_root "$output_root" \
 		--argjson seed "$v2_r2_sv1_activation_seed" --arg horizon "$horizon" \
-		--argjson start "$simulation_start_nano" --argjson end "$simulation_end_nano" \
-		--argjson arm_exit_statuses "$arm_exit_statuses" --argjson arm_outcomes "$arm_outcomes" --argjson arm_valid "$arm_valid" \
-		'{schema_version: 1, contract: $contract, candidate: $candidate, candidate_revision: $revision,
+			--argjson start "$simulation_start_nano" --argjson end "$simulation_end_nano" \
+			--argjson arm_exit_statuses "$arm_exit_statuses" --argjson arm_outcomes "$arm_outcomes" --argjson arm_valid "$arm_valid" \
+			--arg capacity_path "$capacity_attestation" --arg capacity_sha256 "$capacity_attestation_sha256" \
+			--arg capacity_config_sha256 "$capacity_config_sha256" --arg capacity_contract "$v2_r2_sv1d_capacity_attestation_contract" \
+			'{schema_version: 1, contract: $contract, candidate: $candidate, candidate_revision: $revision,
 		 candidate_tree_sha256: null, seed: $seed, simulated_horizon: $horizon,
 		 simulation_start_nano: $start, simulation_end_nano: $end, output_root: $output_root,
 		 status: $status, activation_satisfied: false, holdouts_consumed: false, reason: $reason,
-		 arm_exit_statuses: $arm_exit_statuses, arm_outcomes: $arm_outcomes, arm_valid: $arm_valid}' \
+			 arm_exit_statuses: $arm_exit_statuses, arm_outcomes: $arm_outcomes, arm_valid: $arm_valid,
+			 capacity: {path: $capacity_path, sha256: $capacity_sha256, config_sha256: $capacity_config_sha256, contract: $capacity_contract}}' \
 		>"$tmp"
 	mv -- "$tmp" "$path"
 }
@@ -788,8 +799,10 @@ jq -n --arg contract "$v2_r2_sv1_activation_pair_contract" --arg candidate "$v2_
 	--arg binary_path "$binary" --arg binary_sha256 "$binary_sha256" --arg audit_path "$audit_binary" --arg audit_sha256 "$audit_sha256" \
 	--arg renderer_path "$renderer" --arg renderer_sha256 "$renderer_sha256" \
 	--arg checkpoint_path "$checkpoint_validator" --arg checkpoint_sha256 "$checkpoint_validator_sha256" \
-	--arg review_path "$review_attestation" --arg review_sha256 "$review_attestation_sha256" \
-	--arg config_manifest_path "$v2_r2_sv1_config_provenance_manifest" --arg config_manifest_sha256 "$config_manifest_sha256" \
+		--arg review_path "$review_attestation" --arg review_sha256 "$review_attestation_sha256" \
+		--arg capacity_path "$capacity_attestation" --arg capacity_sha256 "$capacity_attestation_sha256" \
+		--arg capacity_config_sha256 "$capacity_config_sha256" --arg capacity_contract "$v2_r2_sv1d_capacity_attestation_contract" \
+		--arg config_manifest_path "$v2_r2_sv1_config_provenance_manifest" --arg config_manifest_sha256 "$config_manifest_sha256" \
 	--argjson arms "$arm_records" \
 	--argjson gomaxprocs "$activation_gomaxprocs" --argjson memory_limit_bytes "$activation_memory_limit_bytes" \
 	--argjson gomemlimit_bytes "$activation_gomemlimit_bytes" --argjson host_cpu_count "$host_cpu_count" \
@@ -808,7 +821,8 @@ jq -n --arg contract "$v2_r2_sv1_activation_pair_contract" --arg candidate "$v2_
 	   analyzer: {path: $audit_path, sha256: $audit_sha256},
 	   renderer: {path: $renderer_path, sha256: $renderer_sha256},
 	   checkpoint_validator: {path: $checkpoint_path, sha256: $checkpoint_sha256}},
-	 review: {path: $review_path, sha256: $review_sha256},
+		 review: {path: $review_path, sha256: $review_sha256},
+		 capacity: {path: $capacity_path, sha256: $capacity_sha256, config_sha256: $capacity_config_sha256, contract: $capacity_contract},
 	 comparison: {path: $comparison_path, recorded_path: $recorded_path, sha256: $comparison_sha256,
 	   exit_status: $comparison_status, object_valid: $comparison_object_valid, valid: $comparison_valid,
 	   activation_satisfied: $comparison_activation, anti_cheating_satisfied: $comparison_anticheating,

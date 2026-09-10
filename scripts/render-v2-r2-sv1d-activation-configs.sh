@@ -22,6 +22,7 @@ require_bound_file() {
 require_bound_file "$v2_r2_sv1_preregistration_path"
 require_bound_file "$v2_r2_sv1_implementation_path"
 require_bound_file "$v2_r2_sv1_activation_runner_path"
+require_bound_file "$v2_r2_sv1d_capacity_runner_path"
 require_bound_file "$v2_r2_sv1_activation_scorer_path"
 require_bound_file "$v2_r2_sv1_config_checker_path"
 require_bound_file "$v2_r2_sv1_config_contract_test_path"
@@ -160,6 +161,7 @@ for bound_path in \
 	"$v2_r2_sv1_preregistration_path" \
 	"$v2_r2_sv1_implementation_path" \
 	"$v2_r2_sv1_activation_runner_path" \
+	"$v2_r2_sv1d_capacity_runner_path" \
 	"$v2_r2_sv1_activation_scorer_path" \
 	"$v2_r2_sv1_config_checker_path" \
 	"$v2_r2_sv1_config_contract_test_path" \

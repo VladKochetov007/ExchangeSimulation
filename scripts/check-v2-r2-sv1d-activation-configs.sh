@@ -55,7 +55,7 @@ jq -e --arg contract "$v2_r2_sv1_config_provenance_contract" --arg candidate "$v
 			.arms["mode-off"] == {path: "research/configs/v2-r2-sv1d-activation/activation-659-mode-off.json", mode: "two_sided_only", cdf_roster: true} and
 			.arms["no-roster"] == {path: "research/configs/v2-r2-sv1d-activation/activation-659-no-roster.json", mode: "no_roster", cdf_roster: false}' "$v2_r2_sv1_config_provenance_manifest" >/dev/null || fail "invalid top-level provenance"
 
-expected_bound_files='["research/v2-r2-sv1d-implementation-2026-09-09.md", "research/v2-r2-sv1d-one-sided-elastic-successor-preregistration-2026-09-09.md", "scripts/check-v2-r2-sv1d-activation-configs.sh", "scripts/run-v2-r2-sv1d-activation-probe.sh", "scripts/score-v2-r2-sv1d-activation.sh", "scripts/test-v2-r2-sv1d-activation-config-contract.sh", "scripts/v2-r2-sv1-terminal-outcome.jq"]'
+expected_bound_files='["research/v2-r2-sv1d-implementation-2026-09-09.md", "research/v2-r2-sv1d-one-sided-elastic-successor-preregistration-2026-09-09.md", "scripts/check-v2-r2-sv1d-activation-configs.sh", "scripts/run-v2-r2-sv1d-24h-capacity-probe.sh", "scripts/run-v2-r2-sv1d-activation-probe.sh", "scripts/score-v2-r2-sv1d-activation.sh", "scripts/test-v2-r2-sv1d-activation-config-contract.sh", "scripts/v2-r2-sv1-terminal-outcome.jq"]'
 expected_dependencies='["scripts/v2-integrated-longrun-r2-contract.sh", "scripts/v2-r2-sv1-24h-contract.sh", "scripts/v2-r2-sv1-terminal-outcome.jq", "scripts/v2-r2-sv1-activation-status.sh"]'
 jq -e --argjson bound_files "$expected_bound_files" --argjson dependencies "$expected_dependencies" '
 			(.bound_files | keys | sort) == ($bound_files | sort) and

@@ -64,11 +64,12 @@ v2_r2_sv1_activation_review_contract="v2-r2-sv1d-activation-review-v1"
 v2_r2_sv1_config_checker_path="scripts/check-v2-r2-sv1d-activation-configs.sh"
 v2_r2_sv1_config_contract_test_path="scripts/test-v2-r2-sv1d-activation-config-contract.sh"
 v2_r2_sv1_activation_runner_path="scripts/run-v2-r2-sv1d-activation-probe.sh"
+v2_r2_sv1d_capacity_runner_path="scripts/run-v2-r2-sv1d-24h-capacity-probe.sh"
 v2_r2_sv1_activation_scorer_path="scripts/score-v2-r2-sv1d-activation.sh"
 v2_r2_sv1_terminal_outcome_path="scripts/v2-r2-sv1-terminal-outcome.jq"
 v2_r2_sv1_cpu_limit_percent=90
-v2_r2_sv1_review_scope='["r2_calendar", "correctness_hardening", "binary_evidence", "cdf_supplier", "one_sided_local_book", "activation_protocol", "tri_arm_controls", "provenance_binding", "historical_boundary"]'
-v2_r2_sv1_activation_review_scope='["activation_evidence", "cdf_activation", "one_sided_local_book", "tri_arm_controls", "binary_evidence", "resource_guards", "provenance_binding", "historical_boundary"]'
+v2_r2_sv1_review_scope='["r2_calendar", "correctness_hardening", "lifecycle", "strict_risk", "account_scoped_liquidation", "binary_evidence", "cdf_supplier", "one_sided_local_book", "activation_protocol", "capacity_protocol", "resource_guards", "tri_arm_controls", "provenance_binding", "historical_boundary"]'
+v2_r2_sv1_activation_review_scope='["activation_evidence", "cdf_activation", "one_sided_local_book", "tri_arm_controls", "binary_evidence", "lifecycle", "strict_risk", "account_scoped_liquidation", "resource_guards", "provenance_binding", "historical_boundary"]'
 v2_r2_sv1_activation_gomaxprocs=2
 v2_r2_sv1_activation_memory_limit_bytes=$((20 * 1024 * 1024 * 1024))
 v2_r2_sv1_activation_gomemlimit_bytes=$((18 * 1024 * 1024 * 1024))
@@ -77,6 +78,209 @@ v2_r2_sv1_activation_minimum_memory_available_bytes=$((4 * 1024 * 1024 * 1024))
 v2_r2_sv1_activation_max_wall_seconds=900
 v2_r2_sv1_activation_analyzer_max_wall_seconds=300
 v2_r2_sv1d_activation_decision_interval_nano=2000000000
+
+v2_r2_sv1d_capacity_attestation_contract="v2-r2-sv1d-24h-binary-capacity-v1"
+v2_r2_sv1d_capacity_seed=659
+v2_r2_sv1d_capacity_horizon="24h"
+v2_r2_sv1d_capacity_simulation_start_nano=1735689600000000000
+v2_r2_sv1d_capacity_simulation_end_nano=1735776000000000000
+v2_r2_sv1d_capacity_config="$root_dir/research/configs/v2-r2-sv1d-activation/activation-659-treatment.json"
+v2_r2_sv1d_capacity_gomaxprocs=2
+v2_r2_sv1d_capacity_memory_limit_bytes=$((20 * 1024 * 1024 * 1024))
+v2_r2_sv1d_capacity_gomemlimit_bytes=$((18 * 1024 * 1024 * 1024))
+v2_r2_sv1d_capacity_minimum_free_bytes=$((4 * 1024 * 1024 * 1024))
+v2_r2_sv1d_capacity_safety_margin_bytes=$((4 * 1024 * 1024 * 1024))
+v2_r2_sv1d_capacity_max_wall_seconds=3600
+
+v2_r2_sv1d_capacity_attestation_path() {
+	local revision=${1:-$(git -C "$root_dir" rev-parse HEAD)}
+	[[ "$revision" =~ ^[0-9a-f]{40}$ ]] || return 1
+	printf '/home/vlad/external-scratch/v2-r2-sv1d-capacity-%s-attestation.json\n' "$revision"
+}
+
+v2_r2_sv1d_capacity_probe_root() {
+	local revision=${1:-$(git -C "$root_dir" rev-parse HEAD)}
+	[[ "$revision" =~ ^[0-9a-f]{40}$ ]] || return 1
+	printf '/home/vlad/external-scratch/v2-r2-sv1d-capacity-%s\n' "$revision"
+}
+
+v2_r2_sv1d_capacity_probe_cell() {
+	[[ $# -eq 0 ]] || return 1
+	printf 'capacity-659-treatment-g2\n'
+}
+
+v2_r2_sv1d_capacity_free_bytes() {
+	[[ $# -eq 1 && -d "$1" && ! -L "$1" ]] || return 1
+	local available_bytes
+	available_bytes=$(df -P -B1 -- "$1" | awk 'NR == 2 {print $4}') || return 1
+	[[ "$available_bytes" =~ ^[0-9]+$ ]] || return 1
+	printf '%s\n' "$available_bytes"
+}
+
+v2_r2_sv1d_capacity_memory_available_bytes() {
+	local available_bytes
+	available_bytes=$(awk '$1 == "MemAvailable:" {printf "%.0f\n", $2 * 1024; exit}' /proc/meminfo) || return 1
+	[[ "$available_bytes" =~ ^[1-9][0-9]*$ ]] || return 1
+	printf '%s\n' "$available_bytes"
+}
+
+v2_r2_sv1d_capacity_expected_cell_files() {
+	v2_r2_sv1d_expected_arm_root_files
+}
+
+v2_r2_sv1d_capacity_require_cell() {
+	[[ $# -eq 1 ]] || return 1
+	local cell=$1 expected_files actual_files actual_directories file_path
+	[[ "$cell" == /* && "$cell" != */ && "$cell" != *$'\n'* && "$cell" != *$'\t'* ]] || return 1
+	[[ -d "$cell" && ! -L "$cell" && "$(realpath -e -- "$cell")" == "$cell" ]] || return 1
+	if find "$cell" -type l -print -quit 2>/dev/null | grep -q .; then
+		return 1
+	fi
+	if find "$cell" \( -type p -o -type s -o -type b -o -type c \) -print -quit 2>/dev/null | grep -q .; then
+		return 1
+	fi
+	actual_directories=$(find "$cell" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | LC_ALL=C sort)
+	[[ "$actual_directories" == venues ]] || return 1
+	expected_files=$(v2_r2_sv1d_capacity_expected_cell_files)
+	actual_files=$(find "$cell" -mindepth 1 -maxdepth 1 -type f -printf '%f\n' | LC_ALL=C sort)
+	[[ "$actual_files" == "$expected_files" ]] || return 1
+	while IFS= read -r file_path; do
+		[[ -f "$cell/$file_path" && ! -L "$cell/$file_path" ]] || return 1
+		if [[ "$file_path" != market-data-*.bin && "$file_path" != simulator.stdout.log && "$file_path" != simulator.stderr.log ]]; then
+			[[ -s "$cell/$file_path" ]] || return 1
+		fi
+	done < <(v2_r2_sv1d_capacity_expected_cell_files)
+	v2_r2_verify_evidence_manifest "$cell"
+}
+
+# This predicate is the SV1D-specific replacement for the historical capacity
+# validator. It deliberately has no activation-provenance prerequisite: the
+# capacity measurement is the prerequisite for activation, not its aftermath.
+v2_r2_sv1d_require_capacity_attestation() {
+	[[ $# -eq 6 ]] || return 1
+	local attestation=$1 expected_revision=$2 expected_binary_sha256=$3 expected_config_sha256=$4
+	local expected_review_path=$5 expected_review_sha256=$6
+	local expected_tree expected_config_path expected_config expected_review_actual_sha256
+	local measurement_config_path launch_config_path probe_root probe_cell checkpoint_validator
+	local checkpoint_validator_revision checkpoint_validator_sha256
+	local expected_host_memory_total expected_minimum_memory_available
+	local current_available_free_bytes current_memory_available_bytes actual_manifest_sha256
+	local current_host_cpu_count current_allowed_cpu_count current_cpu_affinity
+	[[ "$expected_revision" =~ ^[0-9a-f]{40}$ && "$expected_binary_sha256" =~ ^[0-9a-f]{64}$ &&
+		"$expected_config_sha256" =~ ^[0-9a-f]{64}$ && "$expected_review_sha256" =~ ^[0-9a-f]{64}$ ]] || return 1
+	[[ -s "$attestation" && ! -L "$attestation" ]] || return 1
+	v2_r2_require_single_json_object "$attestation" || return 1
+	expected_tree=$(v2_r2_sv1d_git_tree_sha256 "$expected_revision") || return 1
+	expected_config_path="research/configs/v2-r2-sv1d-activation/activation-659-treatment.json"
+	expected_config="$root_dir/$expected_config_path"
+	[[ -f "$expected_config" && ! -L "$expected_config" && "$(realpath -e -- "$expected_config")" == "$expected_config" ]] || return 1
+	[[ "$(v2_r2_sv1d_sha256_file "$expected_config")" == "$expected_config_sha256" ]] || return 1
+	[[ "$expected_review_path" == /* && "$expected_review_path" != "$root_dir"/* && "$expected_review_path" != */ &&
+		-f "$expected_review_path" && ! -L "$expected_review_path" && "$(realpath -e -- "$expected_review_path")" == "$expected_review_path" ]] || return 1
+	expected_review_actual_sha256=$(v2_r2_sv1d_sha256_file "$expected_review_path") || return 1
+	[[ "$expected_review_actual_sha256" == "$expected_review_sha256" ]] || return 1
+	v2_r2_require_sv1b_review_attestation "$expected_review_path" "$expected_revision" || return 1
+
+	measurement_config_path=$(jq -er '.measurement_config_path | select(type == "string" and length > 0)' "$attestation") || return 1
+	launch_config_path=$(jq -er '.launch_config_path | select(type == "string" and length > 0)' "$attestation") || return 1
+	[[ "$measurement_config_path" == "$expected_config_path" && "$launch_config_path" == "$expected_config_path" ]] || return 1
+	probe_root=$(jq -er '.probe_root | select(type == "string" and startswith("/"))' "$attestation") || return 1
+	[[ "$probe_root" != "$root_dir" && "$probe_root" != "$root_dir"/* && "$probe_root" != *$'\n'* && "$probe_root" != *$'\t'* &&
+		-d "$probe_root" && ! -L "$probe_root" && "$(realpath -e -- "$probe_root")" == "$probe_root" ]] || return 1
+	[[ "$probe_root" == "$(v2_r2_sv1d_capacity_probe_root "$expected_revision")" ]] || return 1
+	probe_cell=$(jq -er '.probe_cell | select(type == "string" and length > 0)' "$attestation") || return 1
+	[[ "$probe_cell" == "$(v2_r2_sv1d_capacity_probe_cell)" && "$probe_cell" != */* && "$probe_cell" != *$'\n'* && "$probe_cell" != *$'\t'* ]] || return 1
+	v2_r2_sv1d_capacity_require_cell "$probe_root/$probe_cell" || return 1
+	[[ "$(v2_r2_sv1d_sha256_file "$probe_root/$probe_cell/run-config.json")" == "$expected_config_sha256" ]] || return 1
+
+	checkpoint_validator=$(jq -er '.checkpoint_validator.path | select(type == "string" and startswith("/"))' "$attestation") || return 1
+	checkpoint_validator_revision=$(jq -er '.checkpoint_validator.revision | select(type == "string" and test("^[0-9a-f]{40}$"))' "$attestation") || return 1
+	checkpoint_validator_sha256=$(jq -er '.checkpoint_validator.sha256 | select(type == "string" and test("^[0-9a-f]{64}$"))' "$attestation") || return 1
+	[[ "$checkpoint_validator_revision" == "$expected_revision" ]] || return 1
+	v2_r2_sv1d_require_pinned_binary "$checkpoint_validator" "$expected_revision" "$checkpoint_validator_sha256" "exchange_sim/cmd/checkpointvalidate" || return 1
+	v2_r2_register_checkpoint_validator "$checkpoint_validator" "$expected_revision" "$checkpoint_validator_sha256" || return 1
+
+	expected_host_memory_total=$(jq -er '.resource_policy.host_memory_total_bytes | select(type == "number" and floor == . and . > 0)' "$attestation") || return 1
+	expected_minimum_memory_available=$(v2_r2_sv1d_required_memory_available_bytes "$expected_host_memory_total") || return 1
+	IFS=$'\t' read -r current_host_cpu_count current_allowed_cpu_count current_cpu_affinity < <(v2_r2_sv1d_cpu_policy) || return 1
+	current_available_free_bytes=$(v2_r2_sv1d_capacity_free_bytes "$probe_root") || return 1
+	current_memory_available_bytes=$(v2_r2_sv1d_capacity_memory_available_bytes) || return 1
+	actual_manifest_sha256=$(v2_r2_sv1d_sha256_file "$probe_root/$probe_cell/evidence-manifest.json") || return 1
+	jq -e --arg contract "$v2_r2_sv1d_capacity_attestation_contract" --arg revision "$expected_revision" \
+		--arg tree "$expected_tree" --arg binary_sha256 "$expected_binary_sha256" --arg config_path "$expected_config_path" \
+		--arg config_sha256 "$expected_config_sha256" --arg review_path "$expected_review_path" --arg review_sha256 "$expected_review_sha256" \
+		--argjson seed "$v2_r2_sv1d_capacity_seed" --arg horizon "$v2_r2_sv1d_capacity_horizon" \
+		--argjson start "$v2_r2_sv1d_capacity_simulation_start_nano" --argjson end "$v2_r2_sv1d_capacity_simulation_end_nano" \
+		--argjson minimum_free "$v2_r2_sv1d_capacity_minimum_free_bytes" \
+		--argjson safety_margin "$v2_r2_sv1d_capacity_safety_margin_bytes" \
+		--argjson minimum_memory_available "$expected_minimum_memory_available" \
+		--argjson gomaxprocs "$v2_r2_sv1d_capacity_gomaxprocs" \
+		--argjson memory_limit "$v2_r2_sv1d_capacity_memory_limit_bytes" \
+		--argjson gomemlimit "$v2_r2_sv1d_capacity_gomemlimit_bytes" \
+		--argjson cpu_limit "$v2_r2_sv1_cpu_limit_percent" \
+		--argjson expected_host_memory_total "$expected_host_memory_total" \
+		--argjson host_cpu "$current_host_cpu_count" --argjson allowed_cpu "$current_allowed_cpu_count" --arg affinity "$current_cpu_affinity" \
+		--argjson max_wall "$v2_r2_sv1d_capacity_max_wall_seconds" \
+		--argjson current_free "$current_available_free_bytes" --argjson current_memory "$current_memory_available_bytes" \
+		--arg manifest_sha256 "$actual_manifest_sha256" '
+		type == "object" and .schema_version == 1 and .contract == $contract and
+		.measurement == "full_24h_binary_evidence_capacity_probe" and .evidence_format == "evstream_v3" and .log_mode == "full" and
+		.source_revision == $revision and .source_tree_sha256 == $tree and .binary_sha256 == $binary_sha256 and
+		.measurement_config_path == $config_path and .launch_config_path == $config_path and
+		.measurement_config_sha256 == $config_sha256 and .launch_config_sha256 == $config_sha256 and .config_sha256 == $config_sha256 and
+		.measurement_seed == $seed and .source_config_seed == $seed and .capacity_only == true and .calibration_only == false and
+		.simulated_horizon == $horizon and .simulation_start_nano == $start and .simulation_end_nano == $end and
+		.holdouts_consumed == false and .review.path == $review_path and .review.sha256 == $review_sha256 and
+		(.checkpoint_validator.path | type) == "string" and .checkpoint_validator.revision == $revision and
+		(.checkpoint_validator.sha256 | type) == "string" and (.checkpoint_validator.sha256 | test("^[0-9a-f]{64}$")) and
+		(.peak_output_bytes | type) == "number" and (.peak_output_bytes | floor) == . and .peak_output_bytes > 0 and
+		(.safety_margin_bytes | type) == "number" and .safety_margin_bytes == $safety_margin and
+		(.required_free_bytes | type) == "number" and .required_free_bytes == (.peak_output_bytes + .safety_margin_bytes) and
+		(.available_free_bytes | type) == "number" and .available_free_bytes >= .required_free_bytes and
+		(.initial_available_free_bytes | type) == "number" and .initial_available_free_bytes >= $minimum_free and
+		(.minimum_free_bytes | type) == "number" and .minimum_free_bytes == $minimum_free and
+		(.initial_memory_available_bytes | type) == "number" and .initial_memory_available_bytes >= $minimum_memory_available and
+		(.final_memory_available_bytes | type) == "number" and .final_memory_available_bytes >= $minimum_memory_available and
+		(.evidence_manifest_sha256 | type) == "string" and .evidence_manifest_sha256 == $manifest_sha256 and
+		(.simulator_stdout_sha256 | type) == "string" and (.simulator_stdout_sha256 | test("^[0-9a-f]{64}$")) and
+		(.simulator_stderr_sha256 | type) == "string" and (.simulator_stderr_sha256 | test("^[0-9a-f]{64}$")) and
+		(.wall_clock_seconds | type) == "number" and floor == . and .wall_clock_seconds >= 0 and .wall_clock_seconds <= $max_wall and
+		(.resource_policy | type) == "object" and .resource_policy.gomaxprocs == $gomaxprocs and
+		.resource_policy.memory_limit_bytes == $memory_limit and .resource_policy.gomemlimit_bytes == $gomemlimit and
+		.resource_policy.cpu_limit_percent == $cpu_limit and .resource_policy.minimum_free_bytes == $minimum_free and
+		.resource_policy.minimum_memory_available_bytes == $minimum_memory_available and
+		.resource_policy.host_memory_total_bytes == $expected_host_memory_total and
+		(.resource_policy.minimum_memory_available_bytes | type) == "number" and
+		.resource_policy.host_cpu_count == $host_cpu and .resource_policy.allowed_cpu_count == $allowed_cpu and
+		.resource_policy.cpu_affinity == $affinity and .resource_policy.max_wall_seconds == $max_wall and
+		(.peak_rss_bytes | type) == "number" and .peak_rss_bytes > 0 and .peak_rss_bytes <= $memory_limit and
+		$current_free >= .required_free_bytes and $current_memory >= .resource_policy.minimum_memory_available_bytes' \
+		"$attestation" >/dev/null || return 1
+	[[ "$(v2_r2_sv1d_sha256_file "$probe_root/$probe_cell/simulator.stdout.log")" == "$(jq -er '.simulator_stdout_sha256' "$attestation")" &&
+		"$(v2_r2_sv1d_sha256_file "$probe_root/$probe_cell/simulator.stderr.log")" == "$(jq -er '.simulator_stderr_sha256' "$attestation")" ]] || return 1
+	jq -e --arg revision "$expected_revision" --arg config_sha256 "$expected_config_sha256" --argjson seed "$v2_r2_sv1d_capacity_seed" \
+		--argjson start "$v2_r2_sv1d_capacity_simulation_start_nano" --argjson end "$v2_r2_sv1d_capacity_simulation_end_nano" \
+		'.schema_version == 1 and .contract == "v2-r2-sv1d-capacity-runner-v1" and .git_revision == $revision and
+		 .seed == $seed and .simulated_horizon == "24h" and .simulation_start_nano == $start and .simulation_end_nano == $end and
+		 .capacity_only == true and .holdouts_consumed == false and .config_sha256 == $config_sha256 and
+		 .evidence_format == "evstream_v3" and .log_mode == "full"' \
+		"$probe_root/$probe_cell/run-metadata.json" >/dev/null || return 1
+	jq -e --arg revision "$expected_revision" --argjson seed "$v2_r2_sv1d_capacity_seed" \
+		--argjson start "$v2_r2_sv1d_capacity_simulation_start_nano" --argjson end "$v2_r2_sv1d_capacity_simulation_end_nano" \
+		'.build.revision == $revision and .build.modified == false and .config.seed == $seed and
+		 .config.log_mode == "full" and .config.evidence_format == "evstream_v3"' \
+		"$probe_root/$probe_cell/manifest.json" >/dev/null || return 1
+	jq -e --argjson start "$v2_r2_sv1d_capacity_simulation_start_nano" --argjson end "$v2_r2_sv1d_capacity_simulation_end_nano" \
+		'(.initial_accounts | type == "array" and length > 0 and all(.[]; .account.timestamp == $start)) and
+		 (.terminal_accounts | type == "array" and length > 0 and all(.[]; .account.timestamp == $end))' \
+		"$probe_root/$probe_cell/greeks.json" >/dev/null || return 1
+	v2_r2_terminal_completed_outcome_present "$probe_root/$probe_cell" || return 1
+	v2_r2_require_checkpoint_stream "$probe_root/$probe_cell/checkpoints.jsonl" \
+		"$v2_r2_sv1d_capacity_simulation_start_nano" "$v2_r2_sv1d_capacity_simulation_end_nano" evstream_v3 || return 1
+	v2_r2_require_binary_checkpoint_stream_exact "$probe_root/$probe_cell/checkpoints.jsonl" \
+		"$v2_r2_sv1d_capacity_simulation_start_nano" "$v2_r2_sv1d_capacity_simulation_end_nano" \
+		"$probe_root/$probe_cell/binary-evidence-attestation.json" || return 1
+}
 
 v2_r2_sv1d_calendar='[{"name":"short","listing_interval_nano":3600000000000,"time_to_expiry_nano":7200000000000},{"name":"medium","listing_interval_nano":10800000000000,"time_to_expiry_nano":21600000000000},{"name":"long","listing_interval_nano":21600000000000,"time_to_expiry_nano":43200000000000}]'
 v2_r2_sv1d_arm_names=(treatment mode-off no-roster)

@@ -11,8 +11,9 @@ temp_root=$(mktemp -d)
 trap 'rm -rf -- "$temp_root"' EXIT
 
 runner="$root_dir/scripts/run-v2-r2-sv1d-activation-probe.sh"
+capacity_runner="$root_dir/scripts/run-v2-r2-sv1d-24h-capacity-probe.sh"
 scorer="$root_dir/scripts/score-v2-r2-sv1d-activation.sh"
-for file in "$contract" "$checker" "$generator" "$runner" "$scorer"; do
+for file in "$contract" "$checker" "$generator" "$runner" "$capacity_runner" "$scorer"; do
 	[[ -f "$file" && -x "$file" ]] || { echo "SV1D activation contract script is not executable: $file" >&2; exit 1; }
 done
 [[ -f "$status_writer" && ! -L "$status_writer" ]] || { echo "SV1D activation status writer is missing or symlinked" >&2; exit 1; }
@@ -36,6 +37,11 @@ rg -F 'simulator_stdout_sha256' "$status_writer" "$contract" "$runner" "$root_di
 rg -F 'max_inventory_utilization' "$contract" "$root_dir/analysis/cdf_liquidity.go" >/dev/null
 rg -F 'filled_qty >= .configured_minimum_qualifying_qty' "$contract" >/dev/null
 rg -F 'v2_r2_sv1d_require_activation_capacity' "$contract" "$checker" "$generator" >/dev/null
+rg -F 'v2_r2_sv1d_require_capacity_attestation' "$contract" "$runner" "$capacity_runner" "$scorer" >/dev/null
+rg -F 'run-v2-r2-sv1d-24h-capacity-probe.sh' "$contract" "$checker" "$generator" >/dev/null
+rg -F 'capacity_protocol' "$contract" >/dev/null
+rg -F 'capacity: {path:' "$runner" >/dev/null
+rg -F '.capacity.path' "$scorer" >/dev/null
 rg -F 'host_memory_total_bytes' "$contract" "$root_dir/scripts/run-v2-r2-sv1d-activation-probe.sh" "$root_dir/scripts/score-v2-r2-sv1d-activation.sh" >/dev/null
 rg -F 'host_memory_total_bytes: $comparison_host_memory_total' "$root_dir/scripts/run-v2-r2-sv1d-activation-probe.sh" >/dev/null
 rg -F 'comparison_valid" == true' "$root_dir/scripts/score-v2-r2-sv1d-activation.sh" >/dev/null
@@ -55,7 +61,7 @@ if rg -F 'holdout-619' "$generator" "$checker" "$contract" >/dev/null; then
 	echo "SV1D activation package names a holdout" >&2
 	exit 1
 fi
-if rg -F 'capacity' "$generator" >/dev/null; then
+if rg -F 'run-v2-r2-sv1d-24h-capacity-probe.sh ' "$generator" >/dev/null; then
 	echo "SV1D activation config generator must not silently perform capacity work" >&2
 	exit 1
 fi
@@ -73,6 +79,13 @@ v2_r2_sv1d_require_activation_capacity "$capacity_fixture" || {
 jq '.elastic_liquidity_suppliers[0].max_position = 151' "$capacity_fixture" >"$temp_root/over-capacity.json"
 if v2_r2_sv1d_require_activation_capacity "$temp_root/over-capacity.json"; then
 	echo "horizon-relative finite-capital overflow fixture was accepted" >&2
+	exit 1
+fi
+printf '%s\n' '{}' >"$temp_root/malformed-capacity-attestation.json"
+if v2_r2_sv1d_require_capacity_attestation "$temp_root/malformed-capacity-attestation.json" \
+	"$(git -C "$root_dir" rev-parse HEAD)" "$(printf '%064d' 0)" "$(printf '%064d' 0)" \
+	"$temp_root/missing-review.json" "$(printf '%064d' 0)"; then
+	echo "malformed capacity attestation was accepted" >&2
 	exit 1
 fi
 

@@ -54,7 +54,8 @@ jq -e --arg contract "$v2_r2_sv1_activation_pair_contract" --arg candidate "$v2_
 		(.resource_policy.host_memory_total_bytes | type) == "number" and .resource_policy.host_memory_total_bytes > 0 and
 		(.resource_policy.minimum_memory_available_bytes | type) == "number" and
 		.resource_policy.minimum_memory_available_bytes == (if ((.resource_policy.host_memory_total_bytes + 4) / 5) < (4 * 1024 * 1024 * 1024) then (4 * 1024 * 1024 * 1024) else ((.resource_policy.host_memory_total_bytes + 4) / 5 | floor) end) and
-		.resource_policy.max_wall_seconds == 900 and .resource_policy.analyzer_max_wall_seconds == 300' "$provenance_path" >/dev/null || exit 1
+		.resource_policy.max_wall_seconds == 900 and .resource_policy.analyzer_max_wall_seconds == 300 and
+		(.capacity | type) == "object" and .capacity.contract == "v2-r2-sv1d-24h-binary-capacity-v1"' "$provenance_path" >/dev/null || exit 1
 
 config_checker="$root_dir/$v2_r2_sv1_config_checker_path"
 [[ -x "$config_checker" ]] || exit 1
@@ -84,6 +85,15 @@ review_path=$(jq -er '.review.path | select(type == "string")' "$provenance_path
 review_sha256=$(jq -er '.review.sha256 | select(type == "string" and test("^[0-9a-f]{64}$"))' "$provenance_path") || exit 1
 [[ "$(v2_r2_sv1d_sha256_file "$review_path")" == "$review_sha256" ]] || exit 1
 v2_r2_require_sv1b_review_attestation "$review_path" "$head_revision" || exit 1
+
+capacity_path=$(jq -er '.capacity.path | select(type == "string")' "$provenance_path") || exit 1
+capacity_sha256=$(jq -er '.capacity.sha256 | select(type == "string" and test("^[0-9a-f]{64}$"))' "$provenance_path") || exit 1
+capacity_config_sha256=$(jq -er '.capacity.config_sha256 | select(type == "string" and test("^[0-9a-f]{64}$"))' "$provenance_path") || exit 1
+[[ "$capacity_path" == "$(v2_r2_sv1d_capacity_attestation_path "$head_revision")" ]] || exit 1
+[[ "$(v2_r2_sv1d_sha256_file "$capacity_path")" == "$capacity_sha256" ]] || exit 1
+[[ "$capacity_config_sha256" == "$(v2_r2_sv1d_sha256_file "$v2_r2_sv1d_capacity_config")" ]] || exit 1
+v2_r2_sv1d_require_capacity_attestation "$capacity_path" "$head_revision" "$binary_sha256" \
+	"$capacity_config_sha256" "$review_path" "$review_sha256" || exit 1
 
 config_manifest_path=$(jq -er '.config_provenance_manifest_path | select(type == "string")' "$provenance_path") || exit 1
 config_manifest_sha256=$(jq -er '.config_provenance_manifest_sha256 | select(type == "string" and test("^[0-9a-f]{64}$"))' "$provenance_path") || exit 1
