@@ -1020,3 +1020,53 @@ supplier attribution, quote lifetimes, inventory/PnL exposure,
 withdrawal/reprice behavior, and removal-counterfactual coverage. The old R2,
 SV1C, and invalid SV1D outcomes remain historical negative/non-advancing
 records and are not rewritten.
+
+## Append-only current checkpoint: exact-tree CDF lifecycle hardening — 2026-09-10
+
+The authoritative scientific branch is clean and pushed at `c2b0ad7`
+(`test: cover CDF lifecycle edge cases`), with semantic parents
+`1298a7f` (`fix: enforce causal CDF quote lifecycle`) and `fbdec9d`
+(`fix: bind rendered payloads to binary evidence`). The predecessor
+`4965ada` lifecycle checkpoint was independently reviewed by Goodall the 2nd
+(Sol-xhigh) and rejected for promotion. Its seven findings are preserved in
+the triage note; this checkpoint addresses them with attributable changes and
+adversarial regressions rather than treating the rejected verdict as
+acceptance.
+
+- Epoch-4 binary frames now carry a SHA-256 commitment to the canonical JSON
+  payload, the renderer verifies it, and strict CDF source/render identity
+  comparison includes the payload digest. Epoch-3 historical streams remain
+  readable, while the registered successor contract is epoch 4.
+- CDF supplier decisions carry an explicit `replaces_order_id` in decision
+  schema v3 (v1/v2 decoding remains supported). Strict analysis requires the
+  replacement link and changed terms before counting a completed reprice.
+  The audit rejects multiple simultaneous live supplier orders and terminal
+  order-ID reuse.
+- Forced exchange cancellation evidence is emitted after the public
+  `BookDelta`, allowing strict depth reconstruction to observe the post-removal
+  state. A legitimate actor-cancel/forced-cancel `ORDER_NOT_FOUND` race is
+  accepted only for a previously recorded forced terminal order.
+- Strict decision reasons are restricted to the preregistered economic
+  lifecycle vocabulary. Per-supplier activation now requires an actual
+  withdrawal or reprice cancellation; aggregate arbitrary cancellations no
+  longer satisfy the lifecycle gate.
+- Focused tests cover payload mutation after attestation regeneration,
+  explicit replacement identity, one-live-order enforcement, terminal-ID
+  reuse, forced-cancel races, partial-to-full fills, same-timestamp sequence
+  inversion, and producer BookDelta ordering.
+
+The exact clean bounded gate `GOMAXPROCS=4 GOMEMLIMIT=8GiB make test` passed
+on `c2b0ad7`, including package, integrated-long-run, R2, and archive suites;
+the focused analyzer/exchange/multivenue suites and `git diff --check` also
+passed. The performance branch was fetched at this natural semantic
+checkpoint and has no commit after reviewed `b1847ac`; no performance code was
+merged. RAM remained below the 8 GiB process limit with approximately 24 GiB
+host-available, and approximately 38 GiB disk was free.
+
+This is still a promotion checkpoint, not launch authorization. No binary
+rebuild, capacity run, development cell, freeze authorization, or holdout was
+consumed; holdouts `619/631/641` remain untouched. Next: fresh exact-tree
+Sol-xhigh review of the complete successor, `go vet`, targeted race and
+fresh-process evidence-neutrality checks, an actual binary-evidence capacity
+measurement, then a provenance-pinned Go 1.27 build and the development-only
+SV1D activation probe before any registered 24-hour cell.

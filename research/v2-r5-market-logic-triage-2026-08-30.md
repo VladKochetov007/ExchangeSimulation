@@ -758,3 +758,47 @@ supplier attribution, concentration, quote-lifetime, inventory/PnL,
 withdrawal/reprice, and removal-counterfactual diagnostics. A fresh review of
 the exact final successor tree is required before the repaired SV1D activation
 probe. Historical R2/SV1C/SV1D records remain unchanged.
+
+## Exact-tree review response — `c2b0ad7` — 2026-09-10
+
+### Review boundary
+
+Goodall the 2nd (Sol-xhigh) independently reviewed exact clean predecessor
+`4965ada` and rejected promotion. The review was read-only and did not run a
+simulation. Its findings are treated as scientific gate failures, not as
+implementation suggestions to be waived.
+
+### Finding disposition
+
+| Finding | Disposition on current tree | Evidence |
+|---|---|---|
+| Rendered payload could be changed without changing source identity | Fixed in `fbdec9d`; epoch-4 frame payload digest is checked by renderer and strict analyzer | `TestRenderBinaryFrameRejectsPayloadDigestMismatch`, `TestCDFStrictRenderedEvidenceRejectsPayloadMutation` |
+| More than one live supplier order was not rejected | Fixed in `1298a7f`; supplier-to-live-order index and terminal-ID reuse check | `TestCDFStrictAuditRejectsMultipleLiveOrders`, `TestCDFStrictAuditRejectsTerminalOrderReuse` |
+| Actor cancel racing exchange forced cancel rejected valid `ORDER_NOT_FOUND` | Fixed in `1298a7f`; forced terminal state is an allowed causal predecessor | `TestCDFCancelRejectedForcedCancelRaceIsReconciled` |
+| Forced cancellation was logged before public depth removal | Fixed in `1298a7f`; all forced-cancel call sites log after book mutation/public delta | `TestExchangeForcedCancellationIsLoggedWithoutActorRequest` |
+| Reprice completion was inferred from any later changed acceptance | Fixed in `1298a7f`; actor emits `replaces_order_id`, strict audit requires it and changed terms | `TestCDFStrictRepriceRejectsUnlinkedReplacement`, `TestCDFRepriceLifecycleSeparatesCancelFromReplacement` |
+| Any nonempty/self-attested cancellation reason could satisfy lifecycle | Fixed in `1298a7f`; strict reason vocabulary and per-supplier withdrawal/reprice gate | strict decision validation and finalization predicates |
+| Strict adversarial end-to-end coverage was absent | Added in `0c0266f` and `c2b0ad7` | payload mutation, lifecycle race, partial fill, terminal identity, and sequence tests |
+
+The forced-cancel producer change is evidence ordering only: exchange book,
+ledger, RNG, actor-visible state, and matching decisions are unchanged. The
+binary payload commitment adds an encoding/hash operation to the successor
+evidence path; it does not alter economic state or event order. Epoch-3
+historical streams remain readable, but strict successor audits require the
+registered epoch 4 contract.
+
+### Current gate result and remaining work
+
+`GOMAXPROCS=4 GOMEMLIMIT=8GiB make test` passed cleanly on `c2b0ad7`, as did
+focused `analysis`, `exchange`, and `simulations/multivenue` tests plus
+`git diff --check`. The performance feed was fetched through the current tip;
+there are no commits after reviewed `b1847ac`, and no performance branch code
+was imported. No development cell, capacity probe, freeze authorization, or
+holdout was consumed.
+
+This disposition is not yet a promotion verdict: a new exact-tree Sol-xhigh
+review is required for `c2b0ad7` after the fixes. Then run `go vet ./...`,
+targeted race tests, fresh-process determinism/evidence-neutrality checks, and
+an actual binary-evidence full-run capacity measurement. Only an accepted
+candidate may receive the pinned Go 1.27 build and the development-only SV1D
+activation probe. Holdouts `619/631/641` remain behind freeze authorization.

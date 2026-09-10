@@ -852,3 +852,39 @@ The remaining promotion work is strict CDF end-to-end evidence coverage and
 the preregistered supplier concentration, quote-lifecycle, inventory/PnL, and
 removal-counterfactual diagnostics, followed by fresh exact-tree review. No
 holdout may be touched before freeze authorization.
+
+## Append-only current checkpoint: Goodall review response and lifecycle hardening — 2026-09-10
+
+The exact scientific HEAD is `c2b0ad7`, pushed on
+`autoresearch/ffa-ecology-gen0`, with a clean worktree. The predecessor
+`4965ada` was rejected by the independent Goodall the 2nd Sol-xhigh review.
+The rejection identified: missing payload-content binding, unenforced
+one-live-order semantics, an unaccepted forced-cancel race, producer/log depth
+ordering, inferred rather than linked repricing, self-attested cancellation
+motivation, and insufficient strict adversarial coverage.
+
+The successor response is split across `fbdec9d`, `1298a7f`, `0c0266f`, and
+`c2b0ad7`. Epoch-4 binary evidence binds the renderer/analyzer payload to the
+source digest; CDF decision schema v3 carries `replaces_order_id`; strict
+analysis enforces one live order and no terminal identity reuse; allowed
+economic reasons are explicit; forced cancellation is logged after the public
+book update; forced-cancel/cancel-rejection races are reconciled; and
+per-supplier activation requires a real withdrawal or reprice cancellation.
+The tests include a strict end-to-end source/render payload-tamper fixture and
+the lifecycle/order/ordering adversarial cases listed in `RESUME-HERE.md`.
+
+The clean bounded `GOMAXPROCS=4 GOMEMLIMIT=8GiB make test` passed on the exact
+HEAD, including all package tests and integrated-long-run/R2/archive guards.
+Focused suites and `git diff --check` pass. Performance ref
+`origin/autoresearch/v2-performance-research` was fetched at this checkpoint;
+there is no commit after `b1847ac`, and no performance implementation was
+imported. The host currently has approximately 38 GiB free and 24 GiB
+available RAM. No development/capacity cell, binary launch, freeze, or
+holdout `619/631/641` has run.
+
+Promotion remains blocked until one fresh independent review accepts this
+exact complete tree, followed by vet/race/fresh-process checks, a measured
+binary-evidence capacity floor, and a clean provenance-pinned Go 1.27 build.
+The old R2 candidate remains the archived negative control
+`NON-VIABLE AT THE 24H MARKET-SURVIVAL GATE`; no historical result has been
+rewritten.
