@@ -2,6 +2,7 @@ package multivenue
 
 import (
 	"context"
+	"encoding/hex"
 	"math"
 	"strings"
 	"testing"
@@ -9,6 +10,7 @@ import (
 
 	"exchange_sim/actor"
 	"exchange_sim/exchange"
+	"exchange_sim/simulation"
 	etypes "exchange_sim/types"
 )
 
@@ -68,6 +70,20 @@ func TestCDFSupplierDisabledOneSidedBookWaits(t *testing.T) {
 	supplier.onTick(time.Unix(0, int64(2*time.Second)))
 	if got := len(gateway.orders()); got != 0 {
 		t.Fatalf("mode-off one-sided orders = %d, want zero", got)
+	}
+}
+
+func TestCDFSupplierDecisionCarriesDeliveredObservationFingerprint(t *testing.T) {
+	gateway := newMetaGateway()
+	fingerprint := [16]byte{1, 2, 3, 4}
+	cfg := cdfSupplierUnitConfig()
+	cfg.ObservationFrontier = func() simulation.MarketDataFrontier {
+		return simulation.MarketDataFrontier{LinkID: 3, Ordinal: 7, DeliveredAt: 1_000, Fingerprint: fingerprint}
+	}
+	supplier := NewElasticLiquiditySupplier(1, gateway, cfg)
+	decision := supplier.baseDecision(2_000)
+	if decision.ObservationFingerprint != hex.EncodeToString(fingerprint[:]) {
+		t.Fatalf("decision fingerprint = %q, want the delivered message identity", decision.ObservationFingerprint)
 	}
 }
 

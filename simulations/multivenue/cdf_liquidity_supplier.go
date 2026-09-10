@@ -1028,6 +1028,9 @@ func (s *ElasticLiquiditySupplier) baseDecision(now int64) ElasticLiquiditySuppl
 		frontier = s.cfg.ObservationFrontier()
 	}
 	fingerprint := ""
+	if frontier.Fingerprint != ([16]byte{}) {
+		fingerprint = hex.EncodeToString(frontier.Fingerprint[:])
+	}
 	digest := ""
 	if frontier.Digest != ([16]byte{}) {
 		digest = hex.EncodeToString(frontier.Digest[:])

@@ -64,6 +64,10 @@ type MarketDataFrontier struct {
 	Ordinal     uint64
 	DeliveredAt int64
 	Digest      [16]byte
+	// Fingerprint identifies the last delivered public message itself. Digest
+	// authenticates the complete prefix; Fingerprint lets an evidence-only
+	// actor decision bind its reported observation to that exact message.
+	Fingerprint [16]byte
 }
 
 // MarketDataDecision records an attempted order decision at the actor-facing
@@ -299,6 +303,10 @@ func (r *MarketDataReceiptRecorder) RecordReceipt(receipt MarketDataReceipt) Mar
 	if !ok {
 		return MarketDataFrontier{}
 	}
+	if receipt.Fingerprint == ([16]byte{}) {
+		r.writeErr = fmt.Errorf("market-data receipt has empty message fingerprint")
+		return MarketDataFrontier{}
+	}
 	r.nextEvent++
 	var raw [MarketDataReceiptRecordBytes]byte
 	encodeMarketDataRecord(raw[:], receipt.MarketDataSchedule, linkID, symbolID, receipt.DeliveredAt, r.nextEvent)
@@ -312,7 +320,10 @@ func (r *MarketDataReceiptRecorder) RecordReceipt(receipt MarketDataReceipt) Mar
 	_, _ = chain.Write(raw[:])
 	var digest [16]byte
 	copy(digest[:], chain.Sum(nil))
-	frontier := MarketDataFrontier{LinkID: linkID, Ordinal: receipt.LinkOrdinal, DeliveredAt: receipt.DeliveredAt, Digest: digest}
+	frontier := MarketDataFrontier{
+		LinkID: linkID, Ordinal: receipt.LinkOrdinal, DeliveredAt: receipt.DeliveredAt,
+		Digest: digest, Fingerprint: receipt.Fingerprint,
+	}
 	r.frontiers[linkID] = frontier
 	return frontier
 }
