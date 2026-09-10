@@ -1437,6 +1437,47 @@ func TestCDFCancelRejectedFillRaceIsReconciled(t *testing.T) {
 	}
 }
 
+func TestCDFCancelRejectedForcedCancelRaceIsReconciled(t *testing.T) {
+	state := &cdfSupplierState{audit: CDFSupplierActivationAudit{VenueID: "north", Role: "cdf_supplier_1", ClientID: 7}}
+	orderKey := cdfOrderKey{venueID: "north", clientID: 7, orderID: 11}
+	orders := map[cdfOrderKey]*cdfOrderState{orderKey: {
+		side: "BUY", price: 100, originalQty: 5, remainingQty: 5, acceptedAt: 10, acceptedGlobalSeq: 1,
+	}}
+	audit := &CDFActivationAudit{
+		strictMechanics:     true,
+		terminalOrders:      make(map[cdfOrderKey]*cdfOrderState),
+		liveOrderBySupplier: map[cdfParticipantKey]cdfOrderKey{{venueID: "north", clientID: 7}: orderKey},
+	}
+	states := map[cdfParticipantKey]*cdfSupplierState{{venueID: "north", clientID: 7}: state}
+	cancelledRaw, err := json.Marshal(cdfCancelledEvidence{
+		OrderID: 11, RemainingQty: 5, Reason: "EXCHANGE_FORCED_LIFECYCLE",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	audit.processCDFCancelled(Event{SimTS: 20, GlobalSequence: 2, VenueID: "north", ClientID: 7, payload: cancelledRaw},
+		states, map[cdfRequestKey]*cdfWithdrawal{}, orders, nil, nil)
+	if len(audit.Checks) != 0 || len(orders) != 0 || audit.terminalOrders[orderKey].terminalState != "forced_cancelled" {
+		t.Fatalf("forced cancellation lifecycle = checks=%+v orders=%+v terminal=%+v", audit.Checks, orders, audit.terminalOrders[orderKey])
+	}
+	withdrawalKey := cdfRequestKey{venueID: "north", clientID: 7, requestID: 13}
+	withdrawals := map[cdfRequestKey]*cdfWithdrawal{withdrawalKey: {
+		event:    Event{SimTS: 10, GlobalSequence: 1},
+		decision: cdfDecisionEvidence{QuoteOrderID: 11, Action: "withdraw", Reason: "stale_or_missing_observation"},
+	}}
+	rejectedRaw, err := json.Marshal(cdfCancelRejectedEvidence{
+		OrderID: 11, RequestID: 13, Success: false, Error: etypes.RejectOrderNotFound,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	audit.processCDFCancelRejected(Event{SimTS: 21, GlobalSequence: 3, VenueID: "north", ClientID: 7, payload: rejectedRaw},
+		states, withdrawals, orders)
+	if len(audit.Checks) != 0 || !withdrawals[withdrawalKey].cancelRejected || state.audit.CancelRejectedCount != 1 {
+		t.Fatalf("forced cancellation/cancel race = checks=%+v withdrawals=%+v state=%+v", audit.Checks, withdrawals, state)
+	}
+}
+
 func TestCDFOpenOrderIsRightCensoredAtTerminalHorizon(t *testing.T) {
 	state := &cdfSupplierState{audit: CDFSupplierActivationAudit{VenueID: "north", Role: "cdf_supplier_1", ClientID: 7}}
 	orderKey := cdfOrderKey{venueID: "north", clientID: 7, orderID: 11}
@@ -1450,6 +1491,76 @@ func TestCDFOpenOrderIsRightCensoredAtTerminalHorizon(t *testing.T) {
 	)
 	if len(audit.Checks) != 0 || state.audit.CensoredOrderCount != 1 || state.audit.CensoredQuoteLifetimeNano != 20 || state.audit.OpenOrderCount != 1 {
 		t.Fatalf("right-censored lifecycle = checks=%+v audit=%+v", audit.Checks, state.audit)
+	}
+}
+
+func TestCDFOrderLifecycleRecordsPartialThenFullFill(t *testing.T) {
+	contract := RegisteredSV1DActivationContract().Suppliers[0]
+	state := &cdfSupplierState{
+		contract: contract,
+		audit:    CDFSupplierActivationAudit{VenueID: "north", Role: contract.Role, ClientID: 7},
+	}
+	orderKey := cdfOrderKey{venueID: "north", clientID: 7, orderID: 11}
+	orders := map[cdfOrderKey]*cdfOrderState{orderKey: {
+		side: "BUY", price: contract.ReferencePrice, originalQty: 5, remainingQty: 5,
+		acceptedAt: 10, acceptedGlobalSeq: 1,
+	}}
+	audit := &CDFActivationAudit{
+		strictMechanics:     true,
+		terminalOrders:      make(map[cdfOrderKey]*cdfOrderState),
+		liveOrderBySupplier: map[cdfParticipantKey]cdfOrderKey{{venueID: "north", clientID: 7}: orderKey},
+	}
+	states := map[cdfParticipantKey]*cdfSupplierState{{venueID: "north", clientID: 7}: state}
+	actual := make(map[cdfFillKey]cdfOrderFillEvidence)
+	for _, fill := range []struct {
+		at, sequence, tradeID, qty, filledQty, remainingQty int64
+		isFull                                              bool
+	}{{20, 2, 12, 2, 2, 3, false}, {30, 3, 13, 3, 5, 0, true}} {
+		fee := cdfFixtureFee(contract.ReferencePrice, fill.qty, contract.BasePrecision, contract.MakerFeeBps)
+		payload, err := json.Marshal(cdfOrderFillEvidence{
+			OrderID: 11, TradeID: uint64(fill.tradeID), Side: "BUY", Price: contract.ReferencePrice,
+			Qty: fill.qty, FeeAmount: fee, FeeAsset: contract.QuoteAsset,
+			FilledQty: fill.filledQty, RemainingQty: fill.remainingQty, IsFull: fill.isFull,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		audit.processCDFOrderFill(Event{SimTS: fill.at, GlobalSequence: uint64(fill.sequence), VenueID: "north", ClientID: 7, payload: payload}, states, orders, actual)
+	}
+	if len(audit.Checks) != 0 || len(orders) != 0 || state.audit.FilledOrderCount != 1 || state.audit.TotalQuoteLifetimeNano != 20 {
+		t.Fatalf("partial/full lifecycle = checks=%+v orders=%+v state=%+v", audit.Checks, orders, state)
+	}
+	if audit.terminalOrders[orderKey].fillCount != 2 || audit.terminalOrders[orderKey].filledQty != 5 {
+		t.Fatalf("partial/full terminal order = %+v", audit.terminalOrders[orderKey])
+	}
+}
+
+func TestCDFStrictOrderLifecycleRejectsInvertedSameTimestampSequence(t *testing.T) {
+	contract := RegisteredSV1DActivationContract().Suppliers[0]
+	quantity := int64(5)
+	price := contract.ReferencePrice
+	state := &cdfSupplierState{
+		contract: contract,
+		audit:    CDFSupplierActivationAudit{VenueID: "north", Role: contract.Role, ClientID: 7},
+	}
+	orders := map[cdfOrderKey]*cdfOrderState{{venueID: "north", clientID: 7, orderID: 11}: {
+		side: "BUY", price: price, originalQty: quantity, remainingQty: quantity,
+		acceptedAt: 20, acceptedGlobalSeq: 10,
+	}}
+	fee := cdfFixtureFee(price, quantity, contract.BasePrecision, contract.MakerFeeBps)
+	payload, err := json.Marshal(cdfOrderFillEvidence{
+		OrderID: 11, TradeID: 12, Side: "BUY", Price: price, Qty: quantity,
+		FeeAmount: fee, FeeAsset: contract.QuoteAsset, FilledQty: quantity, IsFull: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	audit := &CDFActivationAudit{strictMechanics: true, terminalOrders: make(map[cdfOrderKey]*cdfOrderState)}
+	audit.processCDFOrderFill(Event{SimTS: 20, GlobalSequence: 9, VenueID: "north", ClientID: 7, payload: payload},
+		map[cdfParticipantKey]*cdfSupplierState{{venueID: "north", clientID: 7}: state}, orders,
+		map[cdfFillKey]cdfOrderFillEvidence{})
+	if !hasCDFActivationFailure(audit.Checks, "exchange OrderFill does not match a live accepted CDF order") || len(orders) != 1 {
+		t.Fatalf("inverted same-timestamp fill was accepted: checks=%+v orders=%+v", audit.Checks, orders)
 	}
 }
 
@@ -1572,6 +1683,36 @@ func TestCDFStrictAuditRejectsMultipleLiveOrders(t *testing.T) {
 	}
 	if !hasCDFActivationFailure(audit.Checks, "CDF supplier accepted order 29 while order 19 was still live") || len(orders) != 1 {
 		t.Fatalf("multiple live orders were not rejected: checks=%+v orders=%+v", audit.Checks, orders)
+	}
+}
+
+func TestCDFStrictAuditRejectsTerminalOrderReuse(t *testing.T) {
+	contract := RegisteredSV1DActivationContract().Suppliers[0]
+	state := &cdfSupplierState{contract: contract, audit: CDFSupplierActivationAudit{VenueID: "north", Role: contract.Role, ClientID: 7}}
+	orderKey := cdfOrderKey{venueID: "north", clientID: 7, orderID: 19}
+	audit := &CDFActivationAudit{
+		strictMechanics: true,
+		terminalOrders:  map[cdfOrderKey]*cdfOrderState{orderKey: {terminalState: "filled"}},
+	}
+	states := map[cdfParticipantKey]*cdfSupplierState{{venueID: "north", clientID: 7}: state}
+	decision := cdfDecisionEvidence{
+		ClientID: 7, Role: contract.Role, Symbol: cdfActivationSymbol, Action: "submit", Reason: "inventory_target_gap",
+		Side: "BUY", QuotePrice: contract.ReferencePrice, QuoteQty: 5, QuoteRequestID: 17,
+		MinimumQualifyingQty: contract.MinimumQualifyingQty,
+	}
+	submissions := map[cdfRequestKey]*cdfSubmission{{venueID: "north", clientID: 7, requestID: 17}: {
+		event: Event{SimTS: 21, GlobalSequence: 4}, decision: decision,
+	}}
+	payload, err := json.Marshal(cdfAcceptedEvidence{
+		OrderID: 19, ClientID: 7, RequestID: 17, Side: "BUY", Type: "LIMIT", TimeInForce: "GTC",
+		PostOnly: true, Price: contract.ReferencePrice, Qty: 5,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	audit.processCDFAccepted(Event{SimTS: 22, GlobalSequence: 5, VenueID: "north", ClientID: 7, payload: payload}, states, submissions, map[cdfOrderKey]*cdfOrderState{})
+	if !hasCDFActivationFailure(audit.Checks, "CDF order identity was reused after a terminal outcome") {
+		t.Fatalf("terminal order reuse was accepted: %+v", audit.Checks)
 	}
 }
 
