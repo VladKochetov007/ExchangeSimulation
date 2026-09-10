@@ -172,6 +172,154 @@ if v2_r2_sv1d_require_capacity_attestation_shape "$temp_root/invalid-capacity-sh
 	exit 1
 fi
 
+(
+	set -euo pipefail
+	full_capacity_revision=$(git -C "$root_dir" rev-parse HEAD)
+	full_capacity_tree=$(v2_r2_sv1d_git_tree_sha256 "$full_capacity_revision")
+	full_capacity_root="$temp_root/full-capacity-root"
+	full_capacity_cell="$full_capacity_root/$(v2_r2_sv1d_capacity_probe_cell)"
+	mkdir -p -- "$full_capacity_cell"
+	full_capacity_binary="$temp_root/evscapacity"
+	printf '%s\n' '#!/bin/sh' 'exit 0' >"$full_capacity_binary"
+	chmod 755 "$full_capacity_binary"
+	full_capacity_binary_sha=$(v2_r2_sv1d_sha256_file "$full_capacity_binary")
+	full_capacity_config="$root_dir/research/configs/v2-r2-sv1d-activation/activation-659-treatment.json"
+	full_capacity_config_sha=$(v2_r2_sv1d_sha256_file "$full_capacity_config")
+	full_capacity_review_report="$temp_root/full-capacity-review-report.json"
+	printf '%s\n' '{}' >"$full_capacity_review_report"
+	full_capacity_review_report_sha=$(v2_r2_sv1d_sha256_file "$full_capacity_review_report")
+	full_capacity_review="$temp_root/full-capacity-review.json"
+	full_capacity_review_scope=$(jq -c '.' <<<"$v2_r2_sv1_review_scope")
+	jq -n --arg revision "$full_capacity_revision" --arg tree "$full_capacity_tree" \
+		--arg report_path "$full_capacity_review_report" --arg report_sha "$full_capacity_review_report_sha" \
+		--argjson scope "$full_capacity_review_scope" \
+		'{schema_version:1,contract:"v2-r2-sv1d-independent-review-v1",reviewed_revision:$revision,
+		 reviewed_tree_sha256:$tree,review_type:"independent_sol_xhigh",verdict:"ACCEPTED_FOR_ACTIVATION",
+		 reviewed_worktree_clean:true,holdouts_consumed:false,reviewer:"full-validator-fixture",
+		 reviewed_scope:$scope,review_report_path:$report_path,review_report_sha256:$report_sha}' \
+		>"$full_capacity_review"
+	full_capacity_review_sha=$(v2_r2_sv1d_sha256_file "$full_capacity_review")
+
+	printf 'evs-fixture\n' >"$full_capacity_cell/events.evs"
+	printf 'stdout-fixture\n' >"$full_capacity_cell/capacity.stdout.log"
+	printf 'stderr-fixture\n' >"$full_capacity_cell/capacity.stderr.log"
+	full_capacity_host_memory_total=$(v2_r2_sv1d_host_memory_total_bytes)
+	full_capacity_minimum_memory=$(v2_r2_sv1d_required_memory_available_bytes "$full_capacity_host_memory_total")
+	full_capacity_memory_available=$(v2_r2_sv1d_capacity_memory_available_bytes)
+	IFS=$'\t' read -r full_capacity_host_cpu full_capacity_allowed_cpu full_capacity_affinity < <(v2_r2_sv1d_cpu_policy)
+	full_capacity_free=$(v2_r2_sv1d_capacity_free_bytes "$full_capacity_root")
+	full_capacity_minimum_free=$v2_r2_sv1d_capacity_minimum_free_bytes
+	full_capacity_safety_margin=$v2_r2_sv1d_capacity_safety_margin_bytes
+	full_capacity_peak_output=1024
+	full_capacity_required_free=$((full_capacity_peak_output + full_capacity_safety_margin))
+	full_capacity_stream_bytes=$(stat -c '%s' -- "$full_capacity_cell/events.evs")
+	full_capacity_stream_sha=$(v2_r2_sv1d_sha256_file "$full_capacity_cell/events.evs")
+	full_capacity_stdout_sha=$(v2_r2_sv1d_sha256_file "$full_capacity_cell/capacity.stdout.log")
+	full_capacity_stderr_sha=$(v2_r2_sv1d_sha256_file "$full_capacity_cell/capacity.stderr.log")
+
+	jq -n --arg profile "$v2_r2_sv1d_capacity_workload_profile" \
+		--argjson seed "$v2_r2_sv1d_capacity_workload_seed" --argjson event_count "$v2_r2_sv1d_capacity_event_count" \
+		--argjson book_events "$v2_r2_sv1d_capacity_book_delta_events" --argjson balance_events "$v2_r2_sv1d_capacity_balance_change_events" \
+		--argjson opaque_events "$v2_r2_sv1d_capacity_opaque_events" --argjson start "$v2_r2_sv1d_capacity_workload_start_nano" \
+		--argjson end "$v2_r2_sv1d_capacity_workload_end_nano" \
+		'{schema_version:1,contract:"v2-r2-sv1d-synthetic-capacity-workload-v1",profile:{name:$profile,
+		 workload_seed:$seed,event_count:$event_count,book_delta_events:$book_events,balance_change_events:$balance_events,
+		 opaque_scientific_events:$opaque_events,start_nano:$start,end_nano:$end}}' \
+		>"$full_capacity_cell/workload-profile.json"
+	jq -n --arg profile "$v2_r2_sv1d_capacity_workload_profile" \
+		--argjson seed "$v2_r2_sv1d_capacity_workload_seed" --argjson event_count "$v2_r2_sv1d_capacity_event_count" \
+		--argjson book_events "$v2_r2_sv1d_capacity_book_delta_events" --argjson balance_events "$v2_r2_sv1d_capacity_balance_change_events" \
+		--argjson opaque_events "$v2_r2_sv1d_capacity_opaque_events" \
+		--argjson start "$v2_r2_sv1d_capacity_workload_start_nano" --argjson end "$v2_r2_sv1d_capacity_workload_end_nano" \
+		'{schema_version:1,contract:"v2-r2-sv1d-synthetic-capacity-workload-v1",profile:{name:$profile,
+		 workload_seed:$seed,event_count:$event_count,book_delta_events:$book_events,balance_change_events:$balance_events,
+		 opaque_scientific_events:$opaque_events,start_nano:$start,end_nano:$end},evidence_format:"evstream_v3",
+		 hashing:"route_and_global_sequence_neutral_v2",ordering:"ordered_stream",event_frames:$event_count,
+		 family_counts:[$book_events,$balance_events,$opaque_events],unencodable_payloads:0,readback_verified:true}' \
+		>"$full_capacity_cell/synthetic-capacity-report.json"
+	jq -n '{schema_version:1,contract:"v2-r2-sv1d-synthetic-capacity-evidence-v1",
+		domain:"canonical_binary_execution_frames",ordering:"ordered_stream",hashing:"route_and_global_sequence_neutral_v2",
+		outcome_neutral:true,simulator_invoked:false,holdouts_consumed:false,readback_verified:true,unencodable_payloads:0}' \
+		>"$full_capacity_cell/binary-evidence-attestation.json"
+	jq -n --arg revision "$full_capacity_revision" \
+		--arg config_sha "$full_capacity_config_sha" --arg profile "$v2_r2_sv1d_capacity_workload_profile" \
+		--argjson seed "$v2_r2_sv1d_capacity_workload_seed" --argjson event_count "$v2_r2_sv1d_capacity_event_count" \
+		--argjson start "$v2_r2_sv1d_capacity_workload_start_nano" --argjson end "$v2_r2_sv1d_capacity_workload_end_nano" \
+		'{schema_version:1,contract:"v2-r2-sv1d-synthetic-capacity-run-v1",source_revision:$revision,
+		 target_config_path:"research/configs/v2-r2-sv1d-activation/activation-659-treatment.json",
+		 target_config_sha256:$config_sha,workload_profile:$profile,workload_seed:$seed,event_count:$event_count,
+		 workload_start_nano:$start,workload_end_nano:$end,workload_horizon:"24h",capacity_only:true,
+		 outcome_neutral:true,simulator_invoked:false,terminal_outcome_present:false,holdouts_consumed:false,
+		 evidence_format:"evstream_v3",command:["evscapacity"]}' \
+		>"$full_capacity_cell/run-metadata.json"
+
+	full_capacity_manifest=$(jq -cn --arg cell "$(basename "$full_capacity_cell")" \
+		'{schema_version:1,contract:"v2-r2-sv1d-synthetic-capacity-evidence-manifest-v1",cell:$cell,
+		 outcome_neutral:true,simulator_invoked:false,holdouts_consumed:false,files:[]}')
+	while IFS= read -r full_capacity_relative; do
+		full_capacity_bytes=$(stat -c '%s' -- "$full_capacity_cell/$full_capacity_relative")
+		full_capacity_sha=$(v2_r2_sv1d_sha256_file "$full_capacity_cell/$full_capacity_relative")
+		full_capacity_manifest=$(jq -c --arg path "$full_capacity_relative" --argjson bytes "$full_capacity_bytes" \
+			--arg sha "$full_capacity_sha" '.files += [{path:$path,bytes:$bytes,sha256:$sha}]' <<<"$full_capacity_manifest")
+	done < <(v2_r2_sv1d_capacity_expected_cell_files | grep -v '^evidence-manifest.json$')
+	printf '%s\n' "$full_capacity_manifest" >"$full_capacity_cell/evidence-manifest.json"
+	full_capacity_report_sha=$(v2_r2_sv1d_sha256_file "$full_capacity_cell/synthetic-capacity-report.json")
+	full_capacity_profile_sha=$(v2_r2_sv1d_sha256_file "$full_capacity_cell/workload-profile.json")
+	full_capacity_manifest_sha=$(v2_r2_sv1d_sha256_file "$full_capacity_cell/evidence-manifest.json")
+	full_capacity_cell_name=$(basename "$full_capacity_cell")
+	full_capacity_attestation="$temp_root/full-capacity-attestation.json"
+	jq -n --arg contract "$v2_r2_sv1d_capacity_attestation_contract" --arg revision "$full_capacity_revision" \
+		--arg tree "$full_capacity_tree" --arg binary_path "$full_capacity_binary" --arg binary_sha "$full_capacity_binary_sha" \
+		--arg config_path "research/configs/v2-r2-sv1d-activation/activation-659-treatment.json" --arg config_sha "$full_capacity_config_sha" \
+		--arg profile "$v2_r2_sv1d_capacity_workload_profile" --arg review_path "$full_capacity_review" --arg review_sha "$full_capacity_review_sha" \
+		--arg probe_root "$full_capacity_root" --arg probe_cell "$full_capacity_cell_name" \
+		--arg report_sha "$full_capacity_report_sha" --arg profile_sha "$full_capacity_profile_sha" --arg manifest_sha "$full_capacity_manifest_sha" \
+		--arg stream_sha "$full_capacity_stream_sha" --arg stdout_sha "$full_capacity_stdout_sha" --arg stderr_sha "$full_capacity_stderr_sha" \
+		--argjson seed "$v2_r2_sv1d_capacity_workload_seed" --argjson event_count "$v2_r2_sv1d_capacity_event_count" \
+		--argjson book_events "$v2_r2_sv1d_capacity_book_delta_events" --argjson balance_events "$v2_r2_sv1d_capacity_balance_change_events" \
+		--argjson opaque_events "$v2_r2_sv1d_capacity_opaque_events" --argjson start "$v2_r2_sv1d_capacity_workload_start_nano" \
+		--argjson end "$v2_r2_sv1d_capacity_workload_end_nano" --argjson stream_bytes "$full_capacity_stream_bytes" \
+		--argjson peak_output "$full_capacity_peak_output" --argjson peak_rss 1048576 --argjson safety_margin "$full_capacity_safety_margin" \
+		--argjson required_free "$full_capacity_required_free" --argjson available_free "$full_capacity_free" \
+		--argjson minimum_free "$full_capacity_minimum_free" --argjson memory_available "$full_capacity_memory_available" \
+		--argjson minimum_memory "$full_capacity_minimum_memory" --argjson host_memory_total "$full_capacity_host_memory_total" \
+		--argjson host_cpu "$full_capacity_host_cpu" --argjson allowed_cpu "$full_capacity_allowed_cpu" --arg affinity "$full_capacity_affinity" \
+		--argjson gomaxprocs "$v2_r2_sv1d_capacity_gomaxprocs" --argjson memory_limit "$v2_r2_sv1d_capacity_memory_limit_bytes" \
+		--argjson gomemlimit "$v2_r2_sv1d_capacity_gomemlimit_bytes" --argjson cpu_limit "$v2_r2_sv1_cpu_limit_percent" \
+		--argjson max_wall "$v2_r2_sv1d_capacity_max_wall_seconds" \
+		'{schema_version:1,contract:$contract,measurement:"synthetic_24h_binary_evidence_capacity_probe",capacity_only:true,
+		 outcome_neutral:true,simulator_invoked:false,terminal_outcome_present:false,holdouts_consumed:false,
+		 source_revision:$revision,source_tree_sha256:$tree,evidence_format:"evstream_v3",hashing:"route_and_global_sequence_neutral_v2",ordering:"ordered_stream",
+		 capacity_binary:{path:$binary_path,sha256:$binary_sha},target_config:{path:$config_path,sha256:$config_sha},
+		 review:{path:$review_path,sha256:$review_sha},probe_root:$probe_root,probe_cell:$probe_cell,
+		 workload:{profile:$profile,seed:$seed,event_count:$event_count,book_delta_events:$book_events,balance_change_events:$balance_events,
+		 opaque_scientific_events:$opaque_events,start_nano:$start,end_nano:$end,horizon:"24h"},
+		 report_sha256:$report_sha,profile_sha256:$profile_sha,evidence_manifest_sha256:$manifest_sha,stream_sha256:$stream_sha,stream_bytes:$stream_bytes,
+		 stdout_sha256:$stdout_sha,stderr_sha256:$stderr_sha,peak_output_bytes:$peak_output,peak_rss_bytes:$peak_rss,
+		 safety_margin_bytes:$safety_margin,required_free_bytes:$required_free,available_free_bytes:$available_free,
+		 initial_available_free_bytes:$available_free,minimum_free_bytes:$minimum_free,initial_memory_available_bytes:$memory_available,
+		 final_memory_available_bytes:$memory_available,wall_clock_seconds:1,
+		 resource_policy:{gomaxprocs:$gomaxprocs,memory_limit_bytes:$memory_limit,gomemlimit_bytes:$gomemlimit,cpu_limit_percent:$cpu_limit,
+		 minimum_free_bytes:$minimum_free,minimum_memory_available_bytes:$minimum_memory,host_memory_total_bytes:$host_memory_total,
+		 host_cpu_count:$host_cpu,allowed_cpu_count:$allowed_cpu,cpu_affinity:$affinity,max_wall_seconds:$max_wall}}' \
+		>"$full_capacity_attestation"
+
+	v2_r2_sv1d_capacity_binary="$full_capacity_binary"
+	v2_r2_sv1d_require_pinned_binary() { return 0; }
+	v2_r2_sv1d_capacity_probe_root() { printf '%s\n' "$full_capacity_root"; }
+	v2_r2_sv1d_require_capacity_attestation "$full_capacity_attestation" "$full_capacity_revision" \
+		"$full_capacity_binary_sha" "$full_capacity_config_sha" "$full_capacity_review" "$full_capacity_review_sha" || {
+		echo "valid full capacity attestation fixture was rejected" >&2
+		exit 1
+	}
+	jq '.stream_bytes += 1' "$full_capacity_attestation" >"$temp_root/invalid-full-capacity-attestation.json"
+	if v2_r2_sv1d_require_capacity_attestation "$temp_root/invalid-full-capacity-attestation.json" "$full_capacity_revision" \
+		"$full_capacity_binary_sha" "$full_capacity_config_sha" "$full_capacity_review" "$full_capacity_review_sha"; then
+		echo "mutated full capacity attestation was accepted" >&2
+		exit 1
+	fi
+)
+
 capacity_root_fixture="$temp_root/capacity-root"
 mkdir -p -- "$capacity_root_fixture/$(v2_r2_sv1d_capacity_probe_cell)"
 v2_r2_sv1d_capacity_require_root "$capacity_root_fixture" "$(v2_r2_sv1d_capacity_probe_cell)" || {

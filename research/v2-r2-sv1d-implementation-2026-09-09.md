@@ -418,7 +418,7 @@ independent review before a capacity workload is permitted.
 
 The first post-repair full gate reached every long multivenue case but exposed
 one repository-policy defect in the newly added positive capacity-attestation
-fixture: its tracked JSON construction embedded `/tmp` paths. The correction
+fixture: its tracked JSON construction embedded system-temporary paths. The correction
 at `623ecae` changed those fixture paths to repository-safe placeholders; the
 follow-up at `448c684` restored the producer contract's required absolute-path
 shape without embedding a system-temporary path. The generated SV1D configs
@@ -434,3 +434,24 @@ fixtures and all integrated-long-run, archive, SV1C, and SV1D contract suites
 passed. No capacity workload, simulator world, activation seed, development
 cell, freeze, or holdout was run. The final exact-tree independent Sol-xhigh
 review remains mandatory before any capacity measurement.
+
+## Independent review rejection: full capacity-attestation predicate — 2026-09-10
+
+Halley (`gpt-5.6-sol`, xhigh) independently reviewed exact tree `830b5a3` and
+returned `REJECTED_FOR_PROMOTION`. The reviewer found that the full capacity
+attestation validator compared `floor` to the jq root object for
+`peak_output_bytes` and `stream_bytes`; consequently every valid producer
+attestation would fail after the filesystem and shape checks. The existing
+positive fixture covered only the lighter shape predicate and did not exercise
+this full validator. No capacity, activation, development, freeze, or holdout
+workload ran from the rejected tree.
+
+The repair changes both comparisons to the corresponding numeric fields and
+extends the activation contract test with a complete producer-shaped
+attestation fixture, real manifest/readback files, a valid review fixture, and
+a mutation that must fail the full validator. The fixture isolates only the
+external pinned-binary and review identities; the production filesystem,
+manifest, report, profile, workload, resource, and full jq predicates execute
+unchanged. The repair does not alter R2 economics, CDF behavior, binary
+evidence, or historical results. A clean full gate, provenance regeneration,
+and another exact-tree independent review are required before capacity work.

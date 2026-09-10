@@ -357,8 +357,8 @@ v2_r2_sv1d_require_capacity_attestation() {
 		.report_sha256 == $report_sha and .profile_sha256 == $profile_sha and
 		.evidence_manifest_sha256 == $manifest_sha and
 		.stream_bytes == $stream_bytes and .stream_sha256 == $stream_sha256 and
-		(.peak_output_bytes | type) == "number" and (.peak_output_bytes | floor) == . and .peak_output_bytes > 0 and
-		(.stream_bytes | type) == "number" and (.stream_bytes | floor) == . and .stream_bytes > 0 and
+		(.peak_output_bytes | type) == "number" and (.peak_output_bytes | floor) == .peak_output_bytes and .peak_output_bytes > 0 and
+		(.stream_bytes | type) == "number" and (.stream_bytes | floor) == .stream_bytes and .stream_bytes > 0 and
 		(.required_free_bytes | type) == "number" and .required_free_bytes == (.peak_output_bytes + .safety_margin_bytes) and
 		(.safety_margin_bytes | type) == "number" and .safety_margin_bytes == $safety_margin and
 		(.available_free_bytes | type) == "number" and .available_free_bytes >= .required_free_bytes and
