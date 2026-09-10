@@ -994,3 +994,29 @@ The next permissible SV1D action is source-level diagnosis plus a minimal
 non-economic producer/fixture repair, then exact-tree review and a fresh
 seed-659 activation probe only if the repaired contract can produce a valid
 endpoint. Do not weaken strict valuation or force one-sided activation.
+
+## Append-only operational update: strict CDF equity correction — 2026-09-10
+
+The exact scientific branch is now clean and pushed at
+`3fe893b5626a33994bdf47015f1a1b306a8a7fdc`. This successor correction follows
+the binary-evidence integration and CDF balance reconciliation. Strict CDF
+decision validation now distinguishes a current local risk mark from cached
+equity, reconstructs marked equity and peak from initial account state plus
+actor-visible fill deltas, and preserves cached risk state through pending,
+missing, or unavailable observations. The binary decision schema is explicitly
+versioned (`v2`); v1 decoding remains supported.
+
+The bounded clean gate `GOMAXPROCS=4 GOMEMLIMIT=8GiB make test` passed on this
+exact revision, including all package tests and the integrated long-run, R2,
+and archive contract suites. No development cell, capacity attestation,
+parity control, or holdout was run. `619/631/641` remain untouched. The
+latest fetch of `origin/autoresearch/v2-performance-research` found no commit
+after reviewed `b1847ac`; no performance code was imported.
+
+This correction is not yet independently accepted for promotion. Before a
+valid SV1D activation probe, the successor still needs strict end-to-end CDF
+evidence auditing and the preregistered concentration/lifecycle diagnostics:
+supplier attribution, quote lifetimes, inventory/PnL exposure,
+withdrawal/reprice behavior, and removal-counterfactual coverage. The old R2,
+SV1C, and invalid SV1D outcomes remain historical negative/non-advancing
+records and are not rewritten.

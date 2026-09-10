@@ -832,3 +832,23 @@ and a fresh exact-tree independent review. Any change to risk semantics,
 fallback valuation, roster economics, warm-up, or seed is a new successor
 amendment. The authoritative branch remains at `22c414d`; its R2 candidate is
 closed as `NON-VIABLE AT THE 24H MARKET-SURVIVAL GATE`.
+
+## Append-only current checkpoint: strict CDF equity correction `3fe893b` — 2026-09-10
+
+The live scientific worktree is clean at
+`3fe893b5626a33994bdf47015f1a1b306a8a7fdc`, with the same revision pushed to
+`origin/autoresearch/ffa-ecology-gen0`. The correction separates a current
+local risk mark from cached CDF equity, reconstructs strict marked equity and
+peak from initial account state and actor-visible fill deltas, and keeps the
+cached state unchanged for pending/missing/unavailable observations. The
+binary CDF decision envelope is now schema version 2 with backward-compatible
+v1 decoding.
+
+`GOMAXPROCS=4 GOMEMLIMIT=8GiB make test` passed cleanly on this exact tree,
+including the integrated long-run/R2/archive contract suites. No new
+scientific trajectory or capacity measurement exists. The performance feed
+was fetched and has no commits after `b1847ac`; its changes remain deferred.
+The remaining promotion work is strict CDF end-to-end evidence coverage and
+the preregistered supplier concentration, quote-lifecycle, inventory/PnL, and
+removal-counterfactual diagnostics, followed by fresh exact-tree review. No
+holdout may be touched before freeze authorization.

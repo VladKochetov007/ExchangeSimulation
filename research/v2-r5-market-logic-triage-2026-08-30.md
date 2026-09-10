@@ -733,3 +733,28 @@ SV1D hypothesis remains untested. The only next action is a minimal
 non-economic producer/fixture repair with focused/full tests and fresh exact-
 tree review. Any risk, fallback, roster, seed, or warm-up change requires a
 new successor amendment. Holdouts `619/631/641` remain untouched.
+
+## Exact-tree follow-up — strict CDF equity correction `3fe893b` (2026-09-10)
+
+The scientific branch subsequently advanced to clean, pushed revision
+`3fe893b5626a33994bdf47015f1a1b306a8a7fdc`. The correction addresses the
+reviewed CDF evidence boundary without changing R2 economics or the SV1D
+roster: strict decisions now distinguish a current local risk mark from a
+cached equity state; current marked equity and peak are reconstructed from
+initial account state plus actor-visible fill deltas; and pending, missing,
+or unavailable observations preserve cached state rather than inventing a
+valuation. The binary decision envelope is schema version 2, with v1 decoding
+retained for compatibility.
+
+The exact-tree bounded clean `GOMAXPROCS=4 GOMEMLIMIT=8GiB make test` gate
+passed, including package, integrated-long-run, R2, and archive contract
+suites. No trajectory, capacity attestation, development cell, or holdout was
+run. The latest performance-branch fetch has no revision after reviewed
+`b1847ac`, and no performance implementation was imported.
+
+This is a mechanical correction checkpoint, not independent promotion. The
+remaining evidence work is a strict end-to-end CDF audit plus preregistered
+supplier attribution, concentration, quote-lifetime, inventory/PnL,
+withdrawal/reprice, and removal-counterfactual diagnostics. A fresh review of
+the exact final successor tree is required before the repaired SV1D activation
+probe. Historical R2/SV1C/SV1D records remain unchanged.
