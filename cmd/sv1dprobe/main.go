@@ -5,6 +5,7 @@ package main
 
 import (
 	"bytes"
+	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -14,6 +15,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"exchange_sim/analysis"
 )
@@ -57,7 +59,7 @@ func main() {
 }
 
 func run() error {
-	mode := flag.String("mode", "", "plan, audit, or score")
+	mode := flag.String("mode", "", "plan, audit, score, or verify-review")
 	out := flag.String("out", "", "new JSON output path")
 	planPath := flag.String("plan", "", "pre-run SV1D plan JSON")
 	armName := flag.String("arm", "", "treatment, mode-off, or no-roster")
@@ -73,6 +75,13 @@ func run() error {
 	modeOffResult := flag.String("mode-off-result", "", "audited mode-off arm result")
 	noRosterResult := flag.String("no-roster-result", "", "audited no-roster arm result")
 	treatmentResult := flag.String("treatment-result", "", "audited treatment arm result")
+	reviewAttestation := flag.String("review-attestation", "", "externally signed SV1D review attestation")
+	reviewReport := flag.String("review-report", "", "externally produced SV1D review report")
+	trustedReviewKey := flag.String("trusted-review-key", "", "raw 32-byte trusted Ed25519 public key")
+	treeRevision := flag.String("tree-revision", "", "externally resolved reviewed Git tree revision")
+	planSHA256 := flag.String("plan-sha256", "", "externally resolved canonical SV1D plan SHA-256")
+	parentRegistrationSHA256 := flag.String("parent-registration-sha256", "", "raw parent preregistration SHA-256")
+	amendmentSHA256 := flag.String("amendment-sha256", "", "raw SV1D amendment SHA-256")
 	flag.Parse()
 
 	switch *mode {
@@ -82,8 +91,16 @@ func run() error {
 		return auditArm(*out, *planPath, *armName, *runDir, *renderedDir)
 	case "score":
 		return scoreArms(*out, *planPath, *treatmentResult, *modeOffResult, *noRosterResult)
+	case "verify-review":
+		return verifyReview(reviewVerificationInputs{
+			AttestationPath: *reviewAttestation, ReportPath: *reviewReport, TrustedKeyPath: *trustedReviewKey,
+			SourceRevision: *sourceRevision, TreeRevision: *treeRevision, PlanSHA256: *planSHA256,
+			ParentRegistrationSHA256: *parentRegistrationSHA256, AmendmentSHA256: *amendmentSHA256,
+			TreatmentConfigPath: *treatmentConfig, ModeOffConfigPath: *modeOffConfig, NoRosterConfigPath: *noRosterConfig,
+			BinarySHA256: *binarySHA256, AnalyzerSHA256: *analyzerSHA256, RendererSHA256: *rendererSHA256,
+		})
 	default:
-		return fmt.Errorf("-mode must be plan, audit, or score")
+		return fmt.Errorf("-mode must be plan, audit, score, or verify-review")
 	}
 }
 
@@ -237,6 +254,101 @@ func isHexDigest(value string) bool {
 	}
 	_, err := hex.DecodeString(value)
 	return err == nil
+}
+
+type reviewVerificationInputs struct {
+	AttestationPath          string
+	ReportPath               string
+	TrustedKeyPath           string
+	SourceRevision           string
+	TreeRevision             string
+	PlanSHA256               string
+	ParentRegistrationSHA256 string
+	AmendmentSHA256          string
+	TreatmentConfigPath      string
+	ModeOffConfigPath        string
+	NoRosterConfigPath       string
+	BinarySHA256             string
+	AnalyzerSHA256           string
+	RendererSHA256           string
+}
+
+func verifyReview(inputs reviewVerificationInputs) error {
+	if inputs.AttestationPath == "" || inputs.ReportPath == "" || inputs.TrustedKeyPath == "" || inputs.SourceRevision == "" || inputs.TreeRevision == "" || inputs.PlanSHA256 == "" || inputs.ParentRegistrationSHA256 == "" || inputs.AmendmentSHA256 == "" || inputs.TreatmentConfigPath == "" || inputs.ModeOffConfigPath == "" || inputs.NoRosterConfigPath == "" || inputs.BinarySHA256 == "" || inputs.AnalyzerSHA256 == "" || inputs.RendererSHA256 == "" {
+		return fmt.Errorf("verify-review mode requires attestation, report, trusted key, source/tree/plan identities, parent/amendment hashes, all config paths, and all tool hashes")
+	}
+	trustedKey, err := readTrustedReviewKey(inputs.TrustedKeyPath)
+	if err != nil {
+		return err
+	}
+	configSHA256 := func(path string) (string, error) {
+		raw, err := readRegularNoSymlink(path)
+		if err != nil {
+			return "", err
+		}
+		digest := sha256.Sum256(raw)
+		return hex.EncodeToString(digest[:]), nil
+	}
+	treatmentConfigSHA256, err := configSHA256(inputs.TreatmentConfigPath)
+	if err != nil {
+		return fmt.Errorf("hash treatment config: %w", err)
+	}
+	modeOffConfigSHA256, err := configSHA256(inputs.ModeOffConfigPath)
+	if err != nil {
+		return fmt.Errorf("hash mode-off config: %w", err)
+	}
+	noRosterConfigSHA256, err := configSHA256(inputs.NoRosterConfigPath)
+	if err != nil {
+		return fmt.Errorf("hash no-roster config: %w", err)
+	}
+	_, err = analysis.VerifySV1DReviewAttestation(inputs.AttestationPath, inputs.ReportPath, analysis.SV1DReviewExpectation{
+		SourceRevision: inputs.SourceRevision, TreeRevision: inputs.TreeRevision, ProbeID: probeID, PlanSHA256: inputs.PlanSHA256,
+		ParentRegistrationSHA256: inputs.ParentRegistrationSHA256, AmendmentSHA256: inputs.AmendmentSHA256,
+		TreatmentConfigSHA256: treatmentConfigSHA256, ModeOffConfigSHA256: modeOffConfigSHA256, NoRosterConfigSHA256: noRosterConfigSHA256,
+		BinarySHA256: inputs.BinarySHA256, AnalyzerSHA256: inputs.AnalyzerSHA256, RendererSHA256: inputs.RendererSHA256,
+		TrustedPublicKey: trustedKey,
+	})
+	return err
+}
+
+func readTrustedReviewKey(path string) (ed25519.PublicKey, error) {
+	raw, err := readRegularNoSymlink(path)
+	if err != nil {
+		return nil, fmt.Errorf("read trusted review key: %w", err)
+	}
+	if len(raw) != ed25519.PublicKeySize {
+		return nil, fmt.Errorf("trusted review key must be exactly %d raw bytes", ed25519.PublicKeySize)
+	}
+	return ed25519.PublicKey(append([]byte(nil), raw...)), nil
+}
+
+func readRegularNoSymlink(path string) ([]byte, error) {
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return nil, err
+	}
+	current := string(filepath.Separator)
+	for _, component := range strings.Split(strings.TrimPrefix(absolute, current), string(filepath.Separator)) {
+		if component == "" {
+			continue
+		}
+		current = filepath.Join(current, component)
+		info, err := os.Lstat(current)
+		if err != nil {
+			return nil, err
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return nil, fmt.Errorf("path contains a symlink: %s", path)
+		}
+	}
+	info, err := os.Stat(absolute)
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("path is not a regular file: %s", path)
+	}
+	return os.ReadFile(absolute)
 }
 
 func readArmResult(path string) (armResultDocument, error) {

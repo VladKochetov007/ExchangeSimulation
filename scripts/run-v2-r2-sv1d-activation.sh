@@ -4,8 +4,8 @@
 # This adapter is deliberately narrower than the 24-hour campaign runner:
 # treatment, same-roster mode-off, and no-roster are the only accepted arms;
 # every arm gets a fresh namespace; and the command refuses to start until an
-# independent review and a matching measured binary-capacity attestation have
-# been supplied explicitly.
+# externally authenticated exact-tree review and a separately measured binary
+# capacity preflight have been supplied explicitly.
 set -euo pipefail
 
 if [[ $# -gt 3 ]]; then
@@ -19,7 +19,10 @@ multivenue_binary=${1:-"$root_dir/bin/multivenue"}
 sv1dprobe_binary=${2:-"$root_dir/bin/sv1dprobe"}
 evsrender_binary=${3:-"$root_dir/bin/evsrender"}
 output_root=${SV1D_OUTPUT_ROOT:-"/home/vlad/v2-r2-sv1d-activation-659-v1"}
-capacity_attestation=${SV1D_CAPACITY_ATTESTATION:-"/home/vlad/v2-integrated-longrun-r2-binary-capacity-v1.json"}
+review_attestation=${SV1D_REVIEW_ATTESTATION:-}
+review_report=${SV1D_REVIEW_REPORT:-}
+trusted_review_key=${SV1D_TRUSTED_REVIEW_KEY:-}
+capacity_attestation=${SV1D_CAPACITY_PREFLIGHT_ATTESTATION:-}
 lock_path="/home/vlad/v2-r2-sv1d-activation-659.lock"
 
 fail() {
@@ -41,6 +44,12 @@ require_no_symlink_components() {
 require_binary() {
 	local name=$1 path=$2
 	[[ -f "$path" && ! -L "$path" && -x "$path" ]] || fail "missing executable $name: $path"
+	require_no_symlink_components "$path" || fail "$name path contains a symlink: $path"
+}
+
+require_regular_file() {
+	local name=$1 path=$2
+	[[ -f "$path" && ! -L "$path" ]] || fail "missing regular file $name: $path"
 	require_no_symlink_components "$path" || fail "$name path contains a symlink: $path"
 }
 
@@ -71,13 +80,14 @@ require_clean_pinned_binary() {
 	[[ "$go_version" == go1.27* ]] || fail "$name is not built with Go 1.27: $go_version"
 }
 
-[[ "${SV1D_REVIEW_ACCEPTED:-0}" == 1 ]] || fail "set SV1D_REVIEW_ACCEPTED=1 only after fresh exact-tree review acceptance"
 [[ "${SV1D_PROBE_AUTHORIZED:-0}" == 1 ]] || fail "set SV1D_PROBE_AUTHORIZED=1 at the explicit development-probe boundary"
 
 [[ -d "$root_dir/.git" ]] || fail "repository root is not a Git worktree"
 [[ -z "$(git -C "$root_dir" status --porcelain --untracked-files=all)" ]] || fail "source worktree must be clean"
 source_revision=$(git -C "$root_dir" rev-parse HEAD)
 [[ "$source_revision" =~ ^[0-9a-f]{40}$ ]] || fail "invalid source revision: $source_revision"
+tree_revision=$(git -C "$root_dir" rev-parse HEAD^{tree})
+[[ "$tree_revision" =~ ^[0-9a-f]{40}$ ]] || fail "invalid reviewed tree revision: $tree_revision"
 
 [[ -d "$config_dir" && ! -L "$config_dir" ]] || fail "missing or symlinked SV1D config directory"
 "$root_dir/scripts/check-v2-r2-sv1d-activation-configs.sh" >/dev/null || fail "registered SV1D config contract failed"
@@ -92,9 +102,46 @@ require_clean_pinned_binary multivenue "$multivenue_binary" "$source_revision"
 require_clean_pinned_binary sv1dprobe "$sv1dprobe_binary" "$source_revision"
 require_clean_pinned_binary evsrender "$evsrender_binary" "$source_revision"
 
+require_regular_file sv1d-review-attestation "$review_attestation"
+require_regular_file sv1d-review-report "$review_report"
+require_regular_file trusted-review-key "$trusted_review_key"
+require_regular_file SV1D-parent-registration "$root_dir/research/v2-r2-sv1d-one-sided-elastic-successor-preregistration-2026-09-10.md"
+require_regular_file SV1D-amendment "$root_dir/research/v2-r2-sv1d-activation-contract-amendment-2026-09-11.md"
+
+treatment_config="$config_dir/activation-659-treatment.json"
+mode_off_config="$config_dir/activation-659-mode-off.json"
+no_roster_config="$config_dir/activation-659-no-roster.json"
+config_sha256() { sha256sum -- "$1" | awk '{print $1}'; }
+multivenue_sha256=$(sha256sum -- "$multivenue_binary" | awk '{print $1}')
+sv1dprobe_sha256=$(sha256sum -- "$sv1dprobe_binary" | awk '{print $1}')
+evsrender_sha256=$(sha256sum -- "$evsrender_binary" | awk '{print $1}')
+parent_registration_sha256=$(sha256sum -- "$root_dir/research/v2-r2-sv1d-one-sided-elastic-successor-preregistration-2026-09-10.md" | awk '{print $1}')
+amendment_sha256=$(sha256sum -- "$root_dir/research/v2-r2-sv1d-activation-contract-amendment-2026-09-11.md" | awk '{print $1}')
+
+review_stage=$(mktemp -d /tmp/sv1d-review-stage.XXXXXX)
+[[ "$review_stage" == /tmp/sv1d-review-stage.* && -d "$review_stage" && ! -L "$review_stage" ]] || fail "invalid SV1D review staging directory"
+trap 'rm -rf -- "$review_stage"' EXIT
+review_plan="$review_stage/probe-plan.json"
+"$sv1dprobe_binary" -mode plan -out "$review_plan" \
+	-treatment-config "$treatment_config" -mode-off-config "$mode_off_config" \
+	-no-roster-config "$no_roster_config" -source-revision "$source_revision" \
+	-binary-sha256 "$multivenue_sha256" -analyzer-sha256 "$sv1dprobe_sha256" \
+	-renderer-sha256 "$evsrender_sha256" || fail "could not derive the review-bound SV1D plan"
+review_plan_sha256=$(jq -er '.plan_sha256 | select(test("^[0-9a-f]{64}$"))' "$review_plan") || fail "review-bound SV1D plan has no canonical digest"
+"$sv1dprobe_binary" -mode verify-review \
+	-review-attestation "$review_attestation" -review-report "$review_report" -trusted-review-key "$trusted_review_key" \
+	-source-revision "$source_revision" -tree-revision "$tree_revision" -plan-sha256 "$review_plan_sha256" \
+	-parent-registration-sha256 "$parent_registration_sha256" -amendment-sha256 "$amendment_sha256" \
+	-treatment-config "$treatment_config" -mode-off-config "$mode_off_config" -no-roster-config "$no_roster_config" \
+	-binary-sha256 "$multivenue_sha256" -analyzer-sha256 "$sv1dprobe_sha256" -renderer-sha256 "$evsrender_sha256" ||
+	fail "externally authenticated exact-tree SV1D review was not accepted"
+review_attestation_sha256=$(sha256sum -- "$review_attestation" | awk '{print $1}')
+review_report_sha256=$(sha256sum -- "$review_report" | awk '{print $1}')
+
 source "$root_dir/scripts/v2-integrated-longrun-r2-contract.sh"
+[[ -n "$capacity_attestation" ]] || fail "a measured SV1D binary-capacity preflight is required"
 v2_r2_require_binary_capacity_attestation "$multivenue_binary" "$source_revision" "$capacity_attestation" ||
-	fail "matching measured binary-evidence capacity attestation is missing or disk headroom is unsafe"
+	fail "matching measured SV1D binary-evidence capacity preflight is missing or disk headroom is unsafe"
 
 [[ "$output_root" == /* ]] || fail "SV1D output root must be absolute"
 require_no_symlink_components "$output_root" || fail "SV1D output root contains a symlink"
@@ -106,14 +153,7 @@ flock -n "$lock_fd" || fail "another SV1D activation run holds the namespace loc
 export GOMAXPROCS=2
 export GOMEMLIMIT=4GiB
 
-treatment_config="$config_dir/activation-659-treatment.json"
-mode_off_config="$config_dir/activation-659-mode-off.json"
-no_roster_config="$config_dir/activation-659-no-roster.json"
 mkdir -p "$output_root"
-config_sha256() { sha256sum -- "$1" | awk '{print $1}'; }
-multivenue_sha256=$(sha256sum -- "$multivenue_binary" | awk '{print $1}')
-sv1dprobe_sha256=$(sha256sum -- "$sv1dprobe_binary" | awk '{print $1}')
-evsrender_sha256=$(sha256sum -- "$evsrender_binary" | awk '{print $1}')
 
 plan_path="$output_root/probe-plan.json"
 "$sv1dprobe_binary" -mode plan -out "$plan_path" \
