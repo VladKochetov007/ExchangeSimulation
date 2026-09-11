@@ -29,6 +29,11 @@ for config in "$config_dir"/*.json; do
 		.auto_borrow_spot == false and .cross_asset_spot_graph == true and
 		.cross_asset_collateral_marks == false and
 		.venue_ids == ["north", "central", "south"] and
+		.venue_rules == {
+			central: {funding_interval_seconds: 3600, matching_rule: "pro_rata"},
+			north: {funding_interval_seconds: 28800, matching_rule: "price_time"},
+			south: {funding_interval_seconds: 7200, matching_rule: "pro_rata"}
+		} and
 		.step == 1000000000 and .snapshot_interval == 1000000000 and
 		.automation_interval == 1000000000 and .quote_interval == 1000000000 and
 		.noise_interval == 2000000000 and .greek_interval == 60000000000 and

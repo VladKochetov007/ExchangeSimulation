@@ -45,6 +45,14 @@ func TestRegisteredSV1DActivationConfigs(t *testing.T) {
 				config.CheckpointIntervalSeconds != 60 || config.ElasticSupplierCount != 8 {
 				t.Fatalf("common config contract mismatch: seed=%d evidence=%s/%d mode=%s calendar=%v venues=%v", config.Seed, config.EvidenceFormat, config.EvidenceContractVersion, config.LogMode, config.R2ExpiryCalendar != nil, config.VenueIDs)
 			}
+			if config.VenueRules["north"].MatchingRule != MatchingPriceTime ||
+				config.VenueRules["central"].MatchingRule != MatchingProRata ||
+				config.VenueRules["south"].MatchingRule != MatchingProRata ||
+				config.VenueRules["north"].FundingIntervalSeconds != 8*60*60 ||
+				config.VenueRules["central"].FundingIntervalSeconds != 60*60 ||
+				config.VenueRules["south"].FundingIntervalSeconds != 2*60*60 {
+				t.Fatalf("matching/funding policy mismatch: %+v", config.VenueRules)
+			}
 			if got := config.R2ExpiryCalendar.Schedules; len(got) != 3 ||
 				got[0].Name != "short" || time.Duration(got[0].ListingIntervalNano) != time.Hour || time.Duration(got[0].TimeToExpiryNano) != 2*time.Hour ||
 				got[1].Name != "medium" || time.Duration(got[1].ListingIntervalNano) != 3*time.Hour || time.Duration(got[1].TimeToExpiryNano) != 6*time.Hour ||
