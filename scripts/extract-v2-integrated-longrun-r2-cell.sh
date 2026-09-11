@@ -70,9 +70,6 @@ case "$evidence_format" in
 	evstream_v3) required_inputs=(manifest.json binary-evidence-attestation.json evidence-manifest.json events.evs run-config.json run-metadata.json run-status.json) ;;
 	*) fail "unsupported evidence format: $evidence_format" ;;
 esac
-if [[ "$evidence_format" == evstream_v3 && "$log_mode" == "full" ]]; then
-	required_inputs+=(evidence-only-artifact-hash.json)
-fi
 for input in "${required_inputs[@]}"; do
 	require_file "$cell/$input"
 	require_json_object "$cell/$input"
@@ -86,7 +83,11 @@ cleanup_raw_stage() {
 	fi
 }
 trap cleanup_raw_stage EXIT
-v2_r2_stage_raw_evidence "$cell" || fail "raw evidence is neither retained nor covered by a valid archive"
+if [[ "$evidence_format" == evstream_v3 ]]; then
+	v2_r2_verify_evidence_manifest "$cell" || fail "canonical binary evidence manifest does not verify"
+else
+	v2_r2_stage_raw_evidence "$cell" || fail "raw evidence is neither retained nor covered by a valid archive"
+fi
 
 expected_config="$root_dir/research/configs/v2-integrated-longrun-r2/$cell_name.json"
 require_file "$expected_config"
@@ -129,6 +130,7 @@ jq -e --arg cell "$cell_name" \
 	 (.greeks_sha256 | test("^[0-9a-f]{64}$")) and
 	(.latency_sha256 | test("^[0-9a-f]{64}$")) and
 	(.checkpoints_sha256 | test("^[0-9a-f]{64}$")) and
+	(.binary_evidence_attestation_sha256 | test("^[0-9a-f]{64}$")) and
 	(.simulation_start_nano | type) == "number" and (.simulation_end_nano | type) == "number" and
 	.simulation_start_nano == 1735689600000000000 and .simulation_end_nano == 1735776000000000000 and
 	(.evidence_manifest_sha256 | test("^[0-9a-f]{64}$"))' \

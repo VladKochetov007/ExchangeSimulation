@@ -61,6 +61,9 @@ for input in "${required_inputs[@]}"; do
 	[[ -s "$cell/$input" ]] || fail "missing completed-cell input: $cell/$input"
 done
 [[ "$(jq -er '.log_mode' "$cell/run-config.json")" == full ]] || fail "raw archive requires full log mode"
+if [[ "$(v2_r2_evidence_format "$cell")" == evstream_v3 ]]; then
+	fail "canonical evstream_v3 evidence has no raw JSONL archive; verify the binary manifest instead"
+fi
 v2_r2_require_raw_archive_attestation_path "$cell_name" || fail "raw archive attestation namespace is not canonical"
 
 archive=$(v2_r2_raw_archive_path "$cell")
@@ -114,10 +117,10 @@ else
 	[[ -s "$parity_attestation" ]] || fail "missing completed parity attestation: $parity_attestation"
 	jq -e --arg source_revision "$(jq -er '.git_revision' "$cell/run-metadata.json")" \
 		'any(.controls[]; .cell == "dev-607-g8" and .log_mode == "full" and .gomaxprocs == 8) and
-		 .contract == "v2-integrated-longrun-r2-parity-v2" and
+		 .contract == "v2-integrated-longrun-r2-parity-v3" and
 		 .source_revision == $source_revision and
 		 .predicates.full_evidence_equal == true and
-		 .predicates.ordered_raw_evidence_equal == true and
+		 .predicates.canonical_binary_reconstruction_equal == true and
 		 all(.predicates | to_entries[]; .value == true)' "$parity_attestation" >/dev/null ||
 		fail "G8 parity attestation has not passed"
 fi

@@ -2527,7 +2527,11 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 	var evidenceSequence uint64
 	evidenceSequenceMu := &sync.Mutex{}
 	newLogger := func(name string) (venueLogger, error) {
-		if s.Config.LogMode != "full" {
+		// evstream_v3 contract v2 is the canonical full-evidence path. The
+		// binary sink owns persistence and global ordering, so opening the
+		// legacy JSON logger here would create an unregistered second evidence
+		// representation and make the manifest contract ambiguous.
+		if s.Config.LogMode != "full" || s.checkpoints.replacesRawLog() {
 			return venueLogger{venueID: id, route: filepath.ToSlash(name), sink: s.checkpoints,
 				sequence: &evidenceSequence, sequenceMu: evidenceSequenceMu}, nil
 		}

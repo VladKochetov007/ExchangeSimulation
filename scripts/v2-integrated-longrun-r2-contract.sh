@@ -218,7 +218,7 @@ v2_r2_write_evidence_manifest() {
 			;;
 		evstream_v3:full)
 			contract="v2-integrated-longrun-evidence-manifest-v2"
-			fixed_files=(run-config.json run-metadata.json manifest.json greeks.json latency.json checkpoints.jsonl events.evs binary-evidence-attestation.json evidence-only-artifact-hash.json)
+			fixed_files=(run-config.json run-metadata.json manifest.json greeks.json latency.json checkpoints.jsonl events.evs binary-evidence-attestation.json)
 			;;
 		evstream_v3:none)
 			contract="v2-integrated-longrun-evidence-manifest-v2"
@@ -240,19 +240,27 @@ v2_r2_write_evidence_manifest() {
 	local raw_count=0
 	local raw_bytes=0
 	[[ -d "$cell/venues" ]] || return 1
-	while IFS= read -r -d '' path; do
-		relative=${path#"$cell/"}
-		bytes=$(stat -c '%s' -- "$path") || return 1
-		digest=$(sha256sum -- "$path" | awk '{print $1}') || return 1
-		raw_records=$(jq -c --arg path "$relative" --arg digest "$digest" --argjson bytes "$bytes" \
-			'. + [{path: $path, bytes: $bytes, sha256: $digest}]' <<<"$raw_records") || return 1
-		raw_count=$((raw_count + 1))
-		raw_bytes=$((raw_bytes + bytes))
-	done < <(find "$cell/venues" -type f -name '*.jsonl' -print0 | sort -z)
-	if [[ "$log_mode" == full ]]; then
-		(( raw_count > 0 )) || return 1
+	if [[ "$evidence_format" == jsonl ]]; then
+		while IFS= read -r -d '' path; do
+			relative=${path#"$cell/"}
+			bytes=$(stat -c '%s' -- "$path") || return 1
+			digest=$(sha256sum -- "$path" | awk '{print $1}') || return 1
+			raw_records=$(jq -c --arg path "$relative" --arg digest "$digest" --argjson bytes "$bytes" \
+				'. + [{path: $path, bytes: $bytes, sha256: $digest}]' <<<"$raw_records") || return 1
+			raw_count=$((raw_count + 1))
+			raw_bytes=$((raw_bytes + bytes))
+		done < <(find "$cell/venues" -type f -name '*.jsonl' -print0 | sort -z)
+		if [[ "$log_mode" == full ]]; then
+			(( raw_count > 0 )) || return 1
+		else
+			(( raw_count == 0 )) || return 1
+		fi
 	else
-		(( raw_count == 0 )) || return 1
+		# evstream_v3 contract v2 is binary-only. The empty venue namespace is
+		# intentional: events.evs is the sole canonical event representation.
+		if find "$cell/venues" -type f -print -quit 2>/dev/null | grep -q .; then
+			return 1
+		fi
 	fi
 	local temporary="$output.tmp-$$"
 	jq -n \
@@ -285,7 +293,7 @@ v2_r2_verify_evidence_manifest() {
 	case "$evidence_format:$log_mode" in
 		jsonl:full) expected_fixed=$(printf '%s\n' run-config.json run-metadata.json manifest.json greeks.json latency.json checkpoints.jsonl evidence-artifact-hash.json | sort) ;;
 		jsonl:none) expected_fixed=$(printf '%s\n' run-config.json run-metadata.json manifest.json greeks.json latency.json checkpoints.jsonl | sort) ;;
-		evstream_v3:full) expected_fixed=$(printf '%s\n' run-config.json run-metadata.json manifest.json greeks.json latency.json checkpoints.jsonl events.evs binary-evidence-attestation.json evidence-only-artifact-hash.json | sort) ;;
+		evstream_v3:full) expected_fixed=$(printf '%s\n' run-config.json run-metadata.json manifest.json greeks.json latency.json checkpoints.jsonl events.evs binary-evidence-attestation.json | sort) ;;
 		evstream_v3:none) expected_fixed=$(printf '%s\n' run-config.json run-metadata.json manifest.json greeks.json latency.json checkpoints.jsonl events.evs binary-evidence-attestation.json | sort) ;;
 		*) return 1 ;;
 	 esac
@@ -295,7 +303,8 @@ v2_r2_verify_evidence_manifest() {
 			.log_mode == $log_mode and .evidence_format == $evidence_format and
 			(.source_revision | test("^[0-9a-f]{40}$")) and (.fixed_files | type) == "array" and
 			(.raw_files | type) == "array" and .raw_jsonl_files == (.raw_files | length) and
-			(if $log_mode == "full" then .raw_jsonl_files > 0 else .raw_jsonl_files == 0 end)' "$manifest" >/dev/null || return 1
+			(if $evidence_format == "evstream_v3" then .raw_jsonl_files == 0 and .raw_jsonl_bytes == 0 and (.raw_files | length) == 0
+			 else (if $log_mode == "full" then .raw_jsonl_files > 0 else .raw_jsonl_files == 0 end) end)' "$manifest" >/dev/null || return 1
 	local listed
 	listed=$(jq -r '.fixed_files[].path' "$manifest" | sort)
 	[[ "$listed" == "$expected_fixed" ]] || return 1
@@ -309,6 +318,13 @@ v2_r2_verify_evidence_manifest() {
 		actual_digest=$(sha256sum -- "$path" | awk '{print $1}') || return 1
 		[[ "$actual_bytes" == "$expected_bytes" && "$actual_digest" == "$expected_digest" ]] || return 1
 	done < <(jq -r '.fixed_files[] | [.path, (.bytes | tostring), .sha256] | @tsv' "$manifest")
+	if [[ "$evidence_format" == evstream_v3 ]]; then
+		if find "$cell/venues" -type f -print -quit 2>/dev/null | grep -q .; then
+			return 1
+		fi
+		[[ "$(jq -er '.source_revision' "$manifest")" == "$(jq -er '.git_revision' "$cell/run-metadata.json")" ]] || return 1
+		return 0
+	fi
 	if [[ "$log_mode" == full ]] && ! find "$cell/venues" -type f -name '*.jsonl' -print -quit 2>/dev/null | grep -q .; then
 		v2_r2_verify_raw_evidence_archive "$cell" || return 1
 		[[ "$(jq -er '.source_revision' "$manifest")" == "$(jq -er '.git_revision' "$cell/run-metadata.json")" ]] || return 1

@@ -2,6 +2,7 @@ package analysis
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
@@ -702,7 +703,7 @@ func (r *Run) AuditCDFLiquidityActivation(options CDFActivationOptions) (*CDFAct
 			if options.RenderedEvidenceDir == "" {
 				return nil, fmt.Errorf("cdf activation: v2 audit requires independently rendered binary evidence")
 			}
-			if err := validateCDFCompletionArtifacts(evidenceDir, metadata); err != nil {
+			if err := validateCDFCompletionArtifacts(evidenceDir, metadata, options.Contract.BinarySchemaEpoch); err != nil {
 				return nil, err
 			}
 			if err := validateCDFRenderedGlobalSequence(scanRun, evidenceDir, options.RenderedEvidenceDir, options.Contract.BinarySchemaEpoch); err != nil {
@@ -966,7 +967,7 @@ type cdfEvidenceManifest struct {
 	RawFiles       []cdfEvidenceManifestRecord `json:"raw_files"`
 }
 
-func validateCDFCompletionArtifacts(dir string, metadata cdfActivationMetadata) error {
+func validateCDFCompletionArtifacts(dir string, metadata cdfActivationMetadata, expectedSchemaEpoch uint32) error {
 	raw, err := os.ReadFile(filepath.Join(dir, "run-status.json"))
 	if err != nil {
 		return fmt.Errorf("cdf activation: read run status: %w", err)
@@ -1007,7 +1008,7 @@ func validateCDFCompletionArtifacts(dir string, metadata cdfActivationMetadata) 
 			return fmt.Errorf("cdf activation: run status %s hash mismatch", check.name)
 		}
 	}
-	if err := validateCDFCompletionSidecars(dir, metadata); err != nil {
+	if err := validateCDFCompletionSidecars(dir, metadata, expectedSchemaEpoch); err != nil {
 		return err
 	}
 	if metadata.BinaryPath == "" {
@@ -1023,7 +1024,7 @@ func validateCDFCompletionArtifacts(dir string, metadata cdfActivationMetadata) 
 	return nil
 }
 
-func validateCDFCompletionSidecars(dir string, metadata cdfActivationMetadata) error {
+func validateCDFCompletionSidecars(dir string, metadata cdfActivationMetadata, expectedSchemaEpoch uint32) error {
 	greeksRaw, err := os.ReadFile(filepath.Join(dir, "greeks.json"))
 	if err != nil {
 		return fmt.Errorf("cdf activation: read greeks sidecar: %w", err)
@@ -1052,6 +1053,22 @@ func validateCDFCompletionSidecars(dir string, metadata cdfActivationMetadata) e
 		return fmt.Errorf("cdf activation: latency sidecar is structurally incomplete")
 	}
 
+	attestationRaw, err := os.ReadFile(filepath.Join(dir, "binary-evidence-attestation.json"))
+	if err != nil {
+		return fmt.Errorf("cdf activation: read binary evidence attestation: %w", err)
+	}
+	var attestation cdfBinaryEvidenceAttestation
+	if err := json.Unmarshal(attestationRaw, &attestation); err != nil {
+		return fmt.Errorf("cdf activation: decode binary evidence attestation: %w", err)
+	}
+	if attestation.Domain != "canonical_binary_execution_frames" || attestation.Ordering != "ordered_stream" ||
+		attestation.SchemaEpoch != expectedSchemaEpoch || expectedSchemaEpoch == 0 ||
+		!isCDFHex(attestation.ExecutionStreamHash, sha256.Size) || attestation.EventFrames == 0 ||
+		attestation.StreamFrames < attestation.EventFrames || !attestation.EvidenceOnlyIncluded ||
+		attestation.UnencodablePayloads != 0 {
+		return fmt.Errorf("cdf activation: binary evidence attestation is not a complete v2 successor attestation")
+	}
+
 	checkpointFile, err := os.Open(filepath.Join(dir, "checkpoints.jsonl"))
 	if err != nil {
 		return fmt.Errorf("cdf activation: open checkpoint sidecar: %w", err)
@@ -1064,24 +1081,45 @@ func validateCDFCompletionSidecars(dir string, metadata cdfActivationMetadata) e
 	for scanner.Scan() {
 		line := scanner.Bytes()
 		var checkpoint struct {
-			Domain     string `json:"domain"`
-			Ordering   string `json:"ordering"`
-			SimTime    int64  `json:"sim_time"`
-			EventCount int64  `json:"event_count"`
+			Domain              string `json:"domain"`
+			Ordering            string `json:"ordering"`
+			SimTime             int64  `json:"sim_time"`
+			EventCount          int64  `json:"event_count"`
+			ExecutionStreamHash string `json:"execution_stream_hash"`
+			Representation      string `json:"representation"`
+			Unencodable         int64  `json:"unencodable_payloads"`
 		}
 		if err := json.Unmarshal(line, &checkpoint); err != nil || checkpoint.Domain != "execution_observations" ||
 			checkpoint.Ordering != "ordered_stream" || checkpoint.SimTime <= 0 || checkpoint.EventCount <= 0 ||
+			checkpoint.Representation != "evstream_v3" || checkpoint.Unencodable != 0 ||
+			!isCDFHex(checkpoint.ExecutionStreamHash, sha256.Size) ||
 			(checkpointCount > 0 && (checkpoint.SimTime <= previousSimTime || checkpoint.EventCount <= previousEventCount)) {
 			return fmt.Errorf("cdf activation: checkpoint sidecar contains an invalid sequence")
 		}
 		previousSimTime, previousEventCount = checkpoint.SimTime, checkpoint.EventCount
+		if checkpointCount > 0 && checkpoint.EventCount > int64(attestation.EventFrames) {
+			return fmt.Errorf("cdf activation: checkpoint event count exceeds binary attestation")
+		}
 		checkpointCount++
 	}
 	if err := scanner.Err(); err != nil {
 		return fmt.Errorf("cdf activation: scan checkpoint sidecar: %w", err)
 	}
-	if checkpointCount == 0 || previousSimTime != metadata.SimulationEndNano {
+	if checkpointCount == 0 || previousSimTime != metadata.SimulationEndNano ||
+		previousEventCount != int64(attestation.EventFrames) {
 		return fmt.Errorf("cdf activation: checkpoint sidecar does not attest the registered terminal horizon")
+	}
+	var terminalCheckpoint struct {
+		ExecutionStreamHash string `json:"execution_stream_hash"`
+	}
+	checkpointRaw, err := os.ReadFile(filepath.Join(dir, "checkpoints.jsonl"))
+	if err != nil {
+		return fmt.Errorf("cdf activation: read terminal checkpoint: %w", err)
+	}
+	checkpointLines := bytes.Split(bytes.TrimSpace(checkpointRaw), []byte{'\n'})
+	if len(checkpointLines) == 0 || json.Unmarshal(checkpointLines[len(checkpointLines)-1], &terminalCheckpoint) != nil ||
+		terminalCheckpoint.ExecutionStreamHash != attestation.ExecutionStreamHash {
+		return fmt.Errorf("cdf activation: terminal checkpoint is not bound to the binary attestation")
 	}
 
 	manifestRaw, err := os.ReadFile(filepath.Join(dir, "evidence-manifest.json"))
@@ -1118,13 +1156,36 @@ func validateCDFCompletionSidecars(dir string, metadata cdfActivationMetadata) e
 			return fmt.Errorf("cdf activation: evidence manifest digest mismatch for %q", record.Path)
 		}
 	}
-	for _, required := range []string{"run-config.json", "run-metadata.json", "manifest.json", "greeks.json", "latency.json", "checkpoints.jsonl", "events.evs", "binary-evidence-attestation.json", "evidence-only-artifact-hash.json"} {
+	requiredFiles := []string{"run-config.json", "run-metadata.json", "manifest.json", "greeks.json", "latency.json", "checkpoints.jsonl", "events.evs", "binary-evidence-attestation.json"}
+	for _, required := range requiredFiles {
 		if _, exists := fixed[required]; !exists {
 			return fmt.Errorf("cdf activation: evidence manifest omits required file %q", required)
 		}
 	}
-	if evidenceManifest.RawJSONLFiles <= 0 || evidenceManifest.RawJSONLBytes <= 0 || len(evidenceManifest.RawFiles) != evidenceManifest.RawJSONLFiles {
-		return fmt.Errorf("cdf activation: evidence manifest does not attest retained raw JSONL evidence")
+	if len(fixed) != len(requiredFiles) || evidenceManifest.RawJSONLFiles != 0 || evidenceManifest.RawJSONLBytes != 0 || len(evidenceManifest.RawFiles) != 0 {
+		return fmt.Errorf("cdf activation: v2 binary evidence manifest contains legacy raw JSONL evidence")
+	}
+	venuesDir := filepath.Join(dir, "venues")
+	if info, err := os.Lstat(venuesDir); err == nil {
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("cdf activation: binary evidence venue namespace is a symlink")
+		}
+		if err := filepath.WalkDir(venuesDir, func(path string, entry os.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			if entry.Type()&os.ModeSymlink != 0 {
+				return fmt.Errorf("cdf activation: binary evidence venue namespace contains a symlink")
+			}
+			if !entry.IsDir() {
+				return fmt.Errorf("cdf activation: binary evidence venue namespace contains legacy raw file %q", filepath.Base(path))
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("cdf activation: inspect binary evidence venue namespace: %w", err)
 	}
 	return nil
 }

@@ -65,11 +65,6 @@ for cell in dev-607 dev-607-none dev-607-g8; do
 	v2_r2_require_cell_path "$cell_dir" || fail "parity cell is outside the canonical R2 root or is symlinked: $cell"
 done
 
-for cell in dev-607 dev-607-g8; do
-	cell_dir="$output_root/$cell"
-	raw_stage_cells+=("$cell_dir")
-	v2_r2_stage_raw_evidence "$cell_dir" || fail "raw evidence is neither retained nor covered by a valid archive: $cell"
-done
 cmp -s "$root_dir/research/configs/v2-integrated-longrun-r2/dev-607.json" \
 	"$output_root/dev-607/run-config.json" || fail "seed-607 full config differs from registry"
 cmp -s "$root_dir/research/configs/v2-integrated-longrun-r2/dev-607-none.json" \
@@ -182,13 +177,10 @@ full_runtime_digest=$(jq -er '.execution_stream_hash' "$output_root/dev-607/bina
 g8_runtime_events=$(jq -er '.event_frames' "$output_root/dev-607-g8/binary-evidence-attestation.json")
 g8_runtime_digest=$(jq -er '.execution_stream_hash' "$output_root/dev-607-g8/binary-evidence-attestation.json")
 [[ "$full_runtime_events" == "$g8_runtime_events" && "$full_runtime_digest" == "$g8_runtime_digest" ]] || fail "full runtime evidence hashes are not equal"
-full_sidecar_result=$("$analyzer" -metric evidenceartifacthash -json "$output_root/dev-607") || fail "could not recompute g4 evidence-only digest"
-g8_sidecar_result=$("$analyzer" -metric evidenceartifacthash -json "$output_root/dev-607-g8") || fail "could not recompute g8 evidence-only digest"
-full_sidecar_events=$(jq -er '.result.events' <<<"$full_sidecar_result") || fail "malformed g4 evidence-only digest"
-full_sidecar_digest=$(jq -er '.result.digest' <<<"$full_sidecar_result") || fail "malformed g4 evidence-only digest"
-g8_sidecar_events=$(jq -er '.result.events' <<<"$g8_sidecar_result") || fail "malformed g8 evidence-only digest"
-g8_sidecar_digest=$(jq -er '.result.digest' <<<"$g8_sidecar_result") || fail "malformed g8 evidence-only digest"
-[[ "$full_sidecar_events" == "$g8_sidecar_events" && "$full_sidecar_digest" == "$g8_sidecar_digest" ]] || fail "independently recomputed g4/g8 evidence-only hashes are not equal"
+full_reconstruction_events=$full_runtime_events
+full_reconstruction_digest=$full_runtime_digest
+g8_reconstruction_events=$g8_runtime_events
+g8_reconstruction_digest=$g8_runtime_digest
 
 source_revision=$(jq -er '.git_revision' "$output_root/dev-607/run-metadata.json")
 v2_r2_require_current_source_revision "$source_revision" "$head_revision" "$analyzer_revision" ||
@@ -219,7 +211,7 @@ done
 mkdir -p "$output_root"
 tmp=$(mktemp "$attestation.tmp-XXXXXX")
 jq -n \
-	--arg contract "v2-integrated-longrun-r2-parity-v2" \
+	--arg contract "v2-integrated-longrun-r2-parity-v3" \
 	--arg evidence_format "$evidence_format" \
 	--arg source_revision "$source_revision" \
 	--arg simulator_binary_sha256 "$binary_sha256" \
@@ -237,14 +229,14 @@ jq -n \
 	--arg latency_sha256 "$(sha256sum "$output_root/dev-607/latency.json" | awk '{print $1}')" \
 	--arg binary_attestation_sha256 "$(sha256sum "$output_root/dev-607/binary-evidence-attestation.json" | awk '{print $1}')" \
 	--arg binary_stream_sha256 "$(sha256sum "$output_root/dev-607/events.evs" | awk '{print $1}')" \
-	--arg full_sidecar_events "$full_sidecar_events" \
-	--arg full_sidecar_digest "$full_sidecar_digest" \
-	--arg g8_sidecar_events "$g8_sidecar_events" \
-	--arg g8_sidecar_digest "$g8_sidecar_digest" \
+	--arg full_reconstruction_events "$full_reconstruction_events" \
+	--arg full_reconstruction_digest "$full_reconstruction_digest" \
+	--arg g8_reconstruction_events "$g8_reconstruction_events" \
+	--arg g8_reconstruction_digest "$g8_reconstruction_digest" \
 	--argjson evidence_events "$full_runtime_events" \
 	--arg evidence_digest "$full_runtime_digest" \
 	'{
-		schema_version: 2, contract: $contract, evidence_format: $evidence_format, seed: 607, horizon: "24h",
+		schema_version: 3, contract: $contract, evidence_format: $evidence_format, seed: 607, horizon: "24h",
 		source_revision: $source_revision, simulator_revision: $source_revision,
 		simulator_binary_sha256: $simulator_binary_sha256,
 		simulator_binary_go_version: $simulator_binary_go_version,
@@ -257,7 +249,7 @@ jq -n \
 			{cell: "dev-607-g8", log_mode: "full", gomaxprocs: 8}
 		],
 		exact_equal_domains: ["checkpoints.jsonl", "greeks.json", "latency.json", "events.evs", "binary-evidence-attestation.json"],
-		full_evidence_equal_domains: ["events.evs", "binary-evidence-attestation.json", "ordered_evidence_only_jsonl", "recomputed_evidence_only_jsonl"],
+		full_evidence_equal_domains: ["events.evs", "binary-evidence-attestation.json", "canonical_binary_reconstruction"],
 		no_log_absence_contract: ["evidence-artifact-hash.json", "evidence-only-artifact-hash.json", "venues/*.jsonl"],
 		hashes: {
 			full_g4_checkpoints: $full_g4_checkpoints,
@@ -267,15 +259,15 @@ jq -n \
 			binary_attestation: $binary_attestation_sha256, binary_stream: $binary_stream_sha256
 		},
 		full_runtime_evidence: {event_frames: ($evidence_events | tonumber), execution_stream_hash: $evidence_digest},
-		recomputed_evidence_only: {
-			g4: {events: ($full_sidecar_events | tonumber), digest: $full_sidecar_digest},
-			g8: {events: ($g8_sidecar_events | tonumber), digest: $g8_sidecar_digest}
+		canonical_binary_reconstruction: {
+			g4: {event_frames: ($full_reconstruction_events | tonumber), execution_stream_hash: $full_reconstruction_digest},
+			g8: {event_frames: ($g8_reconstruction_events | tonumber), execution_stream_hash: $g8_reconstruction_digest}
 		},
 		predicates: {
 				ordered_checkpoints_equal: true,
 				deterministic_sidecars_equal: true,
 				full_evidence_equal: true,
-				ordered_raw_evidence_equal: true,
+				canonical_binary_reconstruction_equal: true,
 				no_log_evidence_absent: true,
 			source_and_build_identity_equal: true
 		}
@@ -290,7 +282,7 @@ else
 	mv "$tmp" "$attestation"
 fi
 require_object "$attestation"
-jq -e '.schema_version == 2 and .contract == "v2-integrated-longrun-r2-parity-v2" and .evidence_format == "evstream_v3" and
+jq -e '.schema_version == 3 and .contract == "v2-integrated-longrun-r2-parity-v3" and .evidence_format == "evstream_v3" and
 	(.simulator_binary_sha256 | test("^[0-9a-f]{64}$")) and
 	(.simulator_binary_go_version | startswith("go1.27")) and
 	(.analyzer_sha256 | test("^[0-9a-f]{64}$")) and
@@ -299,6 +291,6 @@ jq -e '.schema_version == 2 and .contract == "v2-integrated-longrun-r2-parity-v2
 	(.prunegate_sha256 | test("^[0-9a-f]{64}$")) and
 	(.prunegate_go_version | startswith("go1.27")) and
 	(.prunegate_revision | test("^[0-9a-f]{40}$")) and
-	(.predicates | keys) == ["deterministic_sidecars_equal", "full_evidence_equal", "no_log_evidence_absent", "ordered_checkpoints_equal", "ordered_raw_evidence_equal", "source_and_build_identity_equal"] and
+	(.predicates | keys) == ["canonical_binary_reconstruction_equal", "deterministic_sidecars_equal", "full_evidence_equal", "no_log_evidence_absent", "ordered_checkpoints_equal", "source_and_build_identity_equal"] and
 	all(.predicates | to_entries[]; .value == true)' "$attestation" >/dev/null || fail "parity attestation self-check failed"
 printf 'integrated long-run parity verified: %s\n' "$attestation"

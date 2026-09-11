@@ -249,7 +249,10 @@ jq -e --argjson simulation_start_nano "$simulation_start_nano" --argjson simulat
 jq -e -s --argjson simulation_end_nano "$simulation_end_nano" \
 	'. as $checkpoints |
 	 ($checkpoints | length) > 0 and
-	 all($checkpoints[]; .domain == "execution_observations" and .ordering == "ordered_stream" and (.sim_time | type) == "number" and (.event_count | type) == "number") and
+	 all($checkpoints[]; .domain == "execution_observations" and .ordering == "ordered_stream" and
+		(.sim_time | type) == "number" and (.event_count | type) == "number" and
+		(.execution_stream_hash | test("^[0-9a-f]{64}$")) and .representation == "evstream_v3" and
+		(.unencodable_payloads // 0) == 0) and
 	 all(range(1; ($checkpoints | length)); $checkpoints[. - 1].sim_time < $checkpoints[.].sim_time and $checkpoints[. - 1].event_count < $checkpoints[.].event_count) and
 	 $checkpoints[-1].sim_time == $simulation_end_nano' \
 	"$output/checkpoints.jsonl" >/dev/null || {
@@ -265,6 +268,10 @@ v2_r2_write_evidence_manifest "$output" || {
 	echo "failed to write complete evidence manifest: $output" >&2
 	exit 1
 }
+v2_r2_verify_evidence_manifest "$output" || {
+	echo "written evidence manifest does not verify the canonical binary contract: $output" >&2
+	exit 1
+}
 status_tmp="$output/run-status.json.tmp-$$"
 jq -n \
 	--argjson exit_status "$status" \
@@ -278,6 +285,7 @@ jq -n \
 	--arg latency_sha256 "$(sha256sum "$output/latency.json" | awk '{print $1}')" \
 	--arg checkpoints_sha256 "$(sha256sum "$output/checkpoints.jsonl" | awk '{print $1}')" \
 	--arg evidence_manifest_sha256 "$(sha256sum "$output/evidence-manifest.json" | awk '{print $1}')" \
+	--arg binary_attestation_sha256 "$(sha256sum "$output/binary-evidence-attestation.json" | awk '{print $1}')" \
 	--argjson sentinels '["greeks.json", "latency.json"]' \
 	'{schema_version: 1, cell: $cell, exit_status: $exit_status,
 	  completion_verified: true, simulated_horizon: $horizon,
@@ -286,7 +294,8 @@ jq -n \
 	  run_metadata_sha256: $run_metadata_sha256,
 	  manifest_sha256: $manifest_sha256, greeks_sha256: $greeks_sha256,
 	  latency_sha256: $latency_sha256, checkpoints_sha256: $checkpoints_sha256,
-	  evidence_manifest_sha256: $evidence_manifest_sha256}' >"$status_tmp"
+	  evidence_manifest_sha256: $evidence_manifest_sha256,
+	  binary_evidence_attestation_sha256: $binary_attestation_sha256}' >"$status_tmp"
 mv "$status_tmp" "$output/run-status.json"
 v2_r2_write_attestation "$output" || {
 	echo "failed to write external evidence attestation: $output" >&2

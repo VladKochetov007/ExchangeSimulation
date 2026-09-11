@@ -105,22 +105,25 @@ write_common_files() {
 
 write_status() {
 	local cell=$1
-	local metadata_sha256 manifest_sha256 greeks_sha256 latency_sha256 checkpoints_sha256 evidence_manifest_sha256
+	local metadata_sha256 manifest_sha256 greeks_sha256 latency_sha256 checkpoints_sha256 evidence_manifest_sha256 binary_attestation_sha256
 	metadata_sha256=$(sha256sum -- "$cell/run-metadata.json" | awk '{print $1}')
 	manifest_sha256=$(sha256sum -- "$cell/manifest.json" | awk '{print $1}')
 	greeks_sha256=$(sha256sum -- "$cell/greeks.json" | awk '{print $1}')
 	latency_sha256=$(sha256sum -- "$cell/latency.json" | awk '{print $1}')
 	checkpoints_sha256=$(sha256sum -- "$cell/checkpoints.jsonl" | awk '{print $1}')
 	evidence_manifest_sha256=$(sha256sum -- "$cell/evidence-manifest.json" | awk '{print $1}')
+	binary_attestation_sha256=$(sha256sum -- "$cell/binary-evidence-attestation.json" | awk '{print $1}')
 	jq -n --arg metadata_sha256 "$metadata_sha256" --arg manifest_sha256 "$manifest_sha256" \
 		--arg greeks_sha256 "$greeks_sha256" --arg latency_sha256 "$latency_sha256" \
 		--arg checkpoints_sha256 "$checkpoints_sha256" --arg evidence_manifest_sha256 "$evidence_manifest_sha256" \
-		'{exit_status: 0, completion_verified: true, simulated_horizon: "24h",
+		--arg binary_attestation_sha256 "$binary_attestation_sha256" \
+		'{schema_version: 1, exit_status: 0, completion_verified: true, simulated_horizon: "24h",
 		 simulation_start_nano: 1735689600000000000, simulation_end_nano: 1735776000000000000,
 		 completion_sentinels: ["greeks.json", "latency.json"],
 		 run_metadata_sha256: $metadata_sha256, manifest_sha256: $manifest_sha256,
 		 greeks_sha256: $greeks_sha256, latency_sha256: $latency_sha256,
-		 checkpoints_sha256: $checkpoints_sha256, evidence_manifest_sha256: $evidence_manifest_sha256}' \
+		 checkpoints_sha256: $checkpoints_sha256, evidence_manifest_sha256: $evidence_manifest_sha256,
+		 binary_evidence_attestation_sha256: $binary_attestation_sha256}' \
 		>"$cell/run-status.json"
 }
 
@@ -134,10 +137,7 @@ write_full_cell() {
 	cp -- "$config" "$cell/run-config.json"
 	write_metadata "$cell" 607 full "$gomaxprocs" "$config" "$hypothesis_id"
 	write_common_files "$cell" "$experiment_id"
-	printf '%s\n' '{"client_id":607,"data":{"venue_id":"north","sequence":1,"payload":{"fixture":true}},"event":"archive-test-sidecar","sim_ts":1735689600000000000}' >"$cell/venues/north/general.jsonl"
 	"$fixture_binary" -out "$cell/events.evs" -attestation "$cell/binary-evidence-attestation.json" -sequence 2
-	artifact_result=$("$analyzer" -metric evidenceartifacthash -json "$cell")
-	jq -e '.result | select(type == "object") | .domain = "persisted_json_log_evidence_only" | .ordering = "unordered_multiset"' <<<"$artifact_result" >"$cell/evidence-only-artifact-hash.json"
 	v2_r2_write_evidence_manifest "$cell" || fail "could not create full evidence manifest: $cell"
 	write_status "$cell"
 }
@@ -171,48 +171,10 @@ done
 GOMAXPROCS=1 MVANALYZE_BIN="$analyzer" \
 	"$root_dir/scripts/check-v2-integrated-longrun-r2-parity.sh" "$v2_r2_output_root" >/dev/null ||
 	fail "matching G8 parity fixture was rejected"
-G8_ARCHIVE_OUTPUT=$(GOMAXPROCS=1 MVANALYZE_BIN="$analyzer" \
+expect_failure env GOMAXPROCS=1 MVANALYZE_BIN="$analyzer" \
 	"$root_dir/scripts/archive-v2-integrated-longrun-r2-cell.sh" \
-		"$v2_r2_output_root/dev-607-g8" --prune-after-verify) ||
-	fail "matching G8 archive/prune fixture was rejected"
-[[ -n "$G8_ARCHIVE_OUTPUT" ]] || fail "matching G8 archive produced no completion output"
-[[ ! -e "$v2_r2_output_root/dev-607-g8/venues/north/general.jsonl" ]] ||
-	fail "successful G8 archive did not prune its raw fixture"
-
-v2_r2_stage_raw_evidence "$v2_r2_output_root/dev-607-g8" || fail "could not restore G8 fixture for stale-gate test"
-jq --arg stale_revision "$stale_revision" \
-	'.prunegate_vcs_revision = $stale_revision' \
-	"$v2_r2_output_root/dev-607/run-metadata.json" >"$tmp_root/stale-metadata.json"
-mv -- "$tmp_root/stale-metadata.json" "$v2_r2_output_root/dev-607/run-metadata.json"
-stale_metadata_sha256=$(sha256sum -- "$v2_r2_output_root/dev-607/run-metadata.json" | awk '{print $1}')
-stale_metadata_bytes=$(stat -c '%s' -- "$v2_r2_output_root/dev-607/run-metadata.json")
-jq --arg sha256 "$stale_metadata_sha256" --argjson bytes "$stale_metadata_bytes" \
-	'.fixed_files |= map(if .path == "run-metadata.json" then .sha256 = $sha256 | .bytes = $bytes else . end)' \
-	"$v2_r2_output_root/dev-607/evidence-manifest.json" >"$tmp_root/stale-manifest.json"
-mv -- "$tmp_root/stale-manifest.json" "$v2_r2_output_root/dev-607/evidence-manifest.json"
-new_manifest_sha256=$(sha256sum -- "$v2_r2_output_root/dev-607/evidence-manifest.json" | awk '{print $1}')
-jq --arg metadata_sha256 "$stale_metadata_sha256" --arg manifest_sha256 "$new_manifest_sha256" \
-	'.run_metadata_sha256 = $metadata_sha256 | .evidence_manifest_sha256 = $manifest_sha256' \
-	"$v2_r2_output_root/dev-607/run-status.json" >"$tmp_root/stale-status.json"
-mv -- "$tmp_root/stale-status.json" "$v2_r2_output_root/dev-607/run-status.json"
-new_status_sha256=$(sha256sum -- "$v2_r2_output_root/dev-607/run-status.json" | awk '{print $1}')
-jq --arg status_sha256 "$new_status_sha256" --arg manifest_sha256 "$new_manifest_sha256" \
-	'.run_status_sha256 = $status_sha256 | .evidence_manifest_sha256 = $manifest_sha256' \
-	"$v2_r2_attestation_root/dev-607.json" >"$tmp_root/stale-attestation.json"
-mv -- "$tmp_root/stale-attestation.json" "$v2_r2_attestation_root/dev-607.json"
-if env GOMAXPROCS=1 MVANALYZE_BIN="$analyzer" \
-	"$root_dir/scripts/archive-v2-integrated-longrun-r2-cell.sh" \
-		"$v2_r2_output_root/dev-607-g8" --prune-after-verify \
-		>"$tmp_root/stale-archive.log" 2>&1; then
-	fail "stale pruning-gate archive unexpectedly succeeded"
-fi
-if ! rg -q 'pruning gate revision' "$tmp_root/stale-archive.log"; then
-	sed -n '1,40p' "$tmp_root/stale-archive.log" >&2
-	fail "stale pruning-gate archive failed for an unexpected reason"
-fi
-[[ -e "$v2_r2_output_root/dev-607-g8/venues/north/general.jsonl" ]] ||
-	fail "failed G8 provenance check deleted raw evidence"
-v2_r2_cleanup_staged_raw_evidence "$v2_r2_output_root/dev-607-g8" ||
-	fail "stale-gate fixture cleanup failed"
+		"$v2_r2_output_root/dev-607-g8" --prune-after-verify
+[[ -e "$v2_r2_output_root/dev-607-g8/events.evs" ]] || fail "binary archive rejection removed canonical evidence"
+[[ -d "$v2_r2_output_root/dev-607-g8/venues/north" ]] || fail "binary archive rejection changed venue namespace"
 
 printf 'integrated long-run R2 archive tests: pass\n'

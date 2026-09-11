@@ -447,7 +447,7 @@ func TestValidateCDFCompletionSidecarsRejectsStructurallyIncompleteLatency(t *te
 		t.Fatal(err)
 	}
 	writeCDFFixtureFile(t, filepath.Join(run.Dir, "latency.json"), []byte("{\"domain\":\"courier_delivery\",\"rows\":null}\n"))
-	if err := validateCDFCompletionSidecars(run.Dir, metadata); err == nil || !strings.Contains(err.Error(), "latency sidecar is structurally incomplete") {
+	if err := validateCDFCompletionSidecars(run.Dir, metadata, contract.BinarySchemaEpoch); err == nil || !strings.Contains(err.Error(), "latency sidecar is structurally incomplete") {
 		t.Fatalf("structurally incomplete latency sidecar was accepted: %v", err)
 	}
 }
@@ -638,15 +638,16 @@ func rewriteStrictCDFCompletionIdentity(t *testing.T, dir string, contract CDFAc
 	}
 	writeCDFFixtureFile(t, greeksPath, append(greeksRaw, '\n'))
 	writeCDFFixtureFile(t, filepath.Join(dir, "latency.json"), []byte("{\"domain\":\"courier_delivery\",\"rows\":[]}\n"))
-	writeCDFFixtureFile(t, filepath.Join(dir, "checkpoints.jsonl"), []byte(fmt.Sprintf("{\"domain\":\"execution_observations\",\"ordering\":\"ordered_stream\",\"sim_time\":%d,\"event_count\":1}\n", contract.SimulationEndNano)))
-	evidenceOnlyRaw, err := json.Marshal(map[string]any{
-		"domain": "persisted_json_log_evidence_only", "ordering": "unordered_multiset", "events": 1, "digest": strings.Repeat("b", 64),
-	})
+	attestationRaw, err := os.ReadFile(filepath.Join(dir, "binary-evidence-attestation.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	writeCDFFixtureFile(t, filepath.Join(dir, "evidence-only-artifact-hash.json"), append(evidenceOnlyRaw, '\n'))
-	fixedPaths := []string{"run-config.json", "run-metadata.json", "manifest.json", "greeks.json", "latency.json", "checkpoints.jsonl", "events.evs", "binary-evidence-attestation.json", "evidence-only-artifact-hash.json"}
+	var attestation cdfBinaryEvidenceAttestation
+	if err := json.Unmarshal(attestationRaw, &attestation); err != nil {
+		t.Fatal(err)
+	}
+	writeCDFFixtureFile(t, filepath.Join(dir, "checkpoints.jsonl"), []byte(fmt.Sprintf("{\"domain\":\"execution_observations\",\"ordering\":\"ordered_stream\",\"sim_time\":%d,\"event_count\":%d,\"execution_stream_hash\":%q,\"representation\":\"evstream_v3\",\"unencodable_payloads\":0}\n", contract.SimulationEndNano, attestation.EventFrames, attestation.ExecutionStreamHash)))
+	fixedPaths := []string{"run-config.json", "run-metadata.json", "manifest.json", "greeks.json", "latency.json", "checkpoints.jsonl", "events.evs", "binary-evidence-attestation.json"}
 	fixedFiles := make([]map[string]any, 0, len(fixedPaths))
 	for _, relative := range fixedPaths {
 		path := filepath.Join(dir, relative)
@@ -656,33 +657,10 @@ func rewriteStrictCDFCompletionIdentity(t *testing.T, dir string, contract CDFAc
 		}
 		fixedFiles = append(fixedFiles, map[string]any{"path": relative, "bytes": info.Size(), "sha256": mustCDFFileHash(t, path)})
 	}
-	rawFiles := make([]map[string]any, 0)
-	var rawJSONLBytes int64
-	if err := filepath.Walk(filepath.Join(dir, "venues"), func(path string, info os.FileInfo, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if info.IsDir() || filepath.Ext(path) != ".jsonl" {
-			return nil
-		}
-		fileInfo, err := os.Stat(path)
-		if err != nil {
-			return err
-		}
-		rawJSONLBytes += fileInfo.Size()
-		relative, err := filepath.Rel(dir, path)
-		if err != nil {
-			return err
-		}
-		rawFiles = append(rawFiles, map[string]any{"path": filepath.ToSlash(relative), "bytes": fileInfo.Size(), "sha256": mustCDFFileHash(t, path)})
-		return nil
-	}); err != nil {
-		t.Fatal(err)
-	}
 	evidenceManifestRaw, err := json.Marshal(map[string]any{
 		"schema_version": 2, "contract": "v2-integrated-longrun-evidence-manifest-v2", "cell": "sv1d-activation-659",
 		"log_mode": "full", "evidence_format": "evstream_v3", "source_revision": strings.Repeat("a", 40),
-		"fixed_files": fixedFiles, "raw_jsonl_files": len(rawFiles), "raw_jsonl_bytes": rawJSONLBytes, "raw_files": rawFiles,
+		"fixed_files": fixedFiles, "raw_jsonl_files": 0, "raw_jsonl_bytes": 0, "raw_files": []map[string]any{},
 	})
 	if err != nil {
 		t.Fatal(err)
