@@ -30,7 +30,8 @@ for cell in dev-607 dev-613 dev-617 holdout-619 holdout-631 holdout-641; do
 		'.seed == $seed and
 		 .experiment_id == ("v2-integrated-longrun-r2-" + $cell) and
 		 .hypothesis_id == "V2-INTEGRATED-LONG-R2-CANDIDATE" and
-		 .log_mode == "full" and .evidence_format == $evidence_format and .record_market_data_receipts == true and
+		 .log_mode == "full" and .evidence_format == $evidence_format and .evidence_contract_version == 2 and
+		 .record_market_data_receipts == true and
 		 .record_decision_frontier_vectors == true and
 		 .cross_asset_spot_graph == true and .cross_asset_collateral_marks == true and
 		 .spot_passive_maker_post_only == true and .spot_passive_maker_cancel_before_replace == true and
@@ -40,8 +41,8 @@ for cell in dev-607 dev-613 dev-617 holdout-619 holdout-631 holdout-641; do
 		 .r2_expiry_calendar.schedules == $calendar' "$file" >/dev/null ||
 		fail "invalid R2 full candidate fields in $file"
 	if [[ "$(jq -s '.[0] == .[1]' \
-		<(jq 'del(.seed, .experiment_id, .hypothesis_id, .description, .dated_future_delivery_fee_policy, .short_future_tenor, .long_future_tenor, .short_option_tenor, .long_option_tenor, .r2_expiry_calendar, .evidence_format)' "$source_full") \
-		<(jq 'del(.seed, .experiment_id, .hypothesis_id, .description, .dated_future_delivery_fee_policy, .short_future_tenor, .long_future_tenor, .short_option_tenor, .long_option_tenor, .r2_expiry_calendar, .evidence_format)' "$file"))" != true ]]; then
+		<(jq 'del(.seed, .experiment_id, .hypothesis_id, .description, .dated_future_delivery_fee_policy, .short_future_tenor, .long_future_tenor, .short_option_tenor, .long_option_tenor, .r2_expiry_calendar, .evidence_format, .evidence_contract_version)' "$source_full") \
+		<(jq 'del(.seed, .experiment_id, .hypothesis_id, .description, .dated_future_delivery_fee_policy, .short_future_tenor, .long_future_tenor, .short_option_tenor, .long_option_tenor, .r2_expiry_calendar, .evidence_format, .evidence_contract_version)' "$file"))" != true ]]; then
 		fail "non-calendar economic/config drift in $file"
 	fi
 done
@@ -50,6 +51,7 @@ none="$config_dir/dev-607-none.json"
 jq -e --argjson calendar "$calendar" --arg evidence_format "$evidence_format" \
 	'.seed == 607 and .experiment_id == "v2-integrated-longrun-r2-dev-607-none" and
 	 .hypothesis_id == "V2-INTEGRATED-LONG-R2-CANDIDATE-PARITY" and .log_mode == "none" and .evidence_format == $evidence_format and
+	 .evidence_contract_version == 2 and
 	 .record_market_data_receipts == false and .record_decision_frontier_vectors == false and
 	 .record_maker_quote_size_decisions == false and .record_maker_inventory_rebalance_decisions == false and
 	 .record_liability_hedger_decisions == false and .record_noise_flow_phase_decisions == false and
@@ -58,8 +60,8 @@ jq -e --argjson calendar "$calendar" --arg evidence_format "$evidence_format" \
 	 .short_option_tenor == 7200000000000 and .long_option_tenor == 43200000000000 and
 	 .r2_expiry_calendar.schedules == $calendar' "$none" >/dev/null || fail "invalid R2 parity fields in $none"
 if [[ "$(jq -s '.[0] == .[1]' \
-	<(jq 'del(.seed, .experiment_id, .hypothesis_id, .description, .dated_future_delivery_fee_policy, .short_future_tenor, .long_future_tenor, .short_option_tenor, .long_option_tenor, .r2_expiry_calendar, .evidence_format)' "$source_none") \
-	<(jq 'del(.seed, .experiment_id, .hypothesis_id, .description, .dated_future_delivery_fee_policy, .short_future_tenor, .long_future_tenor, .short_option_tenor, .long_option_tenor, .r2_expiry_calendar, .evidence_format)' "$none"))" != true ]]; then
+		<(jq 'del(.seed, .experiment_id, .hypothesis_id, .description, .dated_future_delivery_fee_policy, .short_future_tenor, .long_future_tenor, .short_option_tenor, .long_option_tenor, .r2_expiry_calendar, .evidence_format, .evidence_contract_version)' "$source_none") \
+		<(jq 'del(.seed, .experiment_id, .hypothesis_id, .description, .dated_future_delivery_fee_policy, .short_future_tenor, .long_future_tenor, .short_option_tenor, .long_option_tenor, .r2_expiry_calendar, .evidence_format, .evidence_contract_version)' "$none"))" != true ]]; then
 	fail "non-calendar economic/config drift in $none"
 fi
 
