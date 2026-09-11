@@ -38,7 +38,11 @@ func TestValidateSV1DCapacityAttestationRejectsFormulaAndCompletionMutations(t *
 		}},
 		{name: "resource policy CPU", mutate: func(attestation *SV1DCapacityAttestation) { attestation.GOMAXPROCS = SV1DCapacityGOMAXPROCS + 1 }},
 		{name: "resource policy memory", mutate: func(attestation *SV1DCapacityAttestation) { attestation.GOMEMLIMIT = "8GiB" }},
+		{name: "evidence schema epoch", mutate: func(attestation *SV1DCapacityAttestation) { attestation.EvidenceSchemaEpoch++ }},
 		{name: "cgroup OOM", mutate: func(attestation *SV1DCapacityAttestation) { attestation.CgroupOOMEventsDelta = 1 }},
+		{name: "arm config binding", mutate: func(attestation *SV1DCapacityAttestation) {
+			attestation.Arms[0].CapacityConfigSHA256 = attestation.CapacityModeOffConfigSHA256
+		}},
 		{name: "arm swap", mutate: func(attestation *SV1DCapacityAttestation) {
 			attestation.Arms[0].Name, attestation.Arms[1].Name = attestation.Arms[1].Name, attestation.Arms[0].Name
 		}},
@@ -82,7 +86,7 @@ func TestVerifySV1DCapacityAttestationBindsExternalExpectationAndRejectsUnknownF
 	}
 	tampered := attestation
 	tampered.Arms = append([]SV1DCapacityArm(nil), attestation.Arms...)
-	tampered.Arms[0].ResourceMeasurementSHA256 = strings.Repeat("x", 64)
+	tampered.Arms[0].ResourceMeasurementSHA256 = strings.Repeat("0", 64)
 	writeSV1DCapacityAttestation(t, path, tampered)
 	if _, err := VerifySV1DCapacityAttestation(path, testSV1DCapacityExpectation(attestation)); err == nil {
 		t.Fatal("capacity record with an unbound resource measurement was accepted")
@@ -111,12 +115,72 @@ func TestVerifySV1DCapacityAttestationBindsExternalExpectationAndRejectsUnknownF
 	}
 }
 
+func TestVerifySV1DCapacityAttestationRejectsOmittedSafetyAndArmFields(t *testing.T) {
+	dir := t.TempDir()
+	attestation := testSV1DCapacityAttestation()
+	attestation.OutputParent = dir
+	attestation.MeasurementRoot = filepath.Join(dir, "capacity-output")
+	attestation.MeasurementRecordsRoot = filepath.Join(dir, "capacity-measurements")
+	if err := os.MkdirAll(attestation.MeasurementRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(attestation.MeasurementRecordsRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	filesystem, err := InspectSV1DFilesystem(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	attestation.FilesystemDevice, attestation.FilesystemID, attestation.FilesystemType = filesystem.Device, filesystem.ID, filesystem.Type
+	attestation.FilesystemMountID, attestation.FilesystemUUID = filesystem.MountID, filesystem.UUID
+	writeSV1DCapacityMeasurementRecords(t, &attestation)
+	path := filepath.Join(dir, "capacity.json")
+	expectation := testSV1DCapacityExpectation(attestation)
+
+	removeField := func(removeArmField bool, field string) {
+		raw, err := json.Marshal(attestation)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var document map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &document); err != nil {
+			t.Fatal(err)
+		}
+		if removeArmField {
+			var arms []map[string]json.RawMessage
+			if err := json.Unmarshal(document["arms"], &arms); err != nil {
+				t.Fatal(err)
+			}
+			delete(arms[0], field)
+			document["arms"], err = json.Marshal(arms)
+			if err != nil {
+				t.Fatal(err)
+			}
+		} else {
+			delete(document, field)
+		}
+		mutated, err := json.Marshal(document)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, mutated, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := VerifySV1DCapacityAttestation(path, expectation); err == nil {
+			t.Fatalf("attestation without %s was accepted", field)
+		}
+	}
+	removeField(false, "scientific_result_eligible")
+	removeField(false, "cgroup_oom_events_delta")
+	removeField(true, "exit_status")
+}
+
 func testSV1DCapacityAttestation() SV1DCapacityAttestation {
 	digest := func(value byte) string { return fmt.Sprintf("%064x", value) }
-	arm := func(name string, index byte) SV1DCapacityArm {
+	arm := func(name string, index byte, configDigest string) SV1DCapacityArm {
 		return SV1DCapacityArm{
 			Name: name, CapacityExperimentID: "v2-r2-sv1d-capacity-977-" + name,
-			CapacityHypothesisID: "V2-R2-SV1D-CAPACITY-ONLY", CapacityConfigSHA256: digest(index), Complete: true,
+			CapacityHypothesisID: "V2-R2-SV1D-CAPACITY-ONLY", CapacityConfigSHA256: configDigest, Complete: true,
 			ExitStatus: 0, SimulationStartNano: SV1DCapacityStartNano, SimulationEndNano: SV1DCapacityEndNano,
 			RunMetadataSHA256: digest(index + 10), ManifestSHA256: digest(index + 20), RunStatusSHA256: digest(index + 30),
 			EvidenceManifestSHA256: digest(index + 40), BinaryEvidenceAttestationSHA256: digest(index + 50), EventsSHA256: digest(index + 60),
@@ -139,7 +203,7 @@ func testSV1DCapacityAttestation() SV1DCapacityAttestation {
 		InitialAvailableBytes: 10_000, MinimumAvailableBytes: 7_000, FinalAvailableBytes: 8_000, PeakApparentBytes: 4_000, PeakAllocatedBytes: 5_000, PeakFilesystemConsumptionBytes: 3_000, MeasuredPeakBytes: 5_000,
 		SafetyReserveBytes: SV1DCapacitySafetyReserveBytes, RequiredFreeBytes: 5_000 + SV1DCapacitySafetyReserveBytes, PeakProcessTreeRSSBytes: 1_000, RequiredAvailableMemoryBytes: 1_000 + 1024*1024*1024, PeakCgroupMemoryBytes: 2_000, CgroupMemoryLimitBytes: 3_000, MinimumHostMemAvailableBytes: 2_000,
 		SwapUsedBytes: 0, SampleIntervalNano: SV1DCapacitySampleIntervalNano, MaximumSampleGapNano: SV1DCapacitySampleIntervalNano, SampleCount: 3, SamplesSHA256: digest('s'), OOMEventsDelta: 0, OOMKillEventsDelta: 0, CgroupOOMEventsDelta: 0, CgroupOOMKillEventsDelta: 0,
-		Arms: []SV1DCapacityArm{arm("treatment", 't'), arm("mode-off", 'u'), arm("no-roster", 'v')},
+		Arms: []SV1DCapacityArm{arm("treatment", 't', digest('i')), arm("mode-off", 'u', digest('j')), arm("no-roster", 'v', digest('k'))},
 	}
 }
 
@@ -210,7 +274,7 @@ func writeSV1DCapacityMeasurementRecords(t *testing.T, attestation *SV1DCapacity
 			last.AvailableBytes = first.AvailableBytes - 1
 		}
 		measurement := SV1DResourceMeasurement{
-			SchemaVersion: 1, Contract: SV1DResourceMeasurementContract, Command: []string{"capacity-test", armName}, OutputParent: attestation.OutputParent,
+			SchemaVersion: 1, Contract: SV1DResourceMeasurementContract, Command: testSV1DCapacityCommand(*attestation, attestation.Arms[index]), OutputParent: attestation.OutputParent,
 			MeasurementRoot: attestation.MeasurementRoot, Filesystem: attestationFilesystem(attestation), SampleIntervalNano: SV1DCapacitySampleIntervalNano, Complete: true,
 			ExitStatus: 0, Samples: []SV1DResourceSample{first, last},
 		}
@@ -225,6 +289,7 @@ func writeSV1DCapacityMeasurementRecords(t *testing.T, attestation *SV1DCapacity
 		attestation.Arms[index].PeakAllocatedBytes = measurement.PeakAllocatedBytes
 		attestation.Arms[index].PeakProcessTreeRSSBytes = measurement.PeakProcessTreeRSSBytes
 	}
+	writeSV1DCapacityArmArtifacts(t, attestation)
 	for index, armName := range armNames {
 		arm := attestation.Arms[index]
 		arm.CapacityArmRecordSHA256 = ""
@@ -309,6 +374,177 @@ func writeSV1DCapacityMeasurementRecords(t *testing.T, attestation *SV1DCapacity
 	attestation.MeasuredPeakBytes = maxCapacityValue(attestation.PeakApparentBytes, attestation.PeakAllocatedBytes, attestation.PeakFilesystemConsumptionBytes)
 	attestation.RequiredFreeBytes, _ = capacityRequiredFree(attestation.MeasuredPeakBytes, attestation.SafetyReserveBytes)
 	attestation.RequiredAvailableMemoryBytes, _ = capacityRequiredMemory(attestation.PeakProcessTreeRSSBytes)
+}
+
+func writeSV1DCapacityArmArtifacts(t *testing.T, attestation *SV1DCapacityAttestation) {
+	t.Helper()
+	armNames := []string{"treatment", "mode-off", "no-roster"}
+	for index, armName := range armNames {
+		arm := &attestation.Arms[index]
+		armDir := filepath.Join(attestation.MeasurementRoot, "arms", armName)
+		renderedDir := filepath.Join(attestation.MeasurementRoot, "rendered", armName)
+		for _, directory := range []string{armDir, renderedDir, filepath.Join(attestation.MeasurementRoot, "configs"), filepath.Join(attestation.MeasurementRoot, "tools"), filepath.Join(attestation.MeasurementRoot, "logs")} {
+			if err := os.MkdirAll(directory, 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}
+		configRaw := []byte(`{"arm":"` + armName + `"}`)
+		writeArmRaw(t, filepath.Join(attestation.MeasurementRoot, "configs", "capacity-"+armName+".json"), configRaw)
+		writeArmRaw(t, filepath.Join(armDir, "run-config.json"), configRaw)
+		arm.CapacityConfigSHA256 = sha256DigestHex(configRaw)
+		switch index {
+		case 0:
+			attestation.CapacityTreatmentConfigSHA256 = arm.CapacityConfigSHA256
+		case 1:
+			attestation.CapacityModeOffConfigSHA256 = arm.CapacityConfigSHA256
+		case 2:
+			attestation.CapacityNoRosterConfigSHA256 = arm.CapacityConfigSHA256
+		}
+
+		metadata := sv1dCapacityRunMetadata{
+			SchemaVersion: 1, RunnerContract: "v2-r2-sv1d-capacity-runner-v1", ProbeID: attestation.ProbeID,
+			CapacityOnly: true, ScientificResultEligible: false, Arm: armName,
+			ExperimentID: arm.CapacityExperimentID, ConfigExperimentID: arm.CapacityExperimentID, HypothesisID: arm.CapacityHypothesisID,
+			Seed: SV1DCapacitySeed, SimulatedHorizon: "5m", SimulationStartNano: int64(SV1DCapacityStartNano), SimulationEndNano: int64(SV1DCapacityEndNano),
+			ConfigSHA256: arm.CapacityConfigSHA256, BinarySHA256: attestation.BinarySHA256, GitRevision: attestation.SourceRevision,
+			BinaryPath: filepath.Join(attestation.MeasurementRoot, "tools", "multivenue-"+attestation.BinarySHA256), BinaryGoVersion: "go1.27.0",
+			BinaryGOOS: "linux", BinaryGOARCH: "amd64", BinaryGOAMD64: "v1", AnalyzerSHA256: attestation.AnalyzerSHA256,
+			RendererSHA256: attestation.RendererSHA256, LogMode: "full", EvidenceFormat: "evstream_v3", GOMAXPROCS: SV1DCapacityGOMAXPROCS,
+			OutputDir: armDir, Holdout: false,
+		}
+		metadataRaw, err := json.Marshal(metadata)
+		if err != nil {
+			t.Fatal(err)
+		}
+		writeArmRaw(t, filepath.Join(armDir, "run-metadata.json"), metadataRaw)
+		arm.RunMetadataSHA256 = sha256DigestHex(metadataRaw)
+
+		for _, name := range []string{"manifest.json", "greeks.json", "latency.json", "checkpoints.jsonl", "market-data-evidence-v2.json", "market-data-schedules-v2.bin", "market-data-receipts-v2.bin", "market-data-decisions-v2.bin"} {
+			writeArmRaw(t, filepath.Join(armDir, name), []byte(`{"fixture":true}`))
+		}
+		arm.ManifestSHA256 = testSV1DFileHash(t, filepath.Join(armDir, "manifest.json"))
+		arm.EventFrames = 10
+		arm.StreamFrames = 11
+		arm.ExecutionStreamHash = fmt.Sprintf("%064x", index+500)
+		binaryAttestation := cdfBinaryEvidenceAttestation{
+			Domain: "canonical_binary_execution_frames", Ordering: "ordered_stream", SchemaEpoch: SV1DCapacityEvidenceSchemaEpoch,
+			EventFrames: arm.EventFrames, StreamFrames: arm.StreamFrames, ExecutionStreamHash: arm.ExecutionStreamHash,
+			EvidenceOnlyIncluded: true, UnencodablePayloads: 0,
+		}
+		binaryRaw, err := json.Marshal(binaryAttestation)
+		if err != nil {
+			t.Fatal(err)
+		}
+		writeArmRaw(t, filepath.Join(armDir, "binary-evidence-attestation.json"), binaryRaw)
+		arm.BinaryEvidenceAttestationSHA256 = sha256DigestHex(binaryRaw)
+		writeArmRaw(t, filepath.Join(armDir, "events.evs"), []byte("binary fixture"))
+		arm.EventsSHA256 = testSV1DFileHash(t, filepath.Join(armDir, "events.evs"))
+
+		renderedDigest := fmt.Sprintf("%064x", index+600)
+		report := sv1dCapacityRendererReport{EventFrames: arm.EventFrames, DictionaryFrames: 1, StreamFrames: arm.StreamFrames, ExecutionStreamHash: arm.ExecutionStreamHash, Routes: 1, RenderedDigest: renderedDigest}
+		reportRaw, err := json.Marshal(report)
+		if err != nil {
+			t.Fatal(err)
+		}
+		writeArmRaw(t, filepath.Join(armDir, "renderer-report.json"), reportRaw)
+		arm.RendererReportSHA256 = sha256DigestHex(reportRaw)
+		arm.RenderedTreeDigest = renderedDigest
+
+		renderedEvidence := cdfRenderedEvidenceAttestation{
+			Domain: "rendered_binary_evidence", Ordering: "venue_sequence_files_with_global_frame_identity",
+			SourceExecutionHash: arm.ExecutionStreamHash, SourceEventFrames: arm.EventFrames, SourceStreamFrames: arm.StreamFrames,
+			RenderedDigest: renderedDigest, GlobalSequenceIncluded: true,
+		}
+		renderedEvidenceRaw, err := json.Marshal(renderedEvidence)
+		if err != nil {
+			t.Fatal(err)
+		}
+		writeArmRaw(t, filepath.Join(renderedDir, "rendered-binary-evidence-attestation.json"), renderedEvidenceRaw)
+		rendererAttestation := sv1dRendererAttestation{
+			SchemaVersion: 1, Contract: "v2-r2-sv1d-renderer-attestation-v1", RendererSHA256: attestation.RendererSHA256,
+			RendererSourceRevision: attestation.SourceRevision, RendererSourceModified: false, RendererGOOS: "linux", RendererGOARCH: "amd64", RendererGOAMD64: "v1",
+			RendererGoVersion: "go1.27.0", RendererTrimpath: true, RendererCGOEnabled: "0", RenderedAttestationSHA256: sha256DigestHex(renderedEvidenceRaw),
+		}
+		rendererRaw, err := json.Marshal(rendererAttestation)
+		if err != nil {
+			t.Fatal(err)
+		}
+		writeArmRaw(t, filepath.Join(renderedDir, "renderer-attestation.json"), rendererRaw)
+		arm.RendererAttestationSHA256 = sha256DigestHex(rendererRaw)
+
+		fixedFiles := []string{"run-config.json", "run-metadata.json", "manifest.json", "greeks.json", "latency.json", "checkpoints.jsonl", "events.evs", "binary-evidence-attestation.json", "market-data-evidence-v2.json", "market-data-schedules-v2.bin", "market-data-receipts-v2.bin", "market-data-decisions-v2.bin"}
+		fixed := make([]cdfEvidenceManifestRecord, 0, len(fixedFiles))
+		for _, name := range fixedFiles {
+			path := filepath.Join(armDir, name)
+			if name == "run-config.json" {
+				path = filepath.Join(attestation.MeasurementRoot, "configs", "capacity-"+armName+".json")
+			}
+			fixed = append(fixed, cdfEvidenceManifestRecord{Path: name, Bytes: int64(testSV1DFileSize(t, path)), SHA256: testSV1DFileHash(t, path)})
+		}
+		evidenceManifest := cdfEvidenceManifest{
+			SchemaVersion: 2, Contract: "v2-integrated-longrun-evidence-manifest-v2", Cell: armName, LogMode: "full", EvidenceFormat: "evstream_v3",
+			SourceRevision: attestation.SourceRevision, FixedFiles: fixed, RawJSONLFiles: 0, RawJSONLBytes: 0, RawFiles: []cdfEvidenceManifestRecord{},
+		}
+		evidenceRaw, err := json.Marshal(evidenceManifest)
+		if err != nil {
+			t.Fatal(err)
+		}
+		writeArmRaw(t, filepath.Join(armDir, "evidence-manifest.json"), evidenceRaw)
+		arm.EvidenceManifestSHA256 = sha256DigestHex(evidenceRaw)
+
+		status := sv1dCapacityRunStatus{
+			SchemaVersion: 1, Contract: "v2-r2-sv1d-capacity-arm-status-v1", CapacityOnly: true, ScientificResultEligible: false,
+			Cell: armName, ExperimentID: arm.CapacityExperimentID, ConfigExperimentID: arm.CapacityExperimentID, HypothesisID: arm.CapacityHypothesisID,
+			ExitStatus: 0, CompletionVerified: true, SimulatedHorizon: "5m", SimulationStartNano: int64(SV1DCapacityStartNano), SimulationEndNano: int64(SV1DCapacityEndNano),
+			CompletionSentinels: []string{"greeks.json", "latency.json"}, RunMetadataSHA256: arm.RunMetadataSHA256, ManifestSHA256: arm.ManifestSHA256,
+			GreeksSHA256: testSV1DFileHash(t, filepath.Join(armDir, "greeks.json")), LatencySHA256: testSV1DFileHash(t, filepath.Join(armDir, "latency.json")),
+			CheckpointsSHA256: testSV1DFileHash(t, filepath.Join(armDir, "checkpoints.jsonl")), EvidenceManifestSHA256: arm.EvidenceManifestSHA256,
+			BinaryEvidenceAttestationSHA256: arm.BinaryEvidenceAttestationSHA256,
+		}
+		statusRaw, err := json.Marshal(status)
+		if err != nil {
+			t.Fatal(err)
+		}
+		writeArmRaw(t, filepath.Join(armDir, "run-status.json"), statusRaw)
+		arm.RunStatusSHA256 = sha256DigestHex(statusRaw)
+	}
+}
+
+func writeArmRaw(t *testing.T, path string, raw []byte) {
+	t.Helper()
+	if err := os.WriteFile(path, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func testSV1DFileHash(t *testing.T, path string) string {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return sha256DigestHex(raw)
+}
+
+func testSV1DFileSize(t *testing.T, path string) int64 {
+	t.Helper()
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return info.Size()
+}
+
+func testSV1DCapacityCommand(attestation SV1DCapacityAttestation, arm SV1DCapacityArm) []string {
+	root := attestation.MeasurementRoot
+	return []string{
+		filepath.Join(root, "staging", "tools", "capacity-runner.sh"), "--internal-arm", arm.Name,
+		filepath.Join(root, "configs", "capacity-"+arm.Name+".json"), filepath.Join(root, "arms", arm.Name),
+		filepath.Join(root, "rendered", arm.Name), filepath.Join(root, "tools", "multivenue-"+attestation.BinarySHA256),
+		filepath.Join(root, "tools", "sv1dprobe-"+attestation.AnalyzerSHA256), filepath.Join(root, "tools", "evsrender-"+attestation.RendererSHA256),
+		attestation.SourceRevision, arm.CapacityExperimentID, filepath.Join(root, "logs", arm.Name+".simulator.stdout.log"),
+		filepath.Join(root, "logs", arm.Name+".simulator.stderr.log"),
+	}
 }
 
 func attestationFilesystem(attestation *SV1DCapacityAttestation) SV1DFilesystemIdentity {
