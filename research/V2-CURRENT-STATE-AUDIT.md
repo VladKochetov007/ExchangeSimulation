@@ -1073,3 +1073,34 @@ Only an accepted review permits actual binary capacity measurement, pinned
 Go 1.27 builds, and the development-only SV1D activation probe. No capacity,
 development, freeze, or holdout action occurred; holdouts `619/631/641` remain
 untouched.
+
+## Append-only operational update: SV1D provenance/runner closure (`301a131`) — 2026-09-11
+
+The exact scientific HEAD is `301a131`, clean and pushed. This checkpoint
+preserves the R2 calendar/lifecycle, risk, actor, and historical negative
+semantics. It adds only successor evidence/provenance hardening: a production
+`sv1dprobe` CLI, immutable simulator/analyzer/renderer identities in the
+tri-arm plan/results, renderer self-attestation bound to the rendered binary
+evidence, and a development-only runner with fresh namespaces, explicit
+review/probe authorization, clean same-revision pinned-tool checks, and a
+measured binary-capacity prerequisite. The runner has not been authorized or
+executed.
+
+Mechanical verification on this exact tree is complete: clean bounded
+`GOMAXPROCS=2 GOMEMLIMIT=4GiB make test`, `go vet ./...`, targeted race tests
+for `analysis`, `cmd/mvanalyze`, `cmd/prunegate`, and `tests`, and fresh-process
+determinism/binary-evidence/log-mode neutrality all pass. A temporary
+non-campaign 3-second run through clean Go 1.27 binaries and the actual
+`evsrender` executable passed with 942 event frames and 15 routes; the renderer
+attestation reports `vcs.modified=false`, linux/amd64/v1, trimpath, and
+CGO-disabled provenance and hashes the rendered attestation.
+
+The first make-test attempt on the pre-commit dirty tree was correctly stopped
+by the parity contract; the clean committed rerun passed. The performance
+branch was refreshed from `origin/autoresearch/v2-performance-research`
+through last-reviewed commit `b1847ac`, with no newer commits and no imported
+performance code. No capacity floor, pinned campaign build, SV1D arm, dev-607,
+freeze, or holdout `619/631/641` was consumed. Promotion remains pending one
+fresh exact-tree independent Sol-xhigh review of `301a131`; acceptance is the
+only next authorization for capacity measurement and the seed-659 activation
+probe.

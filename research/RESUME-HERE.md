@@ -1282,3 +1282,32 @@ capacity measurement, clean Go 1.27 provenance-pinned builds, and the
 development-only SV1D treatment/mode-off/no-roster activation probe. Capacity,
 probe, freeze, and holdout execution remain unauthorized; `619/631/641` are
 untouched. The performance feed remains at reviewed `b1847ac`.
+
+## Append-only checkpoint: SV1D provenance/runner mechanical closure — 2026-09-11
+
+Exact scientific HEAD `301a131` is clean and pushed. The SV1D development-only
+adapter now binds the immutable tri-arm plan and every arm result to the
+simulator, analyzer, and renderer SHA-256 identities. The production
+`evsrender` command emits a self-attested clean-build identity bound to the
+rendered binary-evidence attestation; strict analysis verifies that identity
+before reconstructing activation metrics. A guarded runner accepts only the
+registered seed-659 treatment/mode-off/no-roster arms, a clean same-revision
+Go 1.27 linux/amd64/v1 trimpath CGO-disabled tool set, an explicit review and
+probe authorization, and a separately measured binary-capacity attestation.
+It refuses holdouts and refuses to overwrite any output namespace.
+
+The exact tree passed clean bounded `make test`, `go vet ./...`, targeted
+`go test -race ./analysis ./cmd/mvanalyze ./cmd/prunegate ./tests -count=1`,
+and the fresh-process determinism/binary-evidence neutrality checks. A
+temporary non-campaign 3-second binary run and the actual `evsrender` binary
+also passed: 942 event frames, 15 reconstructed routes, and a clean
+Go 1.27/self-attested renderer bound to the rendered attestation. The first
+dirty-tree make test was intentionally rejected by the parity guard; the
+clean rerun passed. No capacity measurement, development cell, freeze, or
+holdout `619/631/641` was consumed, and no historical evidence was changed.
+
+The performance feed was fetched from `origin` through reviewed `b1847ac` and
+has no newer commit; no performance implementation was imported. The next
+boundary is one fresh exact-tree independent Sol-xhigh review of `301a131`.
+Only acceptance permits the actual binary-capacity measurement, pinned
+scientific build, and registered SV1D activation probe.
