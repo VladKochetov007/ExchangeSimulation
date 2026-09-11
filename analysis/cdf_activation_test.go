@@ -2955,6 +2955,53 @@ func TestCDFSnapshotProjectionRequiresExactPublicView(t *testing.T) {
 	}
 }
 
+func TestCDFVenueConcentrationSeparatesBookAvailabilityStates(t *testing.T) {
+	contract := RegisteredSV1DActivationContract()
+	observations := []cdfDepthObservation{
+		{at: 0, globalSequence: 1, bidDepth: 10},
+		{at: 10, globalSequence: 2, askDepth: 10},
+		{at: 20, globalSequence: 3},
+		{at: 30, globalSequence: 4, bidDepth: 10, askDepth: 10},
+	}
+
+	result := measureCDFVenueConcentration("north", observations, 40, contract)
+	if result.BidOnlyDurationNano != 10 || result.AskOnlyDurationNano != 10 || result.EmptyBookDurationNano != 10 {
+		t.Fatalf("availability durations = bid-only %d, ask-only %d, empty %d; want 10, 10, 10", result.BidOnlyDurationNano, result.AskOnlyDurationNano, result.EmptyBookDurationNano)
+	}
+	if result.OneSidedDurationNano != 20 || result.NonTwoSidedDurationNano != 30 {
+		t.Fatalf("aggregate non-two-sided durations = one-sided %d, total %d; want 20, 30", result.OneSidedDurationNano, result.NonTwoSidedDurationNano)
+	}
+	if result.MaxUninterruptedNonTwoSidedDurationNano != 10 {
+		t.Fatalf("maximum uninterrupted non-two-sided duration = %d; want 10", result.MaxUninterruptedNonTwoSidedDurationNano)
+	}
+	if result.TerminalBookMode != "two_sided" {
+		t.Fatalf("terminal book mode = %q; want two_sided", result.TerminalBookMode)
+	}
+}
+
+func TestCDFVenueConcentrationClampsIntervalsAndPreservesInputOrder(t *testing.T) {
+	contract := RegisteredSV1DActivationContract()
+	observations := []cdfDepthObservation{
+		{at: 20, globalSequence: 3, bidDepth: 20, askDepth: 20},
+		{at: 5, globalSequence: 2, bidDepth: 20},
+		{at: 0, globalSequence: 1, bidDepth: 20},
+	}
+
+	result := measureCDFVenueConcentration("north", observations, 10, contract)
+	if result.BidOnlyDurationNano != 10 || result.NonTwoSidedDurationNano != 10 {
+		t.Fatalf("clamped availability durations = bid-only %d, total %d; want 10, 10", result.BidOnlyDurationNano, result.NonTwoSidedDurationNano)
+	}
+	if result.MaxUninterruptedNonTwoSidedDurationNano != 10 {
+		t.Fatalf("clamped maximum uninterrupted duration = %d; want 10", result.MaxUninterruptedNonTwoSidedDurationNano)
+	}
+	if result.TerminalBookMode != "bid_only" {
+		t.Fatalf("terminal book mode = %q; want bid_only", result.TerminalBookMode)
+	}
+	if observations[0].at != 20 || observations[1].at != 5 || observations[2].at != 0 {
+		t.Fatal("venue concentration measurement reordered the caller's observations")
+	}
+}
+
 func writeOrderedCDFTestEvent(t *testing.T, path, venue string, localSequence, globalSequence uint64, eventName, symbol string, payload any) {
 	t.Helper()
 	rawPayload, err := json.Marshal(payload)

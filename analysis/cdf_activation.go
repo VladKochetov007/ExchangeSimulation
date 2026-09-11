@@ -246,16 +246,22 @@ type CDFSupplierActivationAudit struct {
 }
 
 type CDFVenueConcentrationAudit struct {
-	VenueID                  string  `json:"venue_id"`
-	SnapshotCount            int64   `json:"snapshot_count"`
-	BidActiveDurationNano    int64   `json:"bid_active_duration_nano"`
-	AskActiveDurationNano    int64   `json:"ask_active_duration_nano"`
-	BidDominantDurationNano  int64   `json:"bid_dominant_duration_nano"`
-	AskDominantDurationNano  int64   `json:"ask_dominant_duration_nano"`
-	BidDominanceTimeFraction float64 `json:"bid_dominance_time_fraction"`
-	AskDominanceTimeFraction float64 `json:"ask_dominance_time_fraction"`
-	OneSidedDurationNano     int64   `json:"one_sided_duration_nano"`
-	ConcentrationSatisfied   bool    `json:"concentration_satisfied"`
+	VenueID                                 string  `json:"venue_id"`
+	SnapshotCount                           int64   `json:"snapshot_count"`
+	BidActiveDurationNano                   int64   `json:"bid_active_duration_nano"`
+	AskActiveDurationNano                   int64   `json:"ask_active_duration_nano"`
+	BidDominantDurationNano                 int64   `json:"bid_dominant_duration_nano"`
+	AskDominantDurationNano                 int64   `json:"ask_dominant_duration_nano"`
+	BidDominanceTimeFraction                float64 `json:"bid_dominance_time_fraction"`
+	AskDominanceTimeFraction                float64 `json:"ask_dominance_time_fraction"`
+	BidOnlyDurationNano                     int64   `json:"bid_only_duration_nano"`
+	AskOnlyDurationNano                     int64   `json:"ask_only_duration_nano"`
+	EmptyBookDurationNano                   int64   `json:"empty_book_duration_nano"`
+	OneSidedDurationNano                    int64   `json:"one_sided_duration_nano"`
+	NonTwoSidedDurationNano                 int64   `json:"non_two_sided_duration_nano"`
+	MaxUninterruptedNonTwoSidedDurationNano int64   `json:"max_uninterrupted_non_two_sided_duration_nano"`
+	TerminalBookMode                        string  `json:"terminal_book_mode"`
+	ConcentrationSatisfied                  bool    `json:"concentration_satisfied"`
 }
 
 type CDFActivationCheck struct {
@@ -3768,25 +3774,49 @@ func (r *CDFActivationAudit) finalizeCDFActivation(
 }
 
 func measureCDFVenueConcentration(venueID string, observations []cdfDepthObservation, terminalAt int64, contract CDFActivationContract) CDFVenueConcentrationAudit {
-	result := CDFVenueConcentrationAudit{VenueID: venueID, SnapshotCount: int64(len(observations))}
+	result := CDFVenueConcentrationAudit{VenueID: venueID, SnapshotCount: int64(len(observations)), TerminalBookMode: "unobserved"}
 	if len(observations) == 0 {
 		return result
 	}
-	sort.SliceStable(observations, func(i, j int) bool {
-		if observations[i].at != observations[j].at {
-			return observations[i].at < observations[j].at
+	ordered := append([]cdfDepthObservation(nil), observations...)
+	sort.SliceStable(ordered, func(i, j int) bool {
+		if ordered[i].at != ordered[j].at {
+			return ordered[i].at < ordered[j].at
 		}
-		return observations[i].globalSequence < observations[j].globalSequence
+		return ordered[i].globalSequence < ordered[j].globalSequence
 	})
-	for index, observation := range observations {
+	currentNonTwoSidedMode := ""
+	currentNonTwoSidedDuration := int64(0)
+	previousIntervalEnd := int64(0)
+	hasPreviousInterval := false
+	for index, observation := range ordered {
+		if observation.at <= terminalAt {
+			result.TerminalBookMode = cdfBookMode(observation.bidDepth, observation.askDepth)
+		}
 		end := terminalAt
-		if index+1 < len(observations) {
-			end = observations[index+1].at
+		if index+1 < len(ordered) && ordered[index+1].at < end {
+			end = ordered[index+1].at
 		}
 		if end <= observation.at {
 			continue
 		}
 		duration := end - observation.at
+		mode := cdfBookMode(observation.bidDepth, observation.askDepth)
+		if mode == "two_sided" {
+			if currentNonTwoSidedDuration > result.MaxUninterruptedNonTwoSidedDurationNano {
+				result.MaxUninterruptedNonTwoSidedDurationNano = currentNonTwoSidedDuration
+			}
+			currentNonTwoSidedMode = ""
+			currentNonTwoSidedDuration = 0
+		} else if hasPreviousInterval && observation.at == previousIntervalEnd && mode == currentNonTwoSidedMode {
+			currentNonTwoSidedDuration += duration
+		} else {
+			if currentNonTwoSidedDuration > result.MaxUninterruptedNonTwoSidedDurationNano {
+				result.MaxUninterruptedNonTwoSidedDurationNano = currentNonTwoSidedDuration
+			}
+			currentNonTwoSidedMode = mode
+			currentNonTwoSidedDuration = duration
+		}
 		if observation.bidDepth > 0 {
 			result.BidActiveDurationNano += duration
 			if float64(observation.supplierBid)/float64(observation.bidDepth) > contract.MaximumSupplierDepthShare {
@@ -3799,10 +3829,22 @@ func measureCDFVenueConcentration(venueID string, observations []cdfDepthObserva
 				result.AskDominantDurationNano += duration
 			}
 		}
-		if (observation.bidDepth > 0) != (observation.askDepth > 0) {
-			result.OneSidedDurationNano += duration
+		switch mode {
+		case "bid_only":
+			result.BidOnlyDurationNano += duration
+		case "ask_only":
+			result.AskOnlyDurationNano += duration
+		case "empty":
+			result.EmptyBookDurationNano += duration
 		}
+		previousIntervalEnd = end
+		hasPreviousInterval = true
 	}
+	if currentNonTwoSidedDuration > result.MaxUninterruptedNonTwoSidedDurationNano {
+		result.MaxUninterruptedNonTwoSidedDurationNano = currentNonTwoSidedDuration
+	}
+	result.OneSidedDurationNano = result.BidOnlyDurationNano + result.AskOnlyDurationNano
+	result.NonTwoSidedDurationNano = result.OneSidedDurationNano + result.EmptyBookDurationNano
 	if result.BidActiveDurationNano > 0 {
 		result.BidDominanceTimeFraction = float64(result.BidDominantDurationNano) / float64(result.BidActiveDurationNano)
 	}
@@ -3813,6 +3855,19 @@ func measureCDFVenueConcentration(venueID string, observations []cdfDepthObserva
 		result.BidDominanceTimeFraction <= contract.MaximumDepthDominanceTimeFraction &&
 		result.AskDominanceTimeFraction <= contract.MaximumDepthDominanceTimeFraction
 	return result
+}
+
+func cdfBookMode(bidDepth, askDepth int64) string {
+	switch {
+	case bidDepth > 0 && askDepth > 0:
+		return "two_sided"
+	case bidDepth > 0:
+		return "bid_only"
+	case askDepth > 0:
+		return "ask_only"
+	default:
+		return "empty"
+	}
 }
 
 type cdfSupplierDepthMetrics struct {
