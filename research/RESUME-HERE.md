@@ -1176,3 +1176,23 @@ holdout `619/631/641` was consumed. Next: targeted race and fresh-process
 evidence-neutrality checks, then one fresh exact-tree Sol-xhigh review. Only an
 accepted review permits binary-evidence capacity measurement and the pinned
 build/activation sequence.
+
+## Append-only current checkpoint: exact-tree mechanical gates complete — 2026-09-11
+
+The exact scientific tree at `50210cd` is clean and pushed. The previously
+pending bounded checks are now complete: targeted `go test -race` for
+`./analysis ./cmd/mvanalyze ./cmd/prunegate ./tests` passed in
+`/tmp/exsim-v2-race-50210cd.log`, and the fresh-process
+determinism/evidence-neutrality matrix for `simulations/multivenue` passed in
+`/tmp/exsim-v2-fresh-50210cd.log`. Both used `GOMAXPROCS=2` and
+`GOMEMLIMIT=4GiB`.
+
+Together with the earlier focused suites, clean bounded `make test`, `go vet`,
+shell syntax, and diff checks, this closes the mechanical verification gate
+for the current successor tree. It is not a scientific promotion verdict:
+one fresh independent exact-tree Sol-xhigh review remains required. The next
+permitted actions after acceptance are a measured binary-evidence capacity
+floor, a clean provenance-pinned Go 1.27 build, and the smallest SV1D
+activation probe. No capacity measurement, development cell, freeze, or
+holdout `619/631/641` has been consumed. The performance feed was re-fetched
+and remains at reviewed `b1847ac`; no performance code was imported.

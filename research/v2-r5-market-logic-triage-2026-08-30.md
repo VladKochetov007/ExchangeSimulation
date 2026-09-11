@@ -905,3 +905,19 @@ No capacity, development, freeze, or holdout action was taken. Classification
 of the prior findings remains **promotion-blocking evidence-contract defects**;
 no simulator economic bug or historical-impact decision was introduced by this
 correction.
+
+## Mechanical gate completion — exact tree `50210cd` — 2026-09-11
+
+The correction tree passed the remaining bounded checks: targeted race tests
+for `analysis`, `mvanalyze`, `prunegate`, and `tests`, plus fresh-process
+determinism/evidence-neutrality checks for the multivenue evidence path. The
+logs are `/tmp/exsim-v2-race-50210cd.log` and
+`/tmp/exsim-v2-fresh-50210cd.log`; both completed with exit status 0 under the
+bounded resource settings. This is mechanical evidence only and does not
+replace the required fresh independent exact-tree Sol-xhigh review.
+
+The performance branch was fetched again and has no commit after reviewed
+`b1847ac`; no performance implementation was imported. No capacity
+measurement, pinned binary, development cell, freeze authorization, or
+holdout was consumed. The next scientific boundary is review of the complete
+R2-calendar, correctness-hardening, and binary-evidence successor tree.

@@ -971,3 +971,23 @@ has no commit after reviewed `b1847ac`; no performance implementation was
 merged. Disk/RAM were approximately 38 GiB free and 24 GiB available. No
 capacity or binary build, SV1D activation probe, development cell, freeze, or
 holdout `619/631/641` was run.
+
+## Append-only current checkpoint: exact-tree mechanical gates complete — 2026-09-11
+
+Exact clean HEAD is `50210cd`. The bounded targeted race suite
+`go test -race ./analysis ./cmd/mvanalyze ./cmd/prunegate ./tests -count=1`
+completed with exit status 0, and the fresh-process
+determinism/evidence-neutrality matrix completed with exit status 0. Logs are
+retained at `/tmp/exsim-v2-race-50210cd.log` and
+`/tmp/exsim-v2-fresh-50210cd.log`; both runs were bounded by
+`GOMAXPROCS=2 GOMEMLIMIT=4GiB`.
+
+The current successor therefore has a complete mechanical gate record
+alongside the focused/full/vet checks recorded above. Promotion remains
+blocked only by the required fresh independent exact-tree Sol-xhigh review at
+this boundary; acceptance is not inferred from passing tests. After an
+accepted review, measure binary-evidence capacity from an actual run, build
+the pinned Go 1.27 binaries, and run the smallest development SV1D activation
+probe before any registered 24h cell. No capacity, development, freeze, or
+holdout action occurred. The performance branch still has no commit after
+`b1847ac`, and no performance code was merged.
