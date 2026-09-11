@@ -78,6 +78,7 @@ func run() error {
 	reviewAttestation := flag.String("review-attestation", "", "externally signed SV1D review attestation")
 	reviewReport := flag.String("review-report", "", "externally produced SV1D review report")
 	trustedReviewKey := flag.String("trusted-review-key", "", "raw 32-byte trusted Ed25519 public key")
+	trustedReviewKeySHA256 := flag.String("trusted-review-key-sha256", "", "externally resolved trusted review key SHA-256")
 	treeRevision := flag.String("tree-revision", "", "externally resolved reviewed Git tree revision")
 	planSHA256 := flag.String("plan-sha256", "", "externally resolved canonical SV1D plan SHA-256")
 	failureReason := flag.String("failure-reason", "", "machine-readable reason for an incomplete arm result")
@@ -124,7 +125,8 @@ func run() error {
 			AttestationPath: *capacityAttestation,
 			SourceRevision:  *sourceRevision, TreeRevision: *treeRevision, PlanSHA256: *planSHA256,
 			ReviewAttestationSHA256: *reviewAttestation, ReviewReportSHA256: *reviewReport,
-			TreatmentConfigPath: *treatmentConfig, ModeOffConfigPath: *modeOffConfig, NoRosterConfigPath: *noRosterConfig,
+			TrustedReviewKeySHA256: *trustedReviewKeySHA256,
+			TreatmentConfigPath:    *treatmentConfig, ModeOffConfigPath: *modeOffConfig, NoRosterConfigPath: *noRosterConfig,
 			CapacityTreatmentConfigPath: *capacityTreatmentConfig, CapacityModeOffConfigPath: *capacityModeOffConfig, CapacityNoRosterConfigPath: *capacityNoRosterConfig,
 			CapacityConfigDeltaSHA256: *capacityConfigDeltaSHA256,
 			BinarySHA256:              *binarySHA256, AnalyzerSHA256: *analyzerSHA256, RendererSHA256: *rendererSHA256,

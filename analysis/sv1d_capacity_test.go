@@ -285,7 +285,7 @@ func testSV1DCapacityAttestation() SV1DCapacityAttestation {
 		SchemaVersion: 1, Contract: SV1DCapacityPreflightContract, ScientificResultEligible: false,
 		Purpose: SV1DCapacityPreflightPurpose, ProbeID: "v2-r2-sv1d-activation-659", CapacitySeed: SV1DCapacitySeed,
 		Horizon: "5m", DurationNano: SV1DCapacityDurationNano, SimulationStartNano: SV1DCapacityStartNano, SimulationEndNano: SV1DCapacityEndNano,
-		SourceRevision: strings.Repeat("a", 40), TreeRevision: strings.Repeat("b", 40), ReviewAttestationSHA256: digest('c'), ReviewReportSHA256: digest('d'), PlanSHA256: digest('e'),
+		SourceRevision: strings.Repeat("a", 40), TreeRevision: strings.Repeat("b", 40), ReviewAttestationSHA256: digest('c'), ReviewReportSHA256: digest('d'), TrustedReviewKeySHA256: digest('y'), PlanSHA256: digest('e'),
 		TargetTreatmentConfigSHA256: digest('f'), TargetModeOffConfigSHA256: digest('g'), TargetNoRosterConfigSHA256: digest('h'),
 		CapacityTreatmentConfigSHA256: digest('i'), CapacityModeOffConfigSHA256: digest('j'), CapacityNoRosterConfigSHA256: digest('k'), CapacityConfigDeltaSHA256: digest('l'),
 		BinarySHA256: digest('m'), AnalyzerSHA256: digest('n'), RendererSHA256: digest('o'), RunnerSHA256: digest('p'), MeasurerSHA256: digest('q'), ResourcePolicySHA256: digest('r'),
@@ -301,7 +301,7 @@ func testSV1DCapacityAttestation() SV1DCapacityAttestation {
 func testSV1DCapacityExpectation(attestation SV1DCapacityAttestation) SV1DCapacityExpectation {
 	return SV1DCapacityExpectation{
 		SourceRevision: attestation.SourceRevision, TreeRevision: attestation.TreeRevision, ProbeID: attestation.ProbeID, PlanSHA256: attestation.PlanSHA256,
-		ReviewAttestationSHA256: attestation.ReviewAttestationSHA256, ReviewReportSHA256: attestation.ReviewReportSHA256,
+		ReviewAttestationSHA256: attestation.ReviewAttestationSHA256, ReviewReportSHA256: attestation.ReviewReportSHA256, TrustedReviewKeySHA256: attestation.TrustedReviewKeySHA256,
 		TargetTreatmentConfigSHA256: attestation.TargetTreatmentConfigSHA256, TargetModeOffConfigSHA256: attestation.TargetModeOffConfigSHA256, TargetNoRosterConfigSHA256: attestation.TargetNoRosterConfigSHA256,
 		CapacityTreatmentConfigSHA256: attestation.CapacityTreatmentConfigSHA256, CapacityModeOffConfigSHA256: attestation.CapacityModeOffConfigSHA256, CapacityNoRosterConfigSHA256: attestation.CapacityNoRosterConfigSHA256, CapacityConfigDeltaSHA256: attestation.CapacityConfigDeltaSHA256,
 		BinarySHA256: attestation.BinarySHA256, AnalyzerSHA256: attestation.AnalyzerSHA256, RendererSHA256: attestation.RendererSHA256, RunnerSHA256: attestation.RunnerSHA256, MeasurerSHA256: attestation.MeasurerSHA256, ResourcePolicySHA256: attestation.ResourcePolicySHA256,
@@ -665,6 +665,7 @@ func writeSV1DCapacityRetainedInputs(t *testing.T, attestation *SV1DCapacityAtte
 	attestation.ResourcePolicySHA256 = writeRetained(filepath.Join(root, "resource-policy-v1.json"), []byte(`{"policy":"fixture"}`))
 	attestation.ReviewAttestationSHA256 = writeRetained(filepath.Join(root, "review", "attestation.json"), []byte(`{"review":"fixture"}`))
 	attestation.ReviewReportSHA256 = writeRetained(filepath.Join(root, "review", "report.md"), []byte("# fixture review\n"))
+	attestation.TrustedReviewKeySHA256 = writeRetained(filepath.Join(root, "review", "trusted-key.raw"), []byte("trusted review key fixture\n"))
 	attestation.TargetTreatmentConfigSHA256 = writeRetained(filepath.Join(root, "configs", "target-treatment.json"), []byte(`{"target":"treatment"}`))
 	attestation.TargetModeOffConfigSHA256 = writeRetained(filepath.Join(root, "configs", "target-mode-off.json"), []byte(`{"target":"mode-off"}`))
 	attestation.TargetNoRosterConfigSHA256 = writeRetained(filepath.Join(root, "configs", "target-no-roster.json"), []byte(`{"target":"no-roster"}`))

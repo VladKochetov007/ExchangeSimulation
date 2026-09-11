@@ -26,6 +26,15 @@ fail() {
 	exit 1
 }
 
+normalize_input_path() {
+	local path=$1
+	[[ -n "$path" ]] || return 1
+	if [[ "$path" != /* ]]; then
+		path="$PWD/$path"
+	fi
+	realpath -m -- "$path"
+}
+
 require_no_symlink_components() {
 	local path=$1 current=/ component
 	local path_without_root=${path#/}
@@ -218,6 +227,9 @@ if [[ $# -gt 4 ]]; then
 	exit 2
 fi
 
+root_dir=$(normalize_input_path "$root_dir") || fail "could not normalize the repository root"
+capacity_script=$(normalize_input_path "$capacity_script") || fail "could not normalize the capacity runner"
+
 multivenue_binary=${1:-"$root_dir/bin/multivenue"}
 sv1dprobe_binary=${2:-"$root_dir/bin/sv1dprobe"}
 evsrender_binary=${3:-"$root_dir/bin/evsrender"}
@@ -228,6 +240,14 @@ review_attestation=${SV1D_REVIEW_ATTESTATION:-}
 review_report=${SV1D_REVIEW_REPORT:-}
 trusted_review_key=${SV1D_TRUSTED_REVIEW_KEY:-}
 capacity_lock_path="/home/vlad/v2-r2-sv1d-capacity-977.lock"
+
+multivenue_binary=$(normalize_input_path "$multivenue_binary") || fail "could not normalize multivenue binary"
+sv1dprobe_binary=$(normalize_input_path "$sv1dprobe_binary") || fail "could not normalize sv1dprobe binary"
+evsrender_binary=$(normalize_input_path "$evsrender_binary") || fail "could not normalize evsrender binary"
+sv1dresource_binary=$(normalize_input_path "$sv1dresource_binary") || fail "could not normalize sv1dresource binary"
+review_attestation=$(normalize_input_path "$review_attestation") || fail "could not normalize review attestation"
+review_report=$(normalize_input_path "$review_report") || fail "could not normalize review report"
+trusted_review_key=$(normalize_input_path "$trusted_review_key") || fail "could not normalize trusted review key"
 
 [[ "${SV1D_CAPACITY_AUTHORIZED:-0}" == 1 ]] || fail "set SV1D_CAPACITY_AUTHORIZED=1 at the explicit capacity-preflight boundary"
 [[ -d "$root_dir/.git" ]] || fail "repository root is not a Git worktree"
@@ -328,6 +348,10 @@ policy_sha256=$(hash_file "$policy_path")
 runner_sha256=$(hash_file "$staged_capacity_script")
 review_attestation_sha256=$(hash_file "$staged_review_attestation")
 review_report_sha256=$(hash_file "$staged_review_report")
+trusted_review_key_sha256=$(hash_file "$staged_trusted_key")
+expected_trusted_review_key_sha256=${SV1D_TRUSTED_REVIEW_KEY_SHA256:-}
+[[ "$expected_trusted_review_key_sha256" =~ ^[0-9a-f]{64}$ ]] || fail "SV1D_TRUSTED_REVIEW_KEY_SHA256 must pin the trusted review key"
+[[ "$trusted_review_key_sha256" == "$expected_trusted_review_key_sha256" ]] || fail "trusted review key does not match the pinned digest"
 
 review_plan="$staging_root/probe-plan.json"
 "$staged_sv1dprobe" -mode plan -out "$review_plan" \
@@ -352,7 +376,8 @@ copy_immutable_file retained-multivenue "$staged_multivenue" "$output_root/tools
 copy_immutable_file retained-sv1dprobe "$staged_sv1dprobe" "$output_root/tools/sv1dprobe-$sv1dprobe_sha256"
 copy_immutable_file retained-evsrender "$staged_evsrender" "$output_root/tools/evsrender-$evsrender_sha256"
 copy_immutable_file retained-sv1dresource "$staged_sv1dresource" "$output_root/tools/sv1dresource-$sv1dresource_sha256"
-copy_immutable_file retained-capacity-runner "$staged_capacity_script" "$output_root/tools/capacity-runner-$runner_sha256.sh"
+retained_capacity_runner="$output_root/tools/capacity-runner-$runner_sha256.sh"
+copy_immutable_file retained-capacity-runner "$staged_capacity_script" "$retained_capacity_runner"
 chmod 0555 -- "$output_root"/tools/*
 copy_immutable_file retained-resource-policy "$policy_path" "$output_root/resource-policy-v1.json"
 copy_immutable_file retained-review-attestation "$staged_review_attestation" "$output_root/review/attestation.json"
@@ -418,12 +443,13 @@ capacity_no_roster_sha256=$(config_sha256 "${capacity_config_for[no-roster]}")
 jq -S -n \
 	--arg contract "v2-r2-sv1d-capacity-run-metadata-v1" --arg source_revision "$source_revision" --arg tree_revision "$tree_revision" \
 	--arg probe_id "$capacity_probe_id" --arg plan_sha256 "$review_plan_sha256" --arg review_attestation_sha256 "$review_attestation_sha256" \
-	--arg review_report_sha256 "$review_report_sha256" --arg runner_sha256 "$runner_sha256" --arg measurer_sha256 "$sv1dresource_sha256" \
+	--arg review_report_sha256 "$review_report_sha256" --arg trusted_review_key_sha256 "$trusted_review_key_sha256" \
+	--arg runner_sha256 "$runner_sha256" --arg measurer_sha256 "$sv1dresource_sha256" \
 	--arg resource_policy_sha256 "$policy_sha256" --arg evidence_format "evstream_v3" --arg log_mode "full" \
 	--arg output_root "$output_root" --arg output_parent "$output_parent" \
 	'{schema_version: 1, contract: $contract, scientific_result_eligible: false, capacity_seed: 977, horizon: "5m",
 	 source_revision: $source_revision, tree_revision: $tree_revision, probe_id: $probe_id, plan_sha256: $plan_sha256,
-	 review_attestation_sha256: $review_attestation_sha256, review_report_sha256: $review_report_sha256,
+	 review_attestation_sha256: $review_attestation_sha256, review_report_sha256: $review_report_sha256, trusted_review_key_sha256: $trusted_review_key_sha256,
 	 runner_sha256: $runner_sha256, measurer_sha256: $measurer_sha256, resource_policy_sha256: $resource_policy_sha256,
 	 evidence_format: $evidence_format, log_mode: $log_mode, output_root: $output_root, output_parent: $output_parent,
 	 arms: ["treatment", "mode-off", "no-roster"], holdouts_consumed: [], outcome_metrics_recorded: false}' \
@@ -440,9 +466,9 @@ for arm in treatment mode-off no-roster; do
 	measurement_path="$measurement_records_root/$arm-resource-measurement.json"
 	arm_result="$measurement_records_root/$arm-record.json"
 	set +e
-	GOMAXPROCS=2 GOMEMLIMIT=4GiB SV1D_CAPACITY_ROOT_DIR="$root_dir" SV1D_CAPACITY_SCRIPT_PATH="$staged_capacity_script" "$staged_sv1dresource" -out "$measurement_path" -output-parent "$output_parent" -measurement-root "$output_root" \
+	GOMAXPROCS=2 GOMEMLIMIT=4GiB SV1D_CAPACITY_ROOT_DIR="$root_dir" SV1D_CAPACITY_SCRIPT_PATH="$retained_capacity_runner" "$staged_sv1dresource" -out "$measurement_path" -output-parent "$output_parent" -measurement-root "$output_root" \
 		-sample-interval 250ms -require-finite-cgroup -- \
-		"$staged_capacity_script" --internal-arm "$arm" "${capacity_config_for[$arm]}" "$arm_dir" "$rendered_dir" "$staged_multivenue" "$staged_sv1dprobe" "$staged_evsrender" "$source_revision" \
+		"$retained_capacity_runner" --internal-arm "$arm" "${capacity_config_for[$arm]}" "$arm_dir" "$rendered_dir" "$staged_multivenue" "$staged_sv1dprobe" "$staged_evsrender" "$source_revision" \
 		"${capacity_experiment_for[$arm]}" "$stdout_log" "$stderr_log"
 	resource_status=$?
 	set -e
@@ -548,7 +574,7 @@ arms_json=$(jq -s \
 jq -S -n \
 	--arg contract "v2-r2-sv1d-binary-capacity-preflight-v1" --arg purpose "five_minute_sv1d_binary_evidence_capacity_preflight" \
 	--arg probe_id "$capacity_probe_id" --arg source_revision "$source_revision" --arg tree_revision "$tree_revision" \
-	--arg review_attestation_sha256 "$review_attestation_sha256" --arg review_report_sha256 "$review_report_sha256" --arg plan_sha256 "$review_plan_sha256" \
+	--arg review_attestation_sha256 "$review_attestation_sha256" --arg review_report_sha256 "$review_report_sha256" --arg trusted_review_key_sha256 "$trusted_review_key_sha256" --arg plan_sha256 "$review_plan_sha256" \
 	--arg target_treatment_config_sha256 "$target_treatment_sha256" --arg target_mode_off_config_sha256 "$target_mode_off_sha256" --arg target_no_roster_config_sha256 "$target_no_roster_sha256" \
 	--arg capacity_treatment_config_sha256 "$capacity_treatment_sha256" --arg capacity_mode_off_config_sha256 "$capacity_mode_off_sha256" --arg capacity_no_roster_config_sha256 "$capacity_no_roster_sha256" \
 	--arg capacity_config_delta_sha256 "$capacity_delta_sha256" --arg binary_sha256 "$multivenue_sha256" --arg analyzer_sha256 "$sv1dprobe_sha256" \
@@ -570,7 +596,7 @@ jq -S -n \
 	'{schema_version: 1, contract: $contract, scientific_result_eligible: false, purpose: $purpose, probe_id: $probe_id,
 	 capacity_seed: 977, horizon: "5m", duration_nano: 300000000000, simulation_start_nano: 1735689600000000000,
 	 simulation_end_nano: 1735689900000000000, source_revision: $source_revision, tree_revision: $tree_revision,
-	 review_attestation_sha256: $review_attestation_sha256, review_report_sha256: $review_report_sha256, plan_sha256: $plan_sha256,
+	 review_attestation_sha256: $review_attestation_sha256, review_report_sha256: $review_report_sha256, trusted_review_key_sha256: $trusted_review_key_sha256, plan_sha256: $plan_sha256,
 	 target_treatment_config_sha256: $target_treatment_config_sha256, target_mode_off_config_sha256: $target_mode_off_config_sha256,
 	 target_no_roster_config_sha256: $target_no_roster_config_sha256, capacity_treatment_config_sha256: $capacity_treatment_config_sha256,
 	 capacity_mode_off_config_sha256: $capacity_mode_off_config_sha256, capacity_no_roster_config_sha256: $capacity_no_roster_config_sha256,
@@ -595,7 +621,7 @@ mv -- "$capacity_attestation.tmp-$$" "$capacity_attestation"
 
 "$staged_sv1dprobe" -mode verify-capacity -capacity-attestation "$capacity_attestation" \
 	-source-revision "$source_revision" -tree-revision "$tree_revision" -plan-sha256 "$review_plan_sha256" \
-	-review-attestation "$review_attestation_sha256" -review-report "$review_report_sha256" \
+	-review-attestation "$review_attestation_sha256" -review-report "$review_report_sha256" -trusted-review-key-sha256 "$trusted_review_key_sha256" \
 	-treatment-config "${staged_target_for[treatment]}" -mode-off-config "${staged_target_for[mode-off]}" -no-roster-config "${staged_target_for[no-roster]}" \
 	-capacity-treatment-config "${capacity_config_for[treatment]}" -capacity-mode-off-config "${capacity_config_for[mode-off]}" -capacity-no-roster-config "${capacity_config_for[no-roster]}" \
 	-capacity-config-delta-sha256 "$capacity_delta_sha256" -binary-sha256 "$multivenue_sha256" -analyzer-sha256 "$sv1dprobe_sha256" \

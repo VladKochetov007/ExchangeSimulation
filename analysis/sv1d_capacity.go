@@ -48,6 +48,7 @@ type SV1DCapacityAttestation struct {
 	TreeRevision                   string            `json:"tree_revision"`
 	ReviewAttestationSHA256        string            `json:"review_attestation_sha256"`
 	ReviewReportSHA256             string            `json:"review_report_sha256"`
+	TrustedReviewKeySHA256         string            `json:"trusted_review_key_sha256"`
 	PlanSHA256                     string            `json:"plan_sha256"`
 	TargetTreatmentConfigSHA256    string            `json:"target_treatment_config_sha256"`
 	TargetModeOffConfigSHA256      string            `json:"target_mode_off_config_sha256"`
@@ -142,6 +143,7 @@ type SV1DCapacityExpectation struct {
 	PlanSHA256                    string
 	ReviewAttestationSHA256       string
 	ReviewReportSHA256            string
+	TrustedReviewKeySHA256        string
 	TargetTreatmentConfigSHA256   string
 	TargetModeOffConfigSHA256     string
 	TargetNoRosterConfigSHA256    string
@@ -330,6 +332,7 @@ func ValidateSV1DCapacityAttestation(attestation SV1DCapacityAttestation) error 
 	for name, value := range map[string]string{
 		"review attestation":        attestation.ReviewAttestationSHA256,
 		"review report":             attestation.ReviewReportSHA256,
+		"trusted review key":        attestation.TrustedReviewKeySHA256,
 		"plan":                      attestation.PlanSHA256,
 		"target treatment config":   attestation.TargetTreatmentConfigSHA256,
 		"target mode-off config":    attestation.TargetModeOffConfigSHA256,
@@ -424,7 +427,7 @@ func VerifySV1DCapacityAttestation(path string, expected SV1DCapacityExpectation
 }
 
 func compareSV1DCapacityExpectation(attestation SV1DCapacityAttestation, expected SV1DCapacityExpectation) error {
-	if expected.ProbeID == "" || attestation.ProbeID != expected.ProbeID || attestation.SourceRevision != expected.SourceRevision || attestation.TreeRevision != expected.TreeRevision || attestation.PlanSHA256 != expected.PlanSHA256 || attestation.ReviewAttestationSHA256 != expected.ReviewAttestationSHA256 || attestation.ReviewReportSHA256 != expected.ReviewReportSHA256 {
+	if expected.ProbeID == "" || attestation.ProbeID != expected.ProbeID || attestation.SourceRevision != expected.SourceRevision || attestation.TreeRevision != expected.TreeRevision || attestation.PlanSHA256 != expected.PlanSHA256 || attestation.ReviewAttestationSHA256 != expected.ReviewAttestationSHA256 || attestation.ReviewReportSHA256 != expected.ReviewReportSHA256 || attestation.TrustedReviewKeySHA256 != expected.TrustedReviewKeySHA256 {
 		return fmt.Errorf("SV1D capacity attestation does not match source, tree, plan, or review identity")
 	}
 	if attestation.TargetTreatmentConfigSHA256 != expected.TargetTreatmentConfigSHA256 || attestation.TargetModeOffConfigSHA256 != expected.TargetModeOffConfigSHA256 || attestation.TargetNoRosterConfigSHA256 != expected.TargetNoRosterConfigSHA256 || attestation.CapacityTreatmentConfigSHA256 != expected.CapacityTreatmentConfigSHA256 || attestation.CapacityModeOffConfigSHA256 != expected.CapacityModeOffConfigSHA256 || attestation.CapacityNoRosterConfigSHA256 != expected.CapacityNoRosterConfigSHA256 || attestation.CapacityConfigDeltaSHA256 != expected.CapacityConfigDeltaSHA256 {
@@ -1092,6 +1095,7 @@ func verifySV1DCapacityRetainedInputs(attestation SV1DCapacityAttestation) error
 		{filepath.Join(root, "resource-policy-v1.json"), attestation.ResourcePolicySHA256},
 		{filepath.Join(root, "review", "attestation.json"), attestation.ReviewAttestationSHA256},
 		{filepath.Join(root, "review", "report.md"), attestation.ReviewReportSHA256},
+		{filepath.Join(root, "review", "trusted-key.raw"), attestation.TrustedReviewKeySHA256},
 		{filepath.Join(root, "configs", "target-treatment.json"), attestation.TargetTreatmentConfigSHA256},
 		{filepath.Join(root, "configs", "target-mode-off.json"), attestation.TargetModeOffConfigSHA256},
 		{filepath.Join(root, "configs", "target-no-roster.json"), attestation.TargetNoRosterConfigSHA256},

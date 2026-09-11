@@ -17,6 +17,7 @@ type capacityVerificationInputs struct {
 
 	ReviewAttestationSHA256 string
 	ReviewReportSHA256      string
+	TrustedReviewKeySHA256  string
 
 	TreatmentConfigPath string
 	ModeOffConfigPath   string
@@ -90,6 +91,7 @@ func verifyCapacity(inputs capacityVerificationInputs) error {
 	_, err = analysis.VerifySV1DCapacityAttestation(inputs.AttestationPath, analysis.SV1DCapacityExpectation{
 		SourceRevision: inputs.SourceRevision, TreeRevision: inputs.TreeRevision, ProbeID: probeID, PlanSHA256: inputs.PlanSHA256,
 		ReviewAttestationSHA256: inputs.ReviewAttestationSHA256, ReviewReportSHA256: inputs.ReviewReportSHA256,
+		TrustedReviewKeySHA256:      inputs.TrustedReviewKeySHA256,
 		TargetTreatmentConfigSHA256: targetTreatment, TargetModeOffConfigSHA256: targetModeOff, TargetNoRosterConfigSHA256: targetNoRoster,
 		CapacityTreatmentConfigSHA256: capacityTreatment, CapacityModeOffConfigSHA256: capacityModeOff, CapacityNoRosterConfigSHA256: capacityNoRoster,
 		CapacityConfigDeltaSHA256: inputs.CapacityConfigDeltaSHA256,
