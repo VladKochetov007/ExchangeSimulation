@@ -515,6 +515,82 @@ func TestCDFStrictDepthDeltaDefersSharedPricePartialReduction(t *testing.T) {
 	}
 }
 
+func TestCDFStrictDepthDeltaRejectsMismatchedCancellation(t *testing.T) {
+	contract := RegisteredSV1DActivationContract().Suppliers[0]
+	const venueID = "north"
+	const clientID = uint64(7)
+	const price = int64(300_300_000)
+	states := map[cdfParticipantKey]*cdfSupplierState{{venueID: venueID, clientID: clientID}: {contract: contract}}
+	orders := map[cdfOrderKey]*cdfOrderState{
+		{venueID: venueID, clientID: clientID, orderID: 1}: {side: "BUY", price: price, remainingQty: 60, originalQty: 60},
+		{venueID: venueID, clientID: clientID, orderID: 2}: {side: "BUY", price: price, remainingQty: 40, originalQty: 40},
+	}
+	publicDepth := map[string]*cdfPublicDepthState{
+		venueID: {initialized: true, bids: map[int64]int64{price: 100}, asks: map[int64]int64{}},
+	}
+	depth := make(map[string][]cdfDepthObservation)
+	pending := make(map[string][]cdfPendingDepthObservation)
+	audit := &CDFActivationAudit{strictMechanics: true}
+	deltaRaw, err := json.Marshal(cdfBookDeltaEvidence{Side: "BUY", Price: price, VisibleQty: 60})
+	if err != nil {
+		t.Fatal(err)
+	}
+	audit.processCDFDepthDelta(Event{SimTS: 2, GlobalSequence: 2, VenueID: venueID, Ordinal: 10, payload: deltaRaw}, states, orders, depth, publicDepth, pending)
+	cancelRaw, err := json.Marshal(cdfCancelledEvidence{OrderID: 1, RemainingQty: 60, Reason: "EXCHANGE_FORCED_LIFECYCLE"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	audit.flushCDFPendingDepthBeforeEvent(Event{
+		Name: "OrderCancelled", SimTS: 3, GlobalSequence: 3, VenueID: venueID, ClientID: clientID, payload: cancelRaw,
+	}, states, orders, depth, pending)
+	if len(pending[venueID]) != 0 || len(depth[venueID]) != 1 ||
+		!hasCDFActivationFailure(audit.Checks, "CDF deferred depth reduction lacks the exact next causal cancellation") {
+		t.Fatalf("mismatched same-level cancellation was accepted: pending=%+v depth=%+v checks=%+v", pending, depth, audit.Checks)
+	}
+}
+
+func TestCDFStrictDepthDeltaResolvesThroughExactCancellation(t *testing.T) {
+	contract := RegisteredSV1DActivationContract().Suppliers[0]
+	const venueID = "north"
+	const clientID = uint64(7)
+	const price = int64(300_300_000)
+	state := &cdfSupplierState{contract: contract, audit: CDFSupplierActivationAudit{VenueID: venueID, Role: contract.Role, ClientID: clientID}}
+	states := map[cdfParticipantKey]*cdfSupplierState{{venueID: venueID, clientID: clientID}: state}
+	orders := map[cdfOrderKey]*cdfOrderState{
+		{venueID: venueID, clientID: clientID, orderID: 1}: {side: "BUY", price: price, remainingQty: 60, originalQty: 60, acceptedAt: 1, acceptedGlobalSeq: 1},
+		{venueID: venueID, clientID: clientID, orderID: 2}: {side: "BUY", price: price, remainingQty: 40, originalQty: 40, acceptedAt: 1, acceptedGlobalSeq: 1},
+	}
+	publicDepth := map[string]*cdfPublicDepthState{
+		venueID: {initialized: true, bids: map[int64]int64{price: 100}, asks: map[int64]int64{}},
+	}
+	depth := make(map[string][]cdfDepthObservation)
+	pending := make(map[string][]cdfPendingDepthObservation)
+	audit := &CDFActivationAudit{strictMechanics: true}
+	deltaRaw, err := json.Marshal(cdfBookDeltaEvidence{Side: "BUY", Price: price, VisibleQty: 60})
+	if err != nil {
+		t.Fatal(err)
+	}
+	audit.processCDFDepthDelta(Event{SimTS: 2, GlobalSequence: 2, VenueID: venueID, payload: deltaRaw}, states, orders, depth, publicDepth, pending)
+	cancelEvent := Event{SimTS: 3, GlobalSequence: 3, VenueID: venueID, ClientID: clientID, Name: "OrderCancelled"}
+	cancelEvent.payload, err = json.Marshal(cdfCancelledEvidence{OrderID: 2, RemainingQty: 40, Reason: "EXCHANGE_FORCED_LIFECYCLE"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	audit.flushCDFPendingDepthBeforeEvent(cancelEvent, states, orders, depth, pending)
+	if len(pending[venueID]) != 1 {
+		t.Fatalf("exact causal cancellation was not retained for processing: %+v", pending)
+	}
+	audit.processCDFCancelled(cancelEvent, states, map[cdfRequestKey]*cdfWithdrawal{}, orders, depth, publicDepth)
+	audit.flushCDFPendingDepth(venueID, states, orders, depth, pending, true)
+	if len(pending[venueID]) != 0 || len(audit.Checks) != 0 || len(orders) != 1 || len(depth[venueID]) != 2 {
+		t.Fatalf("exact causal cancellation did not resolve the pending reduction: pending=%+v orders=%+v depth=%+v checks=%+v", pending, orders, depth, audit.Checks)
+	}
+	observation := depth[venueID][1]
+	if observation.bidDepth != 60 || observation.supplierBid != 60 {
+		t.Fatalf("resolved depth = %+v, want public and supplier depth 60", observation)
+	}
+}
+
 func TestValidateCDFCompletionSidecarsRejectsStructurallyIncompleteLatency(t *testing.T) {
 	run := writeRegisteredCDFActivationFixture(t, cdfActivationFixtureOptions{strictMechanics: true})
 	contract := RegisteredSV1DActivationContract()
@@ -584,11 +660,10 @@ func readStrictCDFFixtureRows(t *testing.T, venuesDir string) []strictCDFFixture
 		if rows[left].Data.VenueID != rows[right].Data.VenueID {
 			return rows[left].Data.VenueID < rows[right].Data.VenueID
 		}
-		if rows[left].Event == "BookDelta" && rows[right].Event == "OrderCancelled" {
-			return true
-		}
-		if rows[left].Event == "OrderCancelled" && rows[right].Event == "BookDelta" {
-			return false
+		leftRank := strictCDFFixtureProducerRank(rows[left], rows)
+		rightRank := strictCDFFixtureProducerRank(rows[right], rows)
+		if leftRank != rightRank {
+			return leftRank < rightRank
 		}
 		if rows[left].Route != rows[right].Route {
 			return rows[left].Route < rows[right].Route
@@ -599,6 +674,48 @@ func readStrictCDFFixtureRows(t *testing.T, venuesDir string) []strictCDFFixture
 		return rows[left].Event < rows[right].Event
 	})
 	return rows
+}
+
+func strictCDFFixtureProducerRank(row strictCDFFixtureRow, rows []strictCDFFixtureRow) int {
+	const (
+		acceptedRank = iota + 10
+		tradeRank
+		fillRank
+		supplierFillRank
+		bookDeltaRank
+		cancelledRank
+	)
+	if row.Event == "BookDelta" {
+		for _, peer := range rows {
+			if peer.SimTS != row.SimTS || peer.Data.VenueID != row.Data.VenueID {
+				continue
+			}
+			switch peer.Event {
+			case "OrderCancelled":
+				return 5
+			case "OrderFill":
+				return 35
+			case "OrderAccepted":
+				return 15
+			}
+		}
+	}
+	switch row.Event {
+	case "OrderAccepted":
+		return acceptedRank
+	case "Trade":
+		return tradeRank
+	case "OrderFill":
+		return fillRank
+	case "elastic_liquidity_supplier_fill":
+		return supplierFillRank
+	case "BookDelta":
+		return bookDeltaRank
+	case "OrderCancelled":
+		return cancelledRank
+	default:
+		return 0
+	}
 }
 
 func writeStrictCDFBinaryEvidence(t *testing.T, dir string, rows []strictCDFFixtureRow, schemaEpoch uint32) {
@@ -1324,16 +1441,6 @@ func appendCDFParticipantEvents(
 		at: cancelDecisionAt, clientID: participant.clientID, event: "elastic_liquidity_supplier_decision", payload: cancelDecision,
 	})
 	if !(options.omitCancellation && participantOrdinal == 0) {
-		if options.strictMechanics && participantOrdinal == len(RegisteredSV1DActivationContract().Suppliers)-1 {
-			// Production cancellation removes public depth before emitting
-			// OrderCancelled. Emit the aggregate level removal only for the
-			// final supplier at this shared price; earlier cancellations leave
-			// sibling orders at the level and therefore cannot remove it.
-			(*bookEvents)[participant.venueID] = append((*bookEvents)[participant.venueID], cdfFixtureEvent{
-				at: cancelledAt, clientID: 0, event: "BookDelta", symbol: cdfActivationSymbol,
-				payload: cdfBookDeltaEvidence{Side: postDecision.Side, Price: postDecision.QuotePrice, VisibleQty: 0},
-			})
-		}
 		(*bookEvents)[participant.venueID] = append((*bookEvents)[participant.venueID], cdfFixtureEvent{
 			at: cancelledAt, clientID: participant.clientID, event: "OrderCancelled", symbol: cdfActivationSymbol,
 			payload: cdfCancelledEvidence{OrderID: orderTwo, RequestID: cancelRequest, RemainingQty: postDecision.QuoteQty},
@@ -2085,6 +2192,51 @@ func TestCDFPostFillResponseAcceptsLaterObservation(t *testing.T) {
 	}
 }
 
+func TestCDFPostFillResponseRequiresFreshObservationOnlyForClosedOneSidedQuote(t *testing.T) {
+	state := &cdfSupplierState{
+		fillResponses: []cdfFillResponseWindow{{
+			fillAt: 10, fillGlobalSeq: 3, positionAfter: 5, requiresFreshObservation: true,
+			preFillDecision: cdfDecisionEvidence{
+				ObservationSequence: 1, ObservationDeliveredAt: 5, BestBid: 99, BestBidQty: 10,
+				BestAsk: 0, BestAskQty: 0, MarkPrice: 99, RiskMarkPrice: 99, RiskMarkCurrent: true,
+				LocalBookMode: "one_sided", QuotePriceSource: "one_sided_missing_side_blended",
+				ReferencePrice: 100, TargetPosition: 2, Position: 0, Side: "BUY", QuotePrice: 98, QuoteQty: 2,
+			},
+			preFillKnown: true,
+		}},
+	}
+	audit := &CDFActivationAudit{strictMechanics: true}
+	audit.recordCDFPostFillResponse(Event{SimTS: 20, GlobalSequence: 5}, state, cdfDecisionEvidence{
+		ObservationSequence: 1, ObservationDeliveredAt: 5, BestBid: 99, BestBidQty: 10,
+		BestAsk: 0, BestAskQty: 0, MarkPrice: 99, RiskMarkPrice: 99, RiskMarkCurrent: true,
+		LocalBookMode: "one_sided", QuotePriceSource: "one_sided_missing_side_blended",
+		ReferencePrice: 100, TargetPosition: 2, Position: 5, Action: "submit", Side: "SELL", QuotePrice: 101, QuoteQty: 5,
+	})
+	if state.audit.PostFillResponsiveCount != 0 || state.fillResponses[0].responded {
+		t.Fatalf("same pre-fill observation was credited as a post-fill response: %+v", state)
+	}
+
+	twoSided := &cdfSupplierState{fillResponses: []cdfFillResponseWindow{{
+		fillAt: 10, fillGlobalSeq: 3, positionAfter: 5,
+		preFillDecision: cdfDecisionEvidence{
+			ObservationSequence: 1, ObservationDeliveredAt: 5, BestBid: 99, BestBidQty: 10,
+			BestAsk: 101, BestAskQty: 10, MarkPrice: 100, RiskMarkPrice: 100, RiskMarkCurrent: true,
+			LocalBookMode: "two_sided", ReferencePrice: 100, TargetPosition: 2, Position: 0, Side: "BUY", QuotePrice: 99, QuoteQty: 2,
+		},
+		preFillKnown: true,
+	}}}
+	audit = &CDFActivationAudit{strictMechanics: true}
+	audit.recordCDFPostFillResponse(Event{SimTS: 20, GlobalSequence: 5}, twoSided, cdfDecisionEvidence{
+		ObservationSequence: 1, ObservationDeliveredAt: 5, BestBid: 99, BestBidQty: 10,
+		BestAsk: 101, BestAskQty: 10, MarkPrice: 100, RiskMarkPrice: 100, RiskMarkCurrent: true,
+		LocalBookMode: "two_sided", ReferencePrice: 100, TargetPosition: 2, Position: 5,
+		Action: "submit", Side: "SELL", QuotePrice: 102, QuoteQty: 5,
+	})
+	if twoSided.audit.PostFillResponsiveCount != 1 || !twoSided.fillResponses[0].responded {
+		t.Fatalf("two-sided response was incorrectly forced to wait for a new observation: %+v", twoSided)
+	}
+}
+
 func TestCDFPostFillResponseRejectsMarketOnlyTargetMovement(t *testing.T) {
 	state := &cdfSupplierState{
 		fillResponses: []cdfFillResponseWindow{{
@@ -2310,6 +2462,41 @@ func TestCDFStrictTradeRequiresOrderIdentities(t *testing.T) {
 	r.processCDFTrade(Event{VenueID: "north", payload: payload})
 	if !hasCDFActivationFailure(r.Checks, `malformed CDF trade evidence: missing required payload field "maker_order_id"`) {
 		t.Fatalf("strict trade without maker/taker identities was accepted: %+v", r.Checks)
+	}
+}
+
+func TestCDFStrictReconciliationRejectsInvertedProducerFillOrder(t *testing.T) {
+	contract := RegisteredSV1DActivationContract().Suppliers[0]
+	state := &cdfSupplierState{audit: CDFSupplierActivationAudit{VenueID: "north", Role: contract.Role, ClientID: 7}}
+	key := cdfFillKey{venueID: "north", clientID: 7, orderID: 11, tradeID: 12}
+	tradeKey := cdfTradeKey{venueID: "north", tradeID: 12}
+	fee := int64(3)
+	observed := cdfFillEvidence{
+		Role: contract.Role, ClientID: 7, Symbol: cdfActivationSymbol, OrderID: 11, TradeID: 12,
+		Timestamp: 20, Side: "BUY", Price: 100, Qty: 5, FeeAmount: fee, FeeAsset: contract.QuoteAsset,
+		IsFull: true,
+	}
+	actual := cdfOrderFillEvidence{
+		OrderID: 11, TradeID: 12, Side: "BUY", Price: 100, Qty: 5, FeeAmount: fee, FeeAsset: contract.QuoteAsset,
+		FilledQty: 5, RemainingQty: 0, IsFull: true,
+	}
+	audit := &CDFActivationAudit{
+		strictMechanics: true,
+		trades: map[cdfTradeKey]cdfTradeEvidence{tradeKey: {
+			TradeID: 12, Price: 100, Qty: 5, Side: "SELL", MakerOrderID: 11, TakerOrderID: 99,
+		}},
+		tradeGlobal:        map[cdfTradeKey]uint64{tradeKey: 5},
+		actualFillGlobal:   map[cdfFillKey]uint64{key: 4},
+		observedFillGlobal: map[cdfFillKey]uint64{key: 6},
+	}
+	audit.reconcileCDFFills(
+		map[cdfParticipantKey]*cdfSupplierState{{venueID: "north", clientID: 7}: state},
+		map[cdfFillKey]cdfFillEvidence{key: observed},
+		map[cdfFillKey]cdfOrderFillEvidence{key: actual},
+		map[cdfOrderKey]*cdfOrderState{},
+	)
+	if !hasCDFActivationFailure(audit.Checks, "CDF fill producer ordering is not Trade < exchange OrderFill < supplier fill") || audit.SupplierVolumeQty != 0 {
+		t.Fatalf("inverted producer order was attributed: checks=%+v volume=%d", audit.Checks, audit.SupplierVolumeQty)
 	}
 }
 
@@ -2551,6 +2738,39 @@ func TestCDFRepriceLifecycleSeparatesCancelFromReplacement(t *testing.T) {
 	audit.processCDFAccepted(Event{SimTS: 22, GlobalSequence: 5, VenueID: "north", ClientID: 7, payload: acceptedPayload}, states, submissions, orders)
 	if len(audit.Checks) != 0 || state.audit.CompletedRepriceCount != 1 || state.pendingReprice {
 		t.Fatalf("replacement lifecycle = checks=%+v state=%+v", audit.Checks, state)
+	}
+}
+
+func TestCDFStrictRepriceAcceptsSameTermLinkedReplacement(t *testing.T) {
+	contract := RegisteredSV1DActivationContract().Suppliers[0]
+	state := &cdfSupplierState{
+		contract:       contract,
+		audit:          CDFSupplierActivationAudit{VenueID: "north", Role: contract.Role, ClientID: 7},
+		pendingReprice: true, pendingRepriceOrderID: 11, pendingRepriceSide: "BUY",
+		pendingRepricePrice: contract.ReferencePrice, pendingRepriceQty: 5,
+	}
+	audit := &CDFActivationAudit{strictMechanics: true, terminalOrders: make(map[cdfOrderKey]*cdfOrderState)}
+	decision := cdfDecisionEvidence{
+		ClientID: 7, Role: contract.Role, Symbol: cdfActivationSymbol, Action: "submit", Reason: "inventory_target_gap",
+		Side: "BUY", QuotePrice: contract.ReferencePrice, QuoteQty: 5,
+		QuoteRequestID: 17, ReplacesOrderID: 11, MinimumQualifyingQty: contract.MinimumQualifyingQty,
+	}
+	submissionKey := cdfRequestKey{venueID: "north", clientID: 7, requestID: 17}
+	submissions := map[cdfRequestKey]*cdfSubmission{submissionKey: {
+		event: Event{SimTS: 21, GlobalSequence: 4}, decision: decision,
+	}}
+	payload, err := json.Marshal(cdfAcceptedEvidence{
+		OrderID: 19, ClientID: 7, RequestID: 17, Side: "BUY", Type: "LIMIT", TimeInForce: "GTC",
+		PostOnly: true, Price: contract.ReferencePrice, Qty: 5,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	orders := make(map[cdfOrderKey]*cdfOrderState)
+	audit.processCDFAccepted(Event{SimTS: 22, GlobalSequence: 5, VenueID: "north", ClientID: 7, payload: payload},
+		map[cdfParticipantKey]*cdfSupplierState{{venueID: "north", clientID: 7}: state}, submissions, orders)
+	if len(audit.Checks) != 0 || state.audit.CompletedRepriceCount != 0 || state.pendingReprice || len(orders) != 1 {
+		t.Fatalf("same-term linked replacement was mishandled: checks=%+v state=%+v orders=%+v", audit.Checks, state, orders)
 	}
 }
 

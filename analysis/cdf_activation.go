@@ -171,6 +171,9 @@ type CDFActivationAudit struct {
 	totalVolumeByVenue  map[string]int64
 	terminalOrders      map[cdfOrderKey]*cdfOrderState
 	liveOrderBySupplier map[cdfParticipantKey]cdfOrderKey
+	observedFillGlobal  map[cdfFillKey]uint64
+	actualFillGlobal    map[cdfFillKey]uint64
+	tradeGlobal         map[cdfTradeKey]uint64
 }
 
 type CDFActivationProvenance struct {
@@ -353,12 +356,13 @@ type cdfSupplierState struct {
 }
 
 type cdfFillResponseWindow struct {
-	fillAt          int64
-	fillGlobalSeq   uint64
-	positionAfter   int64
-	preFillDecision cdfDecisionEvidence
-	preFillKnown    bool
-	responded       bool
+	fillAt                   int64
+	fillGlobalSeq            uint64
+	positionAfter            int64
+	preFillDecision          cdfDecisionEvidence
+	preFillKnown             bool
+	requiresFreshObservation bool
+	responded                bool
 }
 
 type cdfDecisionEvidence struct {
@@ -480,12 +484,13 @@ type cdfRejectedEvidence struct {
 }
 
 type cdfTradeEvidence struct {
-	TradeID      uint64 `json:"trade_id"`
-	Price        int64  `json:"price"`
-	Qty          int64  `json:"qty"`
-	Side         string `json:"side"`
-	TakerOrderID uint64 `json:"taker_order_id"`
-	MakerOrderID uint64 `json:"maker_order_id"`
+	TradeID        uint64 `json:"trade_id"`
+	Price          int64  `json:"price"`
+	Qty            int64  `json:"qty"`
+	Side           string `json:"side"`
+	TakerOrderID   uint64 `json:"taker_order_id"`
+	MakerOrderID   uint64 `json:"maker_order_id"`
+	globalSequence uint64
 }
 
 type cdfBalanceEvidence struct {
@@ -533,10 +538,14 @@ type cdfPublicDepthState struct {
 }
 
 type cdfPendingDepthObservation struct {
-	event        Event
-	state        cdfPublicDepthState
-	causalOrders map[cdfOrderKey]int64
-	isSnapshot   bool
+	event           Event
+	state           cdfPublicDepthState
+	causalOrders    map[cdfOrderKey]int64
+	side            string
+	price           int64
+	previousVisible int64
+	newVisible      int64
+	isSnapshot      bool
 }
 
 type cdfReceiptKey struct {
@@ -674,6 +683,9 @@ func (r *Run) AuditCDFLiquidityActivation(options CDFActivationOptions) (*CDFAct
 		totalVolumeByVenue:  make(map[string]int64),
 		terminalOrders:      make(map[cdfOrderKey]*cdfOrderState),
 		liveOrderBySupplier: make(map[cdfParticipantKey]cdfOrderKey),
+		observedFillGlobal:  make(map[cdfFillKey]uint64),
+		actualFillGlobal:    make(map[cdfFillKey]uint64),
+		tradeGlobal:         make(map[cdfTradeKey]uint64),
 	}
 	config, metadata, err := loadCDFActivationIdentity(evidenceDir)
 	if err != nil {
@@ -1888,6 +1900,7 @@ func (r *CDFActivationAudit) scanCDFOrdered(
 	pendingDepth := make(map[string][]cdfPendingDepthObservation)
 	bookSnapshotCount := 0
 	for _, event := range events {
+		r.flushCDFPendingDepthBeforeEvent(event, states, orders, depth, pendingDepth)
 		switch event.Name {
 		case "elastic_liquidity_supplier_decision":
 			r.processCDFDecision(event, states, receipts, snapshots, submissions, withdrawals)
@@ -1910,10 +1923,9 @@ func (r *CDFActivationAudit) scanCDFOrdered(
 			r.processCDFRejected(event, states, submissions)
 		case "OrderFill":
 			r.processCDFOrderFill(event, states, orders, actualFills)
-			r.flushCDFPendingDepth(event.VenueID, states, orders, depth, pendingDepth)
 		case "OrderCancelled":
 			r.processCDFCancelled(event, states, withdrawals, orders, depth, publicDepth)
-			r.flushCDFPendingDepth(event.VenueID, states, orders, depth, pendingDepth)
+			r.flushCDFPendingDepth(event.VenueID, states, orders, depth, pendingDepth, true)
 		case "OrderCancelRejected":
 			r.processCDFCancelRejected(event, states, withdrawals, orders)
 		}
@@ -2416,7 +2428,7 @@ func (r *CDFActivationAudit) recordCDFPostFillResponse(event Event, state *cdfSu
 			state.audit.PostFillResponsiveCount++
 			continue
 		}
-		if !cdfDecisionUsesFreshObservation(response.preFillDecision, decision, response.fillAt) {
+		if response.requiresFreshObservation && !cdfDecisionUsesFreshObservation(response.preFillDecision, decision, response.fillAt) {
 			continue
 		}
 		marketStateUnchanged := cdfDecisionMarketStateEqual(response.preFillDecision, decision)
@@ -2570,8 +2582,16 @@ func (r *CDFActivationAudit) processCDFFill(event Event, states map[cdfParticipa
 	state.fillBaseDelta = updatedBase
 	state.fillQuoteDelta = updatedQuote
 	observed[key] = fill
+	if r.observedFillGlobal == nil {
+		r.observedFillGlobal = make(map[cdfFillKey]uint64)
+	}
+	r.observedFillGlobal[key] = event.GlobalSequence
 	preFillDecision := state.lastDecision
 	preFillKnown := state.hasLastDecision
+	requiresFreshObservation := preFillKnown && fill.IsFull &&
+		preFillDecision.LocalBookMode == "one_sided" &&
+		preFillDecision.QuotePriceSource == "one_sided_missing_side_blended" &&
+		(preFillDecision.QuoteOrderID == 0 || preFillDecision.QuoteOrderID == fill.OrderID)
 	state.audit.FillCount++
 	state.lastFillAt = event.SimTS
 	state.lastFillPosition = fill.PositionAfter
@@ -2579,6 +2599,7 @@ func (r *CDFActivationAudit) processCDFFill(event Event, states map[cdfParticipa
 	state.fillResponses = append(state.fillResponses, cdfFillResponseWindow{
 		fillAt: event.SimTS, fillGlobalSeq: event.GlobalSequence, positionAfter: fill.PositionAfter,
 		preFillDecision: preFillDecision, preFillKnown: preFillKnown,
+		requiresFreshObservation: requiresFreshObservation,
 	})
 	r.FillCount++
 }
@@ -2713,6 +2734,7 @@ func (r *CDFActivationAudit) scanCDFBooks(
 				r.addCheck(CDFActivationCheck{VenueID: event.VenueID, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "CDF book evidence timestamps regress"})
 			}
 			lastTimestamp = event.SimTS
+			r.flushCDFPendingDepthBeforeEvent(event, states, orders, depth, pendingDepth)
 			switch event.Name {
 			case "BookSnapshot":
 				r.processCDFDepthSnapshot(event, states, orders, depth, publicDepth, pendingDepth)
@@ -2726,10 +2748,9 @@ func (r *CDFActivationAudit) scanCDFBooks(
 				r.processCDFRejected(event, states, submissions)
 			case "OrderFill":
 				r.processCDFOrderFill(event, states, orders, actualFills)
-				r.flushCDFPendingDepth(event.VenueID, states, orders, depth, pendingDepth)
 			case "OrderCancelled":
 				r.processCDFCancelled(event, states, withdrawals, orders, depth, publicDepth)
-				r.flushCDFPendingDepth(event.VenueID, states, orders, depth, pendingDepth)
+				r.flushCDFPendingDepth(event.VenueID, states, orders, depth, pendingDepth, true)
 			case "OrderCancelRejected":
 				r.processCDFCancelRejected(event, states, withdrawals, orders)
 			}
@@ -2799,9 +2820,8 @@ func (r *CDFActivationAudit) processCDFAccepted(event Event, states map[cdfParti
 			if submission.decision.ReplacesOrderID != state.pendingRepriceOrderID {
 				r.addEventCheck(event, state, "CDF replacement acceptance lacks the matching replaced-order identity")
 			} else {
-				if accepted.Side == state.pendingRepriceSide && accepted.Price == state.pendingRepricePrice && accepted.Qty == state.pendingRepriceQty {
-					r.addEventCheck(event, state, "CDF replacement acceptance did not change quote terms")
-				} else if !incrementCDFCounter(&state.audit.CompletedRepriceCount) {
+				if !(accepted.Side == state.pendingRepriceSide && accepted.Price == state.pendingRepricePrice && accepted.Qty == state.pendingRepriceQty) &&
+					!incrementCDFCounter(&state.audit.CompletedRepriceCount) {
 					r.addEventCheck(event, state, "completed CDF reprice counter overflows")
 				}
 				state.pendingReprice = false
@@ -2922,6 +2942,10 @@ func (r *CDFActivationAudit) processCDFOrderFill(event Event, states map[cdfPart
 		return
 	}
 	actual[key] = fill
+	if r.actualFillGlobal == nil {
+		r.actualFillGlobal = make(map[cdfFillKey]uint64)
+	}
+	r.actualFillGlobal[key] = event.GlobalSequence
 	state.exchangeBaseDelta = updatedBase
 	state.exchangeQuoteDelta = updatedQuote
 	order.remainingQty = expectedRemaining
@@ -3212,7 +3236,12 @@ func (r *CDFActivationAudit) processCDFTrade(event Event) {
 		r.addCheck(CDFActivationCheck{VenueID: event.VenueID, Ordinal: event.Ordinal, Failure: "duplicate CDF trade identity"})
 		return
 	}
+	trade.globalSequence = event.GlobalSequence
 	r.trades[tradeKey] = trade
+	if r.tradeGlobal == nil {
+		r.tradeGlobal = make(map[cdfTradeKey]uint64)
+	}
+	r.tradeGlobal[tradeKey] = event.GlobalSequence
 	updatedTotal, totalOK := checkedCDFAdd(r.TotalVolumeQty, trade.Qty)
 	updatedVenue, venueOK := checkedCDFAdd(r.totalVolumeByVenue[event.VenueID], trade.Qty)
 	if !totalOK || !venueOK {
@@ -3287,11 +3316,13 @@ func (r *CDFActivationAudit) processCDFDepthDelta(event Event, states map[cdfPar
 	// cancellation frame. At that instant the supplier order map still contains
 	// the order that caused the public reduction. Defer only a transition whose
 	// currently reconstructed supplier depth would exceed the new public level;
-	// unrelated reductions can be reconciled immediately.
+	// unrelated reductions can be reconciled immediately. The deferred record
+	// retains the level transition so a later event cannot satisfy it merely by
+	// changing some other order at the same price.
 	if r.strictMechanics && delta.VisibleQty < previousVisible {
 		causalOrders := cdfOrdersAtDepthLevel(orders, states, event.VenueID, delta.Side, delta.Price)
 		if cdfSupplierDepthAtLevel(causalOrders) > delta.VisibleQty {
-			r.deferCDFDepthObservation(event, state, pendingDepth, causalOrders, false)
+			r.deferCDFDepthObservation(event, state, pendingDepth, causalOrders, delta.Side, delta.Price, previousVisible, delta.VisibleQty, false)
 			return
 		}
 	}
@@ -3313,12 +3344,14 @@ func cloneCDFPublicDepthState(state *cdfPublicDepthState) cdfPublicDepthState {
 	return clone
 }
 
-func (r *CDFActivationAudit) deferCDFDepthObservation(event Event, state *cdfPublicDepthState, pending map[string][]cdfPendingDepthObservation, causalOrders map[cdfOrderKey]int64, isSnapshot bool) {
+func (r *CDFActivationAudit) deferCDFDepthObservation(event Event, state *cdfPublicDepthState, pending map[string][]cdfPendingDepthObservation, causalOrders map[cdfOrderKey]int64, side string, price, previousVisible, newVisible int64, isSnapshot bool) {
 	if state == nil {
 		return
 	}
 	pending[event.VenueID] = append(pending[event.VenueID], cdfPendingDepthObservation{
-		event: event, state: cloneCDFPublicDepthState(state), causalOrders: causalOrders, isSnapshot: isSnapshot,
+		event: event, state: cloneCDFPublicDepthState(state), causalOrders: causalOrders,
+		side: side, price: price, previousVisible: previousVisible, newVisible: newVisible,
+		isSnapshot: isSnapshot,
 	})
 }
 
@@ -3349,13 +3382,76 @@ func cdfSupplierDepthAtLevel(orders map[cdfOrderKey]int64) int64 {
 }
 
 func cdfPendingDepthResolved(observation cdfPendingDepthObservation, orders map[cdfOrderKey]*cdfOrderState) bool {
+	levelReduction, ok := checkedCDFSub(observation.previousVisible, observation.newVisible)
+	if !ok || levelReduction <= 0 {
+		return false
+	}
+	changedOrders := 0
+	matchingReduction := false
 	for key, previousQuantity := range observation.causalOrders {
 		current, exists := orders[key]
-		if !exists || current == nil || current.remainingQty != previousQuantity {
-			return true
+		currentQuantity := int64(0)
+		if exists && current != nil {
+			if current.side != observation.side || current.price != observation.price {
+				return false
+			}
+			currentQuantity = current.remainingQty
+		}
+		if currentQuantity == previousQuantity {
+			continue
+		}
+		changedOrders++
+		quantityReduction, reductionOK := checkedCDFSub(previousQuantity, currentQuantity)
+		if reductionOK && quantityReduction == levelReduction {
+			matchingReduction = true
 		}
 	}
-	return false
+	return changedOrders == 1 && matchingReduction
+}
+
+func cdfPendingDepthCancellationMatches(observation cdfPendingDepthObservation, event Event, orders map[cdfOrderKey]*cdfOrderState) bool {
+	if event.Name != "OrderCancelled" {
+		return false
+	}
+	var cancelled cdfCancelledEvidence
+	if err := decodeRequiredJSON(event.Raw(), &cancelled, "order_id", "remaining_qty"); err != nil {
+		return false
+	}
+	key := cdfOrderKey{venueID: event.VenueID, clientID: event.ClientID, orderID: cancelled.OrderID}
+	previousQuantity, causal := observation.causalOrders[key]
+	if !causal {
+		return false
+	}
+	order := orders[key]
+	if order == nil || order.side != observation.side || order.price != observation.price ||
+		cancelled.RemainingQty != order.remainingQty {
+		return false
+	}
+	levelReduction, levelOK := checkedCDFSub(observation.previousVisible, observation.newVisible)
+	return levelOK && levelReduction > 0 && previousQuantity == cancelled.RemainingQty &&
+		previousQuantity == levelReduction
+}
+
+func (r *CDFActivationAudit) flushCDFPendingDepthBeforeEvent(event Event, states map[cdfParticipantKey]*cdfSupplierState, orders map[cdfOrderKey]*cdfOrderState, depth map[string][]cdfDepthObservation, pending map[string][]cdfPendingDepthObservation) {
+	observations := pending[event.VenueID]
+	if len(observations) == 0 {
+		return
+	}
+	remaining := observations[:0]
+	for _, observation := range observations {
+		if cdfPendingDepthCancellationMatches(observation, event, orders) {
+			remaining = append(remaining, observation)
+			continue
+		}
+		r.addCheck(CDFActivationCheck{VenueID: event.VenueID, Ordinal: observation.event.Ordinal, Failure: "CDF deferred depth reduction lacks the exact next causal cancellation"})
+		state := observation.state
+		r.recordCDFDepthObservation(observation.event, states, orders, depth, &state, observation.isSnapshot)
+	}
+	if len(remaining) == 0 {
+		delete(pending, event.VenueID)
+	} else {
+		pending[event.VenueID] = remaining
+	}
 }
 
 func (r *CDFActivationAudit) flushCDFPendingDepth(
@@ -3376,6 +3472,9 @@ func (r *CDFActivationAudit) flushCDFPendingDepth(
 		if !forceFlush && !cdfPendingDepthResolved(observation, orders) {
 			remaining = append(remaining, observation)
 			continue
+		}
+		if forceFlush && !cdfPendingDepthResolved(observation, orders) {
+			r.addCheck(CDFActivationCheck{VenueID: venueID, Ordinal: observation.event.Ordinal, Failure: "CDF deferred depth reduction never received an exact causal order transition"})
 		}
 		state := observation.state
 		r.recordCDFDepthObservation(observation.event, states, orders, depth, &state, observation.isSnapshot)
@@ -3457,6 +3556,10 @@ func (r *CDFActivationAudit) reconcileCDFFills(
 	for key, supplierFill := range observed {
 		exchangeFill, exists := actual[key]
 		state := states[cdfParticipantKey{key.venueID, key.clientID}]
+		if state == nil {
+			r.addCheck(CDFActivationCheck{VenueID: key.venueID, ClientID: key.clientID, Failure: "supplier fill is outside the registered CDF supplier roster"})
+			continue
+		}
 		if !exists || exchangeFill.Side != supplierFill.Side || exchangeFill.Price != supplierFill.Price ||
 			exchangeFill.Qty != supplierFill.Qty || exchangeFill.FeeAmount != supplierFill.FeeAmount ||
 			exchangeFill.FeeAsset != supplierFill.FeeAsset || exchangeFill.IsFull != supplierFill.IsFull {
@@ -3479,12 +3582,23 @@ func (r *CDFActivationAudit) reconcileCDFFills(
 				trade.Side == oppositeCDFSide(fill.Side) && trade.MakerOrderID == fill.OrderID &&
 				trade.TakerOrderID != 0 && trade.TakerOrderID != fill.OrderID
 		}
+		producerOrderingValid := true
 		if r.strictMechanics {
 			if !tradeMatches {
 				r.addCheck(CDFActivationCheck{VenueID: key.venueID, Role: state.audit.Role, ClientID: key.clientID, Failure: "exchange OrderFill does not match a unique opposite-side CDF trade and maker order"})
 			}
+			if r.tradeGlobal != nil && r.actualFillGlobal != nil && r.observedFillGlobal != nil {
+				tradeSequence := r.tradeGlobal[cdfTradeKey{venueID: key.venueID, tradeID: key.tradeID}]
+				exchangeFillSequence := r.actualFillGlobal[key]
+				supplierFillSequence := r.observedFillGlobal[key]
+				if tradeSequence == 0 || exchangeFillSequence == 0 || supplierFillSequence == 0 ||
+					!(tradeSequence < exchangeFillSequence && exchangeFillSequence < supplierFillSequence) {
+					producerOrderingValid = false
+					r.addCheck(CDFActivationCheck{VenueID: key.venueID, Role: state.audit.Role, ClientID: key.clientID, Failure: "CDF fill producer ordering is not Trade < exchange OrderFill < supplier fill"})
+				}
+			}
 		}
-		if !r.strictMechanics || tradeMatches {
+		if (!r.strictMechanics || tradeMatches) && producerOrderingValid {
 			if !r.attributeCDFSupplierFill(state, fill) {
 				r.addCheck(CDFActivationCheck{VenueID: key.venueID, Role: state.audit.Role, ClientID: key.clientID, Failure: "supplier volume attribution overflows"})
 			}
