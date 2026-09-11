@@ -16,6 +16,41 @@ simulator_binary=$4
 analyzer=$5
 renderer=$6
 
+run_real=$(realpath -e -- "$run_dir") || {
+	echo "SV1D audit: run directory cannot be resolved" >&2
+	exit 1
+}
+audit_output_abs=$(realpath -m -- "$audit_output") || {
+	echo "SV1D audit: audit output path cannot be resolved" >&2
+	exit 1
+}
+path_has_symlink_component() {
+	local path=$1 current=/ component
+	IFS=/ read -r -a components <<< "${path#/}"
+	for component in "${components[@]}"; do
+		[[ -n "$component" ]] || continue
+		current="$current/$component"
+		[[ -L "$current" ]] && return 0
+		[[ -e "$current" ]] || return 1
+	done
+	return 1
+}
+if path_has_symlink_component "$audit_output_abs"; then
+	echo "SV1D audit: audit output path contains a symlink" >&2
+	exit 1
+fi
+case "$audit_output_abs" in
+	"$run_real"|"$run_real"/*)
+		echo "SV1D audit: audit output must be outside the immutable run directory" >&2
+		exit 1
+		;;
+esac
+[[ ! -e "$audit_output_abs" && ! -L "$audit_output_abs" ]] || {
+	echo "SV1D audit: refusing to overwrite an existing audit output" >&2
+	exit 1
+}
+audit_output=$audit_output_abs
+
 [[ -d "$run_dir" && -s "$run_dir/events.evs" ]] || {
 	echo "SV1D audit: missing binary evidence run directory or events.evs" >&2
 	exit 1
@@ -155,7 +190,7 @@ if ! "$analyzer" -metric cdfactivation -json \
 	-cdf-binary-goarch "$expected_binary_goarch" \
 	-cdf-binary-goamd64 "$expected_binary_goamd64" \
 	"$run_dir" >"$temporary_output"; then
-	mv -- "$temporary_output" "$audit_output"
+	rm -f -- "$temporary_output"
 	exit 1
 fi
 
@@ -167,15 +202,18 @@ jq -e -s --arg config_sha256 "$expected_config_sha256" --arg source_revision "$e
 	 .result.provenance.source_revision == $source_revision and
 	 .result.provenance.binary_sha256 == $binary_sha256)' \
 	"$temporary_output" >/dev/null || {
-	mv -- "$temporary_output" "$audit_output"
+	rm -f -- "$temporary_output"
 	echo "SV1D audit: strict evidence contract failed" >&2
 	exit 1
 }
 jq --slurpfile provenance "$expected_provenance" --arg probe_id "$expected_probe_id" \
 	'. + {audit_provenance: $provenance[0], probe_id: $probe_id}' \
 	"$temporary_output" >"$validated_output" || {
-	mv -- "$temporary_output" "$audit_output"
+	rm -f -- "$temporary_output"
 	echo "SV1D audit: could not bind external probe provenance" >&2
 	exit 1
 }
-mv -- "$validated_output" "$audit_output"
+if ! mv -n -- "$validated_output" "$audit_output" || [[ -e "$validated_output" ]]; then
+	echo "SV1D audit: refusing to overwrite audit output during publication" >&2
+	exit 1
+fi

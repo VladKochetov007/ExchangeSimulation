@@ -93,7 +93,15 @@ func RenderBinaryEvidence(inputDir, outDir string) (BinaryRenderReport, error) {
 	if err != nil {
 		return BinaryRenderReport{}, fmt.Errorf("multivenue: output path: %w", err)
 	}
-	if pathContains(inputAbs, outAbs) {
+	inputReal, err := filepath.EvalSymlinks(inputAbs)
+	if err != nil {
+		return BinaryRenderReport{}, fmt.Errorf("multivenue: resolve input path: %w", err)
+	}
+	outputReal, err := resolveOutputPath(outAbs)
+	if err != nil {
+		return BinaryRenderReport{}, err
+	}
+	if pathContains(inputReal, outputReal) {
 		return BinaryRenderReport{}, fmt.Errorf("multivenue: output directory must not be inside input directory")
 	}
 	if err := prepareEmptyDirectory(outAbs); err != nil {
@@ -274,8 +282,8 @@ func renderBinaryFrameVersioned(reader *evstream.Reader, frame evstream.Frame, i
 	if err := validateRoute(route); err != nil {
 		return renderRouteKey{}, renderRecord{}, fmt.Errorf("multivenue: frame %d: %w", frame.Header.Seq, err)
 	}
-	if frame.Venue == "" {
-		return renderRouteKey{}, renderRecord{}, fmt.Errorf("multivenue: frame %d has no venue", frame.Header.Seq)
+	if err := validateVenue(frame.Venue); err != nil {
+		return renderRouteKey{}, renderRecord{}, fmt.Errorf("multivenue: frame %d: %w", frame.Header.Seq, err)
 	}
 	payload, handled, err := renderCDFPayloadJSONVersioned(
 		frame.Header.SchemaID, frame.Header.SchemaVersion, frame.Payload[envelopeBytes:], reader)
@@ -409,7 +417,10 @@ func (d renderArtifactDigest) hex() string {
 }
 
 func addRenderRecord(routes map[renderRouteKey][]renderRecord, key renderRouteKey, record renderRecord) error {
-	if key.venue == "" || record.sequence == 0 {
+	if err := validateVenue(key.venue); err != nil {
+		return fmt.Errorf("multivenue: rendered record: %w", err)
+	}
+	if record.sequence == 0 {
 		return fmt.Errorf("multivenue: incomplete rendered evidence record")
 	}
 	for _, existing := range routes[key] {
@@ -424,6 +435,9 @@ func addRenderRecord(routes map[renderRouteKey][]renderRecord, key renderRouteKe
 func validateRenderRecords(routes map[renderRouteKey][]renderRecord) error {
 	byVenue := make(map[string]map[uint64]struct{})
 	for key, records := range routes {
+		if err := validateVenue(key.venue); err != nil {
+			return fmt.Errorf("multivenue: rendered venue %s: %w", key.venue, err)
+		}
 		if err := validateRoute(key.route); err != nil {
 			return fmt.Errorf("multivenue: rendered route %s/%s: %w", key.venue, key.route, err)
 		}
@@ -558,7 +572,7 @@ func writeRenderedRoutes(outDir string, routes map[renderRouteKey][]renderRecord
 }
 
 func prepareEmptyDirectory(path string) error {
-	info, err := os.Stat(path)
+	info, err := os.Lstat(path)
 	if os.IsNotExist(err) {
 		if err := os.MkdirAll(path, 0755); err != nil {
 			return fmt.Errorf("multivenue: create render output: %w", err)
@@ -567,6 +581,9 @@ func prepareEmptyDirectory(path string) error {
 	}
 	if err != nil {
 		return fmt.Errorf("multivenue: inspect render output: %w", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("multivenue: render output must not be a symlink")
 	}
 	if !info.IsDir() {
 		return fmt.Errorf("multivenue: render output is not a directory")
@@ -579,6 +596,41 @@ func prepareEmptyDirectory(path string) error {
 		return fmt.Errorf("multivenue: refusing to overwrite non-empty render output")
 	}
 	return nil
+}
+
+// resolveOutputPath canonicalizes the existing parent of an output path. A
+// render is a write operation, so accepting a symlinked component would make a
+// lexical containment check insufficient: the destination could resolve back
+// into the immutable input tree or another caller-controlled location.
+func resolveOutputPath(path string) (string, error) {
+	path = filepath.Clean(path)
+	missing := make([]string, 0, 2)
+	current := path
+	for {
+		info, err := os.Lstat(current)
+		if err == nil {
+			if info.Mode()&os.ModeSymlink != 0 {
+				return "", fmt.Errorf("multivenue: render output path contains a symlink: %s", current)
+			}
+			resolved, err := filepath.EvalSymlinks(current)
+			if err != nil {
+				return "", fmt.Errorf("multivenue: resolve render output parent: %w", err)
+			}
+			for index := len(missing) - 1; index >= 0; index-- {
+				resolved = filepath.Join(resolved, missing[index])
+			}
+			return resolved, nil
+		}
+		if !os.IsNotExist(err) {
+			return "", fmt.Errorf("multivenue: inspect render output path: %w", err)
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return "", fmt.Errorf("multivenue: render output path has no existing parent")
+		}
+		missing = append(missing, filepath.Base(current))
+		current = parent
+	}
 }
 
 func pathContains(parent, child string) bool {
@@ -596,6 +648,16 @@ func validateRoute(route string) error {
 	clean := filepath.ToSlash(filepath.Clean(filepath.FromSlash(route)))
 	if clean != route || clean == "." || clean == ".." || strings.HasPrefix(clean, "../") {
 		return fmt.Errorf("unsafe route %q", route)
+	}
+	return nil
+}
+
+func validateVenue(venue string) error {
+	if venue == "" || filepath.IsAbs(filepath.FromSlash(venue)) || strings.ContainsAny(venue, `/\\`) {
+		return fmt.Errorf("unsafe venue %q", venue)
+	}
+	if filepath.Clean(venue) != venue || venue == "." || venue == ".." {
+		return fmt.Errorf("unsafe venue %q", venue)
 	}
 	return nil
 }

@@ -366,6 +366,39 @@ func TestBinaryEvidenceProductionPathRunsAndRenders(t *testing.T) {
 	}
 }
 
+func TestRenderBinaryEvidenceRejectsSymlinkedOutput(t *testing.T) {
+	inputDir := filepath.Join(t.TempDir(), "run")
+	writeMinimalBinaryRenderInput(t, inputDir, "north")
+	insideTarget := filepath.Join(inputDir, "render-target")
+	if err := os.Mkdir(insideTarget, 0755); err != nil {
+		t.Fatal(err)
+	}
+	linkParent := t.TempDir()
+	outputLink := filepath.Join(linkParent, "rendered")
+	if err := os.Symlink(insideTarget, outputLink); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := RenderBinaryEvidence(inputDir, outputLink); err == nil {
+		t.Fatal("renderer accepted a symlinked output directory")
+	}
+	if _, err := os.Stat(filepath.Join(insideTarget, "venues")); !os.IsNotExist(err) {
+		t.Fatalf("renderer wrote through output symlink: %v", err)
+	}
+}
+
+func TestRenderBinaryEvidenceRejectsUnsafeVenue(t *testing.T) {
+	inputDir := filepath.Join(t.TempDir(), "run")
+	writeMinimalBinaryRenderInput(t, inputDir, "../../escape")
+	outputParent := t.TempDir()
+	outputDir := filepath.Join(outputParent, "rendered")
+	if _, err := RenderBinaryEvidence(inputDir, outputDir); err == nil {
+		t.Fatal("renderer accepted a path-traversing venue")
+	}
+	if _, err := os.Stat(filepath.Join(outputParent, "escape")); !os.IsNotExist(err) {
+		t.Fatalf("renderer wrote outside output directory: %v", err)
+	}
+}
+
 func TestBinaryEvidenceExecutionStreamIsLogModeNeutral(t *testing.T) {
 	root := t.TempDir()
 	for _, logMode := range []string{"full", "none"} {
@@ -519,6 +552,28 @@ func decodeJSONLines(raw []byte, target any) error {
 		encoded[index] = line
 	}
 	return json.Unmarshal([]byte("["+string(bytes.Join(encoded, []byte(",")))+"]"), target)
+}
+
+func writeMinimalBinaryRenderInput(t *testing.T, inputDir, venue string) {
+	t.Helper()
+	if err := os.MkdirAll(inputDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	eventsFile, err := os.Create(filepath.Join(inputDir, "events.evs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sink := newBinaryEvidence(eventsFile)
+	if err := sink.record(1, 7, "event", venue, map[string]int{"value": 1}, "general.jsonl", 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := sink.finish(); err != nil {
+		t.Fatal(err)
+	}
+	if err := eventsFile.Close(); err != nil {
+		t.Fatal(err)
+	}
+	writeRenderMetadata(t, inputDir, sink, "none")
 }
 
 func writeRenderMetadata(t *testing.T, inputDir string, sink *binaryEvidence, logMode string, sidecarRecords ...[]byte) {

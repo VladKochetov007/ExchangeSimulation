@@ -394,7 +394,7 @@ fi
 raw_count=0
 cdf_borrow_events=0
 price_unavailable_rejections=0
-[[ -d "$cell/venues" ]] || fail "missing raw venue evidence directory"
+[[ -d "$analysis_input_dir/venues" ]] || fail "missing rendered venue evidence directory"
 while IFS= read -r -d '' raw_file; do
 	raw_count=$((raw_count + 1))
 	count=$(jq -c '
@@ -409,7 +409,7 @@ while IFS= read -r -d '' raw_file; do
 		select(.event == "OrderRejected" and
 			((payload.error // payload.payload.error // .data.error // .error // "") == "PRICE_UNAVAILABLE")) | 1' "$raw_file" | wc -l)
 	price_unavailable_rejections=$((price_unavailable_rejections + count))
-done < <(find "$cell/venues" -type f -name '*.jsonl' -print0 | sort -z)
+done < <(find "$analysis_input_dir/venues" -type f -name '*.jsonl' -print0 | sort -z)
 [[ "$raw_count" -gt 0 ]] || fail "no raw JSONL evidence files found"
 
 activation_tmp=$(mktemp "$analysis_dir/activation.json.tmp-XXXXXX")
