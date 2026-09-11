@@ -1182,9 +1182,10 @@ build/activation sequence.
 The exact scientific tree at `50210cd` is clean and pushed. The previously
 pending bounded checks are now complete: targeted `go test -race` for
 `./analysis ./cmd/mvanalyze ./cmd/prunegate ./tests` passed in
-`/tmp/exsim-v2-race-50210cd.log`, and the fresh-process
+the retained `exsim-v2-race-50210cd.log` file in the system temporary
+workspace, and the fresh-process
 determinism/evidence-neutrality matrix for `simulations/multivenue` passed in
-`/tmp/exsim-v2-fresh-50210cd.log`. Both used `GOMAXPROCS=2` and
+the retained `exsim-v2-fresh-50210cd.log` file in that workspace. Both used `GOMAXPROCS=2` and
 `GOMEMLIMIT=4GiB`.
 
 Together with the earlier focused suites, clean bounded `make test`, `go vet`,

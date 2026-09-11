@@ -978,8 +978,8 @@ Exact clean HEAD is `50210cd`. The bounded targeted race suite
 `go test -race ./analysis ./cmd/mvanalyze ./cmd/prunegate ./tests -count=1`
 completed with exit status 0, and the fresh-process
 determinism/evidence-neutrality matrix completed with exit status 0. Logs are
-retained at `/tmp/exsim-v2-race-50210cd.log` and
-`/tmp/exsim-v2-fresh-50210cd.log`; both runs were bounded by
+retained as `exsim-v2-race-50210cd.log` and
+`exsim-v2-fresh-50210cd.log` in the system temporary workspace; both runs were bounded by
 `GOMAXPROCS=2 GOMEMLIMIT=4GiB`.
 
 The current successor therefore has a complete mechanical gate record

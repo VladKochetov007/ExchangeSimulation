@@ -911,9 +911,10 @@ correction.
 The correction tree passed the remaining bounded checks: targeted race tests
 for `analysis`, `mvanalyze`, `prunegate`, and `tests`, plus fresh-process
 determinism/evidence-neutrality checks for the multivenue evidence path. The
-logs are `/tmp/exsim-v2-race-50210cd.log` and
-`/tmp/exsim-v2-fresh-50210cd.log`; both completed with exit status 0 under the
-bounded resource settings. This is mechanical evidence only and does not
+logs are the retained `exsim-v2-race-50210cd.log` and
+`exsim-v2-fresh-50210cd.log` files in the system temporary workspace; both
+completed with exit status 0 under the bounded resource settings. This is
+mechanical evidence only and does not
 replace the required fresh independent exact-tree Sol-xhigh review.
 
 The performance branch was fetched again and has no commit after reviewed
