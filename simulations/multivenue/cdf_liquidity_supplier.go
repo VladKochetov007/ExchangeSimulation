@@ -283,6 +283,7 @@ type ElasticLiquiditySupplier struct {
 	quote                          elasticLiquidityQuote
 	lastClosedOrderID              uint64
 	pendingRequestID               uint64
+	pendingReplacementOrderID      uint64
 	cancelRequestID                uint64
 	cancelPending                  bool
 	subscribed                     bool
@@ -382,12 +383,17 @@ func (s *ElasticLiquiditySupplier) observeAccepted(event actor.OrderAcceptedEven
 	}
 	s.quote.orderID, s.quote.requestID = event.OrderID, event.RequestID
 	s.pendingRequestID = 0
+	s.pendingReplacementOrderID = 0
 }
 
 func (s *ElasticLiquiditySupplier) observeRejected(event actor.OrderRejectedEvent) {
 	if event.RequestID == s.pendingRequestID {
 		s.pendingRequestID = 0
 		s.releaseQuoteReservation()
+		if s.pendingReplacementOrderID != 0 {
+			s.lastClosedOrderID = s.pendingReplacementOrderID
+			s.pendingReplacementOrderID = 0
+		}
 		s.quote = elasticLiquidityQuote{}
 	}
 }
@@ -845,6 +851,7 @@ func (s *ElasticLiquiditySupplier) onTick(now time.Time) {
 	if desiredSide == exchange.Buy {
 		quantity = minInt64(quantity, s.availableBuyQuote(desiredPrice))
 	}
+	decision.Side, decision.QuotePrice, decision.QuoteQty = desiredSide.String(), desiredPrice, quantity
 	if quantity <= 0 || desiredPrice <= 0 {
 		decision.Action, decision.Reason = s.withdrawIfNeeded("limit_or_touch_unavailable")
 		decision.CancelRequestID = s.cancelRequestID
@@ -857,7 +864,6 @@ func (s *ElasticLiquiditySupplier) onTick(now time.Time) {
 		s.emitDecision(decision)
 		return
 	}
-	decision.Side, decision.QuotePrice, decision.QuoteQty = desiredSide.String(), desiredPrice, quantity
 	if desiredSide == exchange.Buy {
 		decision.QuoteCashAvailable = s.quoteCashAvailable
 		decision.QuoteCashRequired, _ = quoteRequirement(desiredPrice, quantity, s.cfg.BasePrecision, s.cfg.MakerFeeBps)
@@ -896,6 +902,7 @@ func (s *ElasticLiquiditySupplier) onTick(now time.Time) {
 	}
 	requestID := s.SubmitPostOnlyOrder(s.cfg.Symbol, desiredSide, desiredPrice, quantity)
 	s.pendingRequestID = requestID
+	s.pendingReplacementOrderID = s.lastClosedOrderID
 	s.quote = elasticLiquidityQuote{requestID: requestID, side: desiredSide, price: desiredPrice, qty: quantity, submittedAt: now.UnixNano(), observationSequence: s.observationSequence, observationTimestamp: s.observationTime, oneSidedObservation: localBook.localBookMode == "one_sided"}
 	decision.Action, decision.Reason = "submit", "inventory_target_gap"
 	decision.QuoteRequestID, decision.QuoteSubmittedAt = requestID, now.UnixNano()

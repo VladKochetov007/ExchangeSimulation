@@ -16,6 +16,7 @@ import (
 	"exchange_sim/evstream"
 	"exchange_sim/exchange"
 	"exchange_sim/simulation"
+	"exchange_sim/simulations/multivenue"
 	etypes "exchange_sim/types"
 )
 
@@ -36,6 +37,43 @@ func (e strictCDFTestEnvelope) AppendPayloadInterning(dst []byte, in evstream.In
 	dst = evstream.AppendUint64(dst, e.sequence)
 	dst = append(dst, e.payloadDigest[:]...)
 	return e.inner.AppendPayloadInterning(dst, in)
+}
+
+type strictCDFInstrumentPayload struct {
+	symbol string
+	inner  evstream.InterningAppender
+}
+
+func (e strictCDFInstrumentPayload) SchemaID() uint16      { return exchange.SchemaInstrumentLog }
+func (e strictCDFInstrumentPayload) SchemaVersion() uint16 { return 1 }
+
+func (e strictCDFInstrumentPayload) AppendPayloadInterning(dst []byte, in evstream.Interner) ([]byte, error) {
+	symbolRef, err := in.Intern(e.symbol)
+	if err != nil {
+		return nil, err
+	}
+	dst = evstream.AppendUint32(dst, symbolRef)
+	dst = evstream.AppendUint16(dst, e.inner.SchemaID())
+	dst = evstream.AppendUint16(dst, e.inner.SchemaVersion())
+	return e.inner.AppendPayloadInterning(dst, in)
+}
+
+type strictCDFRenderedPayload struct {
+	Symbol  string          `json:"symbol"`
+	Payload json.RawMessage `json:"payload"`
+}
+
+type strictCDFFixtureRow struct {
+	SimTS    int64  `json:"sim_ts"`
+	ClientID uint64 `json:"client_id"`
+	Event    string `json:"event"`
+	Data     struct {
+		VenueID  string          `json:"venue_id"`
+		Sequence uint64          `json:"sequence"`
+		Symbol   string          `json:"symbol"`
+		Payload  json.RawMessage `json:"payload"`
+	} `json:"data"`
+	Route string `json:"-"`
 }
 
 func TestCDFStrictRenderedEvidenceRejectsPayloadMutation(t *testing.T) {
@@ -147,6 +185,7 @@ func TestCDFStrictRenderedEvidenceRejectsPayloadMutation(t *testing.T) {
 
 type cdfActivationFixtureOptions struct {
 	mutateConfig          func(*cdfActivationConfig)
+	strictMechanics       bool
 	badFingerprint        bool
 	omitPostDecision      bool
 	omitSupplierFill      bool
@@ -310,6 +349,240 @@ func TestAuditCDFLiquidityActivationSupportsSeparateRenderedEvidence(t *testing.
 	}
 }
 
+func TestAuditCDFLiquidityActivationStrictProductionRenderer(t *testing.T) {
+	run := writeRegisteredCDFActivationFixture(t, cdfActivationFixtureOptions{strictMechanics: true})
+	contract := RegisteredSV1DActivationContract()
+	rows := readStrictCDFFixtureRows(t, filepath.Join(run.Dir, "venues"))
+	writeStrictCDFBinaryEvidence(t, run.Dir, rows, contract.BinarySchemaEpoch)
+	rewriteStrictCDFCompletionIdentity(t, run.Dir, contract)
+	if err := os.RemoveAll(filepath.Join(run.Dir, "venues")); err != nil {
+		t.Fatal(err)
+	}
+
+	renderedDir := filepath.Join(t.TempDir(), "rendered")
+	if report, err := multivenue.RenderBinaryEvidence(run.Dir, renderedDir); err != nil {
+		t.Fatalf("production binary renderer: %v", err)
+	} else if report.EventFrames != uint64(len(rows)) || report.ExecutionHash == "" || report.RenderedDigest == "" {
+		t.Fatalf("production render report = %+v", report)
+	}
+	run, err := Open(run.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	binaryHash, err := sha256File("/bin/true")
+	if err != nil {
+		t.Fatal(err)
+	}
+	configRaw, err := os.ReadFile(filepath.Join(run.Dir, "run-config.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	configDigest := sha256.Sum256(configRaw)
+	audit, err := run.AuditCDFLiquidityActivation(CDFActivationOptions{
+		Contract: contract, EvidenceDir: run.Dir, RenderedEvidenceDir: renderedDir,
+		ExpectedProvenance: CDFExpectedProvenance{
+			ConfigSHA256: hex.EncodeToString(configDigest[:]), SourceRevision: strings.Repeat("a", 40),
+			BinarySHA256: binaryHash, BinaryGOOS: "linux", BinaryGOARCH: "amd64", BinaryGOAMD64: "v1",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !audit.Valid || !audit.EvidenceValid || !audit.ActivationSatisfied || !audit.AntiCheatingSatisfied {
+		t.Fatalf("strict production-rendered activation audit = %+v", audit)
+	}
+}
+
+func readStrictCDFFixtureRows(t *testing.T, venuesDir string) []strictCDFFixtureRow {
+	t.Helper()
+	rows := make([]strictCDFFixtureRow, 0)
+	err := filepath.WalkDir(venuesDir, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() || filepath.Ext(path) != ".jsonl" {
+			return nil
+		}
+		relative, err := filepath.Rel(venuesDir, path)
+		if err != nil {
+			return err
+		}
+		parts := strings.Split(filepath.ToSlash(relative), "/")
+		if len(parts) < 2 || parts[0] == "" {
+			return fmt.Errorf("fixture route %q is not venue-qualified", relative)
+		}
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		for _, line := range bytes.Split(raw, []byte{'\n'}) {
+			line = bytes.TrimSpace(line)
+			if len(line) == 0 {
+				continue
+			}
+			var row strictCDFFixtureRow
+			if err := json.Unmarshal(line, &row); err != nil {
+				return fmt.Errorf("decode fixture row %s: %w", relative, err)
+			}
+			if row.Data.VenueID != parts[0] || row.Event == "" || row.Data.Sequence == 0 || len(row.Data.Payload) == 0 {
+				return fmt.Errorf("incomplete fixture row in %s", relative)
+			}
+			row.Route = strings.Join(parts[1:], "/")
+			rows = append(rows, row)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sort.SliceStable(rows, func(left, right int) bool {
+		if rows[left].SimTS != rows[right].SimTS {
+			return rows[left].SimTS < rows[right].SimTS
+		}
+		if rows[left].Data.VenueID != rows[right].Data.VenueID {
+			return rows[left].Data.VenueID < rows[right].Data.VenueID
+		}
+		if rows[left].Route != rows[right].Route {
+			return rows[left].Route < rows[right].Route
+		}
+		if rows[left].Data.Sequence != rows[right].Data.Sequence {
+			return rows[left].Data.Sequence < rows[right].Data.Sequence
+		}
+		return rows[left].Event < rows[right].Event
+	})
+	return rows
+}
+
+func writeStrictCDFBinaryEvidence(t *testing.T, dir string, rows []strictCDFFixtureRow, schemaEpoch uint32) {
+	t.Helper()
+	file, err := os.Create(filepath.Join(dir, "events.evs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	writer := evstream.NewWriter(file, evstream.WriterOptions{SchemaEpoch: schemaEpoch})
+	venueSequences := make(map[string]uint64)
+	for _, row := range rows {
+		venueRef, err := writer.Intern(row.Data.VenueID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		routeRef, err := writer.Intern(row.Route)
+		if err != nil {
+			t.Fatal(err)
+		}
+		eventRef, err := writer.Intern(row.Event)
+		if err != nil {
+			t.Fatal(err)
+		}
+		canonicalPayload, err := json.Marshal(json.RawMessage(row.Data.Payload))
+		if err != nil {
+			t.Fatalf("canonical fixture payload: %v", err)
+		}
+		inner := evstream.InterningAppender(exchange.OpaqueJSON{Value: json.RawMessage(canonicalPayload)})
+		renderedPayload := canonicalPayload
+		if row.Data.Symbol != "" {
+			inner = strictCDFInstrumentPayload{symbol: row.Data.Symbol, inner: inner}
+			renderedPayload, err = json.Marshal(strictCDFRenderedPayload{Symbol: row.Data.Symbol, Payload: json.RawMessage(canonicalPayload)})
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		venueSequences[row.Data.VenueID]++
+		if err := writer.AppendInterning(row.SimTS, row.ClientID, venueRef, strictCDFTestEnvelope{
+			routeRef: routeRef, eventRef: eventRef, sequence: venueSequences[row.Data.VenueID],
+			payloadDigest: sha256.Sum256(renderedPayload), inner: inner,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	digest := writer.ExecutionHash()
+	attestation := cdfBinaryEvidenceAttestation{
+		Domain: "canonical_binary_execution_frames", Ordering: "ordered_stream", SchemaEpoch: schemaEpoch,
+		EventFrames: uint64(len(rows)), StreamFrames: writer.Count(), ExecutionStreamHash: hex.EncodeToString(digest[:]),
+		EvidenceOnlyIncluded: true,
+	}
+	raw, err := json.Marshal(attestation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeCDFFixtureFile(t, filepath.Join(dir, "binary-evidence-attestation.json"), append(raw, '\n'))
+}
+
+func rewriteStrictCDFCompletionIdentity(t *testing.T, dir string, contract CDFActivationContract) {
+	t.Helper()
+	configRaw, err := os.ReadFile(filepath.Join(dir, "run-config.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	binaryHash, err := sha256File("/bin/true")
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest := map[string]any{
+		"schema_version": 2, "venue_ids": contract.VenueIDs,
+		"build":  map[string]any{"revision": strings.Repeat("a", 40), "modified": false, "goos": "linux", "goarch": "amd64", "goamd64": "v1"},
+		"config": json.RawMessage(configRaw),
+	}
+	manifestRaw, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeCDFFixtureFile(t, filepath.Join(dir, "manifest.json"), append(manifestRaw, '\n'))
+	var metadata cdfActivationMetadata
+	metadataRaw, err := os.ReadFile(filepath.Join(dir, "run-metadata.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(metadataRaw, &metadata); err != nil {
+		t.Fatal(err)
+	}
+	metadata.BinaryPath = "/bin/true"
+	configDigest := sha256.Sum256(configRaw)
+	metadata.ConfigSHA256 = hex.EncodeToString(configDigest[:])
+	metadata.BinarySHA256 = binaryHash
+	metadata.GitRevision = strings.Repeat("a", 40)
+	metadata.BinaryGOOS, metadata.BinaryGOARCH, metadata.BinaryGOAMD64 = "linux", "amd64", "v1"
+	metadataRaw, err = json.Marshal(metadata)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeCDFFixtureFile(t, filepath.Join(dir, "run-metadata.json"), append(metadataRaw, '\n'))
+	for _, name := range []string{"latency.json", "checkpoints.jsonl", "evidence-manifest.json"} {
+		writeCDFFixtureFile(t, filepath.Join(dir, name), []byte("{}\n"))
+	}
+	status := cdfRunStatus{
+		ExitStatus: 0, CompletionVerified: true, SimulatedHorizon: contract.Horizon,
+		SimulationStartNano: contract.SimulationStartNano, SimulationEndNano: contract.SimulationEndNano,
+		RunMetadataSHA256:    mustCDFFileHash(t, filepath.Join(dir, "run-metadata.json")),
+		ManifestSHA256:       mustCDFFileHash(t, filepath.Join(dir, "manifest.json")),
+		GreeksSHA256:         mustCDFFileHash(t, filepath.Join(dir, "greeks.json")),
+		LatencySHA256:        mustCDFFileHash(t, filepath.Join(dir, "latency.json")),
+		CheckpointsSHA256:    mustCDFFileHash(t, filepath.Join(dir, "checkpoints.jsonl")),
+		EvidenceManifestSHA:  mustCDFFileHash(t, filepath.Join(dir, "evidence-manifest.json")),
+		BinaryAttestationSHA: mustCDFFileHash(t, filepath.Join(dir, "binary-evidence-attestation.json")),
+	}
+	statusRaw, err := json.Marshal(status)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeCDFFixtureFile(t, filepath.Join(dir, "run-status.json"), append(statusRaw, '\n'))
+}
+
+func mustCDFFileHash(t *testing.T, path string) string {
+	t.Helper()
+	digest, err := sha256File(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return digest
+}
+
 func TestAuditCDFLiquidityActivationRejectsMissingRequiredFields(t *testing.T) {
 	tests := []struct {
 		event string
@@ -422,10 +695,20 @@ func writeRegisteredCDFActivationFixture(t *testing.T, options cdfActivationFixt
 				link: fmt.Sprintf("%s/cdf_elastic_supplier/client/%d", venueID, clientID),
 			}
 			participants = append(participants, participant)
+			quantity := cdfFixtureActivationQuantity(venueID, supplier, options)
+			tradeSide, tradePrice := cdfFixtureActivationTrade(venueID, supplier, options)
+			positionDelta := quantity
+			if tradeSide == "SELL" {
+				positionDelta = -quantity
+			}
 			initialEquity := cdfFixtureInitialEquity(supplier)
-			fee := cdfFixtureFee(supplier.ReferencePrice-2*supplier.TickSize, supplier.MinimumQualifyingQty, supplier.BasePrecision, supplier.MakerFeeBps)
-			terminalBase := supplier.InitialBaseBalance + supplier.MinimumQualifyingQty
-			terminalQuote := supplier.InitialQuoteBalance - cdfFixtureNotional(supplier.ReferencePrice-2*supplier.TickSize, supplier.MinimumQualifyingQty, supplier.BasePrecision) - fee
+			fee := cdfFixtureFee(tradePrice, quantity, supplier.BasePrecision, supplier.MakerFeeBps)
+			tradeNotional := cdfFixtureNotional(tradePrice, quantity, supplier.BasePrecision)
+			terminalBase := supplier.InitialBaseBalance + positionDelta
+			terminalQuote := supplier.InitialQuoteBalance - tradeNotional - fee
+			if tradeSide == "SELL" {
+				terminalQuote = supplier.InitialQuoteBalance + tradeNotional - fee
+			}
 			initial := AccountRow{
 				VenueID: venueID, ClientID: clientID, Role: supplier.Role,
 				Marks: map[string]int64{"CDF": supplier.ReferencePrice, "USD": supplier.QuotePrecision},
@@ -475,12 +758,20 @@ func writeRegisteredCDFActivationFixture(t *testing.T, options cdfActivationFixt
 	})
 	for _, participant := range participants {
 		decisionAt := contract.SimulationStartNano + 2_000_000_000 + participant.contract.DecisionPhaseOffset
+		decisionSide := etypes.Buy
+		decisionPrice := participant.contract.ReferencePrice - 2*participant.contract.TickSize
+		decisionQty := participant.contract.MinimumQualifyingQty
+		if options.strictMechanics {
+			strictDecision := cdfStrictFixtureDecision(participant, participant.first, firstSnapshots[participant.venueID], firstAt, decisionAt, 0, 0, 0, false, "submit")
+			decisionSide = cdfFixtureSide(strictDecision.Side)
+			decisionPrice = strictDecision.QuotePrice
+			decisionQty = strictDecision.QuoteQty
+		}
 		recorder.RecordDecision(simulation.MarketDataDecision{
 			ClientID: participant.clientID, SourceVenue: participant.venueID, Link: participant.link,
 			Symbol: cdfActivationSymbol, RequestID: cdfFixtureRequestID(participant.clientID, 1),
-			Side: etypes.Buy, OrderType: etypes.LimitOrder, TimeInForce: etypes.GTC,
-			Price: participant.contract.ReferencePrice - 2*participant.contract.TickSize,
-			Qty:   participant.contract.MinimumQualifyingQty, DecisionAt: decisionAt, Frontier: participant.first,
+			Side: decisionSide, OrderType: etypes.LimitOrder, TimeInForce: etypes.GTC,
+			Price: decisionPrice, Qty: decisionQty, DecisionAt: decisionAt, Frontier: participant.first,
 		})
 	}
 	recordCDFFixtureReceiptRound(t, recorder, participants, secondSnapshots, 2, secondAt, func(participant *cdfActivationFixtureParticipant, frontier simulation.MarketDataFrontier) {
@@ -488,11 +779,24 @@ func writeRegisteredCDFActivationFixture(t *testing.T, options cdfActivationFixt
 	})
 	for _, participant := range participants {
 		decisionAt := contract.SimulationStartNano + 12_000_000_000 + participant.contract.DecisionPhaseOffset
+		if options.strictMechanics {
+			decisionAt = contract.SimulationStartNano + 18_000_000_000 + participant.contract.DecisionPhaseOffset
+		}
+		decisionSide := etypes.Sell
+		decisionPrice := cdfFixturePostPrice(participant)
+		decisionQty := participant.contract.MinimumQualifyingQty
+		if options.strictMechanics {
+			quantity := cdfFixtureActivationQuantity(participant.venueID, participant.contract, options)
+			strictDecision := cdfStrictFixtureDecision(participant, participant.second, secondSnapshots[participant.venueID], secondAt, decisionAt, -quantity, participant.contract.ReferencePrice, contract.SimulationStartNano+2_000_000_000+participant.contract.DecisionPhaseOffset, true, "submit")
+			decisionSide = cdfFixtureSide(strictDecision.Side)
+			decisionPrice = strictDecision.QuotePrice
+			decisionQty = strictDecision.QuoteQty
+		}
 		recorder.RecordDecision(simulation.MarketDataDecision{
 			ClientID: participant.clientID, SourceVenue: participant.venueID, Link: participant.link,
 			Symbol: cdfActivationSymbol, RequestID: cdfFixtureRequestID(participant.clientID, 2),
-			Side: etypes.Sell, OrderType: etypes.LimitOrder, TimeInForce: etypes.GTC,
-			Price: cdfFixturePostPrice(participant), Qty: participant.contract.MinimumQualifyingQty,
+			Side: decisionSide, OrderType: etypes.LimitOrder, TimeInForce: etypes.GTC,
+			Price: decisionPrice, Qty: decisionQty,
 			DecisionAt: decisionAt, Frontier: participant.second,
 		})
 	}
@@ -513,15 +817,25 @@ func writeRegisteredCDFActivationFixture(t *testing.T, options cdfActivationFixt
 	}
 	for _, venueID := range contract.VenueIDs {
 		independentQty := int64(12_000_000)
+		if options.strictMechanics {
+			independentQty = 20_000_000_000
+		}
 		if options.dominantVolume {
 			independentQty = 1_000_000
 		}
 		bookEvents[venueID] = append(bookEvents[venueID], cdfFixtureEvent{
 			at: contract.SimulationStartNano + 9_000_000_000, event: "Trade", symbol: cdfActivationSymbol,
-			payload: cdfTradeEvidence{TradeID: 900_000 + uint64(len(venueID)), Price: 300_000_000, Qty: independentQty, Side: "BUY"},
+			payload: cdfTradeEvidence{
+				TradeID: 900_000 + uint64(len(venueID)), Price: 300_000_000, Qty: independentQty, Side: "BUY",
+				MakerOrderID: 7_000_000 + uint64(len(venueID)), TakerOrderID: 7_100_000 + uint64(len(venueID)),
+			},
 		})
 		thirdAt := contract.SimulationStartNano + 17_000_000_000
 		fourthAt := contract.SimulationStartNano + 25_000_000_000
+		if options.strictMechanics {
+			thirdAt = contract.SimulationStartNano + 30_000_000_000
+			fourthAt = contract.SimulationStartNano + 40_000_000_000
+		}
 		if options.dominantDepth {
 			fourthAt = contract.SimulationEndNano - 1
 		}
@@ -529,7 +843,12 @@ func writeRegisteredCDFActivationFixture(t *testing.T, options cdfActivationFixt
 			cdfSnapshotFixtureEvent(thirdAt, venueID, 3, cdfFixtureSnapshot(venueID, 3, options)),
 			cdfFixtureEvent{
 				at: thirdAt + 1_000_000_000, event: "BookDelta", symbol: cdfActivationSymbol,
-				payload: cdfBookDeltaEvidence{Side: "BUY", Price: 299_800_000, VisibleQty: 20_000_000},
+				payload: cdfBookDeltaEvidence{Side: "BUY", Price: 299_800_000, VisibleQty: func() int64 {
+					if options.strictMechanics {
+						return 100_000_000_000
+					}
+					return 20_000_000
+				}()},
 			},
 			cdfSnapshotFixtureEvent(fourthAt, venueID, 4, cdfFixtureSnapshot(venueID, 4, options)),
 		)
@@ -632,11 +951,15 @@ func appendCDFParticipantEvents(
 	t.Helper()
 	start := RegisteredSV1DActivationContract().SimulationStartNano
 	supplier := participant.contract
-	quantity := supplier.MinimumQualifyingQty
-	initialPrice := supplier.ReferencePrice - 2*supplier.TickSize
+	quantity := cdfFixtureActivationQuantity(participant.venueID, supplier, options)
+	initialSide, initialPrice := cdfFixtureActivationTrade(participant.venueID, supplier, options)
 	fee := cdfFixtureFee(initialPrice, quantity, supplier.BasePrecision, supplier.MakerFeeBps)
 	notional := cdfFixtureNotional(initialPrice, quantity, supplier.BasePrecision)
 	initialEquity := cdfFixtureInitialEquity(supplier)
+	positionAfter := quantity
+	if initialSide == "SELL" {
+		positionAfter = -quantity
+	}
 	requestOne := cdfFixtureRequestID(participant.clientID, 1)
 	requestTwo := cdfFixtureRequestID(participant.clientID, 2)
 	cancelRequest := cdfFixtureRequestID(participant.clientID, 3)
@@ -651,31 +974,45 @@ func appendCDFParticipantEvents(
 	acceptedTwoAt := start + 14_000_000_000 + supplier.DecisionPhaseOffset
 	cancelDecisionAt := start + 20_000_000_000 + supplier.DecisionPhaseOffset
 	cancelledAt := start + 22_000_000_000 + supplier.DecisionPhaseOffset
+	if options.strictMechanics {
+		fillAt = start + 12_000_000_000 + supplier.DecisionPhaseOffset
+		postBalanceAt = start + 14_000_000_000 + supplier.DecisionPhaseOffset
+		postDecisionAt = start + 18_000_000_000 + supplier.DecisionPhaseOffset
+		acceptedTwoAt = start + 20_000_000_000 + supplier.DecisionPhaseOffset
+		cancelDecisionAt = start + 26_000_000_000 + supplier.DecisionPhaseOffset
+		cancelledAt = start + 28_000_000_000 + supplier.DecisionPhaseOffset
+	}
 
 	firstSnapshot := cdfFixtureSnapshot(participant.venueID, 1, options)
 	firstDecision := cdfFixtureDecision(participant, participant.first, firstSnapshot, firstAt, firstDecisionAt, "submit")
+	if options.strictMechanics {
+		firstDecision = cdfStrictFixtureDecision(participant, participant.first, firstSnapshot, firstAt, firstDecisionAt, 0, 0, 0, false, "submit")
+		quantity = firstDecision.QuoteQty
+	}
 	if options.badFingerprint && participantOrdinal == 0 {
 		firstDecision.ObservationFingerprint = "00000000000000000000000000000000"
 	}
 	(*generalEvents)[participant.venueID] = append((*generalEvents)[participant.venueID],
-		cdfFixtureEvent{at: start + 500_000_000 + supplier.DecisionPhaseOffset, clientID: participant.clientID, event: "balance_snapshot", payload: cdfFixtureBalanceSnapshot(participant, start+500_000_000+supplier.DecisionPhaseOffset, 0, false)},
+		cdfFixtureEvent{at: start + 500_000_000 + supplier.DecisionPhaseOffset, clientID: participant.clientID, event: "balance_snapshot", payload: cdfFixtureBalanceSnapshotForTrade(participant, start+500_000_000+supplier.DecisionPhaseOffset, 0, false, initialSide, initialPrice)},
 		cdfFixtureEvent{at: firstDecisionAt, clientID: participant.clientID, event: "elastic_liquidity_supplier_decision", payload: firstDecision},
 	)
 	(*bookEvents)[participant.venueID] = append((*bookEvents)[participant.venueID],
 		cdfFixtureEvent{at: acceptedOneAt, clientID: participant.clientID, event: "OrderAccepted", symbol: cdfActivationSymbol, payload: cdfAcceptedEvidence{
-			OrderID: orderOne, ClientID: participant.clientID, RequestID: requestOne, Side: "BUY",
-			Type: "LIMIT", TimeInForce: "GTC", PostOnly: true, Price: initialPrice, Qty: quantity,
+			OrderID: orderOne, ClientID: participant.clientID, RequestID: requestOne, Side: firstDecision.Side,
+			Type: "LIMIT", TimeInForce: "GTC", PostOnly: true, Price: firstDecision.QuotePrice, Qty: quantity,
 		}},
-		cdfFixtureEvent{at: fillAt, event: "Trade", symbol: cdfActivationSymbol, payload: cdfTradeEvidence{TradeID: tradeID, Price: initialPrice, Qty: quantity, Side: "SELL"}},
+		cdfFixtureEvent{at: fillAt, event: "Trade", symbol: cdfActivationSymbol, payload: cdfTradeEvidence{
+			TradeID: tradeID, Price: initialPrice, Qty: quantity, Side: cdfOppositeFixtureSide(firstDecision.Side), MakerOrderID: orderOne, TakerOrderID: 8_000_000 + participant.clientID,
+		}},
 	)
 	if !(options.omitSupplierFill && participantOrdinal == 0) {
 		(*generalEvents)[participant.venueID] = append((*generalEvents)[participant.venueID], cdfFixtureEvent{
 			at: fillAt, clientID: participant.clientID, event: "elastic_liquidity_supplier_fill",
 			payload: cdfFillEvidence{
 				Role: supplier.Role, ClientID: participant.clientID, Symbol: cdfActivationSymbol,
-				OrderID: orderOne, TradeID: tradeID, Timestamp: fillAt, Side: "BUY", Price: initialPrice,
+				OrderID: orderOne, TradeID: tradeID, Timestamp: fillAt, Side: firstDecision.Side, Price: initialPrice,
 				Qty: quantity, FeeAmount: fee, FeeAsset: "USD", IsFull: true,
-				PositionBefore: 0, PositionAfter: quantity,
+				PositionBefore: 0, PositionAfter: positionAfter,
 			},
 		})
 	}
@@ -686,61 +1023,73 @@ func appendCDFParticipantEvents(
 	(*bookEvents)[participant.venueID] = append((*bookEvents)[participant.venueID], cdfFixtureEvent{
 		at: fillAt, clientID: participant.clientID, event: "OrderFill", symbol: cdfActivationSymbol,
 		payload: cdfOrderFillEvidence{
-			OrderID: orderOne, TradeID: tradeID, Side: "BUY", Price: initialPrice, Qty: exchangeFillQty,
+			OrderID: orderOne, TradeID: tradeID, Side: firstDecision.Side, Price: initialPrice, Qty: exchangeFillQty,
 			FeeAmount: fee, FeeAsset: "USD", FilledQty: exchangeFillQty, RemainingQty: 0, IsFull: true,
 		},
 	})
 	borrowed := options.borrowedSupplier && participantOrdinal == 0
 	(*generalEvents)[participant.venueID] = append((*generalEvents)[participant.venueID], cdfFixtureEvent{
 		at: postBalanceAt, clientID: participant.clientID, event: "balance_snapshot",
-		payload: cdfFixtureBalanceSnapshot(participant, postBalanceAt, quantity, borrowed),
+		payload: cdfFixtureBalanceSnapshotForTrade(participant, postBalanceAt, positionAfter, borrowed, initialSide, initialPrice),
 	})
 	if options.omitPostDecision && participantOrdinal == 0 {
 		return
 	}
-	secondSnapshot := cdfFixtureSnapshot(participant.venueID, 2, options)
+	secondSnapshotSequence := uint64(2)
+	secondSnapshot := cdfFixtureSnapshot(participant.venueID, secondSnapshotSequence, options)
 	postDecision := cdfFixtureDecision(participant, participant.second, secondSnapshot, secondAt, postDecisionAt, "submit")
-	postDecision.Position = quantity
-	postDecision.TargetPosition = 0
-	postDecision.GrossInventory = supplier.InitialBaseBalance + quantity
-	postDecision.Side = "SELL"
-	postDecision.QuotePrice = cdfFixturePostPrice(participant)
-	postDecision.QuoteQty = quantity
+	if options.strictMechanics {
+		postDecision = cdfStrictFixtureDecision(participant, participant.second, secondSnapshot, secondAt, postDecisionAt, positionAfter, firstDecision.ReferencePrice, firstDecision.DecisionTime, true, "submit")
+	}
+	if !options.strictMechanics {
+		postDecision.Position = quantity
+		postDecision.TargetPosition = 0
+		postDecision.GrossInventory = supplier.InitialBaseBalance + quantity
+		postDecision.Side = "SELL"
+		postDecision.QuotePrice = cdfFixturePostPrice(participant)
+		postDecision.QuoteQty = quantity
+		postDecision.QuoteCashAvailable = supplier.InitialQuoteBalance - notional - fee
+		postDecision.QuoteCashRequired = 0
+		postDecision.EquityQuote = cdfFixtureEquityAtMark(supplier, postDecision.RiskMarkPrice, supplier.InitialBaseBalance+quantity, supplier.InitialQuoteBalance-notional-fee)
+		postDecision.PeakEquityQuote = maxCDFTestInt64(initialEquity, postDecision.EquityQuote)
+		postDecision.LossFromInitialQuote = maxCDFTestInt64(0, initialEquity-postDecision.EquityQuote)
+		postDecision.DrawdownQuote = postDecision.PeakEquityQuote - postDecision.EquityQuote
+		if participant.venueID == "north" {
+			postDecision.QuotePriceSource = "one_sided_missing_side_blended"
+		}
+	}
 	postDecision.QuoteRequestID = requestTwo
 	postDecision.QuoteSubmittedAt = postDecisionAt
-	postDecision.QuoteCashAvailable = supplier.InitialQuoteBalance - notional - fee
-	postDecision.QuoteCashRequired = 0
-	postDecision.EquityQuote = cdfFixtureEquityAtMark(supplier, postDecision.RiskMarkPrice, supplier.InitialBaseBalance+quantity, supplier.InitialQuoteBalance-notional-fee)
-	postDecision.PeakEquityQuote = maxCDFTestInt64(initialEquity, postDecision.EquityQuote)
-	postDecision.LossFromInitialQuote = maxCDFTestInt64(0, initialEquity-postDecision.EquityQuote)
-	postDecision.DrawdownQuote = postDecision.PeakEquityQuote - postDecision.EquityQuote
-	if participant.venueID == "north" {
-		postDecision.QuotePriceSource = "one_sided_missing_side_blended"
-	}
 	(*generalEvents)[participant.venueID] = append((*generalEvents)[participant.venueID], cdfFixtureEvent{
 		at: postDecisionAt, clientID: participant.clientID, event: "elastic_liquidity_supplier_decision", payload: postDecision,
 	})
 	(*bookEvents)[participant.venueID] = append((*bookEvents)[participant.venueID], cdfFixtureEvent{
 		at: acceptedTwoAt, clientID: participant.clientID, event: "OrderAccepted", symbol: cdfActivationSymbol,
 		payload: cdfAcceptedEvidence{
-			OrderID: orderTwo, ClientID: participant.clientID, RequestID: requestTwo, Side: "SELL",
-			Type: "LIMIT", TimeInForce: "GTC", PostOnly: true, Price: postDecision.QuotePrice, Qty: quantity,
+			OrderID: orderTwo, ClientID: participant.clientID, RequestID: requestTwo, Side: postDecision.Side,
+			Type: "LIMIT", TimeInForce: "GTC", PostOnly: true, Price: postDecision.QuotePrice, Qty: postDecision.QuoteQty,
 		},
 	})
 	cancelDecision := postDecision
+	if options.strictMechanics {
+		cancelDecision = cdfStrictFixtureDecision(participant, participant.second, secondSnapshot, secondAt, cancelDecisionAt, positionAfter, postDecision.ReferencePrice, postDecision.DecisionTime, true, "cancel")
+	}
 	cancelDecision.DecisionTime = cancelDecisionAt
 	cancelDecision.ObservationAge = cancelDecisionAt - secondAt
 	cancelDecision.Action = "cancel"
 	cancelDecision.Reason = "reprice_for_inventory_or_touch"
 	cancelDecision.QuoteOrderID = orderTwo
+	cancelDecision.QuoteRequestID = requestTwo
+	cancelDecision.QuoteQty = postDecision.QuoteQty
 	cancelDecision.CancelRequestID = cancelRequest
+	cancelDecision.QuotePrice = postDecision.QuotePrice + supplier.TickSize
 	(*generalEvents)[participant.venueID] = append((*generalEvents)[participant.venueID], cdfFixtureEvent{
 		at: cancelDecisionAt, clientID: participant.clientID, event: "elastic_liquidity_supplier_decision", payload: cancelDecision,
 	})
 	if !(options.omitCancellation && participantOrdinal == 0) {
 		(*bookEvents)[participant.venueID] = append((*bookEvents)[participant.venueID], cdfFixtureEvent{
 			at: cancelledAt, clientID: participant.clientID, event: "OrderCancelled", symbol: cdfActivationSymbol,
-			payload: cdfCancelledEvidence{OrderID: orderTwo, RequestID: cancelRequest, RemainingQty: quantity},
+			payload: cdfCancelledEvidence{OrderID: orderTwo, RequestID: cancelRequest, RemainingQty: postDecision.QuoteQty},
 		})
 	}
 }
@@ -793,6 +1142,210 @@ func cdfFixtureDecision(
 	}
 }
 
+func cdfFixtureActivationQuantity(venueID string, supplier CDFSupplierContract, options cdfActivationFixtureOptions) int64 {
+	if !options.strictMechanics {
+		return supplier.MinimumQualifyingQty
+	}
+	snapshot := cdfFixtureSnapshot(venueID, 1, options)
+	bestBid, bestBidQty := cdfBestBid(snapshot.Bids)
+	bestAsk, bestAskQty := cdfBestAsk(snapshot.Asks)
+	anchor, ok := cdfLocalAnchor(cdfDecisionEvidence{
+		BestBid: bestBid, BestBidQty: bestBidQty, BestAsk: bestAsk, BestAskQty: bestAskQty,
+		LocalBookMode: cdfLocalBookMode(bestBid, bestBidQty, bestAsk, bestAskQty, supplier.TickSize),
+	}, supplier)
+	if !ok {
+		return supplier.MinimumQualifyingQty
+	}
+	quantity := absCDFTestInt64(cdfTargetPosition(supplier.ReferencePrice, anchor, supplier))
+	if quantity > supplier.MaxQuoteQty {
+		quantity = supplier.MaxQuoteQty
+	}
+	return quantity
+}
+
+func cdfFixtureActivationTrade(venueID string, supplier CDFSupplierContract, options cdfActivationFixtureOptions) (string, int64) {
+	if !options.strictMechanics {
+		return "BUY", supplier.ReferencePrice - 2*supplier.TickSize
+	}
+	snapshot := cdfFixtureSnapshot(venueID, 1, options)
+	bestBid, bestBidQty := cdfBestBid(snapshot.Bids)
+	bestAsk, bestAskQty := cdfBestAsk(snapshot.Asks)
+	mode := cdfLocalBookMode(bestBid, bestBidQty, bestAsk, bestAskQty, supplier.TickSize)
+	anchor, _ := cdfLocalAnchor(cdfDecisionEvidence{
+		BestBid: bestBid, BestBidQty: bestBidQty, BestAsk: bestAsk, BestAskQty: bestAskQty, LocalBookMode: mode,
+	}, supplier)
+	target := cdfTargetPosition(supplier.ReferencePrice, anchor, supplier)
+	if target < 0 {
+		probe := cdfDecisionEvidence{
+			ReferencePrice: supplier.ReferencePrice, BestBid: bestBid, BestBidQty: bestBidQty,
+			BestAsk: bestAsk, BestAskQty: bestAskQty, Side: "SELL", QuoteQty: -target,
+		}
+		price, ok := expectedCDFMissingSideQuote(probe, supplier)
+		if ok {
+			return "SELL", price
+		}
+	}
+	return "BUY", bestBid
+}
+
+func cdfFixtureSide(side string) etypes.Side {
+	if side == "SELL" {
+		return etypes.Sell
+	}
+	return etypes.Buy
+}
+
+func cdfOppositeFixtureSide(side string) string {
+	if side == "BUY" {
+		return "SELL"
+	}
+	return "BUY"
+}
+
+func cdfStrictFixtureDecision(
+	participant *cdfActivationFixtureParticipant,
+	frontier simulation.MarketDataFrontier,
+	snapshot etypes.BookSnapshot,
+	observationAt int64,
+	decisionAt int64,
+	position int64,
+	previousReference int64,
+	previousReferenceAt int64,
+	previousReferenceSet bool,
+	action string,
+) cdfDecisionEvidence {
+	supplier := participant.contract
+	bestBid, bestBidQty := cdfBestBid(snapshot.Bids)
+	bestAsk, bestAskQty := cdfBestAsk(snapshot.Asks)
+	mode := cdfLocalBookMode(bestBid, bestBidQty, bestAsk, bestAskQty, supplier.TickSize)
+	anchor, hasAnchor := cdfLocalAnchor(cdfDecisionEvidence{
+		BestBid: bestBid, BestBidQty: bestBidQty, BestAsk: bestAsk, BestAskQty: bestAskQty,
+		LocalBookMode: mode,
+	}, supplier)
+	reference := supplier.ReferencePrice
+	if previousReferenceSet {
+		reference, _, _ = advanceCDFReference(previousReference, previousReferenceAt, true, anchor, decisionAt, supplier.ReferenceHalfLife)
+	}
+	target := int64(0)
+	if hasAnchor {
+		target = cdfTargetPosition(reference, anchor, supplier)
+	}
+	gap, _ := checkedCDFSub(target, position)
+	side := ""
+	if gap > 0 {
+		side = "BUY"
+	} else if gap < 0 {
+		side = "SELL"
+	}
+	quoteSource := ""
+	quotePrice := int64(0)
+	if mode == "two_sided" {
+		quoteSource = "two_sided_touch"
+		if side == "BUY" {
+			quotePrice = bestBid
+		} else if side == "SELL" {
+			quotePrice = bestAsk
+		}
+	} else if mode == "one_sided" {
+		if side == "BUY" && bestBid > 0 {
+			quoteSource, quotePrice = "one_sided_present_touch", bestBid
+		} else if side == "SELL" && bestAsk > 0 {
+			quoteSource, quotePrice = "one_sided_present_touch", bestAsk
+		} else if side != "" {
+			quoteSource = "one_sided_missing_side_blended"
+			probe := cdfDecisionEvidence{
+				ReferencePrice: reference, BestBid: bestBid, BestBidQty: bestBidQty,
+				BestAsk: bestAsk, BestAskQty: bestAskQty, Side: side, QuoteQty: absCDFTestInt64(gap),
+			}
+			quotePrice, _ = expectedCDFMissingSideQuote(probe, supplier)
+		}
+	}
+	quoteQty := absCDFTestInt64(gap)
+	if quoteQty > supplier.MaxQuoteQty {
+		quoteQty = supplier.MaxQuoteQty
+	}
+	quoteCashAvailable := supplier.InitialQuoteBalance
+	if position != 0 {
+		initialSide, initialPrice := cdfFixtureActivationTrade(participant.venueID, supplier, cdfActivationFixtureOptions{strictMechanics: true})
+		initialQty := absCDFTestInt64(position)
+		initialFee := cdfFixtureFee(initialPrice, initialQty, supplier.BasePrecision, supplier.MakerFeeBps)
+		initialNotional := cdfFixtureNotional(initialPrice, initialQty, supplier.BasePrecision)
+		if initialSide == "BUY" {
+			quoteCashAvailable -= initialNotional + initialFee
+		} else {
+			quoteCashAvailable += initialNotional - initialFee
+		}
+	}
+	quoteCashRequired := int64(0)
+	if side == "BUY" {
+		quoteCashRequired = cdfFixtureNotional(quotePrice, quoteQty, supplier.BasePrecision) + cdfFixtureFee(quotePrice, quoteQty, supplier.BasePrecision, supplier.MakerFeeBps)
+	}
+	riskMark := int64(0)
+	riskSource := ""
+	equityAvailable := false
+	if hasAnchor {
+		riskMark = anchor
+		riskSource = "two_sided_midpoint"
+		if mode == "one_sided" {
+			if bestBid > 0 {
+				riskSource = "one_sided_bid"
+			} else if position == 0 {
+				riskSource = "one_sided_ask_zero_inventory"
+			} else {
+				riskMark = 0
+				riskSource = "one_sided_ask_unavailable"
+			}
+		}
+		equityAvailable = riskMark > 0
+	}
+	equity := cdfFixtureInitialEquity(supplier)
+	if equityAvailable {
+		equity = cdfFixtureEquityAtMark(supplier, riskMark, supplier.InitialBaseBalance+position, quoteCashAvailable)
+	}
+	peak := maxCDFTestInt64(cdfFixtureInitialEquity(supplier), equity)
+	if previousReferenceSet {
+		firstSnapshot := cdfFixtureSnapshot(participant.venueID, 1, cdfActivationFixtureOptions{strictMechanics: true})
+		firstBid, firstBidQty := cdfBestBid(firstSnapshot.Bids)
+		firstAsk, firstAskQty := cdfBestAsk(firstSnapshot.Asks)
+		firstMode := cdfLocalBookMode(firstBid, firstBidQty, firstAsk, firstAskQty, supplier.TickSize)
+		firstAnchor, firstAnchorOK := cdfLocalAnchor(cdfDecisionEvidence{
+			BestBid: firstBid, BestBidQty: firstBidQty, BestAsk: firstAsk, BestAskQty: firstAskQty, LocalBookMode: firstMode,
+		}, supplier)
+		if firstAnchorOK {
+			firstEquity := cdfFixtureEquityAtMark(supplier, firstAnchor, supplier.InitialBaseBalance, supplier.InitialQuoteBalance)
+			peak = maxCDFTestInt64(peak, firstEquity)
+		}
+	}
+	loss := maxCDFTestInt64(0, cdfFixtureInitialEquity(supplier)-equity)
+	return cdfDecisionEvidence{
+		Role: supplier.Role, ClientID: participant.clientID, Symbol: cdfActivationSymbol,
+		DecisionTime: decisionAt, DecisionPhaseOffset: supplier.DecisionPhaseOffset,
+		ObservationTime: observationAt, ObservationAge: decisionAt - observationAt,
+		ObservationSequence: frontier.Ordinal, ObservationLinkID: frontier.LinkID, ObservationOrdinal: frontier.Ordinal,
+		ObservationDeliveredAt: frontier.DeliveredAt, ObservationFingerprint: hex.EncodeToString(frontier.Fingerprint[:]),
+		ObservationDigest: hex.EncodeToString(frontier.Digest[:]), BestBid: bestBid, BestBidQty: bestBidQty,
+		BestAsk: bestAsk, BestAskQty: bestAskQty, MarkPrice: anchor, RiskMarkPrice: riskMark,
+		RiskMarkCurrent: equityAvailable, LocalBookMode: mode, QuotePriceSource: quoteSource, RiskMarkSource: riskSource,
+		ReferencePrice: reference, Position: position, TargetPosition: target, InventoryLimit: supplier.MaxPosition,
+		InitialBaseBalance: supplier.InitialBaseBalance, GrossInventory: supplier.InitialBaseBalance + position,
+		GrossInventoryLimit: supplier.MaxInventory, Action: action, Reason: "inventory_target_gap", Side: side,
+		QuotePrice: quotePrice, QuoteQty: quoteQty, MinimumQualifyingQty: supplier.MinimumQualifyingQty,
+		RegisteredMinimumExecutableQty: supplier.RegisteredMinimumExecutableQty,
+		QuoteRequestID:                 cdfFixtureRequestID(participant.clientID, 1), QuoteSubmittedAt: decisionAt,
+		QuoteCashAvailable: quoteCashAvailable, QuoteCashRequired: quoteCashRequired,
+		InitialEquityQuote: cdfFixtureInitialEquity(supplier), EquityQuote: equity, PeakEquityQuote: peak,
+		LossFromInitialQuote: loss, DrawdownQuote: peak - equity, MaxLossQuote: supplier.MaxLossQuote,
+		EquityAvailable: equityAvailable,
+	}
+}
+
+func absCDFTestInt64(value int64) int64 {
+	if value < 0 {
+		return -value
+	}
+	return value
+}
+
 func cdfFixtureBalanceSnapshot(participant *cdfActivationFixtureParticipant, at, position int64, borrowed bool) cdfBalanceSnapshotEvidence {
 	supplier := participant.contract
 	price := supplier.ReferencePrice - 2*supplier.TickSize
@@ -814,17 +1367,51 @@ func cdfFixtureBalanceSnapshot(participant *cdfActivationFixtureParticipant, at,
 	}
 }
 
+func cdfFixtureBalanceSnapshotForTrade(participant *cdfActivationFixtureParticipant, at, position int64, borrowed bool, side string, price int64) cdfBalanceSnapshotEvidence {
+	if side == "BUY" && price == participant.contract.ReferencePrice-2*participant.contract.TickSize {
+		return cdfFixtureBalanceSnapshot(participant, at, position, borrowed)
+	}
+	supplier := participant.contract
+	quantity := absCDFTestInt64(position)
+	notional := cdfFixtureNotional(price, quantity, supplier.BasePrecision)
+	fee := cdfFixtureFee(price, quantity, supplier.BasePrecision, supplier.MakerFeeBps)
+	quote := supplier.InitialQuoteBalance
+	if side == "BUY" {
+		quote -= notional + fee
+	} else {
+		quote += notional - fee
+	}
+	return cdfBalanceSnapshotEvidence{
+		Timestamp: at, ClientID: participant.clientID,
+		SpotBalances: []cdfBalanceEvidence{
+			{Asset: "CDF", Free: supplier.InitialBaseBalance + position, NetAsset: supplier.InitialBaseBalance + position},
+			{Asset: "USD", Free: quote, NetAsset: quote},
+		},
+		PerpBalances: []cdfBalanceEvidence{}, Borrowed: map[string]int64{},
+	}
+}
+
 func cdfFixtureSnapshot(venueID string, sequence uint64, options cdfActivationFixtureOptions) etypes.BookSnapshot {
-	const independentDepth = int64(20_000_000)
+	independentDepth := int64(20_000_000)
+	if options.strictMechanics {
+		independentDepth = 100_000_000_000
+	}
 	snapshot := etypes.BookSnapshot{
 		Bids: []etypes.PriceLevel{{Price: 299_800_000, VisibleQty: independentDepth}},
 		Asks: []etypes.PriceLevel{{Price: 300_200_000, VisibleQty: independentDepth}},
 	}
-	if sequence == 2 && venueID == "north" {
+	if options.strictMechanics && sequence == 1 {
+		snapshot.Bids[0].Price = 300_200_000
 		snapshot.Asks = []etypes.PriceLevel{}
 	}
-	if sequence == 3 && venueID == "north" {
+	if !options.strictMechanics && sequence == 2 && venueID == "north" {
+		snapshot.Asks = []etypes.PriceLevel{}
+	}
+	if !options.strictMechanics && sequence == 3 && venueID == "north" {
 		snapshot.Asks[0].Price = 299_900_000
+	}
+	if options.strictMechanics && sequence >= 2 {
+		snapshot.Asks[0].Price = 300_300_000
 	}
 	if sequence == 3 && options.dominantDepth {
 		snapshot.Asks[0].VisibleQty = 4_000_000

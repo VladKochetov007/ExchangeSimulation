@@ -187,45 +187,56 @@ type CDFActivationProvenance struct {
 }
 
 type CDFSupplierActivationAudit struct {
-	VenueID                      string  `json:"venue_id"`
-	Role                         string  `json:"role"`
-	ClientID                     uint64  `json:"client_id"`
-	DecisionCount                int64   `json:"decision_count"`
-	EligibleObservationCount     int64   `json:"eligible_observation_count"`
-	AcceptedOrderCount           int64   `json:"accepted_order_count"`
-	FillCount                    int64   `json:"fill_count"`
-	BalanceSnapshotCount         int64   `json:"balance_snapshot_count"`
-	PostFillBalanceSnapshotCount int64   `json:"post_fill_balance_snapshot_count"`
-	PostFillResponsiveCount      int64   `json:"post_fill_responsive_count"`
-	TradeCount                   int64   `json:"trade_count"`
-	VolumeQty                    int64   `json:"volume_qty"`
-	VolumeNotionalQuote          int64   `json:"volume_notional_quote"`
-	FeesPaidQuote                int64   `json:"fees_paid_quote"`
-	VenueVolumeDenominatorQty    int64   `json:"venue_volume_denominator_qty"`
-	VenueVolumeShare             float64 `json:"venue_volume_share"`
-	GlobalVolumeShare            float64 `json:"global_volume_share"`
-	FilledOrderCount             int64   `json:"filled_order_count"`
-	CancelledOrderCount          int64   `json:"cancelled_order_count"`
-	ForcedCancelCount            int64   `json:"forced_cancel_count"`
-	CensoredOrderCount           int64   `json:"censored_order_count"`
-	CancelRejectedCount          int64   `json:"cancel_rejected_count"`
-	SuccessfulWithdrawalCount    int64   `json:"successful_withdrawal_count"`
-	RepriceCancelCount           int64   `json:"reprice_cancel_count"`
-	CompletedRepriceCount        int64   `json:"completed_reprice_count"`
-	TotalQuoteLifetimeNano       int64   `json:"total_quote_lifetime_nano"`
-	CensoredQuoteLifetimeNano    int64   `json:"censored_quote_lifetime_nano"`
-	MaxQuoteLifetimeNano         int64   `json:"max_quote_lifetime_nano"`
-	WithdrawalCount              int64   `json:"withdrawal_count"`
-	OpenOrderCount               int64   `json:"open_order_count"`
-	OpenOrderQty                 int64   `json:"open_order_qty"`
-	InitialEquity                int64   `json:"initial_equity"`
-	TerminalEquity               int64   `json:"terminal_equity"`
-	PnL                          int64   `json:"pnl"`
-	MinPosition                  int64   `json:"min_position"`
-	MaxPosition                  int64   `json:"max_position"`
-	MaxGrossInventory            int64   `json:"max_gross_inventory"`
-	EvidenceValid                bool    `json:"evidence_valid"`
-	ActivationSatisfied          bool    `json:"activation_satisfied"`
+	VenueID                       string  `json:"venue_id"`
+	Role                          string  `json:"role"`
+	ClientID                      uint64  `json:"client_id"`
+	DecisionCount                 int64   `json:"decision_count"`
+	EligibleObservationCount      int64   `json:"eligible_observation_count"`
+	AcceptedOrderCount            int64   `json:"accepted_order_count"`
+	FillCount                     int64   `json:"fill_count"`
+	BalanceSnapshotCount          int64   `json:"balance_snapshot_count"`
+	PostFillBalanceSnapshotCount  int64   `json:"post_fill_balance_snapshot_count"`
+	PostFillResponsiveCount       int64   `json:"post_fill_responsive_count"`
+	TradeCount                    int64   `json:"trade_count"`
+	VolumeQty                     int64   `json:"volume_qty"`
+	VolumeNotionalQuote           int64   `json:"volume_notional_quote"`
+	FeesPaidQuote                 int64   `json:"fees_paid_quote"`
+	VenueVolumeDenominatorQty     int64   `json:"venue_volume_denominator_qty"`
+	VenueVolumeShare              float64 `json:"venue_volume_share"`
+	GlobalVolumeShare             float64 `json:"global_volume_share"`
+	FilledOrderCount              int64   `json:"filled_order_count"`
+	CancelledOrderCount           int64   `json:"cancelled_order_count"`
+	ForcedCancelCount             int64   `json:"forced_cancel_count"`
+	CensoredOrderCount            int64   `json:"censored_order_count"`
+	CancelRejectedCount           int64   `json:"cancel_rejected_count"`
+	SuccessfulWithdrawalCount     int64   `json:"successful_withdrawal_count"`
+	RepriceCancelCount            int64   `json:"reprice_cancel_count"`
+	CompletedRepriceCount         int64   `json:"completed_reprice_count"`
+	TotalQuoteLifetimeNano        int64   `json:"total_quote_lifetime_nano"`
+	CensoredQuoteLifetimeNano     int64   `json:"censored_quote_lifetime_nano"`
+	MaxQuoteLifetimeNano          int64   `json:"max_quote_lifetime_nano"`
+	WithdrawalCount               int64   `json:"withdrawal_count"`
+	OpenOrderCount                int64   `json:"open_order_count"`
+	OpenOrderQty                  int64   `json:"open_order_qty"`
+	InitialEquity                 int64   `json:"initial_equity"`
+	TerminalEquity                int64   `json:"terminal_equity"`
+	PnL                           int64   `json:"pnl"`
+	MinPosition                   int64   `json:"min_position"`
+	MaxPosition                   int64   `json:"max_position"`
+	MaxGrossInventory             int64   `json:"max_gross_inventory"`
+	DepthObservationCount         int64   `json:"depth_observation_count"`
+	BidDepthTimeWeightedShare     float64 `json:"bid_depth_time_weighted_share"`
+	AskDepthTimeWeightedShare     float64 `json:"ask_depth_time_weighted_share"`
+	BidQualifyingDepthShare       float64 `json:"bid_qualifying_depth_share"`
+	AskQualifyingDepthShare       float64 `json:"ask_qualifying_depth_share"`
+	BidDepthDominanceTimeFraction float64 `json:"bid_depth_dominance_time_fraction"`
+	AskDepthDominanceTimeFraction float64 `json:"ask_depth_dominance_time_fraction"`
+	BidRemovalDurationNano        int64   `json:"bid_removal_duration_nano"`
+	AskRemovalDurationNano        int64   `json:"ask_removal_duration_nano"`
+	BidRemovalTimeFraction        float64 `json:"bid_removal_time_fraction"`
+	AskRemovalTimeFraction        float64 `json:"ask_removal_time_fraction"`
+	EvidenceValid                 bool    `json:"evidence_valid"`
+	ActivationSatisfied           bool    `json:"activation_satisfied"`
 }
 
 type CDFVenueConcentrationAudit struct {
@@ -614,11 +625,18 @@ type cdfOrderState struct {
 }
 
 type cdfDepthObservation struct {
-	at          int64
-	bidDepth    int64
-	askDepth    int64
-	supplierBid int64
-	supplierAsk int64
+	at                 int64
+	globalSequence     uint64
+	bidDepth           int64
+	askDepth           int64
+	supplierBid        int64
+	supplierAsk        int64
+	supplierDepthByKey map[cdfParticipantKey]cdfSupplierDepth
+}
+
+type cdfSupplierDepth struct {
+	bid int64
+	ask int64
 }
 
 // AuditCDFLiquidityActivation validates a complete treatment run without
@@ -1753,7 +1771,8 @@ func (r *CDFActivationAudit) processCDFDecision(
 	if !isCDFAction(decision.Action) || decision.Reason == "" {
 		r.addEventCheck(event, state, "CDF decision has an unknown action or empty reason")
 	}
-	if r.strictMechanics && !cdfDecisionReasonAllowed(decision.Action, decision.Reason) {
+	if r.strictMechanics && (!cdfDecisionReasonAllowed(decision.Action, decision.Reason) ||
+		!cdfDecisionReasonPredicate(decision, state)) {
 		r.addEventCheck(event, state, "CDF decision reason is not a registered economic lifecycle reason")
 	}
 	r.recordCDFPostFillResponse(event, state, decision)
@@ -1804,7 +1823,8 @@ func (r *CDFActivationAudit) validateCDFObservation(
 	snapshots map[cdfSnapshotKey]cdfSnapshotProof,
 ) bool {
 	if decision.ObservationSequence == 0 || decision.ObservationLinkID == 0 || decision.ObservationOrdinal == 0 {
-		if decision.Action != "wait" || decision.Reason != "subscribe" {
+		if decision.Action != "wait" || decision.Reason != "subscribe" &&
+			decision.Reason != "stale_or_missing_observation" && decision.Reason != "equity_unavailable" {
 			r.addEventCheck(event, state, "actionable CDF decision has no delivered observation frontier")
 		}
 		return false
@@ -2913,9 +2933,10 @@ func (r *CDFActivationAudit) processCDFDepthDelta(event Event, states map[cdfPar
 	} else {
 		levels[delta.Price] = delta.VisibleQty
 	}
-	if !r.strictMechanics {
-		r.recordCDFDepthObservation(event, states, orders, depth, state)
-	}
+	// A BookDelta is the public book state transition. Strict mode must retain
+	// every such transition for event-time concentration and removal
+	// counterfactuals; snapshots alone can hide short-lived supplier dominance.
+	r.recordCDFDepthObservation(event, states, orders, depth, state)
 }
 
 func (r *CDFActivationAudit) recordCDFDepthObservation(event Event, states map[cdfParticipantKey]*cdfSupplierState, orders map[cdfOrderKey]*cdfOrderState, depth map[string][]cdfDepthObservation, publicDepth *cdfPublicDepthState) {
@@ -2925,15 +2946,26 @@ func (r *CDFActivationAudit) recordCDFDepthObservation(event Event, states map[c
 		r.addCheck(CDFActivationCheck{VenueID: event.VenueID, Ordinal: event.Ordinal, Failure: "public CDF depth overflows"})
 		return
 	}
-	observation := cdfDepthObservation{at: event.SimTS, bidDepth: bidDepth, askDepth: askDepth}
+	observation := cdfDepthObservation{
+		at: event.SimTS, globalSequence: event.GlobalSequence,
+		bidDepth: bidDepth, askDepth: askDepth,
+		supplierDepthByKey: make(map[cdfParticipantKey]cdfSupplierDepth),
+	}
 	for key, order := range orders {
 		if key.venueID != event.VenueID || states[cdfParticipantKey{key.venueID, key.clientID}] == nil {
 			continue
 		}
+		participantKey := cdfParticipantKey{venueID: key.venueID, clientID: key.clientID}
 		if order.side == "BUY" {
 			observation.supplierBid, bidOK = checkedCDFAdd(observation.supplierBid, order.remainingQty)
+			depthForSupplier := observation.supplierDepthByKey[participantKey]
+			depthForSupplier.bid, bidOK = checkedCDFAdd(depthForSupplier.bid, order.remainingQty)
+			observation.supplierDepthByKey[participantKey] = depthForSupplier
 		} else {
 			observation.supplierAsk, askOK = checkedCDFAdd(observation.supplierAsk, order.remainingQty)
+			depthForSupplier := observation.supplierDepthByKey[participantKey]
+			depthForSupplier.ask, askOK = checkedCDFAdd(depthForSupplier.ask, order.remainingQty)
+			observation.supplierDepthByKey[participantKey] = depthForSupplier
 		}
 		if !bidOK || !askOK {
 			r.addCheck(CDFActivationCheck{VenueID: event.VenueID, Ordinal: event.Ordinal, Failure: "supplier resting depth overflows"})
@@ -3092,11 +3124,14 @@ func (r *CDFActivationAudit) finalizeCDFActivation(
 			state.audit.MinPosition = 0
 			state.audit.MaxPosition = 0
 		}
+		// The preregistration requires every supplier/venue instance to trade and
+		// show a later inventory response, but requires a lifecycle withdrawal or
+		// reprice globally. Keep those scopes distinct; making every supplier
+		// cancel would be an unregistered post-hoc strengthening.
 		state.audit.ActivationSatisfied = state.initialAccountSeen && state.terminalAccountSeen &&
 			state.audit.EligibleObservationCount > 0 && state.audit.AcceptedOrderCount > 0 &&
 			state.audit.FillCount > 0 && state.audit.PostFillBalanceSnapshotCount > 0 &&
-			state.audit.PostFillResponsiveCount > 0 &&
-			(state.audit.SuccessfulWithdrawalCount > 0 || state.audit.RepriceCancelCount > 0)
+			state.audit.PostFillResponsiveCount > 0
 		allSuppliersActivated = allSuppliersActivated && state.audit.ActivationSatisfied
 		expectedBase, baseOK := checkedCDFAdd(state.initialBaseBalance, state.exchangeBaseDelta)
 		expectedQuote, quoteOK := checkedCDFAdd(state.initialQuoteBalance, state.exchangeQuoteDelta)
@@ -3110,6 +3145,18 @@ func (r *CDFActivationAudit) finalizeCDFActivation(
 		if r.TotalVolumeQty > 0 {
 			state.audit.GlobalVolumeShare = float64(state.audit.VolumeQty) / float64(r.TotalVolumeQty)
 		}
+		depthMetrics := measureCDFSupplierDepth(key, depth[key.venueID], terminalAt, state.contract, contract)
+		state.audit.DepthObservationCount = depthMetrics.observationCount
+		state.audit.BidDepthTimeWeightedShare = depthMetrics.bidTimeWeightedShare
+		state.audit.AskDepthTimeWeightedShare = depthMetrics.askTimeWeightedShare
+		state.audit.BidQualifyingDepthShare = depthMetrics.bidQualifyingShare
+		state.audit.AskQualifyingDepthShare = depthMetrics.askQualifyingShare
+		state.audit.BidDepthDominanceTimeFraction = depthMetrics.bidDominanceTimeFraction
+		state.audit.AskDepthDominanceTimeFraction = depthMetrics.askDominanceTimeFraction
+		state.audit.BidRemovalDurationNano = depthMetrics.bidRemovalDurationNano
+		state.audit.AskRemovalDurationNano = depthMetrics.askRemovalDurationNano
+		state.audit.BidRemovalTimeFraction = depthMetrics.bidRemovalTimeFraction
+		state.audit.AskRemovalTimeFraction = depthMetrics.askRemovalTimeFraction
 		r.Suppliers = append(r.Suppliers, state.audit)
 	}
 	if r.TotalVolumeQty <= 0 || r.SupplierVolumeQty < 0 || r.SupplierVolumeQty > r.TotalVolumeQty {
@@ -3123,14 +3170,22 @@ func (r *CDFActivationAudit) finalizeCDFActivation(
 		allVenueConcentrationSatisfied = allVenueConcentrationSatisfied && venue.ConcentrationSatisfied
 		r.Venues = append(r.Venues, venue)
 	}
+	allSupplierConcentrationSatisfied := true
+	for _, supplier := range r.Suppliers {
+		if supplier.DepthObservationCount == 0 ||
+			supplier.BidDepthDominanceTimeFraction > contract.MaximumDepthDominanceTimeFraction ||
+			supplier.AskDepthDominanceTimeFraction > contract.MaximumDepthDominanceTimeFraction {
+			allSupplierConcentrationSatisfied = false
+		}
+	}
 	for index := range r.Suppliers {
 		r.Suppliers[index].EvidenceValid = !r.hasParticipantCheck(r.Suppliers[index].VenueID, r.Suppliers[index].ClientID)
 	}
 	r.EvidenceValid = len(r.Checks) == 0
 	r.ActivationSatisfied = r.EvidenceValid && allSuppliersActivated &&
-		r.OneSidedDecisionCount > 0 && r.OneSidedRestorationCount > 0
+		r.OneSidedDecisionCount > 0 && r.OneSidedRestorationCount > 0 && r.WithdrawalCount > 0
 	r.AntiCheatingSatisfied = r.EvidenceValid && r.SupplierVolumeShare <= contract.MaximumSupplierVolumeShare &&
-		allVenueConcentrationSatisfied
+		allVenueConcentrationSatisfied && allSupplierConcentrationSatisfied
 	r.Valid = r.EvidenceValid && r.ActivationSatisfied && r.AntiCheatingSatisfied
 }
 
@@ -3175,6 +3230,109 @@ func measureCDFVenueConcentration(venueID string, observations []cdfDepthObserva
 		result.BidDominanceTimeFraction <= contract.MaximumDepthDominanceTimeFraction &&
 		result.AskDominanceTimeFraction <= contract.MaximumDepthDominanceTimeFraction
 	return result
+}
+
+type cdfSupplierDepthMetrics struct {
+	observationCount         int64
+	bidTimeWeightedShare     float64
+	askTimeWeightedShare     float64
+	bidQualifyingShare       float64
+	askQualifyingShare       float64
+	bidDominanceTimeFraction float64
+	askDominanceTimeFraction float64
+	bidRemovalDurationNano   int64
+	askRemovalDurationNano   int64
+	bidRemovalTimeFraction   float64
+	askRemovalTimeFraction   float64
+}
+
+// measureCDFSupplierDepth computes event-time, supplier-specific diagnostics
+// from the reconstructed public book. A removal interval is one in which the
+// supplier's qualifying side is the only reason the displayed side remains at
+// or above the registered qualifying threshold. The qualifying share uses the
+// same intervals and weights depth quantity rather than snapshot count.
+func measureCDFSupplierDepth(
+	key cdfParticipantKey,
+	observations []cdfDepthObservation,
+	terminalAt int64,
+	contract CDFSupplierContract,
+	activation CDFActivationContract,
+) cdfSupplierDepthMetrics {
+	metrics := cdfSupplierDepthMetrics{observationCount: int64(len(observations))}
+	ordered := append([]cdfDepthObservation(nil), observations...)
+	sort.SliceStable(ordered, func(i, j int) bool {
+		if ordered[i].at != ordered[j].at {
+			return ordered[i].at < ordered[j].at
+		}
+		return ordered[i].globalSequence < ordered[j].globalSequence
+	})
+	var bidActive, askActive int64
+	var bidTimeNumerator, askTimeNumerator float64
+	var bidQualifyingNumerator, bidQualifyingDenominator float64
+	var askQualifyingNumerator, askQualifyingDenominator float64
+	for index, observation := range ordered {
+		end := terminalAt
+		if index+1 < len(ordered) {
+			end = ordered[index+1].at
+		}
+		if end <= observation.at {
+			continue
+		}
+		duration := end - observation.at
+		if duration <= 0 {
+			continue
+		}
+		depthForSupplier := observation.supplierDepthByKey[key]
+		if observation.bidDepth > 0 {
+			bidActive += duration
+			share := float64(depthForSupplier.bid) / float64(observation.bidDepth)
+			bidTimeNumerator += float64(duration) * share
+			if share > activation.MaximumSupplierDepthShare {
+				metrics.bidDominanceTimeFraction += float64(duration)
+			}
+			if depthForSupplier.bid >= contract.MinimumQualifyingQty {
+				bidQualifyingNumerator += float64(depthForSupplier.bid)
+				bidQualifyingDenominator += float64(observation.bidDepth)
+				withoutSupplier, ok := checkedCDFSub(observation.bidDepth, depthForSupplier.bid)
+				if ok && withoutSupplier < contract.MinimumQualifyingQty {
+					metrics.bidRemovalDurationNano += duration
+				}
+			}
+		}
+		if observation.askDepth > 0 {
+			askActive += duration
+			share := float64(depthForSupplier.ask) / float64(observation.askDepth)
+			askTimeNumerator += float64(duration) * share
+			if share > activation.MaximumSupplierDepthShare {
+				metrics.askDominanceTimeFraction += float64(duration)
+			}
+			if depthForSupplier.ask >= contract.MinimumQualifyingQty {
+				askQualifyingNumerator += float64(depthForSupplier.ask)
+				askQualifyingDenominator += float64(observation.askDepth)
+				withoutSupplier, ok := checkedCDFSub(observation.askDepth, depthForSupplier.ask)
+				if ok && withoutSupplier < contract.MinimumQualifyingQty {
+					metrics.askRemovalDurationNano += duration
+				}
+			}
+		}
+	}
+	if bidActive > 0 {
+		metrics.bidTimeWeightedShare = bidTimeNumerator / float64(bidActive)
+		metrics.bidDominanceTimeFraction /= float64(bidActive)
+		metrics.bidRemovalTimeFraction = float64(metrics.bidRemovalDurationNano) / float64(bidActive)
+	}
+	if askActive > 0 {
+		metrics.askTimeWeightedShare = askTimeNumerator / float64(askActive)
+		metrics.askDominanceTimeFraction /= float64(askActive)
+		metrics.askRemovalTimeFraction = float64(metrics.askRemovalDurationNano) / float64(askActive)
+	}
+	if bidQualifyingDenominator > 0 {
+		metrics.bidQualifyingShare = bidQualifyingNumerator / bidQualifyingDenominator
+	}
+	if askQualifyingDenominator > 0 {
+		metrics.askQualifyingShare = askQualifyingNumerator / askQualifyingDenominator
+	}
+	return metrics
 }
 
 func validCDFMissingSideQuote(decision cdfDecisionEvidence, contract CDFSupplierContract) bool {
@@ -3542,7 +3700,9 @@ func cdfDecisionReasonAllowed(action, reason string) bool {
 	switch action {
 	case "wait":
 		switch reason {
-		case "subscribe", "order_pending", "cancel_pending", "awaiting_fresh_observation_after_close":
+		case "subscribe", "order_pending", "cancel_pending", "awaiting_fresh_observation_after_close",
+			"loss_limit", "equity_unavailable", "stale_or_missing_observation", "one_sided_or_locked_book",
+			"limit_or_touch_unavailable", "below_minimum_executable_qty", "inventory_at_target", "quote_cash_limit":
 			return true
 		}
 	case "submit":
@@ -3560,6 +3720,64 @@ func cdfDecisionReasonAllowed(action, reason string) bool {
 		}
 	}
 	return false
+}
+
+// cdfDecisionReasonPredicate checks the observable state that makes a
+// lifecycle reason economically possible. The reason string is actor output,
+// but the associated IDs, inventory, quote, mark, and loss fields are already
+// independently reconstructed by the strict audit. Reasons without an
+// independently testable predicate remain rejected instead of becoming a
+// self-attested escape hatch.
+func cdfDecisionReasonPredicate(decision cdfDecisionEvidence, state *cdfSupplierState) bool {
+	if state == nil {
+		return false
+	}
+	hasQuote := decision.QuoteOrderID != 0
+	switch decision.Reason {
+	case "subscribe":
+		return decision.Action == "wait" && !hasQuote && decision.ObservationSequence == 0
+	case "order_pending":
+		return decision.Action == "wait" && !hasQuote && decision.QuoteRequestID != 0 && decision.QuoteSubmittedAt > 0
+	case "cancel_pending":
+		return decision.Action == "wait" && hasQuote && decision.CancelRequestID != 0
+	case "awaiting_fresh_observation_after_close":
+		return decision.Action == "wait" && !hasQuote && decision.LocalBookMode == "one_sided" &&
+			decision.TargetPosition != decision.Position
+	case "loss_limit":
+		return (decision.Action == "wait" || decision.Action == "withdraw") && decision.RiskLimitTriggered &&
+			decision.MaxLossQuote > 0 && (decision.LossFromInitialQuote >= decision.MaxLossQuote || decision.DrawdownQuote >= decision.MaxLossQuote)
+	case "equity_unavailable":
+		return (decision.Action == "wait" || decision.Action == "withdraw") && !decision.EquityAvailable &&
+			(!decision.RiskMarkCurrent || decision.RiskMarkPrice == 0 || strings.HasSuffix(decision.RiskMarkSource, "_unavailable"))
+	case "stale_or_missing_observation":
+		return (decision.Action == "wait" || decision.Action == "withdraw") &&
+			(decision.ObservationTime == 0 || decision.ObservationAge > state.contract.MaxObservationAge)
+	case "one_sided_or_locked_book":
+		return (decision.Action == "wait" || decision.Action == "withdraw") && decision.LocalBookMode == ""
+	case "limit_or_touch_unavailable":
+		return (decision.Action == "wait" || decision.Action == "withdraw") &&
+			(decision.QuotePrice <= 0 || decision.QuoteQty <= 0)
+	case "below_minimum_executable_qty":
+		return (decision.Action == "wait" || decision.Action == "withdraw") && decision.QuoteQty > 0 &&
+			decision.QuoteQty < state.contract.MinimumExecutableQty
+	case "inventory_at_target":
+		return (decision.Action == "wait" || decision.Action == "withdraw") && decision.TargetPosition == decision.Position
+	case "quote_cash_limit":
+		return (decision.Action == "wait" || decision.Action == "withdraw") && decision.QuoteCashAvailable >= 0 &&
+			decision.QuoteCashRequired > decision.QuoteCashAvailable
+	case "inventory_target_gap":
+		return decision.Action == "submit" && decision.TargetPosition != decision.Position
+	case "quote_unchanged":
+		return decision.Action == "rest" && hasQuote && decision.QuotePrice > 0 && decision.QuoteQty > 0
+	case "reprice_for_inventory_or_touch":
+		if decision.Action != "cancel" || !hasQuote || decision.CancelRequestID == 0 || !state.hasLastDecision {
+			return false
+		}
+		return decision.Side != state.lastDecision.Side || decision.QuotePrice != state.lastDecision.QuotePrice ||
+			decision.QuoteQty != state.lastDecision.QuoteQty
+	default:
+		return false
+	}
 }
 
 func cdfSideCode(side string) uint8 {

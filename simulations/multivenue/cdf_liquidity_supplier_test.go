@@ -166,6 +166,45 @@ func TestCDFSupplierMissingSnapshotWithdrawsAndLaterValidSnapshotCanRecover(t *t
 	}
 }
 
+func TestCDFSupplierRejectedReplacementPreservesRepriceLineage(t *testing.T) {
+	gateway := newMetaGateway()
+	decisions := make([]ElasticLiquiditySupplierDecision, 0)
+	cfg := cdfSupplierUnitConfig()
+	cfg.DecisionObserver = func(decision ElasticLiquiditySupplierDecision) {
+		decisions = append(decisions, decision)
+	}
+	supplier := NewElasticLiquiditySupplier(1, gateway, cfg)
+	supplier.onTick(time.Unix(0, int64(time.Second)))
+	supplier.HandleEvent(context.Background(), cdfSupplierBookEvent(cfg.Symbol, int64(time.Second), 11, 1_200, 1_300, 100, 100))
+	supplier.onTick(time.Unix(0, int64(2*time.Second)))
+	initial := gateway.orders()
+	if len(initial) != 1 {
+		t.Fatalf("initial orders = %+v, want one", initial)
+	}
+	supplier.HandleEvent(context.Background(), &actor.Event{Type: actor.EventOrderAccepted, Data: actor.OrderAcceptedEvent{OrderID: 42, RequestID: initial[0].RequestID}})
+	supplier.HandleEvent(context.Background(), cdfSupplierBookEvent(cfg.Symbol, int64(3*time.Second), 12, 1_000, 1_100, 100, 100))
+	supplier.onTick(time.Unix(0, int64(4*time.Second)))
+	if len(gateway.requests) != 3 || gateway.requests[2].Type != etypes.ReqCancelOrder {
+		t.Fatalf("reprice requests = %+v, want cancellation of order 42", gateway.requests)
+	}
+	cancelRequest := gateway.requests[2].CancelReq.RequestID
+	supplier.HandleEvent(context.Background(), &actor.Event{Type: actor.EventOrderCancelled, Data: actor.OrderCancelledEvent{OrderID: 42, RequestID: cancelRequest}})
+	supplier.HandleEvent(context.Background(), cdfSupplierBookEvent(cfg.Symbol, int64(5*time.Second), 13, 1_000, 1_100, 100, 100))
+	supplier.onTick(time.Unix(0, int64(6*time.Second)))
+	orders := gateway.orders()
+	if len(orders) != 2 || len(decisions) == 0 || decisions[len(decisions)-1].ReplacesOrderID != 42 {
+		t.Fatalf("replacement = orders %+v decisions %+v, want lineage to 42", orders, decisions)
+	}
+	rejectedRequest := orders[1].RequestID
+	supplier.HandleEvent(context.Background(), &actor.Event{Type: actor.EventOrderRejected, Data: actor.OrderRejectedEvent{RequestID: rejectedRequest, Reason: exchange.RejectPostOnlyWouldTake}})
+	supplier.HandleEvent(context.Background(), cdfSupplierBookEvent(cfg.Symbol, int64(7*time.Second), 14, 1_000, 1_100, 100, 100))
+	supplier.onTick(time.Unix(0, int64(8*time.Second)))
+	orders = gateway.orders()
+	if len(orders) != 3 || len(decisions) == 0 || decisions[len(decisions)-1].ReplacesOrderID != 42 {
+		t.Fatalf("retry after rejection = orders %+v decisions %+v, want original lineage 42", orders, decisions)
+	}
+}
+
 func TestCDFSupplierQuotesMissingAskOnRegisteredGrid(t *testing.T) {
 	gateway := newMetaGateway()
 	decisions := make([]ElasticLiquiditySupplierDecision, 0)
