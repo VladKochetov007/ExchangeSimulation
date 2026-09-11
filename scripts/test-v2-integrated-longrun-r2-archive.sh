@@ -162,7 +162,7 @@ write_full_cell() {
 	cp -- "$config" "$cell/run-config.json"
 	write_metadata "$cell" 607 full "$gomaxprocs" "$config" "$hypothesis_id"
 	write_common_files "$cell" "$experiment_id"
-	"$fixture_binary" -out "$cell/events.evs" -attestation "$cell/binary-evidence-attestation.json" -sequence 2
+	"$fixture_binary" -out "$cell/events.evs" -attestation "$cell/binary-evidence-attestation.json" -sequence 1
 	printf '%s\n' '{}' >"$cell/market-data-evidence-v2.json"
 	printf '%s\n' 'schedule-fixture' >"$cell/market-data-schedules-v2.bin"
 	printf '%s\n' 'receipt-fixture' >"$cell/market-data-receipts-v2.bin"
@@ -178,7 +178,7 @@ write_none_cell() {
 	cp -- "$config" "$cell/run-config.json"
 	write_metadata "$cell" 607 none 4 "$config" "V2-INTEGRATED-LONG-R2-CANDIDATE-PARITY"
 	write_common_files "$cell" "v2-integrated-longrun-r2-dev-607-none"
-	"$fixture_binary" -out "$cell/events.evs" -attestation "$cell/binary-evidence-attestation.json" -sequence 2
+	"$fixture_binary" -out "$cell/events.evs" -attestation "$cell/binary-evidence-attestation.json" -sequence 1
 	v2_r2_write_evidence_manifest "$cell" || fail "could not create no-log evidence manifest"
 	write_status "$cell"
 }
