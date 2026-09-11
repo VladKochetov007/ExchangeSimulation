@@ -44,6 +44,75 @@ func TestCollectCDFPublicDepthObservationsMeasuresBookModes(t *testing.T) {
 	}
 }
 
+func TestValidateCDFObservationCadenceCoversOpeningAndTerminalIntervals(t *testing.T) {
+	observations := []cdfDepthObservation{
+		{at: 1, globalSequence: 1, snapshot: true},
+		{at: 2, globalSequence: 2, snapshot: true},
+		{at: 3, globalSequence: 3, snapshot: true},
+		{at: 4, globalSequence: 4, snapshot: true},
+	}
+	if checks := validateCDFObservationCadence("north", observations, 0, 5, 1); len(checks) != 0 {
+		t.Fatalf("complete public cadence rejected: %+v", checks)
+	}
+	covered := prependCDFInitialObservation(observations, CDFActivationContract{
+		SimulationStartNano: 0, InitialPublicBookMode: "empty",
+	})
+	if len(covered) != len(observations)+1 || covered[0].at != 0 || covered[0].bidDepth != 0 || covered[0].askDepth != 0 {
+		t.Fatalf("opening state was not reconstructed: %+v", covered)
+	}
+}
+
+func TestValidateCDFObservationCadenceRejectsMissingOrUnresolvedIntervals(t *testing.T) {
+	makeSnapshots := func(times ...int64) []cdfDepthObservation {
+		observations := make([]cdfDepthObservation, 0, len(times))
+		for sequence, at := range times {
+			observations = append(observations, cdfDepthObservation{at: at, globalSequence: uint64(sequence + 1), snapshot: true})
+		}
+		return observations
+	}
+	tests := []struct {
+		name          string
+		observations  []cdfDepthObservation
+		wantSubstring string
+	}{
+		{name: "opening gap", observations: makeSnapshots(2, 3, 4, 5), wantSubstring: "opening observation"},
+		{name: "missing snapshot", observations: makeSnapshots(1, 3, 4, 5), wantSubstring: "missing or shifted"},
+		{name: "terminal gap", observations: makeSnapshots(1, 2, 3), wantSubstring: "terminal coverage"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			checks := validateCDFObservationCadence("north", test.observations, 0, 5, 1)
+			if len(checks) == 0 {
+				t.Fatal("invalid public cadence was accepted")
+			}
+			found := false
+			for _, check := range checks {
+				if strings.Contains(check.Failure, test.wantSubstring) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Fatalf("checks = %+v; want %q", checks, test.wantSubstring)
+			}
+		})
+	}
+}
+
+func TestValidateCDFObservationCadenceIgnoresSameIntervalDeltas(t *testing.T) {
+	observations := []cdfDepthObservation{
+		{at: 1, globalSequence: 1, snapshot: true},
+		{at: 1, globalSequence: 2},
+		{at: 2, globalSequence: 3, snapshot: true},
+		{at: 3, globalSequence: 4, snapshot: true},
+		{at: 4, globalSequence: 5, snapshot: true},
+		{at: 4, globalSequence: 6},
+	}
+	if checks := validateCDFObservationCadence("north", observations, 0, 5, 1); len(checks) != 0 {
+		t.Fatalf("same-grid public deltas changed cadence validation: %+v", checks)
+	}
+}
+
 func TestCollectCDFPublicDepthObservationsFailsClosedOnBoundaryAndProjectionErrors(t *testing.T) {
 	makeEvent := func(at int64, name string, payload any) Event {
 		raw, err := json.Marshal(payload)

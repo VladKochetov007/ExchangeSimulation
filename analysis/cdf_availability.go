@@ -2,6 +2,7 @@ package analysis
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -112,7 +113,10 @@ func (r *Run) AuditCDFBookAvailability(options CDFActivationOptions) (*CDFBookAv
 		observations, checks := collectCDFPublicDepthObservations(events, options.Contract.VenueIDs, metadata.SimulationStartNano, metadata.SimulationEndNano)
 		result.Checks = append(result.Checks, checks...)
 		for _, venueID := range options.Contract.VenueIDs {
-			result.Venues = append(result.Venues, measureCDFVenueConcentration(venueID, observations[venueID], metadata.SimulationEndNano, options.Contract))
+			venueObservations := observations[venueID]
+			result.Checks = append(result.Checks, validateCDFObservationCadence(venueID, venueObservations, metadata.SimulationStartNano, metadata.SimulationEndNano, options.Contract.ObservationIntervalNano)...)
+			venueObservations = prependCDFInitialObservation(venueObservations, options.Contract)
+			result.Venues = append(result.Venues, measureCDFVenueConcentration(venueID, venueObservations, metadata.SimulationEndNano, options.Contract))
 		}
 	} else {
 		observations, checks, err := collectCDFLegacyPublicDepthObservations(scanRun, options.Contract.VenueIDs, metadata.SimulationStartNano, metadata.SimulationEndNano)
@@ -222,10 +226,108 @@ func cdfPublicDepthObservation(event Event, state *cdfPublicDepthState) (cdfDept
 		return cdfDepthObservation{}, false
 	}
 	return cdfDepthObservation{
-		at: event.SimTS, globalSequence: event.GlobalSequence,
+		at: event.SimTS, globalSequence: event.GlobalSequence, snapshot: event.Name == "BookSnapshot",
 		bidDepth: bidDepth, askDepth: askDepth,
 		supplierDepthByKey: make(map[cdfParticipantKey]cdfSupplierDepth),
 	}, true
+}
+
+// validateCDFObservationCadence checks the registered public-book grid without
+// treating same-timestamp deltas as separate sampling intervals. The simulator
+// starts with an empty CDF book and publishes its first periodic snapshot one
+// interval after start. That opening state is admitted only when no earlier
+// CDF book transition is present in the retained stream.
+func validateCDFObservationCadence(venueID string, observations []cdfDepthObservation, startAt, terminalAt, interval int64) []CDFActivationCheck {
+	checks := []CDFActivationCheck{}
+	if interval <= 0 || terminalAt <= startAt || terminalAt-startAt < interval {
+		return []CDFActivationCheck{{VenueID: venueID, Failure: "registered CDF observation cadence is invalid"}}
+	}
+	if len(observations) == 0 {
+		return []CDFActivationCheck{{VenueID: venueID, Failure: "no public CDF book observations for the registered cadence"}}
+	}
+	previousAt := int64(math.MinInt64)
+	firstAt := int64(math.MaxInt64)
+	lastAt := int64(math.MinInt64)
+	firstSnapshotAt := int64(math.MaxInt64)
+	lastSnapshotAt := int64(math.MinInt64)
+	snapshotTimes := make([]int64, 0, len(observations))
+	for _, observation := range observations {
+		if observation.at < previousAt {
+			checks = append(checks, CDFActivationCheck{VenueID: venueID, Failure: "public CDF observation timestamps regress"})
+		}
+		previousAt = observation.at
+		if observation.at < startAt || observation.at > terminalAt {
+			checks = append(checks, CDFActivationCheck{VenueID: venueID, Failure: "public CDF observation lies outside the registered interval"})
+			continue
+		}
+		if observation.at < firstAt {
+			firstAt = observation.at
+		}
+		if observation.at > lastAt {
+			lastAt = observation.at
+		}
+		if observation.snapshot {
+			if observation.at < firstSnapshotAt {
+				firstSnapshotAt = observation.at
+			}
+			if observation.at > lastSnapshotAt {
+				lastSnapshotAt = observation.at
+			}
+			if len(snapshotTimes) == 0 || snapshotTimes[len(snapshotTimes)-1] != observation.at {
+				snapshotTimes = append(snapshotTimes, observation.at)
+			}
+		}
+	}
+	if len(snapshotTimes) == 0 {
+		return append(checks, CDFActivationCheck{VenueID: venueID, Failure: "public CDF observation cadence has no snapshots"})
+	}
+	if firstSnapshotAt == startAt {
+		if firstAt != startAt {
+			checks = append(checks, CDFActivationCheck{VenueID: venueID, Failure: "public CDF opening snapshot is not the first retained book observation"})
+		}
+	} else if firstSnapshotAt == startAt+interval {
+		if firstAt < firstSnapshotAt {
+			checks = append(checks, CDFActivationCheck{VenueID: venueID, Failure: "public CDF book changed before the first registered snapshot"})
+		}
+	} else {
+		checks = append(checks, CDFActivationCheck{VenueID: venueID, Failure: "public CDF cadence omits the opening observation interval"})
+	}
+	for index := 1; index < len(snapshotTimes); index++ {
+		if snapshotTimes[index]-snapshotTimes[index-1] != interval {
+			checks = append(checks, CDFActivationCheck{VenueID: venueID, Failure: "public CDF snapshot cadence has a missing or shifted interval"})
+			break
+		}
+	}
+	if terminalAt-lastAt > interval {
+		checks = append(checks, CDFActivationCheck{VenueID: venueID, Failure: "public CDF observations end before the registered terminal coverage interval"})
+	}
+	if terminalAt-lastSnapshotAt > interval {
+		checks = append(checks, CDFActivationCheck{VenueID: venueID, Failure: "public CDF snapshots end before the registered terminal coverage interval"})
+	}
+	return checks
+}
+
+func prependCDFInitialObservation(observations []cdfDepthObservation, contract CDFActivationContract) []cdfDepthObservation {
+	if len(observations) == 0 || contract.InitialPublicBookMode != "empty" {
+		return observations
+	}
+	ordered := append([]cdfDepthObservation(nil), observations...)
+	sort.SliceStable(ordered, func(i, j int) bool {
+		if ordered[i].at != ordered[j].at {
+			return ordered[i].at < ordered[j].at
+		}
+		return ordered[i].globalSequence < ordered[j].globalSequence
+	})
+	for _, observation := range ordered {
+		if observation.at <= contract.SimulationStartNano {
+			return observations
+		}
+	}
+	initial := cdfDepthObservation{
+		at: contract.SimulationStartNano, snapshot: true,
+		supplierDepthByKey: make(map[cdfParticipantKey]cdfSupplierDepth),
+	}
+	return append([]cdfDepthObservation{initial}, ordered...)
 }
 
 func collectCDFLegacyPublicDepthObservations(run *Run, venueIDs []string, startAt, terminalAt int64) (map[string][]cdfDepthObservation, []CDFActivationCheck, error) {

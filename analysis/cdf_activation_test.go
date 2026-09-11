@@ -1062,7 +1062,7 @@ func writeRegisteredCDFActivationFixture(t *testing.T, options cdfActivationFixt
 	firstAt := contract.SimulationStartNano + 1_000_000_000
 	secondAt := contract.SimulationStartNano + 10_000_000_000
 	if options.strictMechanics {
-		secondAt = contract.SimulationStartNano + 2_000_000_004
+		secondAt = contract.SimulationStartNano + 2_000_000_000
 	}
 	firstSnapshots := make(map[string]etypes.BookSnapshot, len(contract.VenueIDs))
 	secondSnapshots := make(map[string]etypes.BookSnapshot, len(contract.VenueIDs))
@@ -1070,7 +1070,7 @@ func writeRegisteredCDFActivationFixture(t *testing.T, options cdfActivationFixt
 		firstSnapshots[venueID] = cdfFixtureSnapshot(venueID, 1, options)
 		secondSnapshots[venueID] = cdfFixtureSnapshot(venueID, 2, options)
 	}
-	recordCDFFixtureReceiptRound(t, recorder, participants, firstSnapshots, 1, firstAt, func(participant *cdfActivationFixtureParticipant, frontier simulation.MarketDataFrontier) {
+	recordCDFFixtureReceiptRound(t, recorder, participants, firstSnapshots, 1, firstAt, 1, func(participant *cdfActivationFixtureParticipant, frontier simulation.MarketDataFrontier) {
 		participant.first = frontier
 	})
 	for _, participant := range participants {
@@ -1095,7 +1095,11 @@ func writeRegisteredCDFActivationFixture(t *testing.T, options cdfActivationFixt
 			Price: decisionPrice, Qty: decisionQty, DecisionAt: decisionAt, Frontier: participant.first,
 		})
 	}
-	recordCDFFixtureReceiptRound(t, recorder, participants, secondSnapshots, 2, secondAt, func(participant *cdfActivationFixtureParticipant, frontier simulation.MarketDataFrontier) {
+	secondDeliveryDelay := int64(1)
+	if options.strictMechanics {
+		secondDeliveryDelay = 5
+	}
+	recordCDFFixtureReceiptRound(t, recorder, participants, secondSnapshots, 2, secondAt, secondDeliveryDelay, func(participant *cdfActivationFixtureParticipant, frontier simulation.MarketDataFrontier) {
 		participant.second = frontier
 	})
 	for _, participant := range participants {
@@ -1108,7 +1112,7 @@ func writeRegisteredCDFActivationFixture(t *testing.T, options cdfActivationFixt
 		decisionQty := participant.contract.MinimumQualifyingQty
 		if options.strictMechanics {
 			quantity := cdfFixtureActivationQuantity(participant.venueID, participant.contract, options)
-			strictDecision := cdfStrictFixtureDecision(participant, participant.second, secondSnapshots[participant.venueID], secondAt, decisionAt, -quantity, 0, 0, false, "submit")
+			strictDecision := cdfStrictFixtureDecision(participant, participant.second, secondSnapshots[participant.venueID], secondAt, decisionAt, -quantity, participant.contract.ReferencePrice, contract.SimulationStartNano+2_000_000_000, true, "submit")
 			decisionSide = cdfFixtureSide(strictDecision.Side)
 			decisionPrice = strictDecision.QuotePrice
 			decisionQty = strictDecision.QuoteQty
@@ -1162,7 +1166,8 @@ func writeRegisteredCDFActivationFixture(t *testing.T, options cdfActivationFixt
 		if options.dominantDepth {
 			fourthAt = contract.SimulationEndNano - 1
 		}
-		bookEvents[venueID] = append(bookEvents[venueID],
+		venueBookEvents := append([]cdfFixtureEvent(nil), bookEvents[venueID]...)
+		venueBookEvents = append(venueBookEvents,
 			cdfSnapshotFixtureEvent(thirdAt, venueID, 3, cdfFixtureSnapshot(venueID, 3, options)),
 			cdfFixtureEvent{
 				at: thirdAt + 1_000_000_000, event: "BookDelta", symbol: cdfActivationSymbol,
@@ -1175,6 +1180,10 @@ func writeRegisteredCDFActivationFixture(t *testing.T, options cdfActivationFixt
 			},
 			cdfSnapshotFixtureEvent(fourthAt, venueID, 4, cdfFixtureSnapshot(venueID, 4, options)),
 		)
+		if options.strictMechanics {
+			appendCDFStrictSnapshotCadence(&venueBookEvents, venueID, contract, thirdAt, options)
+		}
+		bookEvents[venueID] = venueBookEvents
 		writeCDFFixtureEvents(t, filepath.Join(dir, "venues", venueID, "general.jsonl"), venueID, generalEvents[venueID])
 		writeCDFFixtureEvents(t, filepath.Join(dir, "venues", venueID, "spot", "CDF-USD.jsonl"), venueID, bookEvents[venueID])
 	}
@@ -1226,6 +1235,7 @@ func recordCDFFixtureReceiptRound(
 	snapshots map[string]etypes.BookSnapshot,
 	sequence uint64,
 	publishedAt int64,
+	deliveryDelay int64,
 	assign func(*cdfActivationFixtureParticipant, simulation.MarketDataFrontier),
 ) {
 	t.Helper()
@@ -1252,7 +1262,7 @@ func recordCDFFixtureReceiptRound(
 	}
 	for _, participant := range participants {
 		frontier := recorder.RecordReceipt(simulation.MarketDataReceipt{
-			MarketDataSchedule: schedules[participant], DeliveredAt: publishedAt + 1,
+			MarketDataSchedule: schedules[participant], DeliveredAt: publishedAt + deliveryDelay,
 		})
 		if frontier.LinkID == 0 {
 			t.Fatal("record CDF fixture receipt")
@@ -1303,10 +1313,10 @@ func appendCDFParticipantEvents(
 		acceptedOneAt = strictBase + 1
 		fillAt = strictBase + 2
 		postBalanceAt = strictBase + 3
-		postDecisionAt = strictBase + 5
-		acceptedTwoAt = start + 20_000_000_000 + supplier.DecisionPhaseOffset
-		cancelDecisionAt = start + 26_000_000_000 + supplier.DecisionPhaseOffset
-		cancelledAt = start + 28_000_000_000 + supplier.DecisionPhaseOffset
+		postDecisionAt = start + 2_000_000_005
+		acceptedTwoAt = start + 45_000_000_000 + supplier.DecisionPhaseOffset
+		cancelDecisionAt = start + 46_000_000_000 + supplier.DecisionPhaseOffset
+		cancelledAt = start + 48_000_000_000 + supplier.DecisionPhaseOffset
 	}
 
 	firstSnapshot := cdfFixtureSnapshot(participant.venueID, 1, options)
@@ -1383,7 +1393,7 @@ func appendCDFParticipantEvents(
 	secondSnapshot := cdfFixtureSnapshot(participant.venueID, secondSnapshotSequence, options)
 	postDecision := cdfFixtureDecision(participant, participant.second, secondSnapshot, secondAt, postDecisionAt, "submit")
 	if options.strictMechanics {
-		postDecision = cdfStrictFixtureDecision(participant, participant.second, secondSnapshot, secondAt, postDecisionAt, positionAfter, 0, 0, false, "submit")
+		postDecision = cdfStrictFixtureDecision(participant, participant.second, secondSnapshot, secondAt, postDecisionAt, positionAfter, supplier.ReferencePrice, firstDecisionAt, true, "submit")
 		postDecision.PeakEquityQuote = maxCDFTestInt64(firstDecision.PeakEquityQuote, postDecision.EquityQuote)
 		postDecision.DrawdownQuote = postDecision.PeakEquityQuote - postDecision.EquityQuote
 	}
@@ -1763,6 +1773,27 @@ func cdfSnapshotFixtureEvent(at int64, venueID string, sequence uint64, snapshot
 			"bids": snapshot.Bids, "asks": snapshot.Asks, "source_sequence": sequence,
 			"public_bids": snapshot.Bids, "public_asks": snapshot.Asks,
 		},
+	}
+}
+
+func appendCDFStrictSnapshotCadence(events *[]cdfFixtureEvent, venueID string, contract CDFActivationContract, twoSidedAt int64, options cdfActivationFixtureOptions) {
+	registeredSnapshotTimes := make(map[int64]struct{})
+	for _, event := range *events {
+		if event.event == "BookSnapshot" {
+			registeredSnapshotTimes[event.at] = struct{}{}
+		}
+	}
+	for at := contract.SimulationStartNano + contract.ObservationIntervalNano; at <= contract.SimulationEndNano; at += contract.ObservationIntervalNano {
+		if _, exists := registeredSnapshotTimes[at]; exists {
+			continue
+		}
+		sequence := uint64(1_000_000) + uint64((at-contract.SimulationStartNano)/contract.ObservationIntervalNano)
+		snapshot := cdfFixtureSnapshot(venueID, sequence, options)
+		if at < twoSidedAt && options.strictMechanics {
+			snapshot.Bids[0].Price = 300_200_000
+			snapshot.Asks = []etypes.PriceLevel{}
+		}
+		*events = append(*events, cdfSnapshotFixtureEvent(at, venueID, sequence, snapshot))
 	}
 }
 
@@ -2971,8 +3002,8 @@ func TestCDFVenueConcentrationSeparatesBookAvailabilityStates(t *testing.T) {
 	if result.OneSidedDurationNano != 20 || result.NonTwoSidedDurationNano != 30 {
 		t.Fatalf("aggregate non-two-sided durations = one-sided %d, total %d; want 20, 30", result.OneSidedDurationNano, result.NonTwoSidedDurationNano)
 	}
-	if result.MaxUninterruptedNonTwoSidedDurationNano != 10 {
-		t.Fatalf("maximum uninterrupted non-two-sided duration = %d; want 10", result.MaxUninterruptedNonTwoSidedDurationNano)
+	if result.MaxUninterruptedNonTwoSidedDurationNano != 30 {
+		t.Fatalf("maximum uninterrupted non-two-sided duration = %d; want 30", result.MaxUninterruptedNonTwoSidedDurationNano)
 	}
 	if result.TerminalBookMode != "two_sided" {
 		t.Fatalf("terminal book mode = %q; want two_sided", result.TerminalBookMode)

@@ -42,12 +42,17 @@ type CDFActivationOptions struct {
 // CDFActivationContract makes the evaluator reusable by successor campaigns
 // without teaching the analysis package about a central experiment registry.
 type CDFActivationContract struct {
-	HypothesisID                      string
-	ExperimentID                      string
-	Seed                              int64
-	Horizon                           string
-	SimulationStartNano               int64
-	SimulationEndNano                 int64
+	HypothesisID        string
+	ExperimentID        string
+	Seed                int64
+	Horizon             string
+	SimulationStartNano int64
+	SimulationEndNano   int64
+	// ObservationIntervalNano is the registered public-book sampling cadence.
+	// A strict audit may reconstruct the opening empty state only when the first
+	// observed transition is exactly one interval after the registered start.
+	ObservationIntervalNano           int64
+	InitialPublicBookMode             string
 	VenueIDs                          []string
 	HistoricalSupplierCountPerVenue   int
 	Suppliers                         []CDFSupplierContract
@@ -137,6 +142,8 @@ func RegisteredSV1DActivationContract() CDFActivationContract {
 		Seed:         659, Horizon: "5m",
 		SimulationStartNano:             1_735_689_600_000_000_000,
 		SimulationEndNano:               1_735_689_900_000_000_000,
+		ObservationIntervalNano:         second,
+		InitialPublicBookMode:           "empty",
 		VenueIDs:                        []string{"north", "central", "south"},
 		HistoricalSupplierCountPerVenue: 8,
 		Suppliers: []CDFSupplierContract{
@@ -664,6 +671,7 @@ type cdfOrderState struct {
 type cdfDepthObservation struct {
 	at                 int64
 	globalSequence     uint64
+	snapshot           bool
 	bidDepth           int64
 	askDepth           int64
 	supplierBid        int64
@@ -796,8 +804,11 @@ func (c CDFActivationContract) validate() error {
 	if c.HypothesisID == "" || c.ExperimentID == "" || c.Seed == 0 || c.Horizon == "" {
 		return fmt.Errorf("identity, seed, and horizon are required")
 	}
-	if c.SimulationStartNano <= 0 || c.SimulationEndNano <= c.SimulationStartNano {
+	if c.SimulationStartNano <= 0 || c.SimulationEndNano <= c.SimulationStartNano || c.ObservationIntervalNano <= 0 {
 		return fmt.Errorf("invalid simulation interval")
+	}
+	if c.InitialPublicBookMode != "empty" {
+		return fmt.Errorf("initial public CDF book mode must be empty")
 	}
 	if len(c.VenueIDs) == 0 || c.HistoricalSupplierCountPerVenue < 0 || len(c.Suppliers) == 0 {
 		return fmt.Errorf("venue and supplier rosters are required")
@@ -3528,7 +3539,7 @@ func (r *CDFActivationAudit) recordCDFDepthObservation(event Event, states map[c
 		return
 	}
 	observation := cdfDepthObservation{
-		at: event.SimTS, globalSequence: event.GlobalSequence,
+		at: event.SimTS, globalSequence: event.GlobalSequence, snapshot: allowRestoration,
 		bidDepth: bidDepth, askDepth: askDepth,
 		supplierDepthByKey: make(map[cdfParticipantKey]cdfSupplierDepth),
 	}
@@ -3741,7 +3752,11 @@ func (r *CDFActivationAudit) finalizeCDFActivation(
 		if r.TotalVolumeQty > 0 {
 			state.audit.GlobalVolumeShare = float64(state.audit.VolumeQty) / float64(r.TotalVolumeQty)
 		}
-		depthMetrics := measureCDFSupplierDepth(key, depth[key.venueID], terminalAt, state.contract, contract)
+		venueObservations := depth[key.venueID]
+		if r.strictMechanics {
+			venueObservations = prependCDFInitialObservation(venueObservations, contract)
+		}
+		depthMetrics := measureCDFSupplierDepth(key, venueObservations, terminalAt, state.contract, contract)
 		state.audit.DepthObservationCount = depthMetrics.observationCount
 		state.audit.BidDepthTimeWeightedShare = depthMetrics.bidTimeWeightedShare
 		state.audit.AskDepthTimeWeightedShare = depthMetrics.askTimeWeightedShare
@@ -3762,7 +3777,12 @@ func (r *CDFActivationAudit) finalizeCDFActivation(
 	}
 	allVenueConcentrationSatisfied := true
 	for _, venueID := range contract.VenueIDs {
-		venue := measureCDFVenueConcentration(venueID, depth[venueID], terminalAt, contract)
+		venueObservations := depth[venueID]
+		if r.strictMechanics {
+			r.Checks = append(r.Checks, validateCDFObservationCadence(venueID, venueObservations, contract.SimulationStartNano, terminalAt, contract.ObservationIntervalNano)...)
+			venueObservations = prependCDFInitialObservation(venueObservations, contract)
+		}
+		venue := measureCDFVenueConcentration(venueID, venueObservations, terminalAt, contract)
 		allVenueConcentrationSatisfied = allVenueConcentrationSatisfied && venue.ConcentrationSatisfied
 		r.Venues = append(r.Venues, venue)
 	}
@@ -3797,7 +3817,6 @@ func measureCDFVenueConcentration(venueID string, observations []cdfDepthObserva
 		}
 		return ordered[i].globalSequence < ordered[j].globalSequence
 	})
-	currentNonTwoSidedMode := ""
 	currentNonTwoSidedDuration := int64(0)
 	previousIntervalEnd := int64(0)
 	hasPreviousInterval := false
@@ -3818,15 +3837,13 @@ func measureCDFVenueConcentration(venueID string, observations []cdfDepthObserva
 			if currentNonTwoSidedDuration > result.MaxUninterruptedNonTwoSidedDurationNano {
 				result.MaxUninterruptedNonTwoSidedDurationNano = currentNonTwoSidedDuration
 			}
-			currentNonTwoSidedMode = ""
 			currentNonTwoSidedDuration = 0
-		} else if hasPreviousInterval && observation.at == previousIntervalEnd && mode == currentNonTwoSidedMode {
+		} else if hasPreviousInterval && observation.at == previousIntervalEnd {
 			currentNonTwoSidedDuration += duration
 		} else {
 			if currentNonTwoSidedDuration > result.MaxUninterruptedNonTwoSidedDurationNano {
 				result.MaxUninterruptedNonTwoSidedDurationNano = currentNonTwoSidedDuration
 			}
-			currentNonTwoSidedMode = mode
 			currentNonTwoSidedDuration = duration
 		}
 		if observation.bidDepth > 0 {
