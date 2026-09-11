@@ -129,7 +129,7 @@ func (p *analyzerProfiles) Stop() {
 }
 
 func main() {
-	metric := flag.String("metric", "roles", "roles, postonly, makerquotesize, makerrefresh, makerrebalance, perpreplenishment, liabilityhedger, optionliabilityp6, optionvaluetakerp6, vannavolgap6, fundingcarry, termcarry, termcarryp4chain, termcarryp4pair, datedcarryp5, datedcarryp5pair, datedmandatep5, termcarrylifecycle, perpexposurehedger, perpexposurerisk, perpsignals, noiseflowphase, stalls, triangular, stylized, flow, impact, bookshape, sweep, sweepimpact, mechanical, spacing, resting, viability, lifecycle, calendar, hedging, conservation, positions, fillpositions, settlements, expiryfills, orderlifecycle, arbitrage, crossvenue, roleaudit, ecology, liquidations, marginchecks, derivatives, streamhash, evidencehash, evidenceartifacthash, basis, optionsurface, exposure, reaction, observationreceipts, frontiervectors")
+	metric := flag.String("metric", "roles", "roles, cdfactivation, postonly, makerquotesize, makerrefresh, makerrebalance, perpreplenishment, liabilityhedger, optionliabilityp6, optionvaluetakerp6, vannavolgap6, fundingcarry, termcarry, termcarryp4chain, termcarryp4pair, datedcarryp5, datedcarryp5pair, datedmandatep5, termcarrylifecycle, perpexposurehedger, perpexposurerisk, perpsignals, noiseflowphase, stalls, triangular, stylized, flow, impact, bookshape, sweep, sweepimpact, mechanical, spacing, resting, viability, lifecycle, calendar, hedging, conservation, positions, fillpositions, settlements, expiryfills, orderlifecycle, arbitrage, crossvenue, roleaudit, ecology, liquidations, marginchecks, derivatives, streamhash, evidencehash, evidenceartifacthash, basis, optionsurface, exposure, reaction, observationreceipts, frontiervectors")
 	postOnlyRoles := flag.String("post-only-roles", "", "comma-separated participant role groups for post-only activity")
 	postOnlySymbols := flag.String("post-only-symbols", "", "comma-separated symbols for post-only activity")
 	venue := flag.String("venue", "north", "venue for book-level metrics")
@@ -159,6 +159,13 @@ func main() {
 	requireExactReplay := flag.Bool("require-exact-replay", false, "reject position/settlement evidence that lacks exact trade replay fields")
 	fundingIntervalSeconds := flag.Int64("funding-interval-seconds", 0, "registered funding cadence for strict derivative schedule validation")
 	deliveryFeePolicy := flag.String("delivery-fee-policy", "", "registered settlement delivery-fee policy, e.g. zero")
+	cdfRenderedEvidenceDir := flag.String("cdf-rendered-evidence-dir", "", "independently rendered binary evidence directory for cdfactivation")
+	cdfConfigSHA256 := flag.String("cdf-config-sha256", "", "externally attested run-config SHA-256 for cdfactivation")
+	cdfSourceRevision := flag.String("cdf-source-revision", "", "externally attested source revision for cdfactivation")
+	cdfBinarySHA256 := flag.String("cdf-binary-sha256", "", "externally attested simulator binary SHA-256 for cdfactivation")
+	cdfBinaryGOOS := flag.String("cdf-binary-goos", "linux", "externally attested simulator binary GOOS for cdfactivation")
+	cdfBinaryGOARCH := flag.String("cdf-binary-goarch", "amd64", "externally attested simulator binary GOARCH for cdfactivation")
+	cdfBinaryGOAMD64 := flag.String("cdf-binary-goamd64", "v1", "externally attested simulator binary GOAMD64 for cdfactivation")
 	quotePrecision := flag.Int64("quote-precision", 100_000, "quote-asset precision, for converting logged prices into currency units")
 	viabilityWindow := flag.Float64("viability-window", 900, "viability window length in simulated seconds")
 	viabilityStart := flag.Float64("viability-start", 0, "exclude viability evidence before this simulated-second boundary")
@@ -268,6 +275,28 @@ func main() {
 			os.Exit(1)
 		}
 		switch *metric {
+		case "cdfactivation":
+			if *cdfRenderedEvidenceDir == "" || *cdfConfigSHA256 == "" || *cdfSourceRevision == "" || *cdfBinarySHA256 == "" {
+				fmt.Fprintln(os.Stderr, "cdfactivation requires -cdf-rendered-evidence-dir, -cdf-config-sha256, -cdf-source-revision, and -cdf-binary-sha256")
+				os.Exit(2)
+			}
+			result, err := run.AuditCDFLiquidityActivation(analysis.CDFActivationOptions{
+				Contract:            analysis.RegisteredSV1DActivationContract(),
+				EvidenceDir:         dir,
+				RenderedEvidenceDir: *cdfRenderedEvidenceDir,
+				ExpectedProvenance: analysis.CDFExpectedProvenance{
+					ConfigSHA256: *cdfConfigSHA256, SourceRevision: *cdfSourceRevision,
+					BinarySHA256: *cdfBinarySHA256, BinaryGOOS: *cdfBinaryGOOS,
+					BinaryGOARCH: *cdfBinaryGOARCH, BinaryGOAMD64: *cdfBinaryGOAMD64,
+				},
+			})
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "%s: CDF activation audit: %v\n", dir, err)
+				os.Exit(1)
+			}
+			emit(dir, result, *asJSON, func() {
+				fmt.Printf("%-22s CDF evidence %t activation %t anti-cheating %t valid %t\n", dir, result.EvidenceValid, result.ActivationSatisfied, result.AntiCheatingSatisfied, result.Valid)
+			})
 		case "roles":
 			table, err := run.RoleTable()
 			if err != nil {

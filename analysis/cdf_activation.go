@@ -1,11 +1,13 @@
 package analysis
 
 import (
+	"bufio"
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math"
 	"math/big"
 	"os"
@@ -529,6 +531,11 @@ type cdfPublicDepthState struct {
 	asks        map[int64]int64
 }
 
+type cdfPendingDepthObservation struct {
+	event Event
+	state cdfPublicDepthState
+}
+
 type cdfReceiptKey struct {
 	clientID uint64
 	linkID   uint32
@@ -922,18 +929,39 @@ type cdfRenderedEvidenceAttestation struct {
 }
 
 type cdfRunStatus struct {
-	ExitStatus           int    `json:"exit_status"`
-	CompletionVerified   bool   `json:"completion_verified"`
-	SimulatedHorizon     string `json:"simulated_horizon"`
-	SimulationStartNano  int64  `json:"simulation_start_nano"`
-	SimulationEndNano    int64  `json:"simulation_end_nano"`
-	RunMetadataSHA256    string `json:"run_metadata_sha256"`
-	ManifestSHA256       string `json:"manifest_sha256"`
-	GreeksSHA256         string `json:"greeks_sha256"`
-	LatencySHA256        string `json:"latency_sha256"`
-	CheckpointsSHA256    string `json:"checkpoints_sha256"`
-	EvidenceManifestSHA  string `json:"evidence_manifest_sha256"`
-	BinaryAttestationSHA string `json:"binary_evidence_attestation_sha256"`
+	SchemaVersion        int      `json:"schema_version"`
+	ExitStatus           int      `json:"exit_status"`
+	CompletionVerified   bool     `json:"completion_verified"`
+	SimulatedHorizon     string   `json:"simulated_horizon"`
+	SimulationStartNano  int64    `json:"simulation_start_nano"`
+	SimulationEndNano    int64    `json:"simulation_end_nano"`
+	RunMetadataSHA256    string   `json:"run_metadata_sha256"`
+	ManifestSHA256       string   `json:"manifest_sha256"`
+	GreeksSHA256         string   `json:"greeks_sha256"`
+	LatencySHA256        string   `json:"latency_sha256"`
+	CheckpointsSHA256    string   `json:"checkpoints_sha256"`
+	EvidenceManifestSHA  string   `json:"evidence_manifest_sha256"`
+	BinaryAttestationSHA string   `json:"binary_evidence_attestation_sha256"`
+	CompletionSentinels  []string `json:"completion_sentinels"`
+}
+
+type cdfEvidenceManifestRecord struct {
+	Path   string `json:"path"`
+	Bytes  int64  `json:"bytes"`
+	SHA256 string `json:"sha256"`
+}
+
+type cdfEvidenceManifest struct {
+	SchemaVersion  int                         `json:"schema_version"`
+	Contract       string                      `json:"contract"`
+	Cell           string                      `json:"cell"`
+	LogMode        string                      `json:"log_mode"`
+	EvidenceFormat string                      `json:"evidence_format"`
+	SourceRevision string                      `json:"source_revision"`
+	FixedFiles     []cdfEvidenceManifestRecord `json:"fixed_files"`
+	RawJSONLFiles  int                         `json:"raw_jsonl_files"`
+	RawJSONLBytes  int64                       `json:"raw_jsonl_bytes"`
+	RawFiles       []cdfEvidenceManifestRecord `json:"raw_files"`
 }
 
 func validateCDFCompletionArtifacts(dir string, metadata cdfActivationMetadata) error {
@@ -945,9 +973,12 @@ func validateCDFCompletionArtifacts(dir string, metadata cdfActivationMetadata) 
 	if err := json.Unmarshal(raw, &status); err != nil {
 		return fmt.Errorf("cdf activation: decode run status: %w", err)
 	}
-	if status.ExitStatus != 0 || !status.CompletionVerified || status.SimulatedHorizon != metadata.SimulatedHorizon ||
+	if status.SchemaVersion != 1 || status.ExitStatus != 0 || !status.CompletionVerified || status.SimulatedHorizon != metadata.SimulatedHorizon ||
 		status.SimulationStartNano != metadata.SimulationStartNano || status.SimulationEndNano != metadata.SimulationEndNano {
 		return fmt.Errorf("cdf activation: run status does not attest a complete registered horizon")
+	}
+	if !sameCDFStrings(status.CompletionSentinels, []string{"greeks.json", "latency.json"}) {
+		return fmt.Errorf("cdf activation: run status completion sentinels are incomplete")
 	}
 	checks := []struct {
 		name string
@@ -974,6 +1005,9 @@ func validateCDFCompletionArtifacts(dir string, metadata cdfActivationMetadata) 
 			return fmt.Errorf("cdf activation: run status %s hash mismatch", check.name)
 		}
 	}
+	if err := validateCDFCompletionSidecars(dir, metadata); err != nil {
+		return err
+	}
 	if metadata.BinaryPath == "" {
 		return fmt.Errorf("cdf activation: run metadata has no simulator binary path")
 	}
@@ -987,12 +1021,144 @@ func validateCDFCompletionArtifacts(dir string, metadata cdfActivationMetadata) 
 	return nil
 }
 
+func validateCDFCompletionSidecars(dir string, metadata cdfActivationMetadata) error {
+	greeksRaw, err := os.ReadFile(filepath.Join(dir, "greeks.json"))
+	if err != nil {
+		return fmt.Errorf("cdf activation: read greeks sidecar: %w", err)
+	}
+	var greeks map[string]json.RawMessage
+	if err := json.Unmarshal(greeksRaw, &greeks); err != nil || greeks == nil {
+		return fmt.Errorf("cdf activation: greeks sidecar is not a JSON object")
+	}
+	if !cdfJSONNumberAtLeast(greeks["schema_version"], 1) ||
+		!cdfJSONArrayNonEmpty(greeks["initial_accounts"]) ||
+		!cdfJSONArrayNonEmpty(greeks["terminal_accounts"]) ||
+		!cdfJSONObject(greeks["initial_risk"]) || !cdfJSONObject(greeks["terminal_risk"]) ||
+		!cdfJSONObject(greeks["risk_timeline"]) || !cdfJSONArray(greeks["microstructure"]) {
+		return fmt.Errorf("cdf activation: greeks sidecar is structurally incomplete")
+	}
+
+	latencyRaw, err := os.ReadFile(filepath.Join(dir, "latency.json"))
+	if err != nil {
+		return fmt.Errorf("cdf activation: read latency sidecar: %w", err)
+	}
+	var latency struct {
+		Domain string            `json:"domain"`
+		Rows   []json.RawMessage `json:"rows"`
+	}
+	if err := json.Unmarshal(latencyRaw, &latency); err != nil || latency.Domain != "courier_delivery" || latency.Rows == nil {
+		return fmt.Errorf("cdf activation: latency sidecar is structurally incomplete")
+	}
+
+	checkpointFile, err := os.Open(filepath.Join(dir, "checkpoints.jsonl"))
+	if err != nil {
+		return fmt.Errorf("cdf activation: open checkpoint sidecar: %w", err)
+	}
+	defer checkpointFile.Close()
+	scanner := bufio.NewScanner(checkpointFile)
+	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
+	checkpointCount := 0
+	var previousSimTime, previousEventCount int64
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		var checkpoint struct {
+			Domain     string `json:"domain"`
+			Ordering   string `json:"ordering"`
+			SimTime    int64  `json:"sim_time"`
+			EventCount int64  `json:"event_count"`
+		}
+		if err := json.Unmarshal(line, &checkpoint); err != nil || checkpoint.Domain != "execution_observations" ||
+			checkpoint.Ordering != "ordered_stream" || checkpoint.SimTime <= 0 || checkpoint.EventCount <= 0 ||
+			(checkpointCount > 0 && (checkpoint.SimTime <= previousSimTime || checkpoint.EventCount <= previousEventCount)) {
+			return fmt.Errorf("cdf activation: checkpoint sidecar contains an invalid sequence")
+		}
+		previousSimTime, previousEventCount = checkpoint.SimTime, checkpoint.EventCount
+		checkpointCount++
+	}
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("cdf activation: scan checkpoint sidecar: %w", err)
+	}
+	if checkpointCount == 0 || previousSimTime != metadata.SimulationEndNano {
+		return fmt.Errorf("cdf activation: checkpoint sidecar does not attest the registered terminal horizon")
+	}
+
+	manifestRaw, err := os.ReadFile(filepath.Join(dir, "evidence-manifest.json"))
+	if err != nil {
+		return fmt.Errorf("cdf activation: read evidence manifest sidecar: %w", err)
+	}
+	var evidenceManifest cdfEvidenceManifest
+	if err := json.Unmarshal(manifestRaw, &evidenceManifest); err != nil || evidenceManifest.SchemaVersion != 2 ||
+		evidenceManifest.Contract != "v2-integrated-longrun-evidence-manifest-v2" ||
+		evidenceManifest.EvidenceFormat != "evstream_v3" || evidenceManifest.LogMode != metadata.LogMode ||
+		evidenceManifest.SourceRevision != metadata.GitRevision || len(evidenceManifest.FixedFiles) == 0 {
+		return fmt.Errorf("cdf activation: evidence manifest sidecar is structurally incomplete")
+	}
+	fixed := make(map[string]cdfEvidenceManifestRecord, len(evidenceManifest.FixedFiles))
+	for _, record := range evidenceManifest.FixedFiles {
+		if record.Path == "" || filepath.IsAbs(record.Path) || filepath.Clean(record.Path) != record.Path ||
+			strings.HasPrefix(record.Path, "../") || record.Bytes <= 0 || !isCDFHex(record.SHA256, sha256.Size) {
+			return fmt.Errorf("cdf activation: evidence manifest contains an invalid fixed-file record")
+		}
+		if _, duplicate := fixed[record.Path]; duplicate {
+			return fmt.Errorf("cdf activation: evidence manifest repeats fixed file %q", record.Path)
+		}
+		fixed[record.Path] = record
+		path := filepath.Join(dir, filepath.FromSlash(record.Path))
+		info, err := os.Stat(path)
+		if err != nil || !info.Mode().IsRegular() {
+			return fmt.Errorf("cdf activation: evidence manifest fixed file %q is unavailable", record.Path)
+		}
+		if info.Size() != record.Bytes {
+			return fmt.Errorf("cdf activation: evidence manifest byte count mismatch for %q", record.Path)
+		}
+		actual, err := sha256File(path)
+		if err != nil || actual != record.SHA256 {
+			return fmt.Errorf("cdf activation: evidence manifest digest mismatch for %q", record.Path)
+		}
+	}
+	for _, required := range []string{"run-config.json", "run-metadata.json", "manifest.json", "greeks.json", "latency.json", "checkpoints.jsonl", "events.evs", "binary-evidence-attestation.json", "evidence-only-artifact-hash.json"} {
+		if _, exists := fixed[required]; !exists {
+			return fmt.Errorf("cdf activation: evidence manifest omits required file %q", required)
+		}
+	}
+	if evidenceManifest.RawJSONLFiles <= 0 || evidenceManifest.RawJSONLBytes <= 0 || len(evidenceManifest.RawFiles) != evidenceManifest.RawJSONLFiles {
+		return fmt.Errorf("cdf activation: evidence manifest does not attest retained raw JSONL evidence")
+	}
+	return nil
+}
+
+func cdfJSONNumberAtLeast(raw json.RawMessage, minimum int64) bool {
+	var value int64
+	return len(raw) > 0 && json.Unmarshal(raw, &value) == nil && value >= minimum
+}
+
+func cdfJSONArray(raw json.RawMessage) bool {
+	var value []json.RawMessage
+	return len(raw) > 0 && json.Unmarshal(raw, &value) == nil && value != nil
+}
+
+func cdfJSONArrayNonEmpty(raw json.RawMessage) bool {
+	var value []json.RawMessage
+	return len(raw) > 0 && json.Unmarshal(raw, &value) == nil && len(value) > 0
+}
+
+func cdfJSONObject(raw json.RawMessage) bool {
+	var value map[string]json.RawMessage
+	return len(raw) > 0 && json.Unmarshal(raw, &value) == nil && value != nil
+}
+
 func sha256File(path string) (string, error) {
-	raw, err := os.ReadFile(path)
+	file, err := os.Open(path)
 	if err != nil {
 		return "", err
 	}
-	digest := sha256.Sum256(raw)
+	defer file.Close()
+	hasher := sha256.New()
+	if _, err := io.Copy(hasher, file); err != nil {
+		return "", err
+	}
+	var digest [sha256.Size]byte
+	copy(digest[:], hasher.Sum(nil))
 	return hex.EncodeToString(digest[:]), nil
 }
 
@@ -1594,6 +1760,7 @@ func (r *CDFActivationAudit) scanCDFOrdered(
 	depth map[string][]cdfDepthObservation,
 ) error {
 	publicDepth := make(map[string]*cdfPublicDepthState)
+	pendingDepth := make(map[string][]cdfPendingDepthObservation)
 	bookSnapshotCount := 0
 	for _, event := range events {
 		switch event.Name {
@@ -1607,9 +1774,9 @@ func (r *CDFActivationAudit) scanCDFOrdered(
 			r.processCDFBorrow(event, states)
 		case "BookSnapshot":
 			bookSnapshotCount++
-			r.processCDFDepthSnapshot(event, states, orders, depth, publicDepth)
+			r.processCDFDepthSnapshot(event, states, orders, depth, publicDepth, pendingDepth)
 		case "BookDelta":
-			r.processCDFDepthDelta(event, states, orders, depth, publicDepth)
+			r.processCDFDepthDelta(event, states, orders, depth, publicDepth, pendingDepth)
 		case "Trade":
 			r.processCDFTrade(event)
 		case "OrderAccepted":
@@ -1618,12 +1785,15 @@ func (r *CDFActivationAudit) scanCDFOrdered(
 			r.processCDFRejected(event, states, submissions)
 		case "OrderFill":
 			r.processCDFOrderFill(event, states, orders, actualFills)
+			r.flushCDFPendingDepth(event.VenueID, states, orders, depth, pendingDepth)
 		case "OrderCancelled":
 			r.processCDFCancelled(event, states, withdrawals, orders, depth, publicDepth)
+			r.flushCDFPendingDepth(event.VenueID, states, orders, depth, pendingDepth)
 		case "OrderCancelRejected":
 			r.processCDFCancelRejected(event, states, withdrawals, orders)
 		}
 	}
+	r.flushAllCDFPendingDepth(states, orders, depth, pendingDepth)
 	if bookSnapshotCount == 0 {
 		r.addCheck(CDFActivationCheck{Failure: "no rendered CDF/USD book evidence"})
 	}
@@ -2121,18 +2291,31 @@ func (r *CDFActivationAudit) recordCDFPostFillResponse(event Event, state *cdfSu
 			state.audit.PostFillResponsiveCount++
 			continue
 		}
-		if decision.Action == "wait" && decision.Reason == "inventory_at_target" && decision.TargetPosition == decision.Position {
+		marketStateUnchanged := cdfDecisionMarketStateEqual(response.preFillDecision, decision)
+		if response.preFillKnown && marketStateUnchanged && decision.Action == "wait" && decision.Reason == "inventory_at_target" &&
+			decision.TargetPosition == decision.Position && decision.TargetPosition == response.preFillDecision.TargetPosition {
 			response.responded = true
-		} else if response.preFillKnown && (decision.Action == "submit" || decision.Action == "rest" || decision.Action == "cancel" || decision.Action == "withdraw") {
+		} else if response.preFillKnown && marketStateUnchanged &&
+			(decision.Action == "submit" || decision.Action == "cancel" || decision.Action == "withdraw") {
 			quoteChanged := decision.Side != response.preFillDecision.Side || decision.QuotePrice != response.preFillDecision.QuotePrice ||
-				decision.QuoteQty != response.preFillDecision.QuoteQty || decision.QuoteOrderID != response.preFillDecision.QuoteOrderID ||
-				decision.QuoteRequestID != response.preFillDecision.QuoteRequestID || decision.TargetPosition != response.preFillDecision.TargetPosition
+				decision.QuoteQty != response.preFillDecision.QuoteQty || decision.QuoteOrderID != response.preFillDecision.QuoteOrderID
 			response.responded = quoteChanged
 		}
 		if response.responded {
 			state.audit.PostFillResponsiveCount++
 		}
 	}
+}
+
+func cdfDecisionMarketStateEqual(previous, current cdfDecisionEvidence) bool {
+	// Compare the delayed public market and coherent risk mark, not the
+	// supplier's private reference or target. Those private fields are the
+	// response variables under test; treating their normal evolution as a
+	// market change would let target-only replays evade this gate.
+	return previous.BestBid == current.BestBid && previous.BestBidQty == current.BestBidQty &&
+		previous.BestAsk == current.BestAsk && previous.BestAskQty == current.BestAskQty &&
+		previous.MarkPrice == current.MarkPrice && previous.RiskMarkPrice == current.RiskMarkPrice &&
+		previous.RiskMarkCurrent == current.RiskMarkCurrent && previous.LocalBookMode == current.LocalBookMode
 }
 
 func cdfEventAfter(event Event, timestamp int64, globalSequence uint64) bool {
@@ -2360,6 +2543,7 @@ func (r *CDFActivationAudit) scanCDFBooks(
 ) error {
 	bookCount := 0
 	publicDepth := make(map[string]*cdfPublicDepthState)
+	pendingDepth := make(map[string][]cdfPendingDepthObservation)
 	for _, path := range run.Files() {
 		if symbolFromPath(path) != cdfActivationLogName {
 			continue
@@ -2376,9 +2560,9 @@ func (r *CDFActivationAudit) scanCDFBooks(
 			lastTimestamp = event.SimTS
 			switch event.Name {
 			case "BookSnapshot":
-				r.processCDFDepthSnapshot(event, states, orders, depth, publicDepth)
+				r.processCDFDepthSnapshot(event, states, orders, depth, publicDepth, pendingDepth)
 			case "BookDelta":
-				r.processCDFDepthDelta(event, states, orders, depth, publicDepth)
+				r.processCDFDepthDelta(event, states, orders, depth, publicDepth, pendingDepth)
 			case "Trade":
 				r.processCDFTrade(event)
 			case "OrderAccepted":
@@ -2387,12 +2571,15 @@ func (r *CDFActivationAudit) scanCDFBooks(
 				r.processCDFRejected(event, states, submissions)
 			case "OrderFill":
 				r.processCDFOrderFill(event, states, orders, actualFills)
+				r.flushCDFPendingDepth(event.VenueID, states, orders, depth, pendingDepth)
 			case "OrderCancelled":
 				r.processCDFCancelled(event, states, withdrawals, orders, depth, publicDepth)
+				r.flushCDFPendingDepth(event.VenueID, states, orders, depth, pendingDepth)
 			case "OrderCancelRejected":
 				r.processCDFCancelRejected(event, states, withdrawals, orders)
 			}
 		})
+		r.flushAllCDFPendingDepth(states, orders, depth, pendingDepth)
 		if err != nil {
 			return fmt.Errorf("cdf activation: scan CDF book in %s: %w", path, err)
 		}
@@ -2891,7 +3078,7 @@ func oppositeCDFSide(side string) string {
 	return ""
 }
 
-func (r *CDFActivationAudit) processCDFDepthSnapshot(event Event, states map[cdfParticipantKey]*cdfSupplierState, orders map[cdfOrderKey]*cdfOrderState, depth map[string][]cdfDepthObservation, publicDepth map[string]*cdfPublicDepthState) {
+func (r *CDFActivationAudit) processCDFDepthSnapshot(event Event, states map[cdfParticipantKey]*cdfSupplierState, orders map[cdfOrderKey]*cdfOrderState, depth map[string][]cdfDepthObservation, publicDepth map[string]*cdfPublicDepthState, pendingDepth map[string][]cdfPendingDepthObservation) {
 	var snapshot cdfPublicSnapshotEvidence
 	if err := decodeRequiredJSON(event.Raw(), &snapshot, "bids", "asks", "source_sequence", "public_bids", "public_asks"); err != nil {
 		return
@@ -2906,10 +3093,14 @@ func (r *CDFActivationAudit) processCDFDepthSnapshot(event Event, states map[cdf
 		return
 	}
 	publicDepth[event.VenueID] = state
+	if r.strictMechanics && len(pendingDepth[event.VenueID]) > 0 {
+		r.deferCDFDepthObservation(event, state, pendingDepth)
+		return
+	}
 	r.recordCDFDepthObservation(event, states, orders, depth, state)
 }
 
-func (r *CDFActivationAudit) processCDFDepthDelta(event Event, states map[cdfParticipantKey]*cdfSupplierState, orders map[cdfOrderKey]*cdfOrderState, depth map[string][]cdfDepthObservation, publicDepth map[string]*cdfPublicDepthState) {
+func (r *CDFActivationAudit) processCDFDepthDelta(event Event, states map[cdfParticipantKey]*cdfSupplierState, orders map[cdfOrderKey]*cdfOrderState, depth map[string][]cdfDepthObservation, publicDepth map[string]*cdfPublicDepthState, pendingDepth map[string][]cdfPendingDepthObservation) {
 	state := publicDepth[event.VenueID]
 	if state == nil || !state.initialized {
 		r.addCheck(CDFActivationCheck{VenueID: event.VenueID, Ordinal: event.Ordinal, Failure: "CDF BookDelta precedes a complete public snapshot"})
@@ -2933,10 +3124,75 @@ func (r *CDFActivationAudit) processCDFDepthDelta(event Event, states map[cdfPar
 	} else {
 		levels[delta.Price] = delta.VisibleQty
 	}
-	// A BookDelta is the public book state transition. Strict mode must retain
-	// every such transition for event-time concentration and removal
-	// counterfactuals; snapshots alone can hide short-lived supplier dominance.
+	// The exchange deliberately emits a removal BookDelta before the matching
+	// OrderCancelled frame. In that interval the public book has already
+	// removed the order while the supplier order is still live in this replay
+	// state. Retain the exact public transition, but attribute it only after the
+	// lifecycle frame updates the supplier order map.
+	if r.strictMechanics && delta.VisibleQty == 0 {
+		r.deferCDFDepthObservation(event, state, pendingDepth)
+		return
+	}
 	r.recordCDFDepthObservation(event, states, orders, depth, state)
+}
+
+func cloneCDFPublicDepthState(state *cdfPublicDepthState) cdfPublicDepthState {
+	clone := cdfPublicDepthState{initialized: state != nil && state.initialized,
+		bids: make(map[int64]int64), asks: make(map[int64]int64)}
+	if state == nil {
+		return clone
+	}
+	for price, quantity := range state.bids {
+		clone.bids[price] = quantity
+	}
+	for price, quantity := range state.asks {
+		clone.asks[price] = quantity
+	}
+	return clone
+}
+
+func (r *CDFActivationAudit) deferCDFDepthObservation(event Event, state *cdfPublicDepthState, pending map[string][]cdfPendingDepthObservation) {
+	if state == nil {
+		return
+	}
+	pending[event.VenueID] = append(pending[event.VenueID], cdfPendingDepthObservation{
+		event: event,
+		state: cloneCDFPublicDepthState(state),
+	})
+}
+
+func (r *CDFActivationAudit) flushCDFPendingDepth(
+	venueID string,
+	states map[cdfParticipantKey]*cdfSupplierState,
+	orders map[cdfOrderKey]*cdfOrderState,
+	depth map[string][]cdfDepthObservation,
+	pending map[string][]cdfPendingDepthObservation,
+) {
+	observations := pending[venueID]
+	if len(observations) == 0 {
+		return
+	}
+	for _, observation := range observations {
+		state := observation.state
+		r.recordCDFDepthObservation(observation.event, states, orders, depth, &state)
+	}
+	delete(pending, venueID)
+}
+
+func (r *CDFActivationAudit) flushAllCDFPendingDepth(
+	states map[cdfParticipantKey]*cdfSupplierState,
+	orders map[cdfOrderKey]*cdfOrderState,
+	depth map[string][]cdfDepthObservation,
+	pending map[string][]cdfPendingDepthObservation,
+) {
+	venues := make([]string, 0, len(pending))
+	for venueID := range pending {
+		venues = append(venues, venueID)
+	}
+	sort.Strings(venues)
+	for _, venueID := range venues {
+		r.flushCDFPendingDepth(venueID, states, orders, depth, pending)
+	}
 }
 
 func (r *CDFActivationAudit) recordCDFDepthObservation(event Event, states map[cdfParticipantKey]*cdfSupplierState, orders map[cdfOrderKey]*cdfOrderState, depth map[string][]cdfDepthObservation, publicDepth *cdfPublicDepthState) {
@@ -3194,7 +3450,12 @@ func measureCDFVenueConcentration(venueID string, observations []cdfDepthObserva
 	if len(observations) == 0 {
 		return result
 	}
-	sort.SliceStable(observations, func(i, j int) bool { return observations[i].at < observations[j].at })
+	sort.SliceStable(observations, func(i, j int) bool {
+		if observations[i].at != observations[j].at {
+			return observations[i].at < observations[j].at
+		}
+		return observations[i].globalSequence < observations[j].globalSequence
+	})
 	for index, observation := range observations {
 		end := terminalAt
 		if index+1 < len(observations) {
@@ -3755,8 +4016,25 @@ func cdfDecisionReasonPredicate(decision cdfDecisionEvidence, state *cdfSupplier
 	case "one_sided_or_locked_book":
 		return (decision.Action == "wait" || decision.Action == "withdraw") && decision.LocalBookMode == ""
 	case "limit_or_touch_unavailable":
-		return (decision.Action == "wait" || decision.Action == "withdraw") &&
-			(decision.QuotePrice <= 0 || decision.QuoteQty <= 0)
+		if decision.Action != "wait" && decision.Action != "withdraw" {
+			return false
+		}
+		if decision.QuotePrice <= 0 || decision.QuoteQty <= 0 {
+			return true
+		}
+		// Early fail-closed producer paths start from baseDecision, which may
+		// retain the old live quote's positive terms. In that case the absence
+		// of a selected side/source plus an invalid local touch is the
+		// independently observable failure predicate.
+		if decision.Side != "" || decision.QuotePriceSource != "" {
+			return false
+		}
+		if decision.LocalBookMode == "" || decision.LocalBookMode == "one_sided" {
+			return true
+		}
+		return decision.LocalBookMode == "two_sided" &&
+			(decision.BestBid <= 0 || decision.BestAsk <= 0 ||
+				decision.BestBid%state.contract.TickSize != 0 || decision.BestAsk%state.contract.TickSize != 0)
 	case "below_minimum_executable_qty":
 		return (decision.Action == "wait" || decision.Action == "withdraw") && decision.QuoteQty > 0 &&
 			decision.QuoteQty < state.contract.MinimumExecutableQty

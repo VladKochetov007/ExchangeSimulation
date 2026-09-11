@@ -393,6 +393,26 @@ func TestAuditCDFLiquidityActivationStrictProductionRenderer(t *testing.T) {
 	}
 }
 
+func TestValidateCDFCompletionSidecarsRejectsStructurallyIncompleteLatency(t *testing.T) {
+	run := writeRegisteredCDFActivationFixture(t, cdfActivationFixtureOptions{strictMechanics: true})
+	contract := RegisteredSV1DActivationContract()
+	rows := readStrictCDFFixtureRows(t, filepath.Join(run.Dir, "venues"))
+	writeStrictCDFBinaryEvidence(t, run.Dir, rows, contract.BinarySchemaEpoch)
+	rewriteStrictCDFCompletionIdentity(t, run.Dir, contract)
+	metadataRaw, err := os.ReadFile(filepath.Join(run.Dir, "run-metadata.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var metadata cdfActivationMetadata
+	if err := json.Unmarshal(metadataRaw, &metadata); err != nil {
+		t.Fatal(err)
+	}
+	writeCDFFixtureFile(t, filepath.Join(run.Dir, "latency.json"), []byte("{\"domain\":\"courier_delivery\",\"rows\":null}\n"))
+	if err := validateCDFCompletionSidecars(run.Dir, metadata); err == nil || !strings.Contains(err.Error(), "latency sidecar is structurally incomplete") {
+		t.Fatalf("structurally incomplete latency sidecar was accepted: %v", err)
+	}
+}
+
 func readStrictCDFFixtureRows(t *testing.T, venuesDir string) []strictCDFFixtureRow {
 	t.Helper()
 	rows := make([]strictCDFFixtureRow, 0)
@@ -441,6 +461,12 @@ func readStrictCDFFixtureRows(t *testing.T, venuesDir string) []strictCDFFixture
 		}
 		if rows[left].Data.VenueID != rows[right].Data.VenueID {
 			return rows[left].Data.VenueID < rows[right].Data.VenueID
+		}
+		if rows[left].Event == "BookDelta" && rows[right].Event == "OrderCancelled" {
+			return true
+		}
+		if rows[left].Event == "OrderCancelled" && rows[right].Event == "BookDelta" {
+			return false
 		}
 		if rows[left].Route != rows[right].Route {
 			return rows[left].Route < rows[right].Route
@@ -553,11 +579,78 @@ func rewriteStrictCDFCompletionIdentity(t *testing.T, dir string, contract CDFAc
 		t.Fatal(err)
 	}
 	writeCDFFixtureFile(t, filepath.Join(dir, "run-metadata.json"), append(metadataRaw, '\n'))
-	for _, name := range []string{"latency.json", "checkpoints.jsonl", "evidence-manifest.json"} {
-		writeCDFFixtureFile(t, filepath.Join(dir, name), []byte("{}\n"))
+	greeksPath := filepath.Join(dir, "greeks.json")
+	greeksRaw, err := os.ReadFile(greeksPath)
+	if err != nil {
+		t.Fatal(err)
 	}
+	var greeks map[string]any
+	if err := json.Unmarshal(greeksRaw, &greeks); err != nil {
+		t.Fatal(err)
+	}
+	greeks["schema_version"] = 6
+	greeks["initial_risk"] = map[string]any{}
+	greeks["terminal_risk"] = map[string]any{}
+	greeks["risk_timeline"] = map[string]any{}
+	greeks["microstructure"] = []any{}
+	greeksRaw, err = json.Marshal(greeks)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeCDFFixtureFile(t, greeksPath, append(greeksRaw, '\n'))
+	writeCDFFixtureFile(t, filepath.Join(dir, "latency.json"), []byte("{\"domain\":\"courier_delivery\",\"rows\":[]}\n"))
+	writeCDFFixtureFile(t, filepath.Join(dir, "checkpoints.jsonl"), []byte(fmt.Sprintf("{\"domain\":\"execution_observations\",\"ordering\":\"ordered_stream\",\"sim_time\":%d,\"event_count\":1}\n", contract.SimulationEndNano)))
+	evidenceOnlyRaw, err := json.Marshal(map[string]any{
+		"domain": "persisted_json_log_evidence_only", "ordering": "unordered_multiset", "events": 1, "digest": strings.Repeat("b", 64),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeCDFFixtureFile(t, filepath.Join(dir, "evidence-only-artifact-hash.json"), append(evidenceOnlyRaw, '\n'))
+	fixedPaths := []string{"run-config.json", "run-metadata.json", "manifest.json", "greeks.json", "latency.json", "checkpoints.jsonl", "events.evs", "binary-evidence-attestation.json", "evidence-only-artifact-hash.json"}
+	fixedFiles := make([]map[string]any, 0, len(fixedPaths))
+	for _, relative := range fixedPaths {
+		path := filepath.Join(dir, relative)
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fixedFiles = append(fixedFiles, map[string]any{"path": relative, "bytes": info.Size(), "sha256": mustCDFFileHash(t, path)})
+	}
+	rawFiles := make([]map[string]any, 0)
+	var rawJSONLBytes int64
+	if err := filepath.Walk(filepath.Join(dir, "venues"), func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if info.IsDir() || filepath.Ext(path) != ".jsonl" {
+			return nil
+		}
+		fileInfo, err := os.Stat(path)
+		if err != nil {
+			return err
+		}
+		rawJSONLBytes += fileInfo.Size()
+		relative, err := filepath.Rel(dir, path)
+		if err != nil {
+			return err
+		}
+		rawFiles = append(rawFiles, map[string]any{"path": filepath.ToSlash(relative), "bytes": fileInfo.Size(), "sha256": mustCDFFileHash(t, path)})
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	evidenceManifestRaw, err := json.Marshal(map[string]any{
+		"schema_version": 2, "contract": "v2-integrated-longrun-evidence-manifest-v2", "cell": "sv1d-activation-659",
+		"log_mode": "full", "evidence_format": "evstream_v3", "source_revision": strings.Repeat("a", 40),
+		"fixed_files": fixedFiles, "raw_jsonl_files": len(rawFiles), "raw_jsonl_bytes": rawJSONLBytes, "raw_files": rawFiles,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeCDFFixtureFile(t, filepath.Join(dir, "evidence-manifest.json"), append(evidenceManifestRaw, '\n'))
 	status := cdfRunStatus{
-		ExitStatus: 0, CompletionVerified: true, SimulatedHorizon: contract.Horizon,
+		SchemaVersion: 1, ExitStatus: 0, CompletionVerified: true, CompletionSentinels: []string{"greeks.json", "latency.json"}, SimulatedHorizon: contract.Horizon,
 		SimulationStartNano: contract.SimulationStartNano, SimulationEndNano: contract.SimulationEndNano,
 		RunMetadataSHA256:    mustCDFFileHash(t, filepath.Join(dir, "run-metadata.json")),
 		ManifestSHA256:       mustCDFFileHash(t, filepath.Join(dir, "manifest.json")),
@@ -747,6 +840,9 @@ func writeRegisteredCDFActivationFixture(t *testing.T, options cdfActivationFixt
 	}
 	firstAt := contract.SimulationStartNano + 1_000_000_000
 	secondAt := contract.SimulationStartNano + 10_000_000_000
+	if options.strictMechanics {
+		secondAt = contract.SimulationStartNano + 14_000_000_000
+	}
 	firstSnapshots := make(map[string]etypes.BookSnapshot, len(contract.VenueIDs))
 	secondSnapshots := make(map[string]etypes.BookSnapshot, len(contract.VenueIDs))
 	for _, venueID := range contract.VenueIDs {
@@ -833,7 +929,9 @@ func writeRegisteredCDFActivationFixture(t *testing.T, options cdfActivationFixt
 		thirdAt := contract.SimulationStartNano + 17_000_000_000
 		fourthAt := contract.SimulationStartNano + 25_000_000_000
 		if options.strictMechanics {
-			thirdAt = contract.SimulationStartNano + 30_000_000_000
+			// Let the second one-sided quote remain live when the public book
+			// becomes two-sided so the strict fixture exercises restoration.
+			thirdAt = contract.SimulationStartNano + 25_000_000_000
 			fourthAt = contract.SimulationStartNano + 40_000_000_000
 		}
 		if options.dominantDepth {
@@ -976,7 +1074,7 @@ func appendCDFParticipantEvents(
 	cancelledAt := start + 22_000_000_000 + supplier.DecisionPhaseOffset
 	if options.strictMechanics {
 		fillAt = start + 12_000_000_000 + supplier.DecisionPhaseOffset
-		postBalanceAt = start + 14_000_000_000 + supplier.DecisionPhaseOffset
+		postBalanceAt = start + 16_000_000_000 + supplier.DecisionPhaseOffset
 		postDecisionAt = start + 18_000_000_000 + supplier.DecisionPhaseOffset
 		acceptedTwoAt = start + 20_000_000_000 + supplier.DecisionPhaseOffset
 		cancelDecisionAt = start + 26_000_000_000 + supplier.DecisionPhaseOffset
@@ -1005,6 +1103,14 @@ func appendCDFParticipantEvents(
 			TradeID: tradeID, Price: initialPrice, Qty: quantity, Side: cdfOppositeFixtureSide(firstDecision.Side), MakerOrderID: orderOne, TakerOrderID: 8_000_000 + participant.clientID,
 		}},
 	)
+	if options.strictMechanics {
+		// Posting a missing-side quote creates the displayed level before the
+		// matching engine later removes it ahead of OrderFill.
+		(*bookEvents)[participant.venueID] = append((*bookEvents)[participant.venueID], cdfFixtureEvent{
+			at: acceptedOneAt, event: "BookDelta", symbol: cdfActivationSymbol,
+			payload: cdfBookDeltaEvidence{Side: firstDecision.Side, Price: firstDecision.QuotePrice, VisibleQty: 100_000_000_000},
+		})
+	}
 	if !(options.omitSupplierFill && participantOrdinal == 0) {
 		(*generalEvents)[participant.venueID] = append((*generalEvents)[participant.venueID], cdfFixtureEvent{
 			at: fillAt, clientID: participant.clientID, event: "elastic_liquidity_supplier_fill",
@@ -1019,6 +1125,15 @@ func appendCDFParticipantEvents(
 	exchangeFillQty := quantity
 	if options.badExchangeFill && participantOrdinal == 0 {
 		exchangeFillQty++
+	}
+	if options.strictMechanics && participantOrdinal == len(RegisteredSV1DActivationContract().Suppliers)-1 {
+		// Matching removes the filled level before emitting OrderFill. The
+		// strict scanner defers this removal until the fill closes the order.
+		// Earlier fills leave sibling orders at the same aggregate level.
+		(*bookEvents)[participant.venueID] = append((*bookEvents)[participant.venueID], cdfFixtureEvent{
+			at: fillAt, event: "BookDelta", symbol: cdfActivationSymbol,
+			payload: cdfBookDeltaEvidence{Side: firstDecision.Side, Price: firstDecision.QuotePrice, VisibleQty: 0},
+		})
 	}
 	(*bookEvents)[participant.venueID] = append((*bookEvents)[participant.venueID], cdfFixtureEvent{
 		at: fillAt, clientID: participant.clientID, event: "OrderFill", symbol: cdfActivationSymbol,
@@ -1070,6 +1185,14 @@ func appendCDFParticipantEvents(
 			Type: "LIMIT", TimeInForce: "GTC", PostOnly: true, Price: postDecision.QuotePrice, Qty: postDecision.QuoteQty,
 		},
 	})
+	if options.strictMechanics {
+		// A missing-side quote becomes public depth when the exchange accepts
+		// it, allowing the later snapshot to prove one-sided restoration.
+		(*bookEvents)[participant.venueID] = append((*bookEvents)[participant.venueID], cdfFixtureEvent{
+			at: acceptedTwoAt, event: "BookDelta", symbol: cdfActivationSymbol,
+			payload: cdfBookDeltaEvidence{Side: postDecision.Side, Price: postDecision.QuotePrice, VisibleQty: 100_000_000_000},
+		})
+	}
 	cancelDecision := postDecision
 	if options.strictMechanics {
 		cancelDecision = cdfStrictFixtureDecision(participant, participant.second, secondSnapshot, secondAt, cancelDecisionAt, positionAfter, postDecision.ReferencePrice, postDecision.DecisionTime, true, "cancel")
@@ -1087,6 +1210,16 @@ func appendCDFParticipantEvents(
 		at: cancelDecisionAt, clientID: participant.clientID, event: "elastic_liquidity_supplier_decision", payload: cancelDecision,
 	})
 	if !(options.omitCancellation && participantOrdinal == 0) {
+		if options.strictMechanics && participantOrdinal == len(RegisteredSV1DActivationContract().Suppliers)-1 {
+			// Production cancellation removes public depth before emitting
+			// OrderCancelled. Emit the aggregate level removal only for the
+			// final supplier at this shared price; earlier cancellations leave
+			// sibling orders at the level and therefore cannot remove it.
+			(*bookEvents)[participant.venueID] = append((*bookEvents)[participant.venueID], cdfFixtureEvent{
+				at: cancelledAt, clientID: 0, event: "BookDelta", symbol: cdfActivationSymbol,
+				payload: cdfBookDeltaEvidence{Side: postDecision.Side, Price: postDecision.QuotePrice, VisibleQty: 0},
+			})
+		}
 		(*bookEvents)[participant.venueID] = append((*bookEvents)[participant.venueID], cdfFixtureEvent{
 			at: cancelledAt, clientID: participant.clientID, event: "OrderCancelled", symbol: cdfActivationSymbol,
 			payload: cdfCancelledEvidence{OrderID: orderTwo, RequestID: cancelRequest, RemainingQty: postDecision.QuoteQty},
@@ -1400,7 +1533,7 @@ func cdfFixtureSnapshot(venueID string, sequence uint64, options cdfActivationFi
 		Bids: []etypes.PriceLevel{{Price: 299_800_000, VisibleQty: independentDepth}},
 		Asks: []etypes.PriceLevel{{Price: 300_200_000, VisibleQty: independentDepth}},
 	}
-	if options.strictMechanics && sequence == 1 {
+	if options.strictMechanics && sequence <= 2 {
 		snapshot.Bids[0].Price = 300_200_000
 		snapshot.Asks = []etypes.PriceLevel{}
 	}
@@ -1410,7 +1543,7 @@ func cdfFixtureSnapshot(venueID string, sequence uint64, options cdfActivationFi
 	if !options.strictMechanics && sequence == 3 && venueID == "north" {
 		snapshot.Asks[0].Price = 299_900_000
 	}
-	if options.strictMechanics && sequence >= 2 {
+	if options.strictMechanics && sequence >= 3 {
 		snapshot.Asks[0].Price = 300_300_000
 	}
 	if sequence == 3 && options.dominantDepth {
@@ -1847,11 +1980,77 @@ func TestCDFPostFillResponseAcceptsLaterObservation(t *testing.T) {
 	}
 	audit := &CDFActivationAudit{strictMechanics: true}
 	audit.recordCDFPostFillResponse(Event{SimTS: 20, GlobalSequence: 5}, state, cdfDecisionEvidence{
-		ObservationSequence: 2, ReferencePrice: 101, MarkPrice: 101, Position: 5, TargetPosition: 0,
+		ObservationSequence: 2, ReferencePrice: 100, MarkPrice: 100, Position: 5, TargetPosition: 0,
 		Action: "submit", Side: "SELL", QuotePrice: 102, QuoteQty: 5,
 	})
 	if state.audit.PostFillResponsiveCount != 1 || !state.fillResponses[0].responded {
 		t.Fatalf("later observation was not accepted as a post-fill response: %+v", state)
+	}
+}
+
+func TestCDFPostFillResponseRejectsMarketOnlyTargetMovement(t *testing.T) {
+	state := &cdfSupplierState{
+		fillResponses: []cdfFillResponseWindow{{
+			fillAt: 10, fillGlobalSeq: 3, positionAfter: 5,
+			preFillDecision: cdfDecisionEvidence{
+				ReferencePrice: 100, MarkPrice: 100, Position: 0, TargetPosition: 2,
+				LocalBookMode: "two_sided", RiskMarkSource: "two_sided_midpoint",
+			},
+			preFillKnown: true,
+		}},
+	}
+	audit := &CDFActivationAudit{strictMechanics: true}
+	audit.recordCDFPostFillResponse(Event{SimTS: 20, GlobalSequence: 5}, state, cdfDecisionEvidence{
+		ReferencePrice: 100, MarkPrice: 100, Position: 5, TargetPosition: 5,
+		LocalBookMode: "two_sided", RiskMarkSource: "two_sided_midpoint",
+		Action: "rest", QuotePrice: 100, QuoteQty: 2,
+	})
+	if state.audit.PostFillResponsiveCount != 0 || state.fillResponses[0].responded {
+		t.Fatalf("market-only target movement was credited as an inventory response: %+v", state)
+	}
+}
+
+func TestCDFPostFillResponseRejectsTargetOnlyQuoteReplay(t *testing.T) {
+	state := &cdfSupplierState{
+		fillResponses: []cdfFillResponseWindow{{
+			fillAt: 10, fillGlobalSeq: 3, positionAfter: 5,
+			preFillDecision: cdfDecisionEvidence{
+				BestBid: 99, BestBidQty: 10, BestAsk: 101, BestAskQty: 10,
+				MarkPrice: 100, RiskMarkPrice: 100, RiskMarkCurrent: true,
+				LocalBookMode: "two_sided", TargetPosition: 2, Position: 0,
+				Action: "submit", Side: "BUY", QuotePrice: 99, QuoteQty: 2, QuoteOrderID: 11,
+			},
+			preFillKnown: true,
+		}},
+	}
+	audit := &CDFActivationAudit{strictMechanics: true}
+	audit.recordCDFPostFillResponse(Event{SimTS: 20, GlobalSequence: 5}, state, cdfDecisionEvidence{
+		BestBid: 99, BestBidQty: 10, BestAsk: 101, BestAskQty: 10,
+		MarkPrice: 100, RiskMarkPrice: 100, RiskMarkCurrent: true,
+		LocalBookMode: "two_sided", Position: 5, TargetPosition: 5,
+		Action: "submit", Side: "BUY", QuotePrice: 99, QuoteQty: 2, QuoteOrderID: 11, QuoteRequestID: 12,
+	})
+	if state.audit.PostFillResponsiveCount != 0 || state.fillResponses[0].responded {
+		t.Fatalf("target-only quote replay was credited as an inventory response: %+v", state)
+	}
+}
+
+func TestCDFLimitOrTouchUnavailableRequiresObservableFailure(t *testing.T) {
+	contract := RegisteredSV1DActivationContract().Suppliers[0]
+	state := &cdfSupplierState{contract: contract}
+	baseDecision := cdfDecisionEvidence{
+		Action: "wait", Reason: "limit_or_touch_unavailable", QuotePrice: 300_000_000, QuoteQty: contract.MinimumQualifyingQty,
+		LocalBookMode: "one_sided",
+	}
+	if !cdfDecisionReasonPredicate(baseDecision, state) {
+		t.Fatal("stale positive quote terms on a one-sided local book were not recognized as an observable unavailable-touch failure")
+	}
+	validTwoSided := baseDecision
+	validTwoSided.LocalBookMode = "two_sided"
+	validTwoSided.BestBid = contract.ReferencePrice - contract.TickSize
+	validTwoSided.BestAsk = contract.ReferencePrice + contract.TickSize
+	if cdfDecisionReasonPredicate(validTwoSided, state) {
+		t.Fatal("valid two-sided touch was incorrectly accepted as unavailable")
 	}
 }
 
