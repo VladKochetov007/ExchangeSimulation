@@ -455,7 +455,7 @@ jq -S -n \
 	--arg review_attestation_sha256 "$review_attestation_sha256" --arg review_report_sha256 "$review_report_sha256" \
 		--arg capacity_attestation_sha256 "$capacity_attestation_sha256" --arg capacity_records_sha256 "$capacity_records_sha256" \
 		--arg trusted_review_key_sha256 "$trusted_review_key_sha256" \
-	--arg capacity_root "$capacity_root" --arg activation_runner_sha256 "$activation_runner_sha256" --arg capacity_runner_sha256 "$capacity_runner_sha256" \
+	--arg capacity_root "$capacity_root" --arg capacity_records_root "$capacity_records_root" --arg activation_runner_sha256 "$activation_runner_sha256" --arg capacity_runner_sha256 "$capacity_runner_sha256" \
 	--arg simulator_sha256 "$multivenue_sha256" --arg analyzer_sha256 "$sv1dprobe_sha256" --arg renderer_sha256 "$evsrender_sha256" \
 	--arg output_root "$output_root" --arg output_parent "$capacity_output_parent" \
 	'{schema_version: 2, contract: $contract, development_only: true, scientific_result_eligible: false,
@@ -463,7 +463,7 @@ jq -S -n \
 	 review_attestation_sha256: $review_attestation_sha256, review_report_sha256: $review_report_sha256,
 		 capacity_attestation_sha256: $capacity_attestation_sha256, capacity_records_sha256: $capacity_records_sha256,
 		 trusted_review_key_sha256: $trusted_review_key_sha256,
-	 capacity_root: $capacity_root, activation_runner_sha256: $activation_runner_sha256, capacity_runner_sha256: $capacity_runner_sha256,
+	 capacity_root: $capacity_root, capacity_records_root: $capacity_records_root, activation_runner_sha256: $activation_runner_sha256, capacity_runner_sha256: $capacity_runner_sha256,
 	 simulator_sha256: $simulator_sha256, analyzer_sha256: $analyzer_sha256, renderer_sha256: $renderer_sha256,
 	 evidence_format: "evstream_v3", evidence_schema_epoch: 4, log_mode: "full", gomaxprocs: 2, gomemlimit: "4GiB",
 	 output_root: $output_root, output_parent: $output_parent, arms: ["treatment", "mode-off", "no-roster"], holdouts_consumed: []}' \

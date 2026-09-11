@@ -163,7 +163,7 @@ func TestValidateSV1DActivationMetadataBindsPathAndDigest(t *testing.T) {
 		ProbeID: "v2-r2-sv1d-activation-659", PlanSHA256: strings.Repeat("c", 64),
 		ReviewAttestationSHA256: strings.Repeat("d", 64), ReviewReportSHA256: strings.Repeat("e", 64),
 		CapacityAttestationSHA256: strings.Repeat("1", 64), CapacityRecordsSHA256: strings.Repeat("2", 64),
-		TrustedReviewKeySHA256: strings.Repeat("3", 64), CapacityRoot: filepath.Join(filepath.Dir(root), "capacity"),
+		TrustedReviewKeySHA256: strings.Repeat("3", 64), CapacityRoot: filepath.Join(filepath.Dir(root), "capacity"), CapacityRecordsRoot: filepath.Join(filepath.Dir(root), "capacity-records"),
 		ActivationRunnerSHA256: strings.Repeat("4", 64), CapacityRunnerSHA256: strings.Repeat("5", 64),
 		SimulatorSHA256: strings.Repeat("6", 64), AnalyzerSHA256: strings.Repeat("7", 64), RendererSHA256: strings.Repeat("8", 64),
 		EvidenceFormat: "evstream_v3", EvidenceSchemaEpoch: 4, LogMode: "full", GOMAXPROCS: 2, GOMEMLIMIT: "4GiB",
@@ -194,6 +194,61 @@ func TestValidateSV1DActivationMetadataBindsPathAndDigest(t *testing.T) {
 	}
 	if err := ValidateSV1DActivationMetadata(metadataPath, expected); err == nil {
 		t.Fatal("mutated strict activation metadata was accepted")
+	}
+}
+
+func TestValidateSV1DCapacityRetentionRechecksMeasurementBundle(t *testing.T) {
+	dir := t.TempDir()
+	attestation := testSV1DCapacityAttestation()
+	attestation.OutputParent = dir
+	attestation.MeasurementRoot = filepath.Join(dir, "capacity-output")
+	attestation.MeasurementRecordsRoot = filepath.Join(dir, "capacity-measurements")
+	if err := os.MkdirAll(attestation.MeasurementRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(attestation.MeasurementRecordsRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	filesystem, err := InspectSV1DFilesystem(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	attestation.FilesystemDevice, attestation.FilesystemID, attestation.FilesystemType = filesystem.Device, filesystem.ID, filesystem.Type
+	attestation.FilesystemMountID, attestation.FilesystemUUID = filesystem.MountID, filesystem.UUID
+	writeSV1DCapacityMeasurementRecords(t, &attestation)
+
+	activationRoot := filepath.Join(dir, "activation")
+	metadataPath := filepath.Join(activationRoot, "provenance", "capacity-attestation.json")
+	if err := os.MkdirAll(filepath.Dir(metadataPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeSV1DCapacityAttestation(t, metadataPath, attestation)
+	attestationRaw, err := os.ReadFile(metadataPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	metadata := sv1dActivationRunMetadata{
+		ProbeID: attestation.ProbeID, CapacityRoot: attestation.MeasurementRoot,
+		CapacityRecordsRoot: attestation.MeasurementRecordsRoot, OutputRoot: activationRoot, OutputParent: dir,
+	}
+	expected := CDFExpectedProvenance{
+		TreatmentConfigSHA256: attestation.TargetTreatmentConfigSHA256, ModeOffConfigSHA256: attestation.TargetModeOffConfigSHA256,
+		NoRosterConfigSHA256: attestation.TargetNoRosterConfigSHA256, SourceRevision: attestation.SourceRevision,
+		TreeRevision: attestation.TreeRevision, PlanSHA256: attestation.PlanSHA256, BinarySHA256: attestation.BinarySHA256,
+		AnalyzerSHA256: attestation.AnalyzerSHA256, RendererSHA256: attestation.RendererSHA256,
+		ReviewAttestationSHA256: attestation.ReviewAttestationSHA256, ReviewReportSHA256: attestation.ReviewReportSHA256,
+		TrustedReviewKeySHA256:    attestation.TrustedReviewKeySHA256,
+		CapacityAttestationSHA256: sha256DigestHex(attestationRaw), CapacityRecordsSHA256: attestation.MeasurementRecordsSHA256,
+		CapacityRunnerSHA256: attestation.RunnerSHA256,
+	}
+	if err := validateSV1DCapacityRetention(activationRoot, metadata, expected); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(attestation.MeasurementRecordsRoot, "measurement-records-manifest.json")); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateSV1DCapacityRetention(activationRoot, metadata, expected); err == nil {
+		t.Fatal("capacity retention accepted a deleted measurement manifest")
 	}
 }
 

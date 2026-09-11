@@ -293,6 +293,7 @@ type sv1dActivationRunMetadata struct {
 	CapacityRecordsSHA256     string   `json:"capacity_records_sha256"`
 	TrustedReviewKeySHA256    string   `json:"trusted_review_key_sha256"`
 	CapacityRoot              string   `json:"capacity_root"`
+	CapacityRecordsRoot       string   `json:"capacity_records_root"`
 	ActivationRunnerSHA256    string   `json:"activation_runner_sha256"`
 	CapacityRunnerSHA256      string   `json:"capacity_runner_sha256"`
 	SimulatorSHA256           string   `json:"simulator_sha256"`
@@ -436,6 +437,7 @@ func readSV1DActivationMetadata(path string) (sv1dActivationRunMetadata, []byte,
 		"source_revision", "tree_revision", "probe_id", "plan_sha256",
 		"review_attestation_sha256", "review_report_sha256", "capacity_attestation_sha256",
 		"capacity_records_sha256", "trusted_review_key_sha256", "capacity_root",
+		"capacity_records_root",
 		"activation_runner_sha256", "capacity_runner_sha256", "simulator_sha256",
 		"analyzer_sha256", "renderer_sha256", "evidence_format", "evidence_schema_epoch",
 		"log_mode", "gomaxprocs", "gomemlimit", "output_root", "output_parent",
@@ -477,7 +479,8 @@ func validateSV1DActivationMetadata(metadataPath string, expected CDFExpectedPro
 		return fmt.Errorf("SV1D activation metadata does not match the registered strict launch contract")
 	}
 	if !absoluteCleanPath(metadata.OutputRoot) || !absoluteCleanPath(metadata.OutputParent) ||
-		!absoluteCleanPath(metadata.CapacityRoot) || filepath.Dir(metadata.OutputRoot) != metadata.OutputParent {
+		!absoluteCleanPath(metadata.CapacityRoot) || !absoluteCleanPath(metadata.CapacityRecordsRoot) ||
+		filepath.Dir(metadata.OutputRoot) != metadata.OutputParent {
 		return fmt.Errorf("SV1D activation metadata has an invalid output or capacity path")
 	}
 	return nil
@@ -611,6 +614,9 @@ func validateSV1DCapacityRetention(outputRoot string, metadata sv1dActivationRun
 	if err := ValidateSV1DCapacityAttestation(attestation); err != nil {
 		return fmt.Errorf("retained capacity attestation: %w", err)
 	}
+	if metadata.CapacityRoot != attestation.MeasurementRoot || metadata.CapacityRecordsRoot != attestation.MeasurementRecordsRoot {
+		return fmt.Errorf("retained capacity roots do not match activation metadata")
+	}
 	if attestation.SourceRevision != expected.SourceRevision || attestation.TreeRevision != expected.TreeRevision ||
 		attestation.PlanSHA256 != expected.PlanSHA256 || attestation.ReviewAttestationSHA256 != expected.ReviewAttestationSHA256 ||
 		attestation.ReviewReportSHA256 != expected.ReviewReportSHA256 || attestation.TrustedReviewKeySHA256 != expected.TrustedReviewKeySHA256 ||
@@ -621,6 +627,24 @@ func validateSV1DCapacityRetention(outputRoot string, metadata sv1dActivationRun
 	}
 	if attestation.TargetTreatmentConfigSHA256 != expected.TreatmentConfigSHA256 || attestation.TargetModeOffConfigSHA256 != expected.ModeOffConfigSHA256 || attestation.TargetNoRosterConfigSHA256 != expected.NoRosterConfigSHA256 {
 		return fmt.Errorf("retained capacity attestation target config identities do not match the probe")
+	}
+	fullExpectation := SV1DCapacityExpectation{
+		SourceRevision: expected.SourceRevision, TreeRevision: expected.TreeRevision, ProbeID: metadata.ProbeID,
+		PlanSHA256: expected.PlanSHA256, ReviewAttestationSHA256: expected.ReviewAttestationSHA256,
+		ReviewReportSHA256: expected.ReviewReportSHA256, TrustedReviewKeySHA256: expected.TrustedReviewKeySHA256,
+		TargetTreatmentConfigSHA256: expected.TreatmentConfigSHA256, TargetModeOffConfigSHA256: expected.ModeOffConfigSHA256,
+		TargetNoRosterConfigSHA256: expected.NoRosterConfigSHA256, CapacityTreatmentConfigSHA256: attestation.CapacityTreatmentConfigSHA256,
+		CapacityModeOffConfigSHA256: attestation.CapacityModeOffConfigSHA256, CapacityNoRosterConfigSHA256: attestation.CapacityNoRosterConfigSHA256,
+		CapacityConfigDeltaSHA256: attestation.CapacityConfigDeltaSHA256, BinarySHA256: expected.BinarySHA256,
+		AnalyzerSHA256: expected.AnalyzerSHA256, RendererSHA256: expected.RendererSHA256, RunnerSHA256: expected.CapacityRunnerSHA256,
+		MeasurerSHA256: attestation.MeasurerSHA256, ResourcePolicySHA256: attestation.ResourcePolicySHA256,
+		OutputParent: metadata.OutputParent, MeasurementRoot: metadata.CapacityRoot, MeasurementRecordsRoot: metadata.CapacityRecordsRoot,
+		MeasurementRecordsSHA256: expected.CapacityRecordsSHA256, FilesystemDevice: attestation.FilesystemDevice,
+		FilesystemID: attestation.FilesystemID, FilesystemType: attestation.FilesystemType,
+		FilesystemMountID: attestation.FilesystemMountID, FilesystemUUID: attestation.FilesystemUUID,
+	}
+	if _, err := VerifySV1DCapacityAttestation(path, fullExpectation); err != nil {
+		return fmt.Errorf("retained capacity evidence is not fully verifiable: %w", err)
 	}
 	return nil
 }
