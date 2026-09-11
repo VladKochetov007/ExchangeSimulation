@@ -9,6 +9,8 @@ import (
 	"io"
 	"math"
 	"os"
+	"path/filepath"
+	"strings"
 )
 
 const (
@@ -31,6 +33,8 @@ type SV1DProbePlan struct {
 	ProbeDurationNano                       int64            `json:"probe_duration_nano"`
 	VenueIDs                                []string         `json:"venue_ids"`
 	MaxUninterruptedNonTwoSidedDurationNano int64            `json:"max_uninterrupted_non_two_sided_duration_nano"`
+	AnalyzerSHA256                          string           `json:"analyzer_sha256"`
+	RendererSHA256                          string           `json:"renderer_sha256"`
 	Treatment                               SV1DProbeArmSpec `json:"treatment"`
 	ModeOff                                 SV1DProbeArmSpec `json:"mode_off"`
 	NoRoster                                SV1DProbeArmSpec `json:"no_roster"`
@@ -44,6 +48,8 @@ type SV1DProbeArmSpec struct {
 	ConfigSHA256   string `json:"config_sha256"`
 	SourceRevision string `json:"source_revision"`
 	BinarySHA256   string `json:"binary_sha256"`
+	AnalyzerSHA256 string `json:"analyzer_sha256"`
+	RendererSHA256 string `json:"renderer_sha256"`
 }
 
 // SV1DProbeArmResult is the typed, independently reconstructed result of one
@@ -56,6 +62,8 @@ type SV1DProbeArmResult struct {
 	ConfigSHA256           string                       `json:"config_sha256"`
 	SourceRevision         string                       `json:"source_revision"`
 	BinarySHA256           string                       `json:"binary_sha256"`
+	AnalyzerSHA256         string                       `json:"analyzer_sha256"`
+	RendererSHA256         string                       `json:"renderer_sha256"`
 	Complete               bool                         `json:"complete"`
 	EvidenceValid          bool                         `json:"evidence_valid"`
 	StrictMechanicsValid   bool                         `json:"strict_mechanics_valid"`
@@ -85,6 +93,7 @@ func (r *Run) AuditSV1DProbeArm(options SV1DProbeArmAuditOptions) (SV1DProbeArmR
 		ArmName: options.Spec.Name, ExperimentID: options.Spec.ExperimentID,
 		HypothesisID: options.Spec.HypothesisID, ConfigSHA256: options.Spec.ConfigSHA256,
 		SourceRevision: options.Spec.SourceRevision, BinarySHA256: options.Spec.BinarySHA256,
+		AnalyzerSHA256: options.Spec.AnalyzerSHA256, RendererSHA256: options.Spec.RendererSHA256,
 	}
 	if r == nil {
 		return result, fmt.Errorf("SV1D arm audit has a nil run")
@@ -97,6 +106,19 @@ func (r *Run) AuditSV1DProbeArm(options SV1DProbeArmAuditOptions) (SV1DProbeArmR
 	expected := options.Activation.ExpectedProvenance
 	if expected.ConfigSHA256 != options.Spec.ConfigSHA256 || expected.SourceRevision != options.Spec.SourceRevision || expected.BinarySHA256 != options.Spec.BinarySHA256 {
 		return result, fmt.Errorf("SV1D arm spec and expected audit provenance disagree")
+	}
+	if !options.Activation.AllowLegacyJSON {
+		if !isSV1DHexDigest(options.Spec.AnalyzerSHA256) || !isSV1DHexDigest(options.Spec.RendererSHA256) {
+			return result, fmt.Errorf("SV1D arm spec has incomplete successor tool identity")
+		}
+		if expected.RendererSHA256 != options.Spec.RendererSHA256 || expected.RendererSourceRevision != options.Spec.SourceRevision ||
+			expected.RendererSourceModified || expected.RendererGOOS != "linux" || expected.RendererGOARCH != "amd64" ||
+			expected.RendererGOAMD64 != "v1" || !expected.RendererTrimpath || expected.RendererCGOEnabled != "0" {
+			return result, fmt.Errorf("SV1D arm spec and expected renderer provenance disagree")
+		}
+		if err := validateSV1DRendererAttestation(options.Activation.RenderedEvidenceDir, expected); err != nil {
+			return result, err
+		}
 	}
 	evidenceDir := options.Activation.EvidenceDir
 	if evidenceDir == "" {
@@ -147,6 +169,62 @@ func appendCDFActivationFailures(existing []string, checks []CDFActivationCheck)
 		existing = append(existing, check.Failure)
 	}
 	return existing
+}
+
+type sv1dRendererAttestation struct {
+	SchemaVersion             int    `json:"schema_version"`
+	Contract                  string `json:"contract"`
+	RendererSHA256            string `json:"renderer_sha256"`
+	RendererSourceRevision    string `json:"renderer_source_revision"`
+	RendererSourceModified    bool   `json:"renderer_source_modified"`
+	RendererGOOS              string `json:"renderer_goos"`
+	RendererGOARCH            string `json:"renderer_goarch"`
+	RendererGOAMD64           string `json:"renderer_goamd64"`
+	RendererGoVersion         string `json:"renderer_go_version"`
+	RendererTrimpath          bool   `json:"renderer_trimpath"`
+	RendererCGOEnabled        string `json:"renderer_cgo_enabled"`
+	RenderedAttestationSHA256 string `json:"rendered_attestation_sha256"`
+}
+
+func validateSV1DRendererAttestation(renderedDir string, expected CDFExpectedProvenance) error {
+	if renderedDir == "" {
+		return fmt.Errorf("SV1D arm audit requires a rendered evidence directory")
+	}
+	attestationPath := filepath.Join(renderedDir, "renderer-attestation.json")
+	raw, err := os.ReadFile(attestationPath)
+	if err != nil {
+		return fmt.Errorf("SV1D renderer attestation: read: %w", err)
+	}
+	var attestation sv1dRendererAttestation
+	if err := rejectSV1DDuplicateJSONKeys(raw); err != nil {
+		return fmt.Errorf("SV1D renderer attestation: malformed JSON: %w", err)
+	}
+	if err := decodeRequiredJSON(raw, &attestation,
+		"schema_version", "contract", "renderer_sha256", "renderer_source_revision",
+		"renderer_source_modified", "renderer_goos", "renderer_goarch", "renderer_goamd64",
+		"renderer_go_version", "renderer_trimpath", "renderer_cgo_enabled", "rendered_attestation_sha256"); err != nil {
+		return fmt.Errorf("SV1D renderer attestation: decode: %w", err)
+	}
+	if attestation.SchemaVersion != 1 || attestation.Contract != "v2-r2-sv1d-renderer-attestation-v1" ||
+		attestation.RendererSHA256 != expected.RendererSHA256 || attestation.RendererSourceRevision != expected.RendererSourceRevision ||
+		attestation.RendererSourceModified != expected.RendererSourceModified || attestation.RendererGOOS != expected.RendererGOOS ||
+		attestation.RendererGOARCH != expected.RendererGOARCH || attestation.RendererGOAMD64 != expected.RendererGOAMD64 ||
+		(attestation.RendererGoVersion == "" || !strings.HasPrefix(attestation.RendererGoVersion, "go1.27")) ||
+		(expected.RendererGoVersion != "" && attestation.RendererGoVersion != expected.RendererGoVersion) ||
+		attestation.RendererTrimpath != expected.RendererTrimpath ||
+		attestation.RendererCGOEnabled != expected.RendererCGOEnabled || !isSV1DHexDigest(attestation.RendererSHA256) ||
+		!isCDFHex(attestation.RendererSourceRevision, 20) || !isSV1DHexDigest(attestation.RenderedAttestationSHA256) {
+		return fmt.Errorf("SV1D renderer attestation does not match the externally expected clean renderer")
+	}
+	mainAttestationPath := filepath.Join(renderedDir, "rendered-binary-evidence-attestation.json")
+	mainAttestationSHA256, err := sha256File(mainAttestationPath)
+	if err != nil {
+		return fmt.Errorf("SV1D renderer attestation: hash rendered evidence attestation: %w", err)
+	}
+	if mainAttestationSHA256 != attestation.RenderedAttestationSHA256 {
+		return fmt.Errorf("SV1D renderer attestation is not bound to rendered evidence")
+	}
+	return nil
 }
 
 // SV1DProbeVenueScore contains the availability measurements used by the
@@ -333,6 +411,9 @@ func validateSV1DProbePlan(plan SV1DProbePlan) []string {
 	if len(plan.VenueIDs) == 0 {
 		failures = append(failures, "probe plan has no venues")
 	}
+	if !isSV1DHexDigest(plan.AnalyzerSHA256) || !isSV1DHexDigest(plan.RendererSHA256) {
+		failures = append(failures, "probe plan is missing analyzer or renderer identity")
+	}
 	seenVenues := make(map[string]struct{}, len(plan.VenueIDs))
 	for _, venueID := range plan.VenueIDs {
 		if venueID == "" {
@@ -345,9 +426,18 @@ func validateSV1DProbePlan(plan SV1DProbePlan) []string {
 	}
 	specs := []SV1DProbeArmSpec{plan.Treatment, plan.ModeOff, plan.NoRoster}
 	seenArms := make(map[string]struct{}, len(specs))
+	registeredSourceRevision := ""
 	for _, spec := range specs {
-		if spec.Name == "" || spec.ExperimentID == "" || spec.HypothesisID == "" || !isSV1DHexDigest(spec.ConfigSHA256) || !isSV1DHexDigest(spec.BinarySHA256) || spec.SourceRevision == "" {
+		if spec.Name == "" || spec.ExperimentID == "" || spec.HypothesisID == "" || !isSV1DHexDigest(spec.ConfigSHA256) || !isSV1DHexDigest(spec.BinarySHA256) || !isSV1DHexDigest(spec.AnalyzerSHA256) || !isSV1DHexDigest(spec.RendererSHA256) || !isCDFHex(spec.SourceRevision, 20) {
 			failures = append(failures, "probe arm spec is missing an immutable identity: "+spec.Name)
+		}
+		if spec.AnalyzerSHA256 != plan.AnalyzerSHA256 || spec.RendererSHA256 != plan.RendererSHA256 {
+			failures = append(failures, "probe arm tool identity differs from plan: "+spec.Name)
+		}
+		if registeredSourceRevision == "" {
+			registeredSourceRevision = spec.SourceRevision
+		} else if spec.SourceRevision != registeredSourceRevision {
+			failures = append(failures, "probe arm source identity differs from plan: "+spec.Name)
 		}
 		if _, duplicate := seenArms[spec.Name]; duplicate {
 			failures = append(failures, "probe plan contains a duplicate arm: "+spec.Name)
@@ -363,7 +453,7 @@ func validateSV1DProbeArmIdentity(spec SV1DProbeArmSpec, arm SV1DProbeArmResult)
 	if arm.ArmName != spec.Name {
 		failures = append(failures, "arm name does not match its plan")
 	}
-	if arm.ExperimentID != spec.ExperimentID || arm.HypothesisID != spec.HypothesisID || arm.ConfigSHA256 != spec.ConfigSHA256 || arm.SourceRevision != spec.SourceRevision || arm.BinarySHA256 != spec.BinarySHA256 {
+	if arm.ExperimentID != spec.ExperimentID || arm.HypothesisID != spec.HypothesisID || arm.ConfigSHA256 != spec.ConfigSHA256 || arm.SourceRevision != spec.SourceRevision || arm.BinarySHA256 != spec.BinarySHA256 || arm.AnalyzerSHA256 != spec.AnalyzerSHA256 || arm.RendererSHA256 != spec.RendererSHA256 {
 		failures = append(failures, "arm provenance does not match its plan: "+spec.Name)
 	}
 	return failures
@@ -464,6 +554,84 @@ type SV1DConfigTriad struct {
 	Treatment SV1DConfigIdentity `json:"treatment"`
 	ModeOff   SV1DConfigIdentity `json:"mode_off"`
 	NoRoster  SV1DConfigIdentity `json:"no_roster"`
+}
+
+// BuildRegisteredSV1DProbePlan binds the checked-in config triad to the
+// source and binary identities that are resolved before a development probe.
+// The resulting plan is immutable for that run; changing any identity creates
+// a different plan and therefore cannot silently reuse its score.
+func BuildRegisteredSV1DProbePlan(triad SV1DConfigTriad, sourceRevision, binarySHA256, analyzerSHA256, rendererSHA256 string) (SV1DProbePlan, error) {
+	if !isCDFHex(sourceRevision, 20) || !isSV1DHexDigest(binarySHA256) || !isSV1DHexDigest(analyzerSHA256) || !isSV1DHexDigest(rendererSHA256) {
+		return SV1DProbePlan{}, fmt.Errorf("SV1D plan requires a 40-hex source revision and 64-hex simulator, analyzer, and renderer digests")
+	}
+	plan := SV1DProbePlan{
+		ExperimentID:                            "v2-r2-sv1d-activation-659",
+		HypothesisID:                            "V2-R2-SV1D-ONE-SIDED-ELASTIC-LIQUIDITY",
+		Seed:                                    659,
+		Horizon:                                 "5m",
+		ProbeDurationNano:                       300_000_000_000,
+		VenueIDs:                                []string{"north", "central", "south"},
+		MaxUninterruptedNonTwoSidedDurationNano: 30_000_000_000,
+		AnalyzerSHA256:                          analyzerSHA256,
+		RendererSHA256:                          rendererSHA256,
+		Treatment: SV1DProbeArmSpec{
+			Name: "treatment", ExperimentID: triad.Treatment.ExperimentID,
+			HypothesisID: triad.Treatment.HypothesisID, ConfigSHA256: triad.Treatment.ConfigSHA256,
+			SourceRevision: sourceRevision, BinarySHA256: binarySHA256, AnalyzerSHA256: analyzerSHA256, RendererSHA256: rendererSHA256,
+		},
+		ModeOff: SV1DProbeArmSpec{
+			Name: "mode-off", ExperimentID: triad.ModeOff.ExperimentID,
+			HypothesisID: triad.ModeOff.HypothesisID, ConfigSHA256: triad.ModeOff.ConfigSHA256,
+			SourceRevision: sourceRevision, BinarySHA256: binarySHA256, AnalyzerSHA256: analyzerSHA256, RendererSHA256: rendererSHA256,
+		},
+		NoRoster: SV1DProbeArmSpec{
+			Name: "no-roster", ExperimentID: triad.NoRoster.ExperimentID,
+			HypothesisID: triad.NoRoster.HypothesisID, ConfigSHA256: triad.NoRoster.ConfigSHA256,
+			SourceRevision: sourceRevision, BinarySHA256: binarySHA256, AnalyzerSHA256: analyzerSHA256, RendererSHA256: rendererSHA256,
+		},
+	}
+	if err := ValidateRegisteredSV1DProbePlan(plan); err != nil {
+		return SV1DProbePlan{}, err
+	}
+	return plan, nil
+}
+
+// ValidateRegisteredSV1DProbePlan applies the fixed development-only probe
+// boundary in addition to the structural checks shared by the scorer.
+func ValidateRegisteredSV1DProbePlan(plan SV1DProbePlan) error {
+	failures := validateSV1DProbePlan(plan)
+	if plan.ExperimentID != "v2-r2-sv1d-activation-659" || plan.HypothesisID != "V2-R2-SV1D-ONE-SIDED-ELASTIC-LIQUIDITY" ||
+		plan.Seed != 659 || plan.Horizon != "5m" || plan.ProbeDurationNano != 300_000_000_000 ||
+		plan.MaxUninterruptedNonTwoSidedDurationNano != 30_000_000_000 ||
+		!sameSV1DStrings(plan.VenueIDs, []string{"north", "central", "south"}) {
+		failures = append(failures, "probe plan differs from the registered SV1D development boundary")
+	}
+	if len(failures) > 0 {
+		return fmt.Errorf("invalid registered SV1D probe plan: %s", failures[0])
+	}
+	return nil
+}
+
+// ValidateSV1DProbePlan exposes the same fixed validation used by the scorer
+// so a launcher can reject a malformed plan before any arm is executed.
+func ValidateSV1DProbePlan(plan SV1DProbePlan) error {
+	failures := validateSV1DProbePlan(plan)
+	if len(failures) > 0 {
+		return fmt.Errorf("invalid SV1D probe plan: %s", failures[0])
+	}
+	return nil
+}
+
+func sameSV1DStrings(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
 }
 
 // ValidateSV1DConfigTriad validates the registered semantic relationships of

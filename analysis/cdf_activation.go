@@ -66,6 +66,18 @@ type CDFExpectedProvenance struct {
 	BinaryGOOS     string
 	BinaryGOARCH   string
 	BinaryGOAMD64  string
+	// Renderer identity is required by the SV1D successor adapter. Historical
+	// CDF audits leave these fields empty because their contract predates the
+	// explicit renderer attestation.
+	RendererSHA256         string
+	RendererSourceRevision string
+	RendererSourceModified bool
+	RendererGOOS           string
+	RendererGOARCH         string
+	RendererGOAMD64        string
+	RendererGoVersion      string
+	RendererTrimpath       bool
+	RendererCGOEnabled     string
 }
 
 // CDFSupplierContract is one immutable finite-capital roster entry.

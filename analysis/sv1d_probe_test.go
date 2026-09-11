@@ -33,6 +33,16 @@ func TestValidateSV1DConfigTriadFilesAcceptsRegisteredConfigs(t *testing.T) {
 	if triad.Treatment.ConfigSHA256 != hex.EncodeToString(digest[:]) {
 		t.Fatalf("treatment config digest = %s; want %s", triad.Treatment.ConfigSHA256, hex.EncodeToString(digest[:]))
 	}
+	plan, err := BuildRegisteredSV1DProbePlan(triad, strings.Repeat("a", 40), strings.Repeat("b", 64), strings.Repeat("c", 64), strings.Repeat("d", 64))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateSV1DProbePlan(plan); err != nil {
+		t.Fatal(err)
+	}
+	if plan.ProbeDurationNano != 300_000_000_000 || plan.MaxUninterruptedNonTwoSidedDurationNano != 30_000_000_000 {
+		t.Fatalf("registered plan boundary = %+v", plan)
+	}
 }
 
 func TestAuditSV1DProbeArmKeepsExternalIdentitySeparateFromLegacyEvidence(t *testing.T) {
@@ -84,6 +94,44 @@ func TestAuditSV1DProbeArmKeepsExternalIdentitySeparateFromLegacyEvidence(t *tes
 	})
 	if err == nil {
 		t.Fatal("arm identity mismatch was accepted")
+	}
+}
+
+func TestValidateSV1DRendererAttestationBindsRenderedAttestation(t *testing.T) {
+	dir := t.TempDir()
+	mainAttestation := []byte(`{"domain":"rendered_binary_evidence","source_execution_stream_hash":"` + strings.Repeat("a", 64) + `"}`)
+	if err := os.WriteFile(filepath.Join(dir, "rendered-binary-evidence-attestation.json"), mainAttestation, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainDigest := sha256.Sum256(mainAttestation)
+	mainDigestHex := hex.EncodeToString(mainDigest[:])
+	rendererDigest := strings.Repeat("b", 64)
+	raw, err := json.Marshal(sv1dRendererAttestation{
+		SchemaVersion: 1, Contract: "v2-r2-sv1d-renderer-attestation-v1",
+		RendererSHA256: rendererDigest, RendererSourceRevision: strings.Repeat("c", 40),
+		RendererGOOS: "linux", RendererGOARCH: "amd64", RendererGOAMD64: "v1",
+		RendererGoVersion: "go1.27.0", RendererTrimpath: true, RendererCGOEnabled: "0",
+		RenderedAttestationSHA256: mainDigestHex,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "renderer-attestation.json"), raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	expected := CDFExpectedProvenance{
+		RendererSHA256: rendererDigest, RendererSourceRevision: strings.Repeat("c", 40),
+		RendererGOOS: "linux", RendererGOARCH: "amd64", RendererGOAMD64: "v1",
+		RendererTrimpath: true, RendererCGOEnabled: "0",
+	}
+	if err := validateSV1DRendererAttestation(dir, expected); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "rendered-binary-evidence-attestation.json"), append(mainAttestation, 'x'), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateSV1DRendererAttestation(dir, expected); err == nil {
+		t.Fatal("renderer attestation remained valid after rendered evidence mutation")
 	}
 }
 
@@ -272,12 +320,15 @@ func TestScoreSV1DProbeRejectsInvalidIncompleteAndNonDirectionalInputs(t *testin
 }
 
 func testSV1DProbePlan() SV1DProbePlan {
+	analyzerSHA256 := strings.Repeat("c", 64)
+	rendererSHA256 := strings.Repeat("d", 64)
 	return SV1DProbePlan{
 		ExperimentID: "probe", HypothesisID: "hypothesis", Seed: 659, Horizon: "5m", ProbeDurationNano: 300,
 		VenueIDs: []string{"north", "central", "south"}, MaxUninterruptedNonTwoSidedDurationNano: 30,
-		Treatment: SV1DProbeArmSpec{Name: "treatment", ExperimentID: "treatment", HypothesisID: "treatment-hypothesis", ConfigSHA256: strings.Repeat("a", 64), SourceRevision: "revision", BinarySHA256: strings.Repeat("b", 64)},
-		ModeOff:   SV1DProbeArmSpec{Name: "mode-off", ExperimentID: "mode-off", HypothesisID: "mode-off-hypothesis", ConfigSHA256: strings.Repeat("c", 64), SourceRevision: "revision", BinarySHA256: strings.Repeat("d", 64)},
-		NoRoster:  SV1DProbeArmSpec{Name: "no-roster", ExperimentID: "no-roster", HypothesisID: "no-roster-hypothesis", ConfigSHA256: strings.Repeat("e", 64), SourceRevision: "revision", BinarySHA256: strings.Repeat("f", 64)},
+		AnalyzerSHA256: analyzerSHA256, RendererSHA256: rendererSHA256,
+		Treatment: SV1DProbeArmSpec{Name: "treatment", ExperimentID: "treatment", HypothesisID: "treatment-hypothesis", ConfigSHA256: strings.Repeat("a", 64), SourceRevision: strings.Repeat("e", 40), BinarySHA256: strings.Repeat("b", 64), AnalyzerSHA256: analyzerSHA256, RendererSHA256: rendererSHA256},
+		ModeOff:   SV1DProbeArmSpec{Name: "mode-off", ExperimentID: "mode-off", HypothesisID: "mode-off-hypothesis", ConfigSHA256: strings.Repeat("f", 64), SourceRevision: strings.Repeat("e", 40), BinarySHA256: strings.Repeat("a", 64), AnalyzerSHA256: analyzerSHA256, RendererSHA256: rendererSHA256},
+		NoRoster:  SV1DProbeArmSpec{Name: "no-roster", ExperimentID: "no-roster", HypothesisID: "no-roster-hypothesis", ConfigSHA256: strings.Repeat("1", 64), SourceRevision: strings.Repeat("e", 40), BinarySHA256: strings.Repeat("2", 64), AnalyzerSHA256: analyzerSHA256, RendererSHA256: rendererSHA256},
 	}
 }
 
@@ -285,6 +336,7 @@ func testSV1DProbeArm(spec SV1DProbeArmSpec, complete, evidenceValid, strictMech
 	return SV1DProbeArmResult{
 		ArmName: spec.Name, ExperimentID: spec.ExperimentID, HypothesisID: spec.HypothesisID,
 		ConfigSHA256: spec.ConfigSHA256, SourceRevision: spec.SourceRevision, BinarySHA256: spec.BinarySHA256,
+		AnalyzerSHA256: spec.AnalyzerSHA256, RendererSHA256: spec.RendererSHA256,
 		Complete: complete, EvidenceValid: evidenceValid, StrictMechanicsValid: strictMechanics,
 		TerminalValuationValid: terminalValuation, ActivationSatisfied: activation, AntiCheatingSatisfied: activation,
 		Venues: venues,
