@@ -29,6 +29,7 @@ type planDocument struct {
 	SchemaVersion int                    `json:"schema_version"`
 	Contract      string                 `json:"contract"`
 	ProbeID       string                 `json:"probe_id"`
+	PlanSHA256    string                 `json:"plan_sha256"`
 	Plan          analysis.SV1DProbePlan `json:"plan"`
 }
 
@@ -43,6 +44,7 @@ type scoreDocument struct {
 	SchemaVersion int                           `json:"schema_version"`
 	Contract      string                        `json:"contract"`
 	ProbeID       string                        `json:"probe_id"`
+	PlanSHA256    string                        `json:"plan_sha256"`
 	Score         analysis.SV1DProbeScore       `json:"score"`
 	Arms          []analysis.SV1DProbeArmResult `json:"arms"`
 }
@@ -102,7 +104,11 @@ func createPlan(out, treatmentPath, modeOffPath, noRosterPath, sourceRevision, b
 	if err != nil {
 		return err
 	}
-	return publishJSON(out, planDocument{SchemaVersion: 1, Contract: probePlanContract, ProbeID: probeID, Plan: plan})
+	planSHA256, err := analysis.SV1DProbePlanSHA256(plan)
+	if err != nil {
+		return err
+	}
+	return publishJSON(out, planDocument{SchemaVersion: 1, Contract: probePlanContract, ProbeID: probeID, PlanSHA256: planSHA256, Plan: plan})
 }
 
 func auditArm(out, planPath, armName, runDir, renderedDir string) error {
@@ -125,7 +131,7 @@ func auditArm(out, planPath, armName, runDir, renderedDir string) error {
 		return err
 	}
 	result, err := run.AuditSV1DProbeArm(analysis.SV1DProbeArmAuditOptions{
-		Spec: spec, Contract: contract, Treatment: treatment,
+		Spec: spec, Contract: contract, Treatment: treatment, PlanSHA256: document.PlanSHA256,
 		Activation: analysis.CDFActivationOptions{
 			Contract: contract, EvidenceDir: runDir, RenderedEvidenceDir: renderedDir,
 			ExpectedProvenance: analysis.CDFExpectedProvenance{
@@ -167,7 +173,16 @@ func scoreArms(out, planPath, treatmentPath, modeOffPath, noRosterPath string) e
 		arms = append(arms, result.Arm)
 	}
 	score := analysis.ScoreSV1DProbe(document.Plan, arms)
-	return publishJSON(out, scoreDocument{SchemaVersion: 1, Contract: scoreContract, ProbeID: probeID, Score: score, Arms: arms})
+	if score.PlanSHA256 == "" {
+		return fmt.Errorf("could not derive canonical probe plan digest")
+	}
+	if err := publishJSON(out, scoreDocument{SchemaVersion: 1, Contract: scoreContract, ProbeID: probeID, PlanSHA256: score.PlanSHA256, Score: score, Arms: arms}); err != nil {
+		return err
+	}
+	if score.Status == analysis.SV1DProbeStatusInvalidEvidence || score.Status == analysis.SV1DProbeStatusIncompleteArm {
+		return fmt.Errorf("probe score is not executable: %s", score.Status)
+	}
+	return nil
 }
 
 func verifyCurrentAnalyzer(expectedSHA256 string) error {
@@ -200,13 +215,28 @@ func readPlan(path string) (planDocument, error) {
 	if err := readStrictJSON(path, &document); err != nil {
 		return planDocument{}, fmt.Errorf("read plan: %w", err)
 	}
-	if document.SchemaVersion != 1 || document.Contract != probePlanContract || document.ProbeID != probeID {
+	if document.SchemaVersion != 1 || document.Contract != probePlanContract || document.ProbeID != probeID || !isHexDigest(document.PlanSHA256) {
 		return planDocument{}, fmt.Errorf("plan has an invalid contract identity")
 	}
 	if err := analysis.ValidateRegisteredSV1DProbePlan(document.Plan); err != nil {
 		return planDocument{}, err
 	}
+	actualPlanSHA256, err := analysis.SV1DProbePlanSHA256(document.Plan)
+	if err != nil {
+		return planDocument{}, err
+	}
+	if document.PlanSHA256 != actualPlanSHA256 {
+		return planDocument{}, fmt.Errorf("plan digest does not match its canonical typed plan")
+	}
 	return document, nil
+}
+
+func isHexDigest(value string) bool {
+	if len(value) != sha256.Size*2 {
+		return false
+	}
+	_, err := hex.DecodeString(value)
+	return err == nil
 }
 
 func readArmResult(path string) (armResultDocument, error) {
@@ -297,7 +327,19 @@ func readStrictJSON(path string, target any) error {
 		}
 		return fmt.Errorf("trailing JSON: %w", err)
 	}
-	return json.Unmarshal(raw, target)
+	decoder = json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		return err
+	}
+	if _, err := decoder.Token(); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return fmt.Errorf("multiple top-level JSON values")
+		}
+		return fmt.Errorf("trailing JSON: %w", err)
+	}
+	return nil
 }
 
 func walkJSONTokens(decoder *json.Decoder) error {

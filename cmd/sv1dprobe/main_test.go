@@ -23,6 +23,17 @@ func TestReadStrictJSONRejectsDuplicateAndTrailingValues(t *testing.T) {
 	}
 }
 
+func TestReadStrictJSONRejectsUnknownFields(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "document.json")
+	if err := os.WriteFile(path, []byte(`{"schema_version":1,"unexpected":true}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var document planDocument
+	if err := readStrictJSON(path, &document); err == nil {
+		t.Fatal("unknown JSON field was accepted")
+	}
+}
+
 func TestPublishJSONRefusesOverwrite(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "nested", "result.json")
 	if err := publishJSON(path, map[string]string{"value": "first"}); err != nil {

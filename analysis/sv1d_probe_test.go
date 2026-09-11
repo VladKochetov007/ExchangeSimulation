@@ -187,6 +187,75 @@ func TestValidateSV1DConfigTriadRejectsEconomicOrArmDrift(t *testing.T) {
 	}
 }
 
+func TestValidateRegisteredSV1DProbePlanRejectsArmSlotDrift(t *testing.T) {
+	root := filepath.Join("..", "research", "configs", "v2-r2-sv1d-activation")
+	triad, err := ValidateSV1DConfigTriadFiles(SV1DConfigPaths{
+		Treatment: filepath.Join(root, "activation-659-treatment.json"),
+		ModeOff:   filepath.Join(root, "activation-659-mode-off.json"),
+		NoRoster:  filepath.Join(root, "activation-659-no-roster.json"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	registered, err := BuildRegisteredSV1DProbePlan(triad, strings.Repeat("a", 40), strings.Repeat("b", 64), strings.Repeat("c", 64), strings.Repeat("d", 64))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name   string
+		mutate func(*SV1DProbePlan)
+	}{
+		{name: "renamed arm", mutate: func(plan *SV1DProbePlan) { plan.Treatment.Name = "mode-off" }},
+		{name: "swapped experiment", mutate: func(plan *SV1DProbePlan) { plan.ModeOff.ExperimentID = plan.NoRoster.ExperimentID }},
+		{name: "swapped hypothesis", mutate: func(plan *SV1DProbePlan) { plan.NoRoster.HypothesisID = plan.ModeOff.HypothesisID }},
+		{name: "binary divergence", mutate: func(plan *SV1DProbePlan) { plan.NoRoster.BinarySHA256 = strings.Repeat("e", 64) }},
+		{name: "source divergence", mutate: func(plan *SV1DProbePlan) { plan.ModeOff.SourceRevision = strings.Repeat("f", 40) }},
+		{name: "duplicate config identity", mutate: func(plan *SV1DProbePlan) { plan.NoRoster.ConfigSHA256 = plan.Treatment.ConfigSHA256 }},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			candidate := registered
+			test.mutate(&candidate)
+			if err := ValidateRegisteredSV1DProbePlan(candidate); err == nil {
+				t.Fatal("registered arm drift was accepted")
+			}
+		})
+	}
+}
+
+func TestSV1DProbePlanSHA256IsDomainSeparatedAndMutationSensitive(t *testing.T) {
+	plan := testSV1DProbePlan()
+	first, err := SV1DProbePlanSHA256(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !isSV1DHexDigest(first) {
+		t.Fatalf("plan digest = %q", first)
+	}
+	mutated := plan
+	mutated.Seed++
+	second, err := SV1DProbePlanSHA256(mutated)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first == second {
+		t.Fatal("semantic plan mutation did not change plan digest")
+	}
+	legacyDigest := sha256.Sum256(mustJSON(t, plan))
+	if first == hex.EncodeToString(legacyDigest[:]) {
+		t.Fatal("plan digest lacks the registered domain separator")
+	}
+}
+
+func mustJSON(t *testing.T, value any) []byte {
+	t.Helper()
+	raw, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
+}
+
 func TestScoreSV1DProbeRejectsDurationOverflow(t *testing.T) {
 	plan := testSV1DProbePlan()
 	validArms := func() []SV1DProbeArmResult {
@@ -283,9 +352,19 @@ func TestScoreSV1DProbeRejectsInvalidIncompleteAndNonDirectionalInputs(t *testin
 			want: SV1DProbeStatusNoDirectionalEffect,
 		},
 		{
-			name:   "incomplete control",
-			mutate: func(arms []SV1DProbeArmResult) { arms[1].Complete = false },
-			want:   SV1DProbeStatusIncompleteArm,
+			name: "incomplete control",
+			mutate: func(arms []SV1DProbeArmResult) {
+				arms[1].Complete = false
+				arms[1].Venues = nil
+			},
+			want: SV1DProbeStatusIncompleteArm,
+		},
+		{
+			name: "complete arm with invalid evidence",
+			mutate: func(arms []SV1DProbeArmResult) {
+				arms[1].EvidenceValid = false
+			},
+			want: SV1DProbeStatusInvalidEvidence,
 		},
 		{
 			name:   "treatment activation missing",
@@ -333,11 +412,16 @@ func testSV1DProbePlan() SV1DProbePlan {
 }
 
 func testSV1DProbeArm(spec SV1DProbeArmSpec, complete, evidenceValid, strictMechanics, terminalValuation, activation bool, venues []CDFVenueConcentrationAudit) SV1DProbeArmResult {
+	planSHA256, err := SV1DProbePlanSHA256(testSV1DProbePlan())
+	if err != nil {
+		panic(err)
+	}
 	return SV1DProbeArmResult{
 		ArmName: spec.Name, ExperimentID: spec.ExperimentID, HypothesisID: spec.HypothesisID,
 		ConfigSHA256: spec.ConfigSHA256, SourceRevision: spec.SourceRevision, BinarySHA256: spec.BinarySHA256,
 		AnalyzerSHA256: spec.AnalyzerSHA256, RendererSHA256: spec.RendererSHA256,
-		Complete: complete, EvidenceValid: evidenceValid, StrictMechanicsValid: strictMechanics,
+		PlanSHA256: planSHA256,
+		Complete:   complete, EvidenceValid: evidenceValid, StrictMechanicsValid: strictMechanics,
 		TerminalValuationValid: terminalValuation, ActivationSatisfied: activation, AntiCheatingSatisfied: activation,
 		Venues: venues,
 	}

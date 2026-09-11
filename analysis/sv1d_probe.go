@@ -20,6 +20,7 @@ const (
 	SV1DProbeStatusAntiCheatingRejected  = "ANTI_CHEATING_REJECTED"
 	SV1DProbeStatusNoDirectionalEffect   = "NO_DIRECTIONAL_EFFECT"
 	SV1DProbeStatusPass                  = "DEVELOPMENT_PROBE_PASSES"
+	sv1dProbePlanHashDomain              = "v2-r2-sv1d-probe-plan-v2\x00"
 )
 
 // SV1DProbePlan contains the precommitted comparison boundary for one
@@ -64,6 +65,7 @@ type SV1DProbeArmResult struct {
 	BinarySHA256           string                       `json:"binary_sha256"`
 	AnalyzerSHA256         string                       `json:"analyzer_sha256"`
 	RendererSHA256         string                       `json:"renderer_sha256"`
+	PlanSHA256             string                       `json:"plan_sha256"`
 	Complete               bool                         `json:"complete"`
 	EvidenceValid          bool                         `json:"evidence_valid"`
 	StrictMechanicsValid   bool                         `json:"strict_mechanics_valid"`
@@ -82,6 +84,7 @@ type SV1DProbeArmAuditOptions struct {
 	Contract   CDFActivationContract
 	Activation CDFActivationOptions
 	Treatment  bool
+	PlanSHA256 string
 }
 
 // AuditSV1DProbeArm produces one scorer input from a production run. Controls
@@ -94,6 +97,7 @@ func (r *Run) AuditSV1DProbeArm(options SV1DProbeArmAuditOptions) (SV1DProbeArmR
 		HypothesisID: options.Spec.HypothesisID, ConfigSHA256: options.Spec.ConfigSHA256,
 		SourceRevision: options.Spec.SourceRevision, BinarySHA256: options.Spec.BinarySHA256,
 		AnalyzerSHA256: options.Spec.AnalyzerSHA256, RendererSHA256: options.Spec.RendererSHA256,
+		PlanSHA256: options.PlanSHA256,
 	}
 	if r == nil {
 		return result, fmt.Errorf("SV1D arm audit has a nil run")
@@ -106,6 +110,9 @@ func (r *Run) AuditSV1DProbeArm(options SV1DProbeArmAuditOptions) (SV1DProbeArmR
 	expected := options.Activation.ExpectedProvenance
 	if expected.ConfigSHA256 != options.Spec.ConfigSHA256 || expected.SourceRevision != options.Spec.SourceRevision || expected.BinarySHA256 != options.Spec.BinarySHA256 {
 		return result, fmt.Errorf("SV1D arm spec and expected audit provenance disagree")
+	}
+	if !options.Activation.AllowLegacyJSON && !isSV1DHexDigest(options.PlanSHA256) {
+		return result, fmt.Errorf("SV1D strict arm audit requires a canonical plan digest")
 	}
 	if !options.Activation.AllowLegacyJSON {
 		if !isSV1DHexDigest(options.Spec.AnalyzerSHA256) || !isSV1DHexDigest(options.Spec.RendererSHA256) {
@@ -250,6 +257,7 @@ type SV1DProbeAvailability struct {
 // status is meaningful only together with the component durations and failed
 // predicates.
 type SV1DProbeScore struct {
+	PlanSHA256                       string                `json:"plan_sha256"`
 	Status                           string                `json:"status"`
 	TreatmentNonTwoSidedDurationNano int64                 `json:"treatment_non_two_sided_duration_nano"`
 	ModeOffNonTwoSidedDurationNano   int64                 `json:"mode_off_non_two_sided_duration_nano"`
@@ -272,6 +280,13 @@ func ScoreSV1DProbe(plan SV1DProbePlan, arms []SV1DProbeArmResult) SV1DProbeScor
 		score.FailedPredicates = planFailures
 		return score
 	}
+	planSHA256, err := SV1DProbePlanSHA256(plan)
+	if err != nil {
+		score.Status = SV1DProbeStatusInvalidEvidence
+		score.FailedPredicates = []string{"probe plan cannot be canonically hashed: " + err.Error()}
+		return score
+	}
+	score.PlanSHA256 = planSHA256
 
 	armByName := make(map[string]SV1DProbeArmResult, len(arms))
 	for _, arm := range arms {
@@ -305,6 +320,10 @@ func ScoreSV1DProbe(plan SV1DProbePlan, arms []SV1DProbeArmResult) SV1DProbeScor
 			score.Status = SV1DProbeStatusInvalidEvidence
 			score.FailedPredicates = append(score.FailedPredicates, failures...)
 		}
+		if arm.PlanSHA256 != planSHA256 {
+			score.Status = SV1DProbeStatusInvalidEvidence
+			score.FailedPredicates = append(score.FailedPredicates, "arm plan digest does not match the canonical probe plan: "+armName)
+		}
 	}
 	if score.Status == SV1DProbeStatusInvalidEvidence {
 		return score
@@ -313,9 +332,20 @@ func ScoreSV1DProbe(plan SV1DProbePlan, arms []SV1DProbeArmResult) SV1DProbeScor
 	availabilityByArm := make(map[string]map[string]SV1DProbeAvailability, 3)
 	for _, armName := range orderedArmNames {
 		arm := armByName[armName]
-		if !arm.Complete || !arm.EvidenceValid || !arm.StrictMechanicsValid || !arm.TerminalValuationValid {
+		if !arm.Complete {
 			score.Status = SV1DProbeStatusIncompleteArm
-			score.FailedPredicates = append(score.FailedPredicates, "arm is incomplete or lacks strict terminal evidence: "+armName)
+			score.FailedPredicates = append(score.FailedPredicates, "arm did not reach the registered endpoint: "+armName)
+			continue
+		}
+		if !arm.EvidenceValid || !arm.StrictMechanicsValid {
+			score.Status = SV1DProbeStatusInvalidEvidence
+			score.FailedPredicates = append(score.FailedPredicates, "arm lacks valid strict evidence: "+armName)
+			continue
+		}
+		if !arm.TerminalValuationValid {
+			score.Status = SV1DProbeStatusIncompleteArm
+			score.FailedPredicates = append(score.FailedPredicates, "arm lacks strict terminal valuation evidence: "+armName)
+			continue
 		}
 		availability, failures := validateSV1DProbeVenues(plan, arm)
 		if len(failures) > 0 {
@@ -606,10 +636,57 @@ func ValidateRegisteredSV1DProbePlan(plan SV1DProbePlan) error {
 		!sameSV1DStrings(plan.VenueIDs, []string{"north", "central", "south"}) {
 		failures = append(failures, "probe plan differs from the registered SV1D development boundary")
 	}
+	registeredArmNames := []string{"treatment", "mode-off", "no-roster"}
+	registeredArmExperimentIDs := []string{
+		"v2-r2-sv1d-activation-659-treatment",
+		"v2-r2-sv1d-activation-659-mode-off",
+		"v2-r2-sv1d-activation-659-no-roster",
+	}
+	registeredArmHypothesisIDs := []string{
+		"V2-R2-SV1D-ONE-SIDED-ELASTIC-LIQUIDITY",
+		"V2-R2-SV1D-ONE-SIDED-ELASTIC-LIQUIDITY-MODE-OFF",
+		"V2-R2-SV1D-NO-ROSTER-CONTROL",
+	}
+	registeredArms := []SV1DProbeArmSpec{plan.Treatment, plan.ModeOff, plan.NoRoster}
+	registeredConfigHashes := make(map[string]string, len(registeredArms))
+	for index, arm := range registeredArms {
+		if arm.Name != registeredArmNames[index] || arm.ExperimentID != registeredArmExperimentIDs[index] || arm.HypothesisID != registeredArmHypothesisIDs[index] {
+			failures = append(failures, "registered SV1D arm identity differs from the preregistered triad: "+registeredArmNames[index])
+		}
+		if index > 0 && arm.BinarySHA256 != registeredArms[0].BinarySHA256 {
+			failures = append(failures, "registered SV1D arms do not share one simulator binary identity")
+		}
+		if index > 0 && (arm.SourceRevision != registeredArms[0].SourceRevision || arm.AnalyzerSHA256 != registeredArms[0].AnalyzerSHA256 || arm.RendererSHA256 != registeredArms[0].RendererSHA256) {
+			failures = append(failures, "registered SV1D arms do not share one source/tool identity")
+		}
+		if _, duplicate := registeredConfigHashes[arm.ConfigSHA256]; duplicate {
+			failures = append(failures, "registered SV1D arms do not have distinct config identities")
+		}
+		registeredConfigHashes[arm.ConfigSHA256] = registeredArmNames[index]
+	}
 	if len(failures) > 0 {
 		return fmt.Errorf("invalid registered SV1D probe plan: %s", failures[0])
 	}
 	return nil
+}
+
+// SV1DProbePlanSHA256 hashes the canonical typed plan. The digest deliberately
+// excludes the wrapper document and is therefore stable across JSON formatting
+// while remaining sensitive to every plan field and arm identity.
+func SV1DProbePlanSHA256(plan SV1DProbePlan) (string, error) {
+	raw, err := json.Marshal(plan)
+	if err != nil {
+		return "", fmt.Errorf("marshal canonical SV1D probe plan: %w", err)
+	}
+	hasher := sha256.New()
+	if _, err := hasher.Write([]byte(sv1dProbePlanHashDomain)); err != nil {
+		return "", fmt.Errorf("write canonical SV1D probe plan hash domain: %w", err)
+	}
+	if _, err := hasher.Write(raw); err != nil {
+		return "", fmt.Errorf("write canonical SV1D probe plan: %w", err)
+	}
+	digest := hasher.Sum(nil)
+	return hex.EncodeToString(digest), nil
 }
 
 // ValidateSV1DProbePlan exposes the same fixed validation used by the scorer
