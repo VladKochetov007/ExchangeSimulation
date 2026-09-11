@@ -1229,3 +1229,38 @@ about CDF liquidity or a reason to rewrite R2/SV1C/invalid-SV1D history. The
 next correction must align the actual producer/runner/renderer/audit path,
 register the probe identities, repeat mechanical gates, and obtain another
 fresh exact-tree review before capacity or execution.
+
+## Append-only current checkpoint: binary evidence/parity hardening — 2026-09-11
+
+The exact scientific tree is clean and pushed at `7e8d9fa`. The binary
+successor contract now explicitly declares `evidence_contract_version: 2` in
+all registered R2 development and reserved config identities; the simulator
+therefore emits the epoch-4 wrapped payload/global-order evidence required by
+the successor rather than silently defaulting to the legacy binary envelope.
+
+The completion contract binds the four market-data receipt sidecars to both
+the evidence manifest and run status, validates every checkpoint against the
+corresponding binary event prefix, rejects fixed-file symlinks, and requires
+nonempty microstructure and courier-latency observations for strict CDF
+completion. New regressions cover sidecar mutation, intermediate checkpoint
+hash mutation, and fixed-file symlink substitution.
+
+Parity controls now invoke the production `evsrender` binary for both full-log
+seed-607 arms, validate its report and rendered attestation against runtime
+event/frame hashes, compare actual reconstructed venue files, and bind the
+renderer clean build identity into the parity attestation. The hermetic
+archive fixture uses a contiguous epoch-4 venue sequence so this is a real
+renderer-path test rather than a copied runtime attestation.
+
+The clean bounded `GOMAXPROCS=2 GOMEMLIMIT=4GiB make test` passed on this exact
+tree, including package, integrated-long-run, R2, archive, and renderer parity
+suites. The performance feed was fetched again and has no commit after reviewed
+`b1847ac`; no performance implementation was imported. No capacity measurement,
+pinned scientific binary, SV1D probe, development cell, freeze, or holdout was
+run; holdouts `619/631/641` remain untouched.
+
+This is a mechanical evidence checkpoint, not promotion. Remaining gates are
+targeted race/fresh-process checks, one fresh exact-tree independent Sol-xhigh
+review, a measured binary capacity floor, a clean pinned Go 1.27 build, and the
+development-only SV1D activation probe with its separate treatment/mode-off/
+no-roster scoring. Historical R2/SV1C/invalid-SV1D claims remain unchanged.

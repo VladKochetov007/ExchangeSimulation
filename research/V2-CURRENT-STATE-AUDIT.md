@@ -1016,3 +1016,38 @@ The old R2 negative result and all historical SV1C/invalid-SV1D records remain
 unchanged. The next safe work is a minimal evidence/provenance correction and
 production-path regression suite. No capacity or scientific run is allowed
 from `144d151`.
+
+## Append-only checkpoint: binary successor evidence contract `7e8d9fa` — 2026-09-11
+
+The current scientific HEAD is clean, pushed, and exactly `7e8d9fa`. This
+checkpoint preserves the accepted R2 calendar/risk/economic semantics and only
+hardens successor evidence registration and verification.
+
+All seven registered R2 configs now explicitly set binary
+`evidence_contract_version` to 2, and the config checker requires it. This
+closes the prior ambiguity where `evstream_v3` with an omitted version would
+default to the legacy epoch-1 envelope. The binary evidence completion path
+now commits market-data evidence, schedules, receipts, and decisions to both
+the manifest and run status; strict checkpoint records are replayed against
+the exact binary prefixes; fixed-file symlinks are rejected; and strict
+microstructure/latency completion cannot be empty.
+
+The parity contract has an independent production-renderer pass for full-log
+dev-607 and dev-607-g8. It checks renderer build identity, source frame/event
+counts and hashes, rendered attestation, deterministic rendered venue files,
+and records renderer identity in the parity attestation. The archive fixture
+was upgraded to a contiguous epoch-4/global-sequence stream so the production
+reader is exercised in the contract test.
+
+Verification on the exact tree: focused Go suites, shell syntax and diff
+hygiene, the R2 config contract, and clean bounded
+`GOMAXPROCS=2 GOMEMLIMIT=4GiB make test` all pass. The last full gate included
+all package tests plus integrated-long-run, R2, generic archive, and R2
+renderer-parity archive suites. A fresh fetch of
+`origin/autoresearch/v2-performance-research` still has no commit after
+reviewed `b1847ac`; no performance branch implementation was merged.
+
+No capacity, pinned build, CDF probe, development cell, freeze, or holdout
+action occurred. Holdouts `619/631/641` remain untouched. This does not grant
+promotion: targeted race/fresh-process checks and one fresh exact-tree
+independent Sol-xhigh review remain before capacity or scientific execution.
