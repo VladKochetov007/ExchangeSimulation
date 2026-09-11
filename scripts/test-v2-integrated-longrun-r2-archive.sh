@@ -102,7 +102,7 @@ write_common_files() {
 	evidence_contract_version=$(jq -er '.evidence_contract_version' "$cell/run-config.json")
 	jq -n --arg revision "$current_revision" --arg experiment_id "$experiment_id" --arg log_mode "$log_mode" \
 		--argjson evidence_contract_version "$evidence_contract_version" \
-		'{build: {revision: $revision, modified: false}, config: {experiment_id: $experiment_id, evidence_format: "evstream_v3", log_mode: $log_mode, evidence_contract_version: $evidence_contract_version}}' \
+		'{schema_version: 2, build: {revision: $revision, modified: false}, config: {experiment_id: $experiment_id, evidence_format: "evstream_v3", log_mode: $log_mode, evidence_contract_version: $evidence_contract_version}}' \
 		>"$cell/manifest.json"
 	jq -n '{initial_accounts: [], terminal_accounts: []}' >"$cell/greeks.json"
 	jq -n '{latency: []}' >"$cell/latency.json"
