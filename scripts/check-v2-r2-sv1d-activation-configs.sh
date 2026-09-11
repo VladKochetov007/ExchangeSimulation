@@ -93,12 +93,13 @@ jq -e '
 	.market_data_receipt_roles == ["liability_hedger"]
 ' "$no_roster" >/dev/null || fail "no-roster arm contract failed"
 
-baseline_filter='del(.seed,.experiment_id,.hypothesis_id,.description,.date,.status,.elastic_liquidity_suppliers,.record_elastic_liquidity_supplier_decisions)'
-[[ "$(jq -S "$baseline_filter" "$treatment")" == "$(jq -S "$baseline_filter" "$mode_off")" ]] ||
-	fail "treatment/mode-off economic baseline drift"
+identity_filter='del(.experiment_id,.hypothesis_id,.description,.date,.status)'
+treatment_mode_filter="$identity_filter | del(.elastic_liquidity_suppliers[].quote_on_one_sided_local_book)"
+[[ "$(jq -S "$treatment_mode_filter" "$treatment")" == "$(jq -S "$treatment_mode_filter" "$mode_off")" ]] ||
+	fail "treatment/mode-off economic or roster baseline drift"
 
-topology_filter='del(.seed,.experiment_id,.hypothesis_id,.description,.date,.status,.elastic_liquidity_suppliers,.record_elastic_liquidity_supplier_decisions,.market_data_receipt_roles)'
-[[ "$(jq -S "$topology_filter" "$mode_off")" == "$(jq -S "$topology_filter" "$no_roster")" ]] ||
+no_roster_filter="$identity_filter | .elastic_liquidity_suppliers = [] | .record_elastic_liquidity_supplier_decisions = false | .market_data_receipt_roles = [\"liability_hedger\"]"
+[[ "$(jq -S "$no_roster_filter" "$mode_off")" == "$(jq -S "$no_roster_filter" "$no_roster")" ]] ||
 	fail "mode-off/no-roster economic baseline drift"
 
 echo "SV1D activation configs: valid immutable tri-arm shape"
