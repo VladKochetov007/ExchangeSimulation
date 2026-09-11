@@ -1339,13 +1339,70 @@ type cdfEvidenceFrameIdentity struct {
 	payloadDigest  [sha256.Size]byte
 }
 
+type cdfRenderedEvidenceSnapshot struct {
+	BinaryAttestationRaw   []byte
+	EventsRaw              []byte
+	RenderedAttestationRaw []byte
+	RenderedFiles          map[string][]byte
+}
+
 func validateCDFRenderedGlobalSequence(renderedRun *Run, evidenceDir, renderedDir string, expectedSchemaEpoch uint32) error {
-	raw, err := os.ReadFile(filepath.Join(evidenceDir, "binary-evidence-attestation.json"))
+	_ = renderedRun
+	binaryAttestationRaw, err := readSV1DRegularFile(filepath.Join(evidenceDir, "binary-evidence-attestation.json"))
 	if err != nil {
 		return fmt.Errorf("cdf activation: read binary evidence attestation: %w", err)
 	}
+	eventsRaw, err := readSV1DRegularFile(filepath.Join(evidenceDir, "events.evs"))
+	if err != nil {
+		return fmt.Errorf("cdf activation: read binary evidence source: %w", err)
+	}
+	renderedAttestationRaw, err := readSV1DRegularFile(filepath.Join(renderedDir, "rendered-binary-evidence-attestation.json"))
+	if err != nil {
+		return fmt.Errorf("cdf activation: read rendered evidence attestation: %w", err)
+	}
+	renderedFiles, err := snapshotCDFRenderedFiles(renderedDir)
+	if err != nil {
+		return err
+	}
+	return validateCDFRenderedGlobalSequenceSnapshot(cdfRenderedEvidenceSnapshot{
+		BinaryAttestationRaw: binaryAttestationRaw, EventsRaw: eventsRaw,
+		RenderedAttestationRaw: renderedAttestationRaw, RenderedFiles: renderedFiles,
+	}, expectedSchemaEpoch)
+}
+
+func snapshotCDFRenderedFiles(renderedDir string) (map[string][]byte, error) {
+	files := make(map[string][]byte)
+	if err := filepath.WalkDir(renderedDir, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.Type()&os.ModeSymlink != 0 {
+			return fmt.Errorf("cdf activation: rendered evidence contains a symlink")
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		relative, err := filepath.Rel(renderedDir, path)
+		if err != nil {
+			return err
+		}
+		raw, err := readSV1DRegularFile(path)
+		if err != nil {
+			return err
+		}
+		files[filepath.ToSlash(relative)] = raw
+		return nil
+	}); err != nil {
+		return nil, fmt.Errorf("cdf activation: snapshot rendered evidence: %w", err)
+	}
+	return files, nil
+}
+
+func validateCDFRenderedGlobalSequenceSnapshot(snapshot cdfRenderedEvidenceSnapshot, expectedSchemaEpoch uint32) error {
 	var attestation cdfBinaryEvidenceAttestation
-	if err := json.Unmarshal(raw, &attestation); err != nil {
+	if err := decodeSV1DJSONWithRequiredFields(snapshot.BinaryAttestationRaw, &attestation,
+		"domain", "ordering", "schema_epoch", "event_frames", "stream_frames",
+		"execution_stream_hash", "evidence_only_in_stream"); err != nil {
 		return fmt.Errorf("cdf activation: decode binary evidence attestation: %w", err)
 	}
 	if attestation.Domain != "canonical_binary_execution_frames" || attestation.Ordering != "ordered_stream" ||
@@ -1354,12 +1411,7 @@ func validateCDFRenderedGlobalSequence(renderedRun *Run, evidenceDir, renderedDi
 		attestation.UnencodablePayloads != 0 || expectedSchemaEpoch == 0 || attestation.SchemaEpoch != expectedSchemaEpoch {
 		return fmt.Errorf("cdf activation: binary evidence attestation is not a complete v2 successor attestation")
 	}
-	actualSource, err := os.Open(filepath.Join(evidenceDir, "events.evs"))
-	if err != nil {
-		return fmt.Errorf("cdf activation: open binary evidence source: %w", err)
-	}
-	defer actualSource.Close()
-	sourceReader, err := evstream.NewReader(actualSource, evstream.ReaderOptions{VerifyHash: true})
+	sourceReader, err := evstream.NewReader(bytes.NewReader(snapshot.EventsRaw), evstream.ReaderOptions{VerifyHash: true})
 	if err != nil {
 		return fmt.Errorf("cdf activation: read binary evidence source: %w", err)
 	}
@@ -1406,12 +1458,10 @@ func validateCDFRenderedGlobalSequence(renderedRun *Run, evidenceDir, renderedDi
 	if hex.EncodeToString(sourceDigest[:]) != attestation.ExecutionStreamHash {
 		return fmt.Errorf("cdf activation: binary source hash disagrees with attestation")
 	}
-	renderedRaw, err := os.ReadFile(filepath.Join(renderedDir, "rendered-binary-evidence-attestation.json"))
-	if err != nil {
-		return fmt.Errorf("cdf activation: read rendered evidence attestation: %w", err)
-	}
 	var rendered cdfRenderedEvidenceAttestation
-	if err := json.Unmarshal(renderedRaw, &rendered); err != nil {
+	if err := decodeSV1DJSONWithRequiredFields(snapshot.RenderedAttestationRaw, &rendered,
+		"domain", "ordering", "source_execution_stream_hash", "source_event_frames",
+		"source_stream_frames", "rendered_digest", "global_sequence_included"); err != nil {
 		return fmt.Errorf("cdf activation: decode rendered evidence attestation: %w", err)
 	}
 	if rendered.Domain != "rendered_binary_evidence" ||
@@ -1422,7 +1472,7 @@ func validateCDFRenderedGlobalSequence(renderedRun *Run, evidenceDir, renderedDi
 		!rendered.GlobalSequenceIncluded || !isCDFHex(rendered.RenderedDigest, sha256.Size) {
 		return fmt.Errorf("cdf activation: rendered evidence attestation is not bound to the binary source")
 	}
-	actualRenderedDigest, err := digestRenderedEvidenceDirectory(renderedDir)
+	actualRenderedDigest, err := digestRenderedEvidenceSnapshot(snapshot.RenderedFiles)
 	if err != nil {
 		return fmt.Errorf("cdf activation: digest rendered evidence: %w", err)
 	}
@@ -1430,42 +1480,49 @@ func validateCDFRenderedGlobalSequence(renderedRun *Run, evidenceDir, renderedDi
 		return fmt.Errorf("cdf activation: rendered evidence digest mismatch")
 	}
 	renderedByGlobal := make(map[uint64]cdfEvidenceFrameIdentity)
-	var renderedFailure error
-	venueRoot := filepath.Join(renderedDir, "venues")
-	if err := renderedRun.Scan(ScanOptions{Workers: 1}, func(event Event) {
-		if renderedFailure != nil {
-			return
+	paths := make([]string, 0, len(snapshot.RenderedFiles))
+	for path := range snapshot.RenderedFiles {
+		if strings.HasPrefix(path, "venues/") && strings.HasSuffix(path, ".jsonl") {
+			paths = append(paths, path)
 		}
-		if event.GlobalSequence == 0 || event.LocalSequence == 0 || event.VenueID == "" || event.Name == "" {
-			renderedFailure = fmt.Errorf("cdf activation: rendered event has incomplete global/local identity")
-			return
-		}
-		relative, err := filepath.Rel(venueRoot, event.File)
-		if err != nil {
-			renderedFailure = fmt.Errorf("cdf activation: derive rendered route: %w", err)
-			return
-		}
-		parts := strings.Split(filepath.ToSlash(relative), "/")
-		if len(parts) < 2 || parts[0] == "" || parts[0] != event.VenueID {
-			renderedFailure = fmt.Errorf("cdf activation: rendered event path is not venue-qualified")
-			return
-		}
-		identity := cdfEvidenceFrameIdentity{
-			globalSequence: event.GlobalSequence, localSequence: event.LocalSequence,
-			simTS: event.SimTS, clientID: event.ClientID, venueID: event.VenueID,
-			route: strings.Join(parts[1:], "/"), eventName: event.Name,
-			payloadDigest: sha256.Sum256(event.FrameRaw()),
-		}
-		if _, duplicate := renderedByGlobal[event.GlobalSequence]; duplicate {
-			renderedFailure = fmt.Errorf("cdf activation: rendered evidence repeats global frame sequence %d", event.GlobalSequence)
-			return
-		}
-		renderedByGlobal[event.GlobalSequence] = identity
-	}); err != nil {
-		return fmt.Errorf("cdf activation: scan rendered evidence identities: %w", err)
 	}
-	if renderedFailure != nil {
-		return renderedFailure
+	sort.Strings(paths)
+	for _, path := range paths {
+		relative := strings.TrimPrefix(path, "venues/")
+		parts := strings.Split(relative, "/")
+		if len(parts) < 2 || parts[0] == "" {
+			return fmt.Errorf("cdf activation: rendered event path is not venue-qualified")
+		}
+		venueID := parts[0]
+		route := strings.Join(parts[1:], "/")
+		scanner := bufio.NewScanner(bytes.NewReader(snapshot.RenderedFiles[path]))
+		scanner.Buffer(make([]byte, 64*1024), 16*1024*1024)
+		for scanner.Scan() {
+			line := scanner.Bytes()
+			var envelope envelope
+			if err := json.Unmarshal(line, &envelope); err != nil {
+				return fmt.Errorf("cdf activation: parse rendered evidence %s: %w", relative, err)
+			}
+			var data dataLayer
+			if err := json.Unmarshal(envelope.Data, &data); err != nil {
+				return fmt.Errorf("cdf activation: parse rendered evidence data %s: %w", relative, err)
+			}
+			if data.GlobalSequence == 0 || data.Sequence == 0 || data.VenueID == "" || data.VenueID != venueID || envelope.Event == "" {
+				return fmt.Errorf("cdf activation: rendered event has incomplete global/local identity")
+			}
+			identity := cdfEvidenceFrameIdentity{
+				globalSequence: data.GlobalSequence, localSequence: data.Sequence,
+				simTS: envelope.SimTS, clientID: envelope.ClientID, venueID: data.VenueID,
+				route: route, eventName: envelope.Event, payloadDigest: sha256.Sum256(data.Payload),
+			}
+			if _, duplicate := renderedByGlobal[data.GlobalSequence]; duplicate {
+				return fmt.Errorf("cdf activation: rendered evidence repeats global frame sequence %d", data.GlobalSequence)
+			}
+			renderedByGlobal[data.GlobalSequence] = identity
+		}
+		if err := scanner.Err(); err != nil {
+			return fmt.Errorf("cdf activation: scan rendered evidence %s: %w", relative, err)
+		}
 	}
 	if uint64(len(renderedByGlobal)) != attestation.EventFrames {
 		return fmt.Errorf("cdf activation: rendered identity count %d does not match binary event frames %d", len(renderedByGlobal), attestation.EventFrames)

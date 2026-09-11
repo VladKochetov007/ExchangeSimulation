@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -248,6 +249,74 @@ type sv1dCapacityRendererReport struct {
 	RenderedDigest      string `json:"rendered_digest"`
 }
 
+type sv1dCapacityArmSnapshot struct {
+	armFiles      map[string][]byte
+	renderedFiles map[string][]byte
+	retainedFiles map[string][]byte
+	configRaw     []byte
+}
+
+var sv1dCapacityArmArtifactNames = []string{
+	"run-config.json", "run-metadata.json", "manifest.json", "run-status.json",
+	"evidence-manifest.json", "binary-evidence-attestation.json", "events.evs",
+	"renderer-report.json", "greeks.json", "latency.json", "checkpoints.jsonl",
+	"market-data-evidence-v2.json", "market-data-schedules-v2.bin",
+	"market-data-receipts-v2.bin", "market-data-decisions-v2.bin",
+}
+
+func snapshotSV1DCapacityArm(attestation SV1DCapacityAttestation, arm SV1DCapacityArm) (sv1dCapacityArmSnapshot, error) {
+	armDir := filepath.Join(attestation.MeasurementRoot, "arms", arm.Name)
+	renderedDir := filepath.Join(attestation.MeasurementRoot, "rendered", arm.Name)
+	snapshot := sv1dCapacityArmSnapshot{
+		armFiles:      make(map[string][]byte, len(sv1dCapacityArmArtifactNames)),
+		renderedFiles: make(map[string][]byte),
+		retainedFiles: make(map[string][]byte, 1),
+	}
+	for _, name := range sv1dCapacityArmArtifactNames {
+		raw, err := readSV1DRegularFile(filepath.Join(armDir, name))
+		if err != nil {
+			return sv1dCapacityArmSnapshot{}, fmt.Errorf("capacity arm %s: read %s: %w", arm.Name, name, err)
+		}
+		snapshot.armFiles[name] = raw
+	}
+	configPath := filepath.Join(attestation.MeasurementRoot, "configs", "capacity-"+arm.Name+".json")
+	configRaw, err := readSV1DRegularFile(configPath)
+	if err != nil {
+		return sv1dCapacityArmSnapshot{}, fmt.Errorf("capacity arm %s: read retained config: %w", arm.Name, err)
+	}
+	snapshot.configRaw = configRaw
+	binaryPath := filepath.Join(attestation.MeasurementRoot, "tools", "multivenue-"+attestation.BinarySHA256)
+	binaryRaw, err := readSV1DRegularFile(binaryPath)
+	if err != nil {
+		return sv1dCapacityArmSnapshot{}, fmt.Errorf("capacity arm %s: read retained simulator: %w", arm.Name, err)
+	}
+	snapshot.retainedFiles["simulator"] = binaryRaw
+	if err := filepath.WalkDir(renderedDir, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.Type()&os.ModeSymlink != 0 {
+			return fmt.Errorf("capacity arm %s: rendered tree contains a symlink", arm.Name)
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		relative, err := filepath.Rel(renderedDir, path)
+		if err != nil {
+			return err
+		}
+		raw, err := readSV1DRegularFile(path)
+		if err != nil {
+			return err
+		}
+		snapshot.renderedFiles[filepath.ToSlash(relative)] = raw
+		return nil
+	}); err != nil {
+		return sv1dCapacityArmSnapshot{}, fmt.Errorf("capacity arm %s: snapshot rendered tree: %w", arm.Name, err)
+	}
+	return snapshot, nil
+}
+
 // ValidateSV1DCapacityAttestation checks intrinsic completeness and formulas.
 // It does not trust any source/config/tool identity until Verify... compares
 // them with an external expectation.
@@ -345,6 +414,9 @@ func VerifySV1DCapacityAttestation(path string, expected SV1DCapacityExpectation
 	if err := compareSV1DCapacityExpectation(attestation, expected); err != nil {
 		return attestation, err
 	}
+	if err := verifySV1DCapacityRetainedInputs(attestation); err != nil {
+		return attestation, err
+	}
 	if err := verifySV1DCapacityMeasurementRecords(attestation, expected); err != nil {
 		return attestation, err
 	}
@@ -406,6 +478,9 @@ func verifySV1DCapacityMeasurementRecords(attestation SV1DCapacityAttestation, e
 			if armIndex >= len(expectedArmNames) {
 				return fmt.Errorf("SV1D capacity measurement manifest has too many resource records")
 			}
+			if err := validateSV1DResourceMeasurementJSONPresence(fileRaw); err != nil {
+				return fmt.Errorf("validate SV1D resource measurement %s: %w", file.Path, err)
+			}
 			var measurement SV1DResourceMeasurement
 			if err := decodeStrictSV1DCapacityJSON(fileRaw, &measurement, jsonFieldNames(reflect.TypeOf(measurement), false)...); err != nil {
 				return fmt.Errorf("decode SV1D resource measurement %s: %w", file.Path, err)
@@ -459,6 +534,9 @@ func verifySV1DCapacityMeasurementRecords(attestation SV1DCapacityAttestation, e
 	}
 	if uint64(len(sampleRaw)) == 0 || uint64(len(sampleRaw)) != manifest.SampleAggregate.Bytes || sha256DigestHex(sampleRaw) != manifest.SampleAggregate.SHA256 {
 		return fmt.Errorf("SV1D capacity sample aggregate does not match its manifest")
+	}
+	if err := validateSV1DCapacitySampleAggregateJSONPresence(sampleRaw); err != nil {
+		return fmt.Errorf("SV1D capacity sample aggregate is incomplete or malformed: %w", err)
 	}
 	var samples []sv1dCapacitySampleAggregateEntry
 	if err := decodeStrictSV1DCapacityJSON(sampleRaw, &samples); err != nil || len(samples) == 0 {
@@ -602,8 +680,12 @@ func requireSV1DJSONFields(raw []byte, fields ...string) error {
 		return errors.New("required fields must be in a JSON object")
 	}
 	for _, field := range fields {
-		if _, ok := object[field]; !ok {
+		value, ok := object[field]
+		if !ok {
 			return fmt.Errorf("missing %s", field)
+		}
+		if bytes.Equal(bytes.TrimSpace(value), []byte("null")) {
+			return fmt.Errorf("null %s", field)
 		}
 	}
 	return nil
@@ -630,11 +712,59 @@ func validateSV1DCapacityAttestationJSONPresence(raw []byte) error {
 	return nil
 }
 
+func validateSV1DResourceMeasurementJSONPresence(raw []byte) error {
+	var envelope struct {
+		Samples []json.RawMessage `json:"samples"`
+	}
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		return fmt.Errorf("decode samples: %w", err)
+	}
+	if envelope.Samples == nil {
+		return errors.New("samples is missing or null")
+	}
+	for index, sampleRaw := range envelope.Samples {
+		if err := requireSV1DJSONFields(sampleRaw, jsonFieldNames(reflect.TypeOf(SV1DResourceSample{}), true)...); err != nil {
+			return fmt.Errorf("sample %d: %w", index, err)
+		}
+	}
+	return nil
+}
+
+func validateSV1DCapacitySampleAggregateJSONPresence(raw []byte) error {
+	var entries []json.RawMessage
+	if err := json.Unmarshal(raw, &entries); err != nil {
+		return fmt.Errorf("decode entries: %w", err)
+	}
+	if entries == nil {
+		return errors.New("sample aggregate is not an array")
+	}
+	for index, entryRaw := range entries {
+		if err := requireSV1DJSONFields(entryRaw, "arm", "sample"); err != nil {
+			return fmt.Errorf("entry %d: %w", index, err)
+		}
+		var entry struct {
+			Sample json.RawMessage `json:"sample"`
+		}
+		if err := json.Unmarshal(entryRaw, &entry); err != nil {
+			return fmt.Errorf("decode entry %d: %w", index, err)
+		}
+		if err := requireSV1DJSONFields(entry.Sample, jsonFieldNames(reflect.TypeOf(SV1DResourceSample{}), true)...); err != nil {
+			return fmt.Errorf("entry %d sample: %w", index, err)
+		}
+	}
+	return nil
+}
+
 func validateSV1DCapacityResourceCommand(measurement SV1DResourceMeasurement, attestation SV1DCapacityAttestation, arm SV1DCapacityArm) error {
-	if len(measurement.Command) != 13 || !absoluteCleanPath(measurement.Command[0]) || filepath.Base(measurement.Command[0]) != "capacity-runner.sh" {
+	root := attestation.MeasurementRoot
+	expectedRunner := filepath.Join(root, "tools", "capacity-runner-"+attestation.RunnerSHA256+".sh")
+	if len(measurement.Command) != 13 || measurement.Command[0] != expectedRunner {
 		return errors.New("capacity runner command has an invalid wrapper")
 	}
-	root := attestation.MeasurementRoot
+	runnerRaw, err := readSV1DRegularFile(expectedRunner)
+	if err != nil || sha256DigestHex(runnerRaw) != attestation.RunnerSHA256 {
+		return errors.New("capacity runner command is not bound to the retained wrapper")
+	}
 	expected := []string{
 		"--internal-arm",
 		arm.Name,
@@ -661,24 +791,28 @@ func verifySV1DCapacityArmArtifacts(attestation SV1DCapacityAttestation, armInde
 	arm := attestation.Arms[armIndex]
 	armDir := filepath.Join(attestation.MeasurementRoot, "arms", arm.Name)
 	renderedDir := filepath.Join(attestation.MeasurementRoot, "rendered", arm.Name)
-	if err := verifySV1DCapacityArmArtifactDigests(attestation, arm, armDir, renderedDir, armIndex); err != nil {
-		return err
-	}
-	if err := verifySV1DCapacityArmRunMetadata(attestation, arm, armDir); err != nil {
-		return err
-	}
-	status, err := verifySV1DCapacityArmRunStatus(arm, armDir)
+	snapshot, err := snapshotSV1DCapacityArm(attestation, arm)
 	if err != nil {
 		return err
 	}
-	evidenceManifest, err := verifySV1DCapacityArmEvidenceManifest(attestation, arm, armDir)
+	if err := verifySV1DCapacityArmArtifactDigests(attestation, arm, snapshot, armIndex); err != nil {
+		return err
+	}
+	if err := verifySV1DCapacityArmRunMetadata(attestation, arm, armDir, snapshot); err != nil {
+		return err
+	}
+	status, err := verifySV1DCapacityArmRunStatus(arm, armDir, snapshot)
 	if err != nil {
 		return err
 	}
-	if err := verifySV1DCapacityArmBinaryEvidence(attestation, arm, armDir); err != nil {
+	evidenceManifest, err := verifySV1DCapacityArmEvidenceManifest(attestation, arm, armDir, snapshot)
+	if err != nil {
 		return err
 	}
-	if err := verifySV1DCapacityArmRenderer(attestation, arm, armDir, renderedDir); err != nil {
+	if err := verifySV1DCapacityArmBinaryEvidence(attestation, arm, armDir, snapshot); err != nil {
+		return err
+	}
+	if err := verifySV1DCapacityArmRenderer(attestation, arm, armDir, renderedDir, snapshot); err != nil {
 		return err
 	}
 	if status.RunMetadataSHA256 != arm.RunMetadataSHA256 || status.ManifestSHA256 != arm.ManifestSHA256 || status.EvidenceManifestSHA256 != arm.EvidenceManifestSHA256 || status.BinaryEvidenceAttestationSHA256 != arm.BinaryEvidenceAttestationSHA256 || len(evidenceManifest.FixedFiles) == 0 {
@@ -687,7 +821,7 @@ func verifySV1DCapacityArmArtifacts(attestation SV1DCapacityAttestation, armInde
 	return nil
 }
 
-func verifySV1DCapacityArmArtifactDigests(attestation SV1DCapacityAttestation, arm SV1DCapacityArm, armDir, renderedDir string, armIndex int) error {
+func verifySV1DCapacityArmArtifactDigests(attestation SV1DCapacityAttestation, arm SV1DCapacityArm, snapshot sv1dCapacityArmSnapshot, armIndex int) error {
 	artifactDigests := []struct {
 		name   string
 		digest string
@@ -701,32 +835,22 @@ func verifySV1DCapacityArmArtifactDigests(attestation SV1DCapacityAttestation, a
 		{"renderer-report.json", arm.RendererReportSHA256},
 	}
 	for _, artifact := range artifactDigests {
-		raw, err := readSV1DRegularFile(filepath.Join(armDir, artifact.name))
-		if err != nil {
-			return fmt.Errorf("SV1D capacity arm %s: read %s: %w", arm.Name, artifact.name, err)
-		}
-		if len(raw) == 0 || sha256DigestHex(raw) != artifact.digest {
+		raw, ok := snapshot.armFiles[artifact.name]
+		if !ok || len(raw) == 0 || sha256DigestHex(raw) != artifact.digest {
 			return fmt.Errorf("SV1D capacity arm %s: %s is not bound to its attested digest", arm.Name, artifact.name)
 		}
 	}
-	rendererAttestationRaw, err := readSV1DRegularFile(filepath.Join(renderedDir, "renderer-attestation.json"))
-	if err != nil {
-		return fmt.Errorf("SV1D capacity arm %s: read rendered renderer-attestation.json: %w", arm.Name, err)
-	}
-	if len(rendererAttestationRaw) == 0 || sha256DigestHex(rendererAttestationRaw) != arm.RendererAttestationSHA256 {
+	rendererAttestationRaw, ok := snapshot.renderedFiles["renderer-attestation.json"]
+	if !ok || len(rendererAttestationRaw) == 0 || sha256DigestHex(rendererAttestationRaw) != arm.RendererAttestationSHA256 {
 		return fmt.Errorf("SV1D capacity arm %s: rendered renderer-attestation.json is not bound to its attested digest", arm.Name)
 	}
-	configPath := filepath.Join(attestation.MeasurementRoot, "configs", "capacity-"+arm.Name+".json")
-	configRaw, err := readSV1DRegularFile(configPath)
-	if err != nil {
-		return fmt.Errorf("SV1D capacity arm %s: read retained config: %w", arm.Name, err)
-	}
+	configRaw := snapshot.configRaw
 	if sha256DigestHex(configRaw) != arm.CapacityConfigSHA256 || sha256DigestHex(configRaw) != sv1dCapacityConfigDigest(attestation, armIndex) {
 		return fmt.Errorf("SV1D capacity arm %s: retained config is not bound to its attestation", arm.Name)
 	}
-	runConfigRaw, err := readSV1DRegularFile(filepath.Join(armDir, "run-config.json"))
-	if err != nil {
-		return fmt.Errorf("SV1D capacity arm %s: read executed config: %w", arm.Name, err)
+	runConfigRaw, ok := snapshot.armFiles["run-config.json"]
+	if !ok {
+		return fmt.Errorf("SV1D capacity arm %s: executed config is not retained", arm.Name)
 	}
 	if sha256DigestHex(runConfigRaw) != sha256DigestHex(configRaw) {
 		return fmt.Errorf("SV1D capacity arm %s: executed config differs from retained capacity config", arm.Name)
@@ -734,10 +858,10 @@ func verifySV1DCapacityArmArtifactDigests(attestation SV1DCapacityAttestation, a
 	return nil
 }
 
-func verifySV1DCapacityArmRunMetadata(attestation SV1DCapacityAttestation, arm SV1DCapacityArm, armDir string) error {
-	metadataRaw, err := readSV1DRegularFile(filepath.Join(armDir, "run-metadata.json"))
-	if err != nil {
-		return fmt.Errorf("SV1D capacity arm %s: read run metadata: %w", arm.Name, err)
+func verifySV1DCapacityArmRunMetadata(attestation SV1DCapacityAttestation, arm SV1DCapacityArm, armDir string, snapshot sv1dCapacityArmSnapshot) error {
+	metadataRaw, ok := snapshot.armFiles["run-metadata.json"]
+	if !ok {
+		return fmt.Errorf("SV1D capacity arm %s: run metadata is not retained", arm.Name)
 	}
 	var metadata sv1dCapacityRunMetadata
 	if err := decodeSV1DJSONWithRequiredFields(metadataRaw, &metadata, jsonFieldNames(reflect.TypeOf(metadata), true)...); err != nil {
@@ -746,16 +870,21 @@ func verifySV1DCapacityArmRunMetadata(attestation SV1DCapacityAttestation, arm S
 	if metadata.SchemaVersion != 1 || metadata.RunnerContract != "v2-r2-sv1d-capacity-runner-v1" || metadata.ProbeID != attestation.ProbeID || !metadata.CapacityOnly || metadata.ScientificResultEligible || metadata.Arm != arm.Name || metadata.ExperimentID != arm.CapacityExperimentID || metadata.ConfigExperimentID != arm.CapacityExperimentID || metadata.HypothesisID != arm.CapacityHypothesisID || metadata.Seed != SV1DCapacitySeed || metadata.SimulatedHorizon != "5m" || metadata.SimulationStartNano != int64(SV1DCapacityStartNano) || metadata.SimulationEndNano != int64(SV1DCapacityEndNano) || metadata.ConfigSHA256 != arm.CapacityConfigSHA256 || metadata.BinarySHA256 != attestation.BinarySHA256 || metadata.GitRevision != attestation.SourceRevision || metadata.AnalyzerSHA256 != attestation.AnalyzerSHA256 || metadata.RendererSHA256 != attestation.RendererSHA256 || metadata.LogMode != "full" || metadata.EvidenceFormat != "evstream_v3" || metadata.GOMAXPROCS != SV1DCapacityGOMAXPROCS || metadata.OutputDir != armDir || metadata.Holdout {
 		return fmt.Errorf("SV1D capacity arm %s: run metadata identity is inconsistent", arm.Name)
 	}
-	if !absoluteCleanPath(metadata.BinaryPath) || filepath.Base(metadata.BinaryPath) != "multivenue-"+attestation.BinarySHA256 || metadata.BinaryGoVersion == "" || metadata.BinaryGOOS != "linux" || metadata.BinaryGOARCH != "amd64" || metadata.BinaryGOAMD64 != "v1" {
+	expectedBinaryPath := filepath.Join(attestation.MeasurementRoot, "tools", "multivenue-"+attestation.BinarySHA256)
+	if metadata.BinaryPath != expectedBinaryPath || metadata.BinaryGoVersion == "" || metadata.BinaryGOOS != "linux" || metadata.BinaryGOARCH != "amd64" || metadata.BinaryGOAMD64 != "v1" {
 		return fmt.Errorf("SV1D capacity arm %s: run metadata has an invalid simulator identity", arm.Name)
+	}
+	binaryRaw, ok := snapshot.retainedFiles["simulator"]
+	if !ok || sha256DigestHex(binaryRaw) != attestation.BinarySHA256 {
+		return fmt.Errorf("SV1D capacity arm %s: run metadata simulator is not retained", arm.Name)
 	}
 	return nil
 }
 
-func verifySV1DCapacityArmRunStatus(arm SV1DCapacityArm, armDir string) (sv1dCapacityRunStatus, error) {
-	statusRaw, err := readSV1DRegularFile(filepath.Join(armDir, "run-status.json"))
-	if err != nil {
-		return sv1dCapacityRunStatus{}, fmt.Errorf("SV1D capacity arm %s: read run status: %w", arm.Name, err)
+func verifySV1DCapacityArmRunStatus(arm SV1DCapacityArm, armDir string, snapshot sv1dCapacityArmSnapshot) (sv1dCapacityRunStatus, error) {
+	statusRaw, ok := snapshot.armFiles["run-status.json"]
+	if !ok {
+		return sv1dCapacityRunStatus{}, fmt.Errorf("SV1D capacity arm %s: run status is not retained", arm.Name)
 	}
 	var status sv1dCapacityRunStatus
 	if err := decodeSV1DJSONWithRequiredFields(statusRaw, &status,
@@ -774,18 +903,18 @@ func verifySV1DCapacityArmRunStatus(arm SV1DCapacityArm, armDir string) (sv1dCap
 		if !isSV1DHexDigest(artifact.digest) {
 			return sv1dCapacityRunStatus{}, fmt.Errorf("SV1D capacity arm %s: run status has no valid %s digest", arm.Name, artifact.name)
 		}
-		raw, err := readSV1DRegularFile(filepath.Join(armDir, artifact.name))
-		if err != nil || sha256DigestHex(raw) != artifact.digest {
+		raw, ok := snapshot.armFiles[artifact.name]
+		if !ok || sha256DigestHex(raw) != artifact.digest {
 			return sv1dCapacityRunStatus{}, fmt.Errorf("SV1D capacity arm %s: run status %s digest is not retained", arm.Name, artifact.name)
 		}
 	}
 	return status, nil
 }
 
-func verifySV1DCapacityArmEvidenceManifest(attestation SV1DCapacityAttestation, arm SV1DCapacityArm, armDir string) (cdfEvidenceManifest, error) {
-	manifestRaw, err := readSV1DRegularFile(filepath.Join(armDir, "evidence-manifest.json"))
-	if err != nil {
-		return cdfEvidenceManifest{}, fmt.Errorf("SV1D capacity arm %s: read evidence manifest: %w", arm.Name, err)
+func verifySV1DCapacityArmEvidenceManifest(attestation SV1DCapacityAttestation, arm SV1DCapacityArm, armDir string, snapshot sv1dCapacityArmSnapshot) (cdfEvidenceManifest, error) {
+	manifestRaw, ok := snapshot.armFiles["evidence-manifest.json"]
+	if !ok {
+		return cdfEvidenceManifest{}, fmt.Errorf("SV1D capacity arm %s: evidence manifest is not retained", arm.Name)
 	}
 	var evidenceManifest cdfEvidenceManifest
 	if err := decodeSV1DJSONWithRequiredFields(manifestRaw, &evidenceManifest, "schema_version", "contract", "cell", "log_mode", "evidence_format", "source_revision", "fixed_files", "raw_jsonl_files", "raw_jsonl_bytes", "raw_files"); err != nil {
@@ -795,19 +924,19 @@ func verifySV1DCapacityArmEvidenceManifest(attestation SV1DCapacityAttestation, 
 		return cdfEvidenceManifest{}, fmt.Errorf("SV1D capacity arm %s: evidence manifest identity is inconsistent", arm.Name)
 	}
 	requiredEvidenceFiles := []string{"run-config.json", "run-metadata.json", "manifest.json", "greeks.json", "latency.json", "checkpoints.jsonl", "events.evs", "binary-evidence-attestation.json", "market-data-evidence-v2.json", "market-data-schedules-v2.bin", "market-data-receipts-v2.bin", "market-data-decisions-v2.bin"}
-	if err := verifySV1DCapacityEvidenceFiles(armDir, evidenceManifest.FixedFiles, requiredEvidenceFiles); err != nil {
+	if err := verifySV1DCapacityEvidenceFiles(snapshot.armFiles, evidenceManifest.FixedFiles, requiredEvidenceFiles); err != nil {
 		return cdfEvidenceManifest{}, fmt.Errorf("SV1D capacity arm %s: %w", arm.Name, err)
 	}
 	return evidenceManifest, nil
 }
 
-func verifySV1DCapacityArmBinaryEvidence(attestation SV1DCapacityAttestation, arm SV1DCapacityArm, armDir string) error {
-	binaryRaw, err := readSV1DRegularFile(filepath.Join(armDir, "binary-evidence-attestation.json"))
-	if err != nil {
-		return fmt.Errorf("SV1D capacity arm %s: read binary attestation: %w", arm.Name, err)
+func verifySV1DCapacityArmBinaryEvidence(attestation SV1DCapacityAttestation, arm SV1DCapacityArm, armDir string, snapshot sv1dCapacityArmSnapshot) error {
+	binaryRaw, ok := snapshot.armFiles["binary-evidence-attestation.json"]
+	if !ok {
+		return fmt.Errorf("SV1D capacity arm %s: binary attestation is not retained", arm.Name)
 	}
 	var binaryAttestation cdfBinaryEvidenceAttestation
-	if err := decodeSV1DJSONWithRequiredFields(binaryRaw, &binaryAttestation, "domain", "ordering", "schema_epoch", "event_frames", "stream_frames", "execution_stream_hash", "evidence_only_in_stream", "unencodable_payloads"); err != nil {
+	if err := decodeSV1DJSONWithRequiredFields(binaryRaw, &binaryAttestation, "domain", "ordering", "schema_epoch", "event_frames", "stream_frames", "execution_stream_hash", "evidence_only_in_stream"); err != nil {
 		return fmt.Errorf("SV1D capacity arm %s: decode binary attestation: %w", arm.Name, err)
 	}
 	if binaryAttestation.Domain != "canonical_binary_execution_frames" || binaryAttestation.Ordering != "ordered_stream" || binaryAttestation.SchemaEpoch != SV1DCapacityEvidenceSchemaEpoch || binaryAttestation.EventFrames != arm.EventFrames || binaryAttestation.StreamFrames != arm.StreamFrames || binaryAttestation.ExecutionStreamHash != arm.ExecutionStreamHash || !binaryAttestation.EvidenceOnlyIncluded || binaryAttestation.UnencodablePayloads != 0 {
@@ -816,10 +945,10 @@ func verifySV1DCapacityArmBinaryEvidence(attestation SV1DCapacityAttestation, ar
 	return nil
 }
 
-func verifySV1DCapacityArmRenderer(attestation SV1DCapacityAttestation, arm SV1DCapacityArm, armDir, renderedDir string) error {
-	reportRaw, err := readSV1DRegularFile(filepath.Join(armDir, "renderer-report.json"))
-	if err != nil {
-		return fmt.Errorf("SV1D capacity arm %s: read renderer report: %w", arm.Name, err)
+func verifySV1DCapacityArmRenderer(attestation SV1DCapacityAttestation, arm SV1DCapacityArm, armDir, renderedDir string, snapshot sv1dCapacityArmSnapshot) error {
+	reportRaw, ok := snapshot.armFiles["renderer-report.json"]
+	if !ok {
+		return fmt.Errorf("SV1D capacity arm %s: renderer report is not retained", arm.Name)
 	}
 	var report sv1dCapacityRendererReport
 	if err := decodeSV1DJSONWithRequiredFields(reportRaw, &report, jsonFieldNames(reflect.TypeOf(report), true)...); err != nil {
@@ -828,9 +957,9 @@ func verifySV1DCapacityArmRenderer(attestation SV1DCapacityAttestation, arm SV1D
 	if report.EventFrames != arm.EventFrames || report.DictionaryFrames+report.EventFrames != report.StreamFrames || report.StreamFrames != arm.StreamFrames || report.ExecutionStreamHash != arm.ExecutionStreamHash || report.Routes == 0 || report.RenderedDigest != arm.RenderedTreeDigest || !isSV1DHexDigest(report.RenderedDigest) {
 		return fmt.Errorf("SV1D capacity arm %s: renderer report identity is inconsistent", arm.Name)
 	}
-	renderedAttestationRaw, err := readSV1DRegularFile(filepath.Join(renderedDir, "rendered-binary-evidence-attestation.json"))
-	if err != nil {
-		return fmt.Errorf("SV1D capacity arm %s: read rendered binary attestation: %w", arm.Name, err)
+	renderedAttestationRaw, ok := snapshot.renderedFiles["rendered-binary-evidence-attestation.json"]
+	if !ok {
+		return fmt.Errorf("SV1D capacity arm %s: rendered binary attestation is not retained", arm.Name)
 	}
 	var renderedAttestation cdfRenderedEvidenceAttestation
 	if err := decodeSV1DJSONWithRequiredFields(renderedAttestationRaw, &renderedAttestation, "domain", "ordering", "source_execution_stream_hash", "source_event_frames", "source_stream_frames", "rendered_digest", "global_sequence_included"); err != nil {
@@ -839,11 +968,23 @@ func verifySV1DCapacityArmRenderer(attestation SV1DCapacityAttestation, arm SV1D
 	if renderedAttestation.Domain != "rendered_binary_evidence" || renderedAttestation.Ordering != "venue_sequence_files_with_global_frame_identity" || renderedAttestation.SourceExecutionHash != arm.ExecutionStreamHash || renderedAttestation.SourceEventFrames != arm.EventFrames || renderedAttestation.SourceStreamFrames != arm.StreamFrames || renderedAttestation.RenderedDigest != arm.RenderedTreeDigest || !renderedAttestation.GlobalSequenceIncluded {
 		return fmt.Errorf("SV1D capacity arm %s: rendered binary attestation identity is inconsistent", arm.Name)
 	}
-	if err := validateSV1DRendererAttestation(renderedDir, CDFExpectedProvenance{
+	rendererAttestationRaw, ok := snapshot.renderedFiles["renderer-attestation.json"]
+	if !ok {
+		return fmt.Errorf("SV1D capacity arm %s: renderer attestation is not retained", arm.Name)
+	}
+	if err := validateSV1DRendererAttestationRaw(rendererAttestationRaw, renderedAttestationRaw, CDFExpectedProvenance{
 		RendererSHA256: attestation.RendererSHA256, RendererSourceRevision: attestation.SourceRevision,
 		RendererGOOS: "linux", RendererGOARCH: "amd64", RendererGOAMD64: "v1", RendererTrimpath: true, RendererCGOEnabled: "0",
 	}); err != nil {
 		return fmt.Errorf("SV1D capacity arm %s: renderer provenance: %w", arm.Name, err)
+	}
+	if err := validateCDFRenderedGlobalSequenceSnapshot(cdfRenderedEvidenceSnapshot{
+		BinaryAttestationRaw:   snapshot.armFiles["binary-evidence-attestation.json"],
+		EventsRaw:              snapshot.armFiles["events.evs"],
+		RenderedAttestationRaw: renderedAttestationRaw,
+		RenderedFiles:          snapshot.renderedFiles,
+	}, SV1DCapacityEvidenceSchemaEpoch); err != nil {
+		return fmt.Errorf("SV1D capacity arm %s: rendered evidence identity: %w", arm.Name, err)
 	}
 	return nil
 }
@@ -861,7 +1002,7 @@ func sv1dCapacityConfigDigest(attestation SV1DCapacityAttestation, armIndex int)
 	}
 }
 
-func verifySV1DCapacityEvidenceFiles(dir string, records []cdfEvidenceManifestRecord, required []string) error {
+func verifySV1DCapacityEvidenceFiles(files map[string][]byte, records []cdfEvidenceManifestRecord, required []string) error {
 	byPath := make(map[string]cdfEvidenceManifestRecord, len(records))
 	for _, record := range records {
 		if record.Path == "" || filepath.IsAbs(record.Path) || filepath.Clean(record.Path) != record.Path || strings.HasPrefix(record.Path, "../") || record.Bytes <= 0 || !isSV1DHexDigest(record.SHA256) {
@@ -871,9 +1012,9 @@ func verifySV1DCapacityEvidenceFiles(dir string, records []cdfEvidenceManifestRe
 			return fmt.Errorf("evidence manifest repeats %s", record.Path)
 		}
 		byPath[record.Path] = record
-		raw, err := readSV1DRegularFile(filepath.Join(dir, filepath.FromSlash(record.Path)))
-		if err != nil {
-			return fmt.Errorf("evidence manifest fixed file %s is unavailable: %w", record.Path, err)
+		raw, ok := files[record.Path]
+		if !ok {
+			return fmt.Errorf("evidence manifest fixed file %s is unavailable", record.Path)
 		}
 		if uint64(len(raw)) != uint64(record.Bytes) || sha256DigestHex(raw) != record.SHA256 {
 			return fmt.Errorf("evidence manifest fixed file %s is not retained", record.Path)
@@ -926,10 +1067,47 @@ func validateSV1DCapacityArms(attestation SV1DCapacityAttestation) error {
 		if arm.Name != expectedNames[index] || arm.CapacityExperimentID == "" || strings.Contains(strings.ToLower(arm.CapacityExperimentID), "holdout") || arm.CapacityHypothesisID == "" || !isSV1DHexDigest(arm.CapacityConfigSHA256) || !arm.Complete || arm.ExitStatus != 0 || arm.SimulationStartNano != SV1DCapacityStartNano || arm.SimulationEndNano != SV1DCapacityEndNano || arm.EventFrames == 0 || arm.StreamFrames < arm.EventFrames || !isSV1DHexDigest(arm.RunMetadataSHA256) || !isSV1DHexDigest(arm.ManifestSHA256) || !isSV1DHexDigest(arm.RunStatusSHA256) || !isSV1DHexDigest(arm.EvidenceManifestSHA256) || !isSV1DHexDigest(arm.BinaryEvidenceAttestationSHA256) || !isSV1DHexDigest(arm.EventsSHA256) || !isSV1DHexDigest(arm.ExecutionStreamHash) || !isSV1DHexDigest(arm.RendererReportSHA256) || !isSV1DHexDigest(arm.RendererAttestationSHA256) || !isSV1DHexDigest(arm.RenderedTreeDigest) || !isSV1DHexDigest(arm.ResourceMeasurementSHA256) || !isSV1DHexDigest(arm.CapacityArmRecordSHA256) || arm.PeakApparentBytes == 0 || arm.PeakAllocatedBytes == 0 || arm.PeakProcessTreeRSSBytes == 0 {
 			return fmt.Errorf("SV1D capacity arm %s is incomplete or malformed", expectedNames[index])
 		}
+		if arm.CapacityConfigSHA256 != sv1dCapacityConfigDigest(attestation, index) {
+			return fmt.Errorf("SV1D capacity arm %s does not match its top-level config identity", arm.Name)
+		}
 		if _, duplicate := seenConfigHashes[arm.CapacityConfigSHA256]; duplicate {
 			return fmt.Errorf("SV1D capacity arms reuse a config identity")
 		}
 		seenConfigHashes[arm.CapacityConfigSHA256] = struct{}{}
+	}
+	return nil
+}
+
+func verifySV1DCapacityRetainedInputs(attestation SV1DCapacityAttestation) error {
+	root := attestation.MeasurementRoot
+	retainedFiles := []struct {
+		path   string
+		digest string
+	}{
+		{filepath.Join(root, "tools", "multivenue-"+attestation.BinarySHA256), attestation.BinarySHA256},
+		{filepath.Join(root, "tools", "sv1dprobe-"+attestation.AnalyzerSHA256), attestation.AnalyzerSHA256},
+		{filepath.Join(root, "tools", "evsrender-"+attestation.RendererSHA256), attestation.RendererSHA256},
+		{filepath.Join(root, "tools", "sv1dresource-"+attestation.MeasurerSHA256), attestation.MeasurerSHA256},
+		{filepath.Join(root, "tools", "capacity-runner-"+attestation.RunnerSHA256+".sh"), attestation.RunnerSHA256},
+		{filepath.Join(root, "resource-policy-v1.json"), attestation.ResourcePolicySHA256},
+		{filepath.Join(root, "review", "attestation.json"), attestation.ReviewAttestationSHA256},
+		{filepath.Join(root, "review", "report.md"), attestation.ReviewReportSHA256},
+		{filepath.Join(root, "configs", "target-treatment.json"), attestation.TargetTreatmentConfigSHA256},
+		{filepath.Join(root, "configs", "target-mode-off.json"), attestation.TargetModeOffConfigSHA256},
+		{filepath.Join(root, "configs", "target-no-roster.json"), attestation.TargetNoRosterConfigSHA256},
+		{filepath.Join(root, "configs", "capacity-config-delta.json"), attestation.CapacityConfigDeltaSHA256},
+	}
+	for _, retained := range retainedFiles {
+		if !isSV1DHexDigest(retained.digest) {
+			return fmt.Errorf("retained input %s has an invalid attested digest", retained.path)
+		}
+		raw, err := readSV1DRegularFile(retained.path)
+		if err != nil {
+			return fmt.Errorf("read retained input %s: %w", retained.path, err)
+		}
+		if sha256DigestHex(raw) != retained.digest {
+			return fmt.Errorf("retained input %s is not bound to its attested digest", retained.path)
+		}
 	}
 	return nil
 }

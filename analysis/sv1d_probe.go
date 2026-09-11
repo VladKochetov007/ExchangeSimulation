@@ -197,11 +197,18 @@ func validateSV1DRendererAttestation(renderedDir string, expected CDFExpectedPro
 	if renderedDir == "" {
 		return fmt.Errorf("SV1D arm audit requires a rendered evidence directory")
 	}
-	attestationPath := filepath.Join(renderedDir, "renderer-attestation.json")
-	raw, err := os.ReadFile(attestationPath)
+	raw, err := readSV1DRegularFile(filepath.Join(renderedDir, "renderer-attestation.json"))
 	if err != nil {
 		return fmt.Errorf("SV1D renderer attestation: read: %w", err)
 	}
+	mainRaw, err := readSV1DRegularFile(filepath.Join(renderedDir, "rendered-binary-evidence-attestation.json"))
+	if err != nil {
+		return fmt.Errorf("SV1D renderer attestation: read rendered evidence attestation: %w", err)
+	}
+	return validateSV1DRendererAttestationRaw(raw, mainRaw, expected)
+}
+
+func validateSV1DRendererAttestationRaw(raw, mainRaw []byte, expected CDFExpectedProvenance) error {
 	var attestation sv1dRendererAttestation
 	if err := rejectSV1DDuplicateJSONKeys(raw); err != nil {
 		return fmt.Errorf("SV1D renderer attestation: malformed JSON: %w", err)
@@ -223,11 +230,8 @@ func validateSV1DRendererAttestation(renderedDir string, expected CDFExpectedPro
 		!isCDFHex(attestation.RendererSourceRevision, 20) || !isSV1DHexDigest(attestation.RenderedAttestationSHA256) {
 		return fmt.Errorf("SV1D renderer attestation does not match the externally expected clean renderer")
 	}
-	mainAttestationPath := filepath.Join(renderedDir, "rendered-binary-evidence-attestation.json")
-	mainAttestationSHA256, err := sha256File(mainAttestationPath)
-	if err != nil {
-		return fmt.Errorf("SV1D renderer attestation: hash rendered evidence attestation: %w", err)
-	}
+	mainAttestationDigest := sha256.Sum256(mainRaw)
+	mainAttestationSHA256 := hex.EncodeToString(mainAttestationDigest[:])
 	if mainAttestationSHA256 != attestation.RenderedAttestationSHA256 {
 		return fmt.Errorf("SV1D renderer attestation is not bound to rendered evidence")
 	}
