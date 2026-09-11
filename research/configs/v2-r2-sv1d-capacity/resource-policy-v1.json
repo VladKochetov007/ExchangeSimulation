@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "contract": "v2-r2-sv1d-binary-capacity-resource-policy-v1",
+  "scientific_result_eligible": false,
+  "capacity_seed": 977,
+  "horizon": "5m",
+  "sample_interval_nano": 250000000,
+  "safety_reserve_bytes": 2147483648,
+  "free_headroom_formula": "max(2*measured_peak_bytes, measured_peak_bytes+safety_reserve_bytes)",
+  "memory_headroom_formula": "max(ceil(3*peak_process_tree_rss_bytes/2), peak_process_tree_rss_bytes+1073741824)",
+  "gomaxprocs": 2,
+  "gomemlimit": "4GiB",
+  "finite_cgroup_memory_limit_required": true,
+  "swap_used_must_remain_bytes": 0,
+  "oom_counter_deltas_must_remain": 0,
+  "footprint_scope": "all regular files below measurement_root; apparent bytes and 512-byte allocated blocks",
+  "filesystem_space_scope": "output_parent filesystem available blocks",
+  "arms": ["treatment", "mode-off", "no-roster"],
+  "capacity_config_delta": ["seed", "experiment_id", "hypothesis_id", "status", "description"],
+  "scientific_config_fields_must_be_unchanged": true,
+  "evidence_format": "evstream_v3",
+  "log_mode": "full",
+  "evidence_schema_epoch": 4,
+  "completion_requires": [
+    "exit_status_zero",
+    "five_minute_terminal_sentinels",
+    "binary_evidence_manifest_verified",
+    "renderer_attestation_verified",
+    "no_oom_or_swap",
+    "sample_gap_at_most_sample_interval"
+  ]
+}

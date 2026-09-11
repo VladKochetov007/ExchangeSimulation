@@ -59,7 +59,7 @@ func main() {
 }
 
 func run() error {
-	mode := flag.String("mode", "", "plan, audit, score, or verify-review")
+	mode := flag.String("mode", "", "plan, audit, score, verify-review, or verify-capacity")
 	out := flag.String("out", "", "new JSON output path")
 	planPath := flag.String("plan", "", "pre-run SV1D plan JSON")
 	armName := flag.String("arm", "", "treatment, mode-off, or no-roster")
@@ -82,6 +82,23 @@ func run() error {
 	planSHA256 := flag.String("plan-sha256", "", "externally resolved canonical SV1D plan SHA-256")
 	parentRegistrationSHA256 := flag.String("parent-registration-sha256", "", "raw parent preregistration SHA-256")
 	amendmentSHA256 := flag.String("amendment-sha256", "", "raw SV1D amendment SHA-256")
+	capacityAttestation := flag.String("capacity-attestation", "", "measured SV1D capacity attestation")
+	capacityTreatmentConfig := flag.String("capacity-treatment-config", "", "capacity-only treatment config")
+	capacityModeOffConfig := flag.String("capacity-mode-off-config", "", "capacity-only mode-off config")
+	capacityNoRosterConfig := flag.String("capacity-no-roster-config", "", "capacity-only no-roster config")
+	capacityConfigDeltaSHA256 := flag.String("capacity-config-delta-sha256", "", "canonical capacity-config delta SHA-256")
+	runnerSHA256 := flag.String("runner-sha256", "", "externally resolved capacity-runner SHA-256")
+	measurerSHA256 := flag.String("measurer-sha256", "", "externally resolved resource-measurer SHA-256")
+	resourcePolicySHA256 := flag.String("resource-policy-sha256", "", "externally resolved resource-policy SHA-256")
+	outputParent := flag.String("output-parent", "", "capacity output parent path")
+	measurementRoot := flag.String("measurement-root", "", "capacity measurement root path")
+	measurementRecordsRoot := flag.String("measurement-records-root", "", "capacity measurement-records root path")
+	measurementRecordsSHA256 := flag.String("measurement-records-sha256", "", "canonical measurement-records manifest SHA-256")
+	filesystemDevice := flag.String("filesystem-device", "", "measured filesystem device")
+	filesystemID := flag.String("filesystem-id", "", "measured filesystem ID")
+	filesystemType := flag.String("filesystem-type", "", "measured filesystem type")
+	filesystemMountID := flag.String("filesystem-mount-id", "", "measured filesystem mount ID")
+	filesystemUUID := flag.String("filesystem-uuid", "", "measured filesystem UUID")
 	flag.Parse()
 
 	switch *mode {
@@ -99,8 +116,22 @@ func run() error {
 			TreatmentConfigPath: *treatmentConfig, ModeOffConfigPath: *modeOffConfig, NoRosterConfigPath: *noRosterConfig,
 			BinarySHA256: *binarySHA256, AnalyzerSHA256: *analyzerSHA256, RendererSHA256: *rendererSHA256,
 		})
+	case "verify-capacity":
+		return verifyCapacity(capacityVerificationInputs{
+			AttestationPath: *capacityAttestation,
+			SourceRevision:  *sourceRevision, TreeRevision: *treeRevision, PlanSHA256: *planSHA256,
+			ReviewAttestationSHA256: *reviewAttestation, ReviewReportSHA256: *reviewReport,
+			TreatmentConfigPath: *treatmentConfig, ModeOffConfigPath: *modeOffConfig, NoRosterConfigPath: *noRosterConfig,
+			CapacityTreatmentConfigPath: *capacityTreatmentConfig, CapacityModeOffConfigPath: *capacityModeOffConfig, CapacityNoRosterConfigPath: *capacityNoRosterConfig,
+			CapacityConfigDeltaSHA256: *capacityConfigDeltaSHA256,
+			BinarySHA256:              *binarySHA256, AnalyzerSHA256: *analyzerSHA256, RendererSHA256: *rendererSHA256,
+			RunnerSHA256: *runnerSHA256, MeasurerSHA256: *measurerSHA256, ResourcePolicySHA256: *resourcePolicySHA256,
+			OutputParent: *outputParent, MeasurementRoot: *measurementRoot, MeasurementRecordsRoot: *measurementRecordsRoot, MeasurementRecordsSHA256: *measurementRecordsSHA256,
+			FilesystemDevice: *filesystemDevice, FilesystemID: *filesystemID, FilesystemType: *filesystemType,
+			FilesystemMountID: *filesystemMountID, FilesystemUUID: *filesystemUUID,
+		})
 	default:
-		return fmt.Errorf("-mode must be plan, audit, score, or verify-review")
+		return fmt.Errorf("-mode must be plan, audit, score, verify-review, or verify-capacity")
 	}
 }
 

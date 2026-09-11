@@ -2,7 +2,10 @@ package analysis
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -19,7 +22,8 @@ const (
 	SV1DCapacityEndNano            = SV1DCapacityStartNano + SV1DCapacityDurationNano
 	SV1DCapacitySampleIntervalNano = uint64(250_000_000)
 	SV1DCapacitySafetyReserveBytes = uint64(2 * 1024 * 1024 * 1024)
-	SV1DCapacityMinimumGOMAXPROCS  = 1
+	SV1DCapacityGOMAXPROCS         = 2
+	SV1DCapacityGOMEMLIMIT         = "4GiB"
 )
 
 // SV1DCapacityAttestation is a measured, outcome-ineligible resource record.
@@ -62,6 +66,8 @@ type SV1DCapacityAttestation struct {
 	GOMEMLIMIT                     string            `json:"gomemlimit"`
 	OutputParent                   string            `json:"output_parent"`
 	MeasurementRoot                string            `json:"measurement_root"`
+	MeasurementRecordsRoot         string            `json:"measurement_records_root"`
+	MeasurementRecordsSHA256       string            `json:"measurement_records_sha256"`
 	FilesystemDevice               string            `json:"filesystem_device"`
 	FilesystemID                   string            `json:"filesystem_id"`
 	FilesystemType                 string            `json:"filesystem_type"`
@@ -120,6 +126,8 @@ type SV1DCapacityArm struct {
 	PeakApparentBytes               uint64 `json:"peak_apparent_bytes"`
 	PeakAllocatedBytes              uint64 `json:"peak_allocated_bytes"`
 	PeakProcessTreeRSSBytes         uint64 `json:"peak_process_tree_rss_bytes"`
+	ResourceMeasurementSHA256       string `json:"resource_measurement_sha256"`
+	CapacityArmRecordSHA256         string `json:"capacity_arm_record_sha256,omitempty"`
 }
 
 // SV1DCapacityExpectation is supplied by the launcher from independently
@@ -146,11 +154,32 @@ type SV1DCapacityExpectation struct {
 	ResourcePolicySHA256          string
 	OutputParent                  string
 	MeasurementRoot               string
+	MeasurementRecordsRoot        string
+	MeasurementRecordsSHA256      string
 	FilesystemDevice              string
 	FilesystemID                  string
 	FilesystemType                string
 	FilesystemMountID             string
 	FilesystemUUID                string
+}
+
+type sv1dCapacityMeasurementManifest struct {
+	SchemaVersion   int                        `json:"schema_version"`
+	Contract        string                     `json:"contract"`
+	MeasurementRoot string                     `json:"measurement_root"`
+	SampleAggregate sv1dCapacityManifestFile   `json:"sample_aggregate"`
+	Files           []sv1dCapacityManifestFile `json:"files"`
+}
+
+type sv1dCapacityManifestFile struct {
+	Path   string `json:"path"`
+	Bytes  uint64 `json:"bytes"`
+	SHA256 string `json:"sha256"`
+}
+
+type sv1dCapacitySampleAggregateEntry struct {
+	Arm    string             `json:"arm"`
+	Sample SV1DResourceSample `json:"sample"`
 }
 
 // ValidateSV1DCapacityAttestation checks intrinsic completeness and formulas.
@@ -181,12 +210,13 @@ func ValidateSV1DCapacityAttestation(attestation SV1DCapacityAttestation) error 
 		"measurer":                  attestation.MeasurerSHA256,
 		"resource policy":           attestation.ResourcePolicySHA256,
 		"samples":                   attestation.SamplesSHA256,
+		"measurement records":       attestation.MeasurementRecordsSHA256,
 	} {
 		if !isSV1DHexDigest(value) {
 			return fmt.Errorf("SV1D capacity attestation has an invalid %s digest", name)
 		}
 	}
-	if attestation.EvidenceFormat != "evstream_v3" || attestation.EvidenceSchemaEpoch == 0 || attestation.LogMode != "full" || attestation.GOMAXPROCS < SV1DCapacityMinimumGOMAXPROCS || attestation.GOMEMLIMIT == "" || !attestation.SameFilesystem || !absoluteCleanPath(attestation.OutputParent) || !absoluteCleanPath(attestation.MeasurementRoot) || attestation.FilesystemDevice == "" || attestation.FilesystemID == "" || attestation.FilesystemType == "" || attestation.FilesystemMountID == "" || attestation.FilesystemUUID == "" {
+	if attestation.EvidenceFormat != "evstream_v3" || attestation.EvidenceSchemaEpoch == 0 || attestation.LogMode != "full" || attestation.GOMAXPROCS != SV1DCapacityGOMAXPROCS || attestation.GOMEMLIMIT != SV1DCapacityGOMEMLIMIT || !attestation.SameFilesystem || !absoluteCleanPath(attestation.OutputParent) || !absoluteCleanPath(attestation.MeasurementRoot) || !absoluteCleanPath(attestation.MeasurementRecordsRoot) || attestation.FilesystemDevice == "" || attestation.FilesystemID == "" || attestation.FilesystemType == "" || attestation.FilesystemMountID == "" || attestation.FilesystemUUID == "" {
 		return fmt.Errorf("SV1D capacity attestation has incomplete runtime or filesystem identity")
 	}
 	if attestation.MinimumAvailableBytes > attestation.InitialAvailableBytes || attestation.FinalAvailableBytes == 0 || attestation.SafetyReserveBytes < SV1DCapacitySafetyReserveBytes || attestation.PeakApparentBytes == 0 || attestation.PeakAllocatedBytes == 0 || attestation.PeakProcessTreeRSSBytes == 0 || attestation.PeakCgroupMemoryBytes < attestation.PeakProcessTreeRSSBytes || attestation.CgroupMemoryLimitBytes < attestation.PeakCgroupMemoryBytes || attestation.MinimumHostMemAvailableBytes == 0 || attestation.SwapUsedBytes != 0 || attestation.OOMEventsDelta != 0 || attestation.OOMKillEventsDelta != 0 || attestation.CgroupOOMEventsDelta != 0 || attestation.CgroupOOMKillEventsDelta != 0 {
@@ -246,6 +276,9 @@ func VerifySV1DCapacityAttestation(path string, expected SV1DCapacityExpectation
 	if err := compareSV1DCapacityExpectation(attestation, expected); err != nil {
 		return attestation, err
 	}
+	if err := verifySV1DCapacityMeasurementRecords(attestation, expected); err != nil {
+		return attestation, err
+	}
 	return attestation, nil
 }
 
@@ -259,10 +292,200 @@ func compareSV1DCapacityExpectation(attestation SV1DCapacityAttestation, expecte
 	if attestation.BinarySHA256 != expected.BinarySHA256 || attestation.AnalyzerSHA256 != expected.AnalyzerSHA256 || attestation.RendererSHA256 != expected.RendererSHA256 || attestation.RunnerSHA256 != expected.RunnerSHA256 || attestation.MeasurerSHA256 != expected.MeasurerSHA256 || attestation.ResourcePolicySHA256 != expected.ResourcePolicySHA256 {
 		return fmt.Errorf("SV1D capacity attestation does not match tool or policy identity")
 	}
-	if attestation.OutputParent != expected.OutputParent || attestation.MeasurementRoot != expected.MeasurementRoot || attestation.FilesystemDevice != expected.FilesystemDevice || attestation.FilesystemID != expected.FilesystemID || attestation.FilesystemType != expected.FilesystemType || attestation.FilesystemMountID != expected.FilesystemMountID || attestation.FilesystemUUID != expected.FilesystemUUID {
+	if attestation.OutputParent != expected.OutputParent || attestation.MeasurementRoot != expected.MeasurementRoot || attestation.MeasurementRecordsRoot != expected.MeasurementRecordsRoot || attestation.MeasurementRecordsSHA256 != expected.MeasurementRecordsSHA256 || attestation.FilesystemDevice != expected.FilesystemDevice || attestation.FilesystemID != expected.FilesystemID || attestation.FilesystemType != expected.FilesystemType || attestation.FilesystemMountID != expected.FilesystemMountID || attestation.FilesystemUUID != expected.FilesystemUUID {
 		return fmt.Errorf("SV1D capacity attestation does not match the measured filesystem")
 	}
 	return nil
+}
+
+func verifySV1DCapacityMeasurementRecords(attestation SV1DCapacityAttestation, expected SV1DCapacityExpectation) error {
+	manifestPath := filepath.Join(expected.MeasurementRecordsRoot, "measurement-records-manifest.json")
+	raw, err := readSV1DRegularFile(manifestPath)
+	if err != nil {
+		return fmt.Errorf("read SV1D capacity measurement manifest: %w", err)
+	}
+	manifestDigest := sha256DigestHex(raw)
+	if manifestDigest != attestation.MeasurementRecordsSHA256 {
+		return fmt.Errorf("SV1D capacity measurement manifest digest does not match its attestation")
+	}
+	var manifest sv1dCapacityMeasurementManifest
+	if err := decodeStrictSV1DCapacityJSON(raw, &manifest); err != nil {
+		return fmt.Errorf("decode SV1D capacity measurement manifest: %w", err)
+	}
+	if manifest.SchemaVersion != 1 || manifest.Contract != "v2-r2-sv1d-capacity-measurement-records-v1" || manifest.MeasurementRoot != attestation.MeasurementRoot || manifest.SampleAggregate.Path != "all-samples.json" || manifest.SampleAggregate.Bytes == 0 || manifest.SampleAggregate.SHA256 != attestation.SamplesSHA256 || len(manifest.Files) != 7 {
+		return fmt.Errorf("SV1D capacity measurement manifest has an invalid identity or file set")
+	}
+	expectedPaths := []string{
+		"treatment-resource-measurement.json", "mode-off-resource-measurement.json", "no-roster-resource-measurement.json",
+		"treatment-record.json", "mode-off-record.json", "no-roster-record.json", "all-samples.json",
+	}
+	expectedArmNames := []string{"treatment", "mode-off", "no-roster"}
+	resourceMeasurements := make([]SV1DResourceMeasurement, len(expectedArmNames))
+	for index, file := range manifest.Files {
+		if file.Path != expectedPaths[index] || file.Bytes == 0 || !isSV1DHexDigest(file.SHA256) || filepath.IsAbs(file.Path) || filepath.Clean(file.Path) != file.Path || strings.HasPrefix(file.Path, "../") || file.Path == ".." {
+			return fmt.Errorf("SV1D capacity measurement manifest has an invalid file entry")
+		}
+		fileRaw, err := readSV1DRegularFile(filepath.Join(expected.MeasurementRecordsRoot, file.Path))
+		if err != nil {
+			return fmt.Errorf("read SV1D capacity measurement record %s: %w", file.Path, err)
+		}
+		if uint64(len(fileRaw)) != file.Bytes || sha256DigestHex(fileRaw) != file.SHA256 {
+			return fmt.Errorf("SV1D capacity measurement record %s does not match its manifest", file.Path)
+		}
+		if strings.HasSuffix(file.Path, "-resource-measurement.json") {
+			armIndex := index
+			if armIndex >= len(expectedArmNames) {
+				return fmt.Errorf("SV1D capacity measurement manifest has too many resource records")
+			}
+			var measurement SV1DResourceMeasurement
+			if err := decodeStrictSV1DCapacityJSON(fileRaw, &measurement); err != nil {
+				return fmt.Errorf("decode SV1D resource measurement %s: %w", file.Path, err)
+			}
+			if err := ValidateSV1DResourceMeasurement(measurement, true); err != nil {
+				return fmt.Errorf("validate SV1D resource measurement %s: %w", file.Path, err)
+			}
+			if measurement.MeasurementRoot != attestation.MeasurementRoot || measurement.OutputParent != attestation.OutputParent || measurement.SampleIntervalNano != SV1DCapacitySampleIntervalNano {
+				return fmt.Errorf("SV1D resource measurement %s is not bound to the registered measurement", file.Path)
+			}
+			if file.SHA256 != attestation.Arms[armIndex].ResourceMeasurementSHA256 {
+				return fmt.Errorf("SV1D resource measurement %s is not bound to its capacity arm", file.Path)
+			}
+			resourceMeasurements[armIndex] = measurement
+		} else if strings.HasSuffix(file.Path, "-record.json") {
+			armIndex := index - len(expectedArmNames)
+			if armIndex < 0 || armIndex >= len(expectedArmNames) {
+				return fmt.Errorf("SV1D capacity measurement manifest has too many arm records")
+			}
+			var arm SV1DCapacityArm
+			if err := decodeStrictSV1DCapacityJSON(fileRaw, &arm); err != nil {
+				return fmt.Errorf("decode SV1D capacity arm record %s: %w", file.Path, err)
+			}
+			expectedArm := attestation.Arms[armIndex]
+			if file.SHA256 != expectedArm.CapacityArmRecordSHA256 {
+				return fmt.Errorf("SV1D capacity arm record %s is not bound to its attestation", file.Path)
+			}
+			expectedArm.CapacityArmRecordSHA256 = ""
+			if arm != expectedArm {
+				return fmt.Errorf("SV1D capacity arm record %s does not match its attestation", file.Path)
+			}
+		}
+	}
+	sampleRaw, err := readSV1DRegularFile(filepath.Join(expected.MeasurementRecordsRoot, manifest.SampleAggregate.Path))
+	if err != nil {
+		return fmt.Errorf("read SV1D capacity sample aggregate: %w", err)
+	}
+	if uint64(len(sampleRaw)) == 0 || uint64(len(sampleRaw)) != manifest.SampleAggregate.Bytes || sha256DigestHex(sampleRaw) != manifest.SampleAggregate.SHA256 {
+		return fmt.Errorf("SV1D capacity sample aggregate does not match its manifest")
+	}
+	var samples []sv1dCapacitySampleAggregateEntry
+	if err := decodeStrictSV1DCapacityJSON(sampleRaw, &samples); err != nil || len(samples) == 0 {
+		return fmt.Errorf("SV1D capacity sample aggregate is incomplete or malformed")
+	}
+	var expectedSampleCount uint64
+	sampleIndex := 0
+	for armIndex, armName := range expectedArmNames {
+		measurement := resourceMeasurements[armIndex]
+		expectedSampleCount += measurement.SampleCount
+		if attestation.Arms[armIndex].PeakApparentBytes != measurement.PeakApparentBytes || attestation.Arms[armIndex].PeakAllocatedBytes != measurement.PeakAllocatedBytes || attestation.Arms[armIndex].PeakProcessTreeRSSBytes != measurement.PeakProcessTreeRSSBytes {
+			return fmt.Errorf("capacity arm %s does not report its retained resource peaks", armName)
+		}
+		for _, expectedSample := range measurement.Samples {
+			if sampleIndex >= len(samples) || samples[sampleIndex].Arm != armName || samples[sampleIndex].Sample != expectedSample {
+				return fmt.Errorf("SV1D capacity sample aggregate differs from the %s resource trace", armName)
+			}
+			sampleIndex++
+		}
+	}
+	if uint64(len(samples)) != expectedSampleCount || uint64(sampleIndex) != expectedSampleCount || attestation.SampleCount != expectedSampleCount {
+		return fmt.Errorf("SV1D capacity sample aggregate count does not match the retained resource traces")
+	}
+	if err := validateSV1DCapacityResourceAggregates(attestation, resourceMeasurements); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateSV1DCapacityResourceAggregates(attestation SV1DCapacityAttestation, measurements []SV1DResourceMeasurement) error {
+	if len(measurements) != 3 {
+		return fmt.Errorf("SV1D capacity resource aggregate has an invalid arm count")
+	}
+	initialAvailable := measurements[0].InitialAvailableBytes
+	minimumAvailable := measurements[0].MinimumAvailableBytes
+	finalAvailable := measurements[len(measurements)-1].FinalAvailableBytes
+	peakApparent := measurements[0].PeakApparentBytes
+	peakAllocated := measurements[0].PeakAllocatedBytes
+	peakRSS := measurements[0].PeakProcessTreeRSSBytes
+	peakCgroup := measurements[0].PeakCgroupMemoryBytes
+	cgroupLimit := measurements[0].CgroupMemoryLimitBytes
+	minimumHostAvailable := measurements[0].MinimumHostMemAvailableBytes
+	maximumSwap := measurements[0].MaximumSwapUsedBytes
+	maximumGap := measurements[0].MaximumSampleGapNano
+	var sampleCount, oomEvents, oomKillEvents, cgroupOOMEvents, cgroupOOMKillEvents uint64
+	for _, measurement := range measurements {
+		if measurement.MinimumAvailableBytes < minimumAvailable {
+			minimumAvailable = measurement.MinimumAvailableBytes
+		}
+		if measurement.PeakApparentBytes > peakApparent {
+			peakApparent = measurement.PeakApparentBytes
+		}
+		if measurement.PeakAllocatedBytes > peakAllocated {
+			peakAllocated = measurement.PeakAllocatedBytes
+		}
+		if measurement.PeakProcessTreeRSSBytes > peakRSS {
+			peakRSS = measurement.PeakProcessTreeRSSBytes
+		}
+		if measurement.PeakCgroupMemoryBytes > peakCgroup {
+			peakCgroup = measurement.PeakCgroupMemoryBytes
+		}
+		if measurement.CgroupMemoryLimitBytes < cgroupLimit {
+			cgroupLimit = measurement.CgroupMemoryLimitBytes
+		}
+		if measurement.MinimumHostMemAvailableBytes < minimumHostAvailable {
+			minimumHostAvailable = measurement.MinimumHostMemAvailableBytes
+		}
+		if measurement.MaximumSwapUsedBytes > maximumSwap {
+			maximumSwap = measurement.MaximumSwapUsedBytes
+		}
+		if measurement.MaximumSampleGapNano > maximumGap {
+			maximumGap = measurement.MaximumSampleGapNano
+		}
+		sampleCount += measurement.SampleCount
+		oomEvents += measurement.CgroupOOMEventsDelta
+		oomKillEvents += measurement.CgroupOOMKillEventsDelta
+		cgroupOOMEvents += measurement.CgroupLocalOOMDelta
+		cgroupOOMKillEvents += measurement.CgroupLocalOOMKillDelta
+	}
+	if attestation.InitialAvailableBytes != initialAvailable || attestation.MinimumAvailableBytes != minimumAvailable || attestation.FinalAvailableBytes != finalAvailable || attestation.PeakApparentBytes != peakApparent || attestation.PeakAllocatedBytes != peakAllocated || attestation.PeakProcessTreeRSSBytes != peakRSS || attestation.PeakCgroupMemoryBytes != peakCgroup || attestation.CgroupMemoryLimitBytes != cgroupLimit || attestation.MinimumHostMemAvailableBytes != minimumHostAvailable || attestation.SwapUsedBytes != maximumSwap || attestation.MaximumSampleGapNano != maximumGap || attestation.SampleCount != sampleCount || attestation.OOMEventsDelta != oomEvents || attestation.OOMKillEventsDelta != oomKillEvents || attestation.CgroupOOMEventsDelta != cgroupOOMEvents || attestation.CgroupOOMKillEventsDelta != cgroupOOMKillEvents {
+		return fmt.Errorf("SV1D capacity attestation aggregates do not match retained resource measurements")
+	}
+	if initialAvailable < minimumAvailable || initialAvailable-minimumAvailable != attestation.PeakFilesystemConsumptionBytes {
+		return fmt.Errorf("SV1D capacity filesystem consumption does not match retained resource measurements")
+	}
+	return nil
+}
+
+func decodeStrictSV1DCapacityJSON(raw []byte, target any) error {
+	if err := rejectSV1DDuplicateJSONKeys(raw); err != nil {
+		return err
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		return err
+	}
+	if _, err := decoder.Token(); err != io.EOF {
+		if err == nil {
+			return errors.New("multiple top-level JSON values")
+		}
+		return fmt.Errorf("trailing JSON: %w", err)
+	}
+	return nil
+}
+
+func sha256DigestHex(raw []byte) string {
+	digest := sha256.Sum256(raw)
+	return hex.EncodeToString(digest[:])
 }
 
 func validateSV1DCapacityArms(attestation SV1DCapacityAttestation) error {
@@ -272,7 +495,7 @@ func validateSV1DCapacityArms(attestation SV1DCapacityAttestation) error {
 	expectedNames := []string{"treatment", "mode-off", "no-roster"}
 	seenConfigHashes := make(map[string]struct{}, len(attestation.Arms))
 	for index, arm := range attestation.Arms {
-		if arm.Name != expectedNames[index] || arm.CapacityExperimentID == "" || strings.Contains(strings.ToLower(arm.CapacityExperimentID), "holdout") || arm.CapacityHypothesisID == "" || !isSV1DHexDigest(arm.CapacityConfigSHA256) || !arm.Complete || arm.ExitStatus != 0 || arm.SimulationStartNano != SV1DCapacityStartNano || arm.SimulationEndNano != SV1DCapacityEndNano || arm.EventFrames == 0 || arm.StreamFrames < arm.EventFrames || !isSV1DHexDigest(arm.RunMetadataSHA256) || !isSV1DHexDigest(arm.ManifestSHA256) || !isSV1DHexDigest(arm.RunStatusSHA256) || !isSV1DHexDigest(arm.EvidenceManifestSHA256) || !isSV1DHexDigest(arm.BinaryEvidenceAttestationSHA256) || !isSV1DHexDigest(arm.EventsSHA256) || !isSV1DHexDigest(arm.ExecutionStreamHash) || !isSV1DHexDigest(arm.RendererReportSHA256) || !isSV1DHexDigest(arm.RendererAttestationSHA256) || !isSV1DHexDigest(arm.RenderedTreeDigest) || arm.PeakApparentBytes == 0 || arm.PeakAllocatedBytes == 0 || arm.PeakProcessTreeRSSBytes == 0 {
+		if arm.Name != expectedNames[index] || arm.CapacityExperimentID == "" || strings.Contains(strings.ToLower(arm.CapacityExperimentID), "holdout") || arm.CapacityHypothesisID == "" || !isSV1DHexDigest(arm.CapacityConfigSHA256) || !arm.Complete || arm.ExitStatus != 0 || arm.SimulationStartNano != SV1DCapacityStartNano || arm.SimulationEndNano != SV1DCapacityEndNano || arm.EventFrames == 0 || arm.StreamFrames < arm.EventFrames || !isSV1DHexDigest(arm.RunMetadataSHA256) || !isSV1DHexDigest(arm.ManifestSHA256) || !isSV1DHexDigest(arm.RunStatusSHA256) || !isSV1DHexDigest(arm.EvidenceManifestSHA256) || !isSV1DHexDigest(arm.BinaryEvidenceAttestationSHA256) || !isSV1DHexDigest(arm.EventsSHA256) || !isSV1DHexDigest(arm.ExecutionStreamHash) || !isSV1DHexDigest(arm.RendererReportSHA256) || !isSV1DHexDigest(arm.RendererAttestationSHA256) || !isSV1DHexDigest(arm.RenderedTreeDigest) || !isSV1DHexDigest(arm.ResourceMeasurementSHA256) || !isSV1DHexDigest(arm.CapacityArmRecordSHA256) || arm.PeakApparentBytes == 0 || arm.PeakAllocatedBytes == 0 || arm.PeakProcessTreeRSSBytes == 0 {
 			return fmt.Errorf("SV1D capacity arm %s is incomplete or malformed", expectedNames[index])
 		}
 		if _, duplicate := seenConfigHashes[arm.CapacityConfigSHA256]; duplicate {
