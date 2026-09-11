@@ -1104,3 +1104,29 @@ freeze, or holdout `619/631/641` was consumed. Promotion remains pending one
 fresh exact-tree independent Sol-xhigh review of `301a131`; acceptance is the
 only next authorization for capacity measurement and the seed-659 activation
 probe.
+
+## Append-only operational update: observation coverage correction (`e4d069c`) — 2026-09-11
+
+The current scientific HEAD is clean, pushed, and exactly `e4d069c`. The fresh
+Sol-xhigh review of the prior exact tree `b1d2a3a` was correctly rejected. Its
+reachable initial-interval and persistence findings are now corrected without
+altering R2 economics or the SV1D participant contract. Strict activation and
+control paths validate the explicit one-second public CDF snapshot grid from
+the registered start through terminal coverage, reject missing or shifted
+intervals, and admit only a contract-bound empty opening state when no earlier
+book transition exists. Adjacent non-two-sided modes remain one persistence
+interval rather than resetting at mode changes.
+
+The strict production fixture now emits the complete registered cadence, keeps
+the first fill before the delayed second receipt, and delays the synthetic
+second quote until after public two-sided restoration. This is fixture repair
+for the audited producer timeline, not an economic retuning. Focused strict
+renderer audit, full analysis tests, and clean bounded `make test` passed.
+
+Promotion is still blocked. The next implementation gates are exact registered
+tri-arm plan names/identities and plan digest, nonzero incomplete-arm handling,
+content-bound independent-review attestation, immutable per-arm corpus hashes
+and final manifest, corrected runner metadata/content-addressed binaries, and
+a measured binary-capacity preflight. No capacity, Go 1.27 campaign build,
+SV1D execution, development cell, freeze, or holdout `619/631/641` was run.
+The performance feed remains at `b1847ac`, with no imported code.

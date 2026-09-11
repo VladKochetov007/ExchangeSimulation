@@ -1311,3 +1311,35 @@ has no newer commit; no performance implementation was imported. The next
 boundary is one fresh exact-tree independent Sol-xhigh review of `301a131`.
 Only acceptance permits the actual binary-capacity measurement, pinned
 scientific build, and registered SV1D activation probe.
+
+## Append-only checkpoint: fail-closed SV1D observation coverage — 2026-09-11
+
+The exact scientific tree is clean and pushed at `e4d069c`. This correction
+responds to the fresh exact-tree Sol-xhigh rejection of `b1d2a3a`: strict CDF
+activation and control audits now require the registered public-book sampling
+cadence, detect missing/shifted opening or terminal coverage, and reconstruct
+the initial empty state only when the first snapshot is exactly one interval
+after the registered start with no earlier public transition. Strict depth
+observations retain whether they came from snapshots or deltas, so the cadence
+check cannot be satisfied by arbitrary transitions alone.
+
+Persistence now measures one uninterrupted run across adjacent non-two-sided
+states, including `bid_only -> empty -> ask_only`, as required by the registered
+kill predicate. The production fixture was made a complete one-second grid and
+its synthetic order timeline was moved so every public-depth transition remains
+causally consistent; no production economic rule was changed.
+
+Verification passed: focused strict renderer audit, full `go test ./analysis`,
+and clean bounded `GOMAXPROCS=2 GOMEMLIMIT=4GiB make test`, including all package,
+integrated-long-run, R2, archive, and renderer-parity suites. The dirty-tree
+make-test attempt was rejected only by the required clean parity/archive
+guards; the committed rerun passed. No capacity measurement, pinned campaign
+build, SV1D arm, development cell, freeze, or holdout `619/631/641` was run.
+
+The remaining rejected-review items are unchanged: measured outcome-neutral
+binary capacity, exact registered tri-arm plan identities and digest,
+content-bound external review attestation, per-arm corpus/result hashes and
+immutable manifest, failure-continuing runner semantics, metadata identity,
+content-addressed launch binaries, and a separately named 24-hour SV1D config
+set. The performance feed remains at reviewed `b1847ac`; no performance code
+was imported.
