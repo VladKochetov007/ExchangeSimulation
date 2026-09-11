@@ -1051,3 +1051,25 @@ No capacity, pinned build, CDF probe, development cell, freeze, or holdout
 action occurred. Holdouts `619/631/641` remain untouched. This does not grant
 promotion: targeted race/fresh-process checks and one fresh exact-tree
 independent Sol-xhigh review remain before capacity or scientific execution.
+
+## Append-only checkpoint: exact current mechanical gate `0bfb809` — 2026-09-11
+
+The scientific tree is clean and pushed at `0bfb809`. The targeted race suite
+passed at `GOMAXPROCS=2 GOMEMLIMIT=4GiB`; the fresh-process execution,
+binary-evidence, and logging-neutrality checks passed as well. `go vet ./...`
+and `git diff --check` pass. The prior clean `make test` at the code-bearing
+ancestor `7e8d9fa` passed after the renderer/parity changes; this latest commit
+contains only this append-only state record.
+
+The retained temporary-workspace logs are named
+`exsim-race-0bfb809.log`, `exsim-fresh-0bfb809.log`, and
+`exsim-binary-neutral-0bfb809.log`. No source, config, historical evidence, or
+economic result was altered by these checks. The performance refetch found no
+commit after reviewed `b1847ac`.
+
+This closes the current mechanical gate but is not independent scientific
+acceptance. Exactly one fresh Sol-xhigh review of the complete tree remains.
+Only an accepted review permits actual binary capacity measurement, pinned
+Go 1.27 builds, and the development-only SV1D activation probe. No capacity,
+development, freeze, or holdout action occurred; holdouts `619/631/641` remain
+untouched.

@@ -1264,3 +1264,21 @@ targeted race/fresh-process checks, one fresh exact-tree independent Sol-xhigh
 review, a measured binary capacity floor, a clean pinned Go 1.27 build, and the
 development-only SV1D activation probe with its separate treatment/mode-off/
 no-roster scoring. Historical R2/SV1C/invalid-SV1D claims remain unchanged.
+
+## Append-only current checkpoint: current-tree mechanical closure — 2026-09-11
+
+At exact clean HEAD `0bfb809`, targeted race coverage
+(`go test -race ./analysis ./cmd/mvanalyze ./cmd/prunegate ./tests -count=1`)
+passed with `GOMAXPROCS=2 GOMEMLIMIT=4GiB`. The fresh-process baseline
+determinism and binary evidence/log-mode neutrality checks also passed; their
+small retained logs are `exsim-race-0bfb809.log`, `exsim-fresh-0bfb809.log`,
+and `exsim-binary-neutral-0bfb809.log` in the system temporary workspace.
+`go vet ./...`, diff hygiene, and the renderer-backed clean `make test` gate
+remain green. No development or holdout world has run.
+
+The exact promotion boundary is now one fresh independent Sol-xhigh review of
+the complete clean tree. If accepted, the next actions are an actual binary
+capacity measurement, clean Go 1.27 provenance-pinned builds, and the
+development-only SV1D treatment/mode-off/no-roster activation probe. Capacity,
+probe, freeze, and holdout execution remain unauthorized; `619/631/641` are
+untouched. The performance feed remains at reviewed `b1847ac`.
