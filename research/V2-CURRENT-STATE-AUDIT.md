@@ -1178,3 +1178,29 @@ freeze authorization, or holdout `619/631/641` was consumed. Promotion remains
 blocked only on one fresh exact-tree independent Sol-xhigh review, after which
 the measured binary-capacity preflight and development-only activation probe
 may proceed.
+
+## Append-only operational update: retained capacity revalidation (`7d92e73`) — 2026-09-11
+
+The fresh independent Sol-xhigh review of exact tree `ccc29c2` rejected one
+valid promotion blocker: strict arm-audit and final-score checks validated the
+copied capacity attestation but did not reopen the retained capacity manifest,
+resource traces, capacity tools/configs, arm evidence, or rendered evidence
+under `capacity_root`. The R2 calendar/lifecycle and current correctness
+semantics were accepted; no capacity or scientific run was authorized.
+
+The code-bearing scientific tree is now clean, pushed, and pinned at `7d92e73`;
+this entry is documentation-only. Strict retention now binds both
+`capacity_root` and `capacity_records_root` from activation metadata to the
+attestation and invokes the full `VerifySV1DCapacityAttestation` contract at
+each strict arm audit and tri-arm score. A regression deletes the measurement
+manifest and confirms the retained bundle is rejected. No R2 economics or
+historical evidence changed.
+
+Clean bounded `make test`, `go vet ./...`, targeted race tests, explicit
+fresh-process determinism/evidence neutrality, shell syntax, and diff hygiene
+all pass at this code-bearing tree. No capacity attestation, pinned Go 1.27
+campaign build, SV1D activation, development cell, freeze, or holdout
+`619/631/641` was consumed. The performance feed remains at reviewed `b1847ac`
+with no newer commit and no imported code. Promotion awaits another fresh
+exact-tree independent Sol-xhigh review; acceptance alone permits capacity
+preflight and the seed-659 activation probe.

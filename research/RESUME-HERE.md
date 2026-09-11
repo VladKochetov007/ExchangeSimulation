@@ -1378,8 +1378,8 @@ imported.
 ## Append-only operational update: strict SV1D launch provenance (`d96fa1c`) — 2026-09-11
 
 The code-bearing scientific tree is clean, pushed, and pinned at `d96fa1c`;
-this entry is documentation-only. This
-checkpoint preserves the R2 calendar/lifecycle, risk, actor, and historical
+this entry is documentation-only. The checkpoint preserves the R2
+calendar/lifecycle, risk, actor, and historical
 negative semantics. The SV1D successor adapter now binds strict arm audits and
 tri-arm scoring to the reviewed tree, canonical plan, parent registration,
 amendment, review attestation/report/key, measured capacity attestation and
@@ -1405,3 +1405,34 @@ performance branch was refreshed through last-reviewed `b1847ac`, with no
 newer commit and no imported performance code. The next boundary remains one
 fresh exact-tree independent Sol-xhigh review; only acceptance permits the
 actual binary-capacity measurement and seed-659 activation probe.
+
+## Append-only operational update: retained capacity revalidation (`7d92e73`) — 2026-09-11
+
+The fresh independent Sol-xhigh review of exact tree `ccc29c2` rejected one
+valid promotion blocker: strict arm-audit and final-score checks validated the
+copied capacity attestation but did not reopen the retained capacity manifest,
+resource traces, capacity tools/configs, arm evidence, or rendered evidence
+under `capacity_root`. The review accepted the R2 calendar/lifecycle and
+current correctness semantics and authorized no capacity or scientific run.
+
+The code-bearing scientific tree is now clean, pushed, and pinned at `7d92e73`;
+this entry is documentation-only. Strict retention now binds both
+`capacity_root` and `capacity_records_root` from activation metadata to the
+attestation and invokes the full `VerifySV1DCapacityAttestation` contract at
+each strict arm audit and tri-arm score. That rechecks retained input hashes,
+measurement-record manifest and traces, resource aggregates, capacity-arm
+artifacts, binary evidence, rendered evidence, and tool identities. A
+regression deletes the measurement manifest and confirms the retained bundle
+is rejected.
+
+Verification at this code-bearing tree passed: clean bounded `make test`
+including all package, integrated-long-run, R2, archive, and parity contracts;
+`go vet ./...`; targeted `go test -race ./analysis ./cmd/sv1dprobe
+./cmd/mvanalyze ./cmd/prunegate ./tests -count=1`; fresh-process
+determinism/binary-evidence neutrality; shell syntax and `git diff --check`.
+No capacity attestation, pinned Go 1.27 campaign build, SV1D activation,
+development cell, freeze, or holdout `619/631/641` was consumed. The
+performance branch remains reviewed through `b1847ac` with no newer commit or
+imported implementation. Promotion again awaits one fresh exact-tree
+independent Sol-xhigh review; only acceptance permits capacity preflight and
+the seed-659 activation probe.
