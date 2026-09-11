@@ -802,3 +802,51 @@ targeted race tests, fresh-process determinism/evidence-neutrality checks, and
 an actual binary-evidence full-run capacity measurement. Only an accepted
 candidate may receive the pinned Go 1.27 build and the development-only SV1D
 activation probe. Holdouts `619/631/641` remain behind freeze authorization.
+
+## Exact-tree review response — Hooke the 2nd — 2026-09-11
+
+### Review boundary
+
+Hooke the 2nd (Sol-xhigh) independently reviewed exact clean tree `b4f8bd4`.
+The verdict was **REJECT**. No development or holdout experiment was run by
+the reviewer. The six findings were accepted as promotion blockers:
+
+1. legitimate wrapped derivative frames could fail strict digest comparison
+   because the sink committed the outer payload while the audit hashed the
+   unwrapped inner payload;
+2. valid actor wait decisions used reasons outside the narrow analyzer list,
+   and the recorded reason was not independently derived;
+3. a rejected replacement request could clear the pending lineage and lose
+   `replaces_order_id` on retry;
+4. the purported strict-complete fixture did not exercise the production
+   binary renderer and complete audit together;
+5. aggregate diagnostics did not retain enough event-time per-supplier depth
+   to establish the registered concentration/removal counterfactuals; and
+6. strict activation required every supplier to withdraw/reprice even though
+   the preregistered activation criterion required a global lifecycle event.
+
+### Correction and verification
+
+`cde2e62` fixes exact wrapped-frame payload commitment. `146bc02` fixes the
+remaining five findings: strict reason derivation and the full registered
+wait vocabulary, rejected-replacement lineage restoration, production
+`events.evs` -> `multivenue.RenderBinaryEvidence` -> strict audit coverage,
+event-time per-supplier depth plus side-specific concentration/removal
+diagnostics, and the preregistered global lifecycle predicate. The correction
+also preserves the stricter anti-cheating dominance checks.
+
+On `146bc02`, clean `make test`, `go vet ./...`, focused analysis/exchange/
+multivenue suites, targeted race tests, fresh-process determinism and
+evidence-neutrality tests, and the strict production-renderer E2E audit pass.
+The current scientific branch is clean and pushed. This evidence establishes
+mechanical readiness only; it does not supersede the rejected verdict.
+
+### Scientific disposition
+
+The rejection and correction are retained as an append-only review boundary.
+No historical trajectory or verdict was rewritten. No capacity measurement,
+binary launch, development cell, freeze authorization, or holdout was
+consumed. A fresh independent exact-tree review of `146bc02` is required
+before the binary-evidence capacity floor, pinned Go 1.27 build, and repaired
+SV1D activation probe. The performance branch remains deferred at reviewed
+`b1847ac`.

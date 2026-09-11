@@ -1070,3 +1070,35 @@ Sol-xhigh review of the complete successor, `go vet`, targeted race and
 fresh-process evidence-neutrality checks, an actual binary-evidence capacity
 measurement, then a provenance-pinned Go 1.27 build and the development-only
 SV1D activation probe before any registered 24-hour cell.
+
+## Append-only current checkpoint: Hooke review rejection and strict-audit correction — 2026-09-11
+
+Hooke the 2nd (Sol-xhigh) independently reviewed exact clean tree `b4f8bd4`
+without running experiments and **REJECTED** promotion. The review identified
+six concrete blockers: strict digest binding used the inner derivative payload
+instead of the wrapped frame payload; legitimate actor wait reasons were
+rejected and reasons were self-attested; rejected replacement requests could
+lose `replaces_order_id`; no strict test exercised `events.evs` through the
+production renderer into the complete strict audit; concentration/removal
+diagnostics lacked exact per-supplier event-time depth evidence; and the
+activation predicate required per-supplier withdrawal/reprice although the
+preregistration required only a global lifecycle event.
+
+The response is committed and pushed in `cde2e62` and `146bc02`. The strict
+audit now hashes the exact wrapped frame payload, derives/validates the
+decision reason from observable state, accepts the registered actor lifecycle
+vocabulary, restores replacement lineage after rejected submissions, records
+event-time per-supplier depth, computes side-specific concentration and
+removal-counterfactual diagnostics, and applies the preregistered global
+withdrawal/reprice criterion. `146bc02` also adds a production-renderer
+strict end-to-end binary fixture with sidecar removal and corruption-sensitive
+identity checks.
+
+On the corrected exact tree, clean `make test`, `go vet ./...`, focused
+analysis/exchange/multivenue tests, targeted race tests, and fresh-process
+determinism/evidence-neutrality tests pass; `git diff --check` passes. The
+review rejection and its corrections are not an acceptance verdict: a fresh
+independent review of `146bc02` is now the promotion boundary. No capacity
+floor, binary rebuild, development cell, freeze authorization, or holdout has
+been consumed. Performance remains deferred at reviewed ref `b1847ac`; no
+performance code was imported. Holdouts `619/631/641` remain untouched.

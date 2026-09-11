@@ -888,3 +888,35 @@ binary-evidence capacity floor, and a clean provenance-pinned Go 1.27 build.
 The old R2 candidate remains the archived negative control
 `NON-VIABLE AT THE 24H MARKET-SURVIVAL GATE`; no historical result has been
 rewritten.
+
+## Append-only current checkpoint: Hooke review rejection and correction `146bc02` — 2026-09-11
+
+Hooke the 2nd (Sol-xhigh) reviewed exact clean predecessor `b4f8bd4` and
+rejected promotion. This was a substantive review, not a request for cosmetic
+changes. The six blockers were: incorrect inner-versus-wrapped payload digest
+binding; incomplete/overly strict actor wait-reason handling with self-attested
+reasons; loss of replacement lineage after a rejected order request; absence
+of a strict production `events.evs` to renderer to complete-audit test; missing
+exact per-supplier event-time depth/concentration/removal evidence; and a
+strict activation predicate stronger than the preregistered global lifecycle
+criterion.
+
+The exact-tree correction is split into `cde2e62` (wrapped payload identity)
+and `146bc02` (lifecycle, reason derivation, lineage, production E2E, and
+diagnostic hardening). The current HEAD is `146bc02`, pushed and clean. Strict
+analysis now binds identity to the exact rendered outer frame, derives valid
+decision reasons from reconstructed state, supports the registered actor wait
+vocabulary, preserves `replaces_order_id` across rejected replacements,
+retains event-time supplier depth, calculates side-specific time-weighted and
+removal-counterfactual diagnostics, and requires global rather than
+per-supplier withdrawal/reprice as preregistered.
+
+Post-correction evidence: clean `make test`, `go vet ./...`, focused
+analysis/exchange/multivenue tests, targeted race tests, fresh-process
+determinism/evidence-neutrality checks, and the strict production-renderer
+binary E2E audit all pass. This is only a mechanical correction gate. The
+fresh exact-tree independent review is still required before capacity,
+provenance-pinned build, or the SV1D activation probe. No development cell,
+freeze, or holdout ran; `619/631/641` remain untouched. The performance feed
+still has no commit after reviewed `b1847ac`, and no performance change was
+merged.
