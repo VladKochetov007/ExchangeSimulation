@@ -35,6 +35,58 @@ func TestValidateSV1DConfigTriadFilesAcceptsRegisteredConfigs(t *testing.T) {
 	}
 }
 
+func TestAuditSV1DProbeArmKeepsExternalIdentitySeparateFromLegacyEvidence(t *testing.T) {
+	run := writeRegisteredCDFActivationFixture(t, cdfActivationFixtureOptions{})
+	configRaw, err := os.ReadFile(filepath.Join(run.Dir, "run-config.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	configDigest := sha256.Sum256(configRaw)
+	configSHA256 := hex.EncodeToString(configDigest[:])
+	sourceRevision := strings.Repeat("a", 40)
+	binarySHA256 := strings.Repeat("b", 64)
+	spec := SV1DProbeArmSpec{
+		Name: "treatment", ExperimentID: "v2-r2-sv1d-activation-659-treatment",
+		HypothesisID: "V2-R2-SV1D-ONE-SIDED-ELASTIC-LIQUIDITY", ConfigSHA256: configSHA256,
+		SourceRevision: sourceRevision, BinarySHA256: binarySHA256,
+	}
+	contract := RegisteredSV1DActivationContract()
+	result, err := run.AuditSV1DProbeArm(SV1DProbeArmAuditOptions{
+		Spec: spec, Contract: contract, Treatment: true,
+		Activation: CDFActivationOptions{
+			Contract: contract, EvidenceDir: run.Dir, AllowLegacyJSON: true,
+			ExpectedProvenance: CDFExpectedProvenance{
+				ConfigSHA256: configSHA256, SourceRevision: sourceRevision, BinarySHA256: binarySHA256,
+				BinaryGOOS: "linux", BinaryGOARCH: "amd64", BinaryGOAMD64: "v1",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Complete || !result.EvidenceValid || !result.ActivationSatisfied || !result.AntiCheatingSatisfied {
+		t.Fatalf("legacy treatment arm result = %+v", result)
+	}
+	if result.StrictMechanicsValid || result.TerminalValuationValid {
+		t.Fatalf("legacy evidence was promoted to strict/terminal validity: %+v", result)
+	}
+	mutated := spec
+	mutated.BinarySHA256 = strings.Repeat("c", 64)
+	_, err = run.AuditSV1DProbeArm(SV1DProbeArmAuditOptions{
+		Spec: mutated, Contract: contract, Treatment: true,
+		Activation: CDFActivationOptions{
+			Contract: contract, EvidenceDir: run.Dir, AllowLegacyJSON: true,
+			ExpectedProvenance: CDFExpectedProvenance{
+				ConfigSHA256: configSHA256, SourceRevision: sourceRevision, BinarySHA256: binarySHA256,
+				BinaryGOOS: "linux", BinaryGOARCH: "amd64", BinaryGOAMD64: "v1",
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("arm identity mismatch was accepted")
+	}
+}
+
 func TestValidateSV1DConfigTriadRejectsEconomicOrArmDrift(t *testing.T) {
 	root := filepath.Join("..", "research", "configs", "v2-r2-sv1d-activation")
 	read := func(name string) []byte {

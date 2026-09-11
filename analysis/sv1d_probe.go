@@ -66,6 +66,89 @@ type SV1DProbeArmResult struct {
 	FailureReasons         []string                     `json:"failure_reasons,omitempty"`
 }
 
+// SV1DProbeArmAuditOptions binds one arm audit to identities supplied by the
+// launcher. The expected provenance is intentionally separate from the run;
+// a run cannot authenticate its own binary or config identity.
+type SV1DProbeArmAuditOptions struct {
+	Spec       SV1DProbeArmSpec
+	Contract   CDFActivationContract
+	Activation CDFActivationOptions
+	Treatment  bool
+}
+
+// AuditSV1DProbeArm produces one scorer input from a production run. Controls
+// use the public-book audit, while the treatment additionally has to satisfy
+// the finite supplier contract. A complete arm may still fail activation or
+// anti-cheating predicates; those are scientific outcomes, not evidence gaps.
+func (r *Run) AuditSV1DProbeArm(options SV1DProbeArmAuditOptions) (SV1DProbeArmResult, error) {
+	result := SV1DProbeArmResult{
+		ArmName: options.Spec.Name, ExperimentID: options.Spec.ExperimentID,
+		HypothesisID: options.Spec.HypothesisID, ConfigSHA256: options.Spec.ConfigSHA256,
+		SourceRevision: options.Spec.SourceRevision, BinarySHA256: options.Spec.BinarySHA256,
+	}
+	if r == nil {
+		return result, fmt.Errorf("SV1D arm audit has a nil run")
+	}
+	if options.Spec.Name == "" || options.Spec.ExperimentID == "" || options.Spec.HypothesisID == "" ||
+		!isSV1DHexDigest(options.Spec.ConfigSHA256) || !isSV1DHexDigest(options.Spec.BinarySHA256) ||
+		!isCDFHex(options.Spec.SourceRevision, 20) {
+		return result, fmt.Errorf("SV1D arm spec has incomplete immutable identity")
+	}
+	expected := options.Activation.ExpectedProvenance
+	if expected.ConfigSHA256 != options.Spec.ConfigSHA256 || expected.SourceRevision != options.Spec.SourceRevision || expected.BinarySHA256 != options.Spec.BinarySHA256 {
+		return result, fmt.Errorf("SV1D arm spec and expected audit provenance disagree")
+	}
+	evidenceDir := options.Activation.EvidenceDir
+	if evidenceDir == "" {
+		evidenceDir = r.Dir
+	}
+	_, metadata, err := loadCDFActivationIdentity(evidenceDir)
+	if err != nil {
+		return result, err
+	}
+	terminalErr := validateCDFTerminalValuation(r, metadata, options.Contract)
+	result.TerminalValuationValid = terminalErr == nil
+	if terminalErr != nil {
+		result.FailureReasons = append(result.FailureReasons, terminalErr.Error())
+	}
+	if options.Treatment {
+		audit, err := r.AuditCDFLiquidityActivation(options.Activation)
+		if err != nil {
+			return result, err
+		}
+		result.Complete = true
+		result.EvidenceValid = audit.EvidenceValid
+		result.StrictMechanicsValid = audit.EvidenceValid && !options.Activation.AllowLegacyJSON
+		result.ActivationSatisfied = audit.ActivationSatisfied
+		result.AntiCheatingSatisfied = audit.AntiCheatingSatisfied
+		result.Venues = append([]CDFVenueConcentrationAudit(nil), audit.Venues...)
+		result.FailureReasons = appendCDFActivationFailures(result.FailureReasons, audit.Checks)
+		return result, nil
+	}
+	audit, err := r.AuditCDFBookAvailability(options.Activation)
+	if err != nil {
+		return result, err
+	}
+	result.Complete = true
+	result.EvidenceValid = audit.EvidenceValid
+	result.StrictMechanicsValid = audit.StrictMechanicsValid
+	result.ActivationSatisfied = false
+	result.AntiCheatingSatisfied = true
+	result.Venues = append([]CDFVenueConcentrationAudit(nil), audit.Venues...)
+	result.FailureReasons = appendCDFActivationFailures(result.FailureReasons, audit.Checks)
+	return result, nil
+}
+
+func appendCDFActivationFailures(existing []string, checks []CDFActivationCheck) []string {
+	for _, check := range checks {
+		if check.Failure == "" {
+			continue
+		}
+		existing = append(existing, check.Failure)
+	}
+	return existing
+}
+
 // SV1DProbeVenueScore contains the availability measurements used by the
 // scorer, retained by venue so aggregate improvement cannot hide a dead venue.
 type SV1DProbeVenueScore struct {
