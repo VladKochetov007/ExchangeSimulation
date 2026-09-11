@@ -58,6 +58,8 @@ matching_binary_sha256=000000000000000000000000000000000000000000000000000000000
 matching_prunegate_sha256=1111111111111111111111111111111111111111111111111111111111111111
 analyzer="$tmp_root/mvanalyze"
 CGO_ENABLED=0 go build -trimpath -o "$analyzer" ./cmd/mvanalyze
+renderer="$tmp_root/evsrender"
+CGO_ENABLED=0 go build -trimpath -o "$renderer" ./cmd/evsrender
 fixture_binary="$tmp_root/evstream-fixture"
 CGO_ENABLED=0 go build -trimpath -o "$fixture_binary" ./scripts/testdata/evstream-fixture
 
@@ -95,8 +97,12 @@ write_metadata() {
 write_common_files() {
 	local cell=$1
 	local experiment_id=$2
-	jq -n --arg revision "$current_revision" --arg experiment_id "$experiment_id" \
-		'{build: {revision: $revision, modified: false}, config: {experiment_id: $experiment_id, evidence_format: "evstream_v3"}}' \
+	local log_mode evidence_contract_version
+	log_mode=$(jq -er '.log_mode' "$cell/run-config.json")
+	evidence_contract_version=$(jq -er '.evidence_contract_version' "$cell/run-config.json")
+	jq -n --arg revision "$current_revision" --arg experiment_id "$experiment_id" --arg log_mode "$log_mode" \
+		--argjson evidence_contract_version "$evidence_contract_version" \
+		'{build: {revision: $revision, modified: false}, config: {experiment_id: $experiment_id, evidence_format: "evstream_v3", log_mode: $log_mode, evidence_contract_version: $evidence_contract_version}}' \
 		>"$cell/manifest.json"
 	jq -n '{initial_accounts: [], terminal_accounts: []}' >"$cell/greeks.json"
 	jq -n '{latency: []}' >"$cell/latency.json"
@@ -191,7 +197,7 @@ for cell in dev-607 dev-607-none dev-607-g8; do
 	v2_r2_write_attestation "$v2_r2_output_root/$cell" || fail "could not write fixture attestation: $cell"
 done
 
-GOMAXPROCS=1 MVANALYZE_BIN="$analyzer" \
+GOMAXPROCS=1 MVANALYZE_BIN="$analyzer" EVSRENDER_BIN="$renderer" \
 	"$root_dir/scripts/check-v2-integrated-longrun-r2-parity.sh" "$v2_r2_output_root" >/dev/null ||
 	fail "matching G8 parity fixture was rejected"
 expect_failure env GOMAXPROCS=1 MVANALYZE_BIN="$analyzer" \

@@ -18,6 +18,7 @@ source "$root_dir/scripts/v2-integrated-longrun-r2-contract.sh"
 output_root=${1:-"$v2_r2_output_root"}
 attestation="$output_root/parity-attestation.json"
 analyzer=${MVANALYZE_BIN:-"$root_dir/bin/mvanalyze"}
+renderer=${EVSRENDER_BIN:-"$root_dir/bin/evsrender"}
 
 fail() {
 	printf 'integrated long-run parity failure: %s\n' "$*" >&2
@@ -38,18 +39,29 @@ else
 fi
 [[ -z "$(git -C "$root_dir" status --porcelain --untracked-files=all)" ]] || fail "parity requires a clean gate worktree"
 [[ -x "$analyzer" ]] || fail "missing analyzer for independent raw parity recomputation: $analyzer"
+[[ -x "$renderer" ]] || fail "missing production binary evidence renderer: $renderer"
 analyzer_revision=$(go version -m "$analyzer" | awk '$1 == "build" && index($2, "vcs.revision=") == 1 {sub("vcs.revision=", "", $2); print $2; exit}')
 analyzer_modified=$(go version -m "$analyzer" | awk '$1 == "build" && index($2, "vcs.modified=") == 1 {sub("vcs.modified=", "", $2); print $2; exit}')
 analyzer_trimpath=$(go version -m "$analyzer" | awk '$1 == "build" && index($2, "-trimpath=") == 1 {sub("-trimpath=", "", $2); print $2; exit}')
 analyzer_cgo_enabled=$(go version -m "$analyzer" | awk '$1 == "build" && index($2, "CGO_ENABLED=") == 1 {sub("CGO_ENABLED=", "", $2); print $2; exit}')
 analyzer_go_version=$(v2_r2_binary_go_version "$analyzer")
+renderer_revision=$(go version -m "$renderer" | awk '$1 == "build" && index($2, "vcs.revision=") == 1 {sub("vcs.revision=", "", $2); print $2; exit}')
+renderer_modified=$(go version -m "$renderer" | awk '$1 == "build" && index($2, "vcs.modified=") == 1 {sub("vcs.modified=", "", $2); print $2; exit}')
+renderer_trimpath=$(go version -m "$renderer" | awk '$1 == "build" && index($2, "-trimpath=") == 1 {sub("-trimpath=", "", $2); print $2; exit}')
+renderer_cgo_enabled=$(go version -m "$renderer" | awk '$1 == "build" && index($2, "CGO_ENABLED=") == 1 {sub("CGO_ENABLED=", "", $2); print $2; exit}')
+renderer_go_version=$(v2_r2_binary_go_version "$renderer")
 head_revision=$(git -C "$root_dir" rev-parse HEAD)
 [[ "$analyzer_revision" == "$head_revision" && "$analyzer_modified" == false &&
 	"$analyzer_trimpath" == true && "$analyzer_cgo_enabled" == 0 ]] ||
 	fail "parity analyzer is not a clean reproducible build of current HEAD"
 v2_r2_is_go_127 "$analyzer_go_version" || fail "parity analyzer is not built with the pinned Go 1.27 toolchain: $analyzer_go_version"
+[[ "$renderer_revision" == "$head_revision" && "$renderer_modified" == false &&
+	"$renderer_trimpath" == true && "$renderer_cgo_enabled" == 0 ]] ||
+	fail "parity renderer is not a clean reproducible build of current HEAD"
+v2_r2_is_go_127 "$renderer_go_version" || fail "parity renderer is not built with the pinned Go 1.27 toolchain: $renderer_go_version"
 
 raw_stage_cells=()
+render_root=$(mktemp -d)
 cleanup_raw_stage() {
 	local cell
 	for cell in "${raw_stage_cells[@]}"; do
@@ -57,7 +69,11 @@ cleanup_raw_stage() {
 			printf 'integrated long-run parity cleanup failure: %s\n' "$cell" >&2
 	done
 }
-trap cleanup_raw_stage EXIT
+cleanup_parity_workspace() {
+	cleanup_raw_stage
+	rm -rf -- "$render_root"
+}
+trap cleanup_parity_workspace EXIT
 
 "$root_dir/scripts/check-v2-integrated-longrun-r2-configs.sh" >/dev/null
 for cell in dev-607 dev-607-none dev-607-g8; do
@@ -165,6 +181,43 @@ for cell in dev-607 dev-607-none dev-607-g8; do
 	fi
 done
 
+for cell in dev-607 dev-607-g8; do
+	rendered_dir="$render_root/$cell"
+	render_report="$render_root/$cell-report.json"
+	"$renderer" -dir "$output_root/$cell" -out "$rendered_dir" >"$render_report" ||
+		fail "production binary renderer rejected parity cell: $cell"
+	require_object "$render_report"
+	runtime_event_frames=$(jq -er '.event_frames' "$output_root/$cell/binary-evidence-attestation.json")
+	runtime_stream_frames=$(jq -er '.stream_frames' "$output_root/$cell/binary-evidence-attestation.json")
+	runtime_execution_hash=$(jq -er '.execution_stream_hash' "$output_root/$cell/binary-evidence-attestation.json")
+	jq -e --arg execution_hash "$runtime_execution_hash" \
+		--argjson event_frames "$runtime_event_frames" --argjson stream_frames "$runtime_stream_frames" \
+		'.event_frames == $event_frames and .dictionary_frames + .event_frames == $stream_frames and
+		 .execution_stream_hash == $execution_hash and .routes > 0 and
+		 (.rendered_digest | test("^[0-9a-f]{64}$"))' "$render_report" >/dev/null ||
+		fail "production renderer report is not bound to runtime evidence: $cell"
+	jq -e --arg execution_hash "$runtime_execution_hash" \
+		--argjson event_frames "$runtime_event_frames" --argjson stream_frames "$runtime_stream_frames" \
+		'.domain == "rendered_binary_evidence" and .ordering == "venue_sequence_files_with_global_frame_identity" and
+		 .source_execution_stream_hash == $execution_hash and .source_event_frames == $event_frames and
+		 .source_stream_frames == $stream_frames and .global_sequence_included == true and
+		 (.rendered_digest | test("^[0-9a-f]{64}$"))' \
+		"$rendered_dir/rendered-binary-evidence-attestation.json" >/dev/null ||
+		fail "production rendered attestation is incomplete: $cell"
+done
+full_reconstruction_events=$(jq -er '.event_frames' "$render_root/dev-607-report.json")
+full_reconstruction_digest=$(jq -er '.execution_stream_hash' "$render_root/dev-607-report.json")
+full_reconstruction_rendered_digest=$(jq -er '.rendered_digest' "$render_root/dev-607-report.json")
+g8_reconstruction_events=$(jq -er '.event_frames' "$render_root/dev-607-g8-report.json")
+g8_reconstruction_digest=$(jq -er '.execution_stream_hash' "$render_root/dev-607-g8-report.json")
+g8_reconstruction_rendered_digest=$(jq -er '.rendered_digest' "$render_root/dev-607-g8-report.json")
+[[ "$full_reconstruction_events" == "$g8_reconstruction_events" &&
+	"$full_reconstruction_digest" == "$g8_reconstruction_digest" &&
+	"$full_reconstruction_rendered_digest" == "$g8_reconstruction_rendered_digest" ]] ||
+	fail "production binary reconstructions differ between full g4 and g8"
+diff -ru -- "$render_root/dev-607/venues" "$render_root/dev-607-g8/venues" >/dev/null ||
+	fail "production rendered venue evidence differs between full g4 and g8"
+
 for file in checkpoints.jsonl greeks.json latency.json; do
 	cmp -s "$output_root/dev-607/$file" "$output_root/dev-607-none/$file" || fail "$file differs between full and no-log"
 	cmp -s "$output_root/dev-607/$file" "$output_root/dev-607-g8/$file" || fail "$file differs between g4 and g8"
@@ -192,10 +245,6 @@ full_runtime_digest=$(jq -er '.execution_stream_hash' "$output_root/dev-607/bina
 g8_runtime_events=$(jq -er '.event_frames' "$output_root/dev-607-g8/binary-evidence-attestation.json")
 g8_runtime_digest=$(jq -er '.execution_stream_hash' "$output_root/dev-607-g8/binary-evidence-attestation.json")
 [[ "$full_runtime_events" == "$g8_runtime_events" && "$full_runtime_digest" == "$g8_runtime_digest" ]] || fail "full runtime evidence hashes are not equal"
-full_reconstruction_events=$full_runtime_events
-full_reconstruction_digest=$full_runtime_digest
-g8_reconstruction_events=$g8_runtime_events
-g8_reconstruction_digest=$g8_runtime_digest
 
 source_revision=$(jq -er '.git_revision' "$output_root/dev-607/run-metadata.json")
 v2_r2_require_current_source_revision "$source_revision" "$head_revision" "$analyzer_revision" ||
@@ -237,6 +286,9 @@ jq -n \
 	--arg analyzer_sha256 "$(sha256sum "$analyzer" | awk '{print $1}')" \
 	--arg analyzer_go_version "$analyzer_go_version" \
 	--arg analyzer_revision "$analyzer_revision" \
+	--arg renderer_sha256 "$(sha256sum "$renderer" | awk '{print $1}')" \
+	--arg renderer_go_version "$renderer_go_version" \
+	--arg renderer_revision "$renderer_revision" \
 	--arg full_g4_checkpoints "$(sha256sum "$output_root/dev-607/checkpoints.jsonl" | awk '{print $1}')" \
 	--arg none_g4_checkpoints "$(sha256sum "$output_root/dev-607-none/checkpoints.jsonl" | awk '{print $1}')" \
 	--arg full_g8_checkpoints "$(sha256sum "$output_root/dev-607-g8/checkpoints.jsonl" | awk '{print $1}')" \
@@ -246,17 +298,21 @@ jq -n \
 	--arg binary_stream_sha256 "$(sha256sum "$output_root/dev-607/events.evs" | awk '{print $1}')" \
 	--arg full_reconstruction_events "$full_reconstruction_events" \
 	--arg full_reconstruction_digest "$full_reconstruction_digest" \
+	--arg full_reconstruction_rendered_digest "$full_reconstruction_rendered_digest" \
 	--arg g8_reconstruction_events "$g8_reconstruction_events" \
 	--arg g8_reconstruction_digest "$g8_reconstruction_digest" \
+	--arg g8_reconstruction_rendered_digest "$g8_reconstruction_rendered_digest" \
 	--argjson evidence_events "$full_runtime_events" \
 	--arg evidence_digest "$full_runtime_digest" \
 	'{
-		schema_version: 3, contract: $contract, evidence_format: $evidence_format, seed: 607, horizon: "24h",
-		source_revision: $source_revision, simulator_revision: $source_revision,
-		simulator_binary_sha256: $simulator_binary_sha256,
-		simulator_binary_go_version: $simulator_binary_go_version,
-		analyzer_sha256: $analyzer_sha256, analyzer_go_version: $analyzer_go_version,
-		analyzer_revision: $analyzer_revision,
+		 schema_version: 3, contract: $contract, evidence_format: $evidence_format, seed: 607, horizon: "24h",
+		 source_revision: $source_revision, simulator_revision: $source_revision,
+		 simulator_binary_sha256: $simulator_binary_sha256,
+		 simulator_binary_go_version: $simulator_binary_go_version,
+		 analyzer_sha256: $analyzer_sha256, analyzer_go_version: $analyzer_go_version,
+		 analyzer_revision: $analyzer_revision,
+		 renderer_sha256: $renderer_sha256, renderer_go_version: $renderer_go_version,
+		 renderer_revision: $renderer_revision,
 		prunegate_sha256: $prunegate_sha256, prunegate_go_version: $prunegate_go_version,
 		prunegate_revision: $prunegate_revision, controls: [
 			{cell: "dev-607", log_mode: "full", gomaxprocs: 4},
@@ -273,17 +329,17 @@ jq -n \
 			greeks: $greeks_sha256, latency: $latency_sha256,
 			binary_attestation: $binary_attestation_sha256, binary_stream: $binary_stream_sha256
 		},
-		full_runtime_evidence: {event_frames: ($evidence_events | tonumber), execution_stream_hash: $evidence_digest},
-		canonical_binary_reconstruction: {
-			g4: {event_frames: ($full_reconstruction_events | tonumber), execution_stream_hash: $full_reconstruction_digest},
-			g8: {event_frames: ($g8_reconstruction_events | tonumber), execution_stream_hash: $g8_reconstruction_digest}
+		 full_runtime_evidence: {event_frames: ($evidence_events | tonumber), execution_stream_hash: $evidence_digest},
+		 canonical_binary_reconstruction: {
+			 g4: {event_frames: ($full_reconstruction_events | tonumber), execution_stream_hash: $full_reconstruction_digest, rendered_digest: $full_reconstruction_rendered_digest},
+			 g8: {event_frames: ($g8_reconstruction_events | tonumber), execution_stream_hash: $g8_reconstruction_digest, rendered_digest: $g8_reconstruction_rendered_digest}
 		},
-		predicates: {
-				ordered_checkpoints_equal: true,
-				deterministic_sidecars_equal: true,
-				full_evidence_equal: true,
-				canonical_binary_reconstruction_equal: true,
-				no_log_evidence_absent: true,
+		 predicates: {
+			 ordered_checkpoints_equal: true,
+			 deterministic_sidecars_equal: true,
+			 full_evidence_equal: true,
+			 canonical_binary_reconstruction_equal: true,
+			 no_log_evidence_absent: true,
 			source_and_build_identity_equal: true
 		}
 	}' >"$tmp"
@@ -303,6 +359,9 @@ jq -e '.schema_version == 3 and .contract == "v2-integrated-longrun-r2-parity-v3
 	(.analyzer_sha256 | test("^[0-9a-f]{64}$")) and
 	(.analyzer_go_version | startswith("go1.27")) and
 	(.analyzer_revision | test("^[0-9a-f]{40}$")) and
+	(.renderer_sha256 | test("^[0-9a-f]{64}$")) and
+	(.renderer_go_version | startswith("go1.27")) and
+	(.renderer_revision | test("^[0-9a-f]{40}$")) and
 	(.prunegate_sha256 | test("^[0-9a-f]{64}$")) and
 	(.prunegate_go_version | startswith("go1.27")) and
 	(.prunegate_revision | test("^[0-9a-f]{40}$")) and

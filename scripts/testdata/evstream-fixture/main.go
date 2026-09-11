@@ -4,6 +4,7 @@
 package main
 
 import (
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"flag"
@@ -22,9 +23,10 @@ func (fixturePayload) AppendPayload(dst []byte) []byte {
 }
 
 type fixtureEnvelope struct {
-	routeRef uint32
-	eventRef uint32
-	sequence uint64
+	routeRef      uint32
+	eventRef      uint32
+	sequence      uint64
+	payloadDigest [sha256.Size]byte
 }
 
 func (fixtureEnvelope) SchemaID() uint16      { return evstream.SchemaOpaqueJSON }
@@ -33,6 +35,7 @@ func (envelope fixtureEnvelope) AppendPayloadInterning(dst []byte, _ evstream.In
 	dst = evstream.AppendUint32(dst, envelope.routeRef)
 	dst = evstream.AppendUint32(dst, envelope.eventRef)
 	dst = evstream.AppendUint64(dst, envelope.sequence)
+	dst = append(dst, envelope.payloadDigest[:]...)
 	return evstream.AppendBytes(dst, []byte(`{"fixture":true}`)), nil
 }
 
@@ -50,7 +53,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	writer := evstream.NewWriter(file, evstream.WriterOptions{})
+	writer := evstream.NewWriter(file, evstream.WriterOptions{SchemaEpoch: 4})
 	routeRef, err := writer.Intern("general.jsonl")
 	if err != nil {
 		_ = file.Close()
@@ -63,7 +66,16 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	if err := writer.AppendInterning(1735689600000000000, 607, 0, fixtureEnvelope{routeRef: routeRef, eventRef: eventRef, sequence: *sequence}); err != nil {
+	venueRef, err := writer.Intern("north")
+	if err != nil {
+		_ = file.Close()
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	fixturePayload := []byte(`{"fixture":true}`)
+	if err := writer.AppendInterning(1735689600000000000, 607, venueRef, fixtureEnvelope{
+		routeRef: routeRef, eventRef: eventRef, sequence: *sequence, payloadDigest: sha256.Sum256(fixturePayload),
+	}); err != nil {
 		_ = file.Close()
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -80,14 +92,16 @@ func main() {
 	if *attestationPath != "" {
 		digest := writer.ExecutionHash()
 		attestation, err := json.MarshalIndent(struct {
-			Domain              string `json:"domain"`
-			Ordering            string `json:"ordering"`
-			EventFrames         uint64 `json:"event_frames"`
-			StreamFrames        uint64 `json:"stream_frames"`
-			ExecutionStreamHash string `json:"execution_stream_hash"`
+			Domain               string `json:"domain"`
+			Ordering             string `json:"ordering"`
+			SchemaEpoch          uint32 `json:"schema_epoch"`
+			EventFrames          uint64 `json:"event_frames"`
+			StreamFrames         uint64 `json:"stream_frames"`
+			ExecutionStreamHash  string `json:"execution_stream_hash"`
+			EvidenceOnlyIncluded bool   `json:"evidence_only_in_stream"`
 		}{
 			Domain: "canonical_binary_execution_frames", Ordering: "ordered_stream",
-			EventFrames: 1, StreamFrames: writer.Count(), ExecutionStreamHash: hex.EncodeToString(digest[:]),
+			SchemaEpoch: 4, EventFrames: 1, StreamFrames: writer.Count(), ExecutionStreamHash: hex.EncodeToString(digest[:]), EvidenceOnlyIncluded: true,
 		}, "", "  ")
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
