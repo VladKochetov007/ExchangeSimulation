@@ -921,3 +921,36 @@ The performance branch was fetched again and has no commit after reviewed
 measurement, pinned binary, development cell, freeze authorization, or
 holdout was consumed. The next scientific boundary is review of the complete
 R2-calendar, correctness-hardening, and binary-evidence successor tree.
+
+## Exact-tree promotion review — `144d151` — REJECT — 2026-09-11
+
+Two independent Sol-xhigh reviews rejected promotion without running capacity,
+development, or holdout workloads. Both found the R2 calendar/risk/economic
+tree unchanged and the finite CDF actor contract consistent with the
+preregistration. The findings are evidence/provenance defects:
+
+1. Production shared-price cancellation emits a nonzero reduced aggregate
+   `BookDelta` before `OrderCancelled`; deferring only zero-quantity deltas
+   still produces a reachable supplier-depth false rejection.
+2. The strict fixture emits full-fill depth removal before `OrderFill`, while
+   the producer emits the fill before the affected book delta; pending depth
+   can therefore be attributed with later replacement state.
+3. Same delayed public state plus changed quote terms is insufficient to prove
+   inventory response when private reference/target evolution can change those
+   terms; order-ID churn is also not an economic response.
+4. Strict completion validation checks raw count/length but not every raw path,
+   digest, size, total, or exact namespace; checkpoint evidence is not fully
+   bound to terminal binary stream identity.
+5. The shell adapter hashes the run config and supplied simulator itself and
+   does not authenticate analyzer/renderer identities. Immutable treatment,
+   mode-off, and no-roster SV1D probe configs are absent from
+   `research/configs`.
+6. The binary-only runner/manifest/status contract is internally inconsistent:
+   the strict validator requires artifacts/status fields that the production
+   runner does not actually produce under the binary evidence mode.
+
+Disposition: **REJECT promotion; correction required**. These findings do not
+invalidate old trajectories and do not license capacity, binary launch, SV1D
+probe, development cells, freeze, or holdouts. Required next step is to fix the
+actual producer-to-audit path, register immutable probe identities, repeat the
+mechanical gates, and obtain another exact-tree review.

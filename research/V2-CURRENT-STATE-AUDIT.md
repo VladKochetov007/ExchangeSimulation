@@ -991,3 +991,28 @@ the pinned Go 1.27 binaries, and run the smallest development SV1D activation
 probe before any registered 24h cell. No capacity, development, freeze, or
 holdout action occurred. The performance branch still has no commit after
 `b1847ac`, and no performance code was merged.
+
+## Append-only current checkpoint: fresh exact-tree review rejection — 2026-09-11
+
+Two independent Sol-xhigh reviewers rejected clean exact `144d151` before any
+capacity, pinned binary, SV1D probe, development cell, freeze, or holdout.
+They independently confirmed that R2 economics/calendar/risk behavior is
+unchanged and that the CDF successor remains finite, opt-in, delayed-local,
+and free of forced two-sided quoting or hidden global price access.
+
+Promotion blockers are preserved here rather than silently treating the
+passing fixtures as acceptance: nonzero shared-level cancellation deltas are
+not deferred until `OrderCancelled`; full-fill producer ordering is not
+represented by the strict fixture; post-fill response can be credited from
+reference/target or order-ID changes; raw manifest records and checkpoint
+terminal binding are not fully validated; the shell adapter derives expected
+hashes from the artifact under test and lacks immutable analyzer/renderer/probe
+identities; and the binary-only runner/manifest/status contract does not match
+the strict validator. No immutable SV1D treatment, mode-off, and no-roster
+configs currently exist under `research/configs`.
+
+The required disposition is **REJECT promotion; correct and review again**.
+The old R2 negative result and all historical SV1C/invalid-SV1D records remain
+unchanged. The next safe work is a minimal evidence/provenance correction and
+production-path regression suite. No capacity or scientific run is allowed
+from `144d151`.

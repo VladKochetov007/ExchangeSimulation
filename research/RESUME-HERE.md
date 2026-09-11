@@ -1196,3 +1196,35 @@ floor, a clean provenance-pinned Go 1.27 build, and the smallest SV1D
 activation probe. No capacity measurement, development cell, freeze, or
 holdout `619/631/641` has been consumed. The performance feed was re-fetched
 and remains at reviewed `b1847ac`; no performance code was imported.
+
+## Append-only current checkpoint: fresh exact-tree review rejection — 2026-09-11
+
+Two independent Sol-xhigh reviewers examined clean exact HEAD `144d151` and
+rejected promotion. They agreed that the R2 calendar, risk/economic
+semantics, opt-in finite CDF roster, and anti-oracle constraints remain intact;
+no capacity, binary launch, development, or holdout work was performed.
+
+The rejection identified reachable evidence/provenance blockers:
+
+- a shared-price cancellation can emit a nonzero aggregate `BookDelta` before
+  `OrderCancelled`, while the analyzer still attributes the canceled supplier
+  order;
+- the strict fixture models full-fill removal before `OrderFill`, contrary to
+  the producer path, and can leak later replacement state into earlier depth
+  observations;
+- post-fill response credit can still arise from private reference/target or
+  order-identity changes rather than an inventory-attributable response;
+- raw manifest records and checkpoint terminal binding are incomplete in the
+  Go strict validator;
+- the shell adapter derives “expected” hashes from the artifact under audit
+  and does not authenticate the analyzer/renderer or immutable probe
+  identities;
+- the binary-only runner, manifest, run-status, and strict-audit requirements
+  are inconsistent, and no immutable SV1D treatment/mode-off/no-roster probe
+  configs are registered under `research/configs`.
+
+These are evidence-contract and promotion defects, not a scientific result
+about CDF liquidity or a reason to rewrite R2/SV1C/invalid-SV1D history. The
+next correction must align the actual producer/runner/renderer/audit path,
+register the probe identities, repeat mechanical gates, and obtain another
+fresh exact-tree review before capacity or execution.
