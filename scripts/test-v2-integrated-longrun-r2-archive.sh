@@ -106,7 +106,7 @@ write_common_files() {
 write_status() {
 	local cell=$1
 	local metadata_sha256 manifest_sha256 greeks_sha256 latency_sha256 checkpoints_sha256 evidence_manifest_sha256 binary_attestation_sha256
-	local record_market_data_receipts market_data_evidence_sha256 market_data_schedules_sha256 market_data_receipts_sha256 market_data_decisions_sha256
+	local record_market_data_receipts market_data_evidence_sha256='' market_data_schedules_sha256='' market_data_receipts_sha256='' market_data_decisions_sha256=''
 	record_market_data_receipts=$(jq -r '.record_market_data_receipts // false' "$cell/run-config.json")
 	metadata_sha256=$(sha256sum -- "$cell/run-metadata.json" | awk '{print $1}')
 	manifest_sha256=$(sha256sum -- "$cell/manifest.json" | awk '{print $1}')
