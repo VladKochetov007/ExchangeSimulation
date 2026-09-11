@@ -59,7 +59,7 @@ func main() {
 }
 
 func run() error {
-	mode := flag.String("mode", "", "plan, audit, score, verify-review, or verify-capacity")
+	mode := flag.String("mode", "", "plan, audit, failure, score, verify-review, or verify-capacity")
 	out := flag.String("out", "", "new JSON output path")
 	planPath := flag.String("plan", "", "pre-run SV1D plan JSON")
 	armName := flag.String("arm", "", "treatment, mode-off, or no-roster")
@@ -80,6 +80,7 @@ func run() error {
 	trustedReviewKey := flag.String("trusted-review-key", "", "raw 32-byte trusted Ed25519 public key")
 	treeRevision := flag.String("tree-revision", "", "externally resolved reviewed Git tree revision")
 	planSHA256 := flag.String("plan-sha256", "", "externally resolved canonical SV1D plan SHA-256")
+	failureReason := flag.String("failure-reason", "", "machine-readable reason for an incomplete arm result")
 	parentRegistrationSHA256 := flag.String("parent-registration-sha256", "", "raw parent preregistration SHA-256")
 	amendmentSHA256 := flag.String("amendment-sha256", "", "raw SV1D amendment SHA-256")
 	capacityAttestation := flag.String("capacity-attestation", "", "measured SV1D capacity attestation")
@@ -106,6 +107,8 @@ func run() error {
 		return createPlan(*out, *treatmentConfig, *modeOffConfig, *noRosterConfig, *sourceRevision, *binarySHA256, *analyzerSHA256, *rendererSHA256)
 	case "audit":
 		return auditArm(*out, *planPath, *armName, *runDir, *renderedDir)
+	case "failure":
+		return publishFailedArm(*out, *planPath, *armName, *failureReason)
 	case "score":
 		return scoreArms(*out, *planPath, *treatmentResult, *modeOffResult, *noRosterResult)
 	case "verify-review":
@@ -131,7 +134,7 @@ func run() error {
 			FilesystemMountID: *filesystemMountID, FilesystemUUID: *filesystemUUID,
 		})
 	default:
-		return fmt.Errorf("-mode must be plan, audit, score, verify-review, or verify-capacity")
+		return fmt.Errorf("-mode must be plan, audit, failure, score, verify-review, or verify-capacity")
 	}
 }
 
@@ -193,6 +196,31 @@ func auditArm(out, planPath, armName, runDir, renderedDir string) error {
 	})
 	if err != nil {
 		return err
+	}
+	return publishJSON(out, armResultDocument{SchemaVersion: 1, Contract: armResultContract, ProbeID: probeID, Arm: result})
+}
+
+func publishFailedArm(out, planPath, armName, reason string) error {
+	if out == "" || planPath == "" || armName == "" || strings.TrimSpace(reason) == "" {
+		return fmt.Errorf("failure mode requires -out, -plan, -arm, and -failure-reason")
+	}
+	document, err := readPlan(planPath)
+	if err != nil {
+		return err
+	}
+	spec, _, _, err := planArm(document.Plan, armName)
+	if err != nil {
+		return err
+	}
+	if err := verifyCurrentAnalyzer(document.Plan.AnalyzerSHA256); err != nil {
+		return err
+	}
+	result := analysis.SV1DProbeArmResult{
+		ArmName: spec.Name, ExperimentID: spec.ExperimentID, HypothesisID: spec.HypothesisID,
+		ConfigSHA256: spec.ConfigSHA256, SourceRevision: spec.SourceRevision, BinarySHA256: spec.BinarySHA256,
+		AnalyzerSHA256: spec.AnalyzerSHA256, RendererSHA256: spec.RendererSHA256, PlanSHA256: document.PlanSHA256,
+		Complete: false, EvidenceValid: false, StrictMechanicsValid: false, TerminalValuationValid: false,
+		ActivationSatisfied: false, AntiCheatingSatisfied: false, FailureReasons: []string{reason},
 	}
 	return publishJSON(out, armResultDocument{SchemaVersion: 1, Contract: armResultContract, ProbeID: probeID, Arm: result})
 }

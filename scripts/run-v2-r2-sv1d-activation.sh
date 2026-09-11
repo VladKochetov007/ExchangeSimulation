@@ -23,6 +23,7 @@ review_attestation=${SV1D_REVIEW_ATTESTATION:-}
 review_report=${SV1D_REVIEW_REPORT:-}
 trusted_review_key=${SV1D_TRUSTED_REVIEW_KEY:-}
 capacity_attestation=${SV1D_CAPACITY_PREFLIGHT_ATTESTATION:-}
+capacity_root=${SV1D_CAPACITY_PREFLIGHT_ROOT:-""}
 lock_path="/home/vlad/v2-r2-sv1d-activation-659.lock"
 
 fail() {
@@ -45,6 +46,23 @@ require_binary() {
 	local name=$1 path=$2
 	[[ -f "$path" && ! -L "$path" && -x "$path" ]] || fail "missing executable $name: $path"
 	require_no_symlink_components "$path" || fail "$name path contains a symlink: $path"
+}
+
+copy_immutable_file() {
+	local name=$1 source=$2 destination=$3
+	require_regular_file "$name" "$source"
+	[[ ! -e "$destination" && ! -L "$destination" ]] || fail "refusing to overwrite staged $name"
+	cp -- "$source" "$destination"
+	cmp -s "$source" "$destination" || fail "$name changed during immutable copy"
+}
+
+copy_immutable_binary() {
+	local name=$1 source=$2 destination=$3
+	require_binary "$name" "$source"
+	[[ ! -e "$destination" && ! -L "$destination" ]] || fail "refusing to overwrite staged $name"
+	cp -- "$source" "$destination"
+	chmod 0555 -- "$destination"
+	cmp -s "$source" "$destination" || fail "$name changed during immutable copy"
 }
 
 require_regular_file() {
@@ -80,6 +98,31 @@ require_clean_pinned_binary() {
 	[[ "$go_version" == go1.27* ]] || fail "$name is not built with Go 1.27: $go_version"
 }
 
+hash_file() {
+	sha256sum -- "$1" | awk '{print $1}'
+}
+
+publish_incomplete_arm() {
+	local arm=$1 result_path=$2 reason=$3
+	[[ ! -e "$result_path" && ! -L "$result_path" ]] || return 1
+	"$sv1dprobe_binary" -mode failure -out "$result_path" -plan "$plan_path" -arm "$arm" -failure-reason "$reason"
+}
+
+require_live_resource_envelope() {
+	local expected_limit=$1
+	local cgroup_relative cgroup_path current_limit swap_total
+	cgroup_relative=$(awk -F: '$1 == "0" {print $3; exit}' /proc/self/cgroup)
+	[[ -n "$cgroup_relative" && "$cgroup_relative" != *$'\n'* ]] || fail "could not resolve the current cgroup"
+	cgroup_path="/sys/fs/cgroup$cgroup_relative"
+	[[ -f "$cgroup_path/memory.max" && -f "$cgroup_path/memory.swap.current" ]] || fail "current cgroup lacks the registered memory controls"
+	current_limit=$(<"$cgroup_path/memory.max")
+	[[ "$current_limit" =~ ^[0-9]+$ && "$current_limit" -gt 0 ]] || fail "activation must run inside a finite memory cgroup"
+	[[ "$current_limit" == "$expected_limit" ]] || fail "activation cgroup limit differs from measured capacity envelope"
+	swap_total=$(awk '$1 == "SwapTotal:" {print $2; exit}' /proc/meminfo)
+	[[ "$swap_total" == 0 ]] || fail "activation host exposes swap although the capacity contract forbids it"
+	[[ "$(<"$cgroup_path/memory.swap.current")" == 0 ]] || fail "activation cgroup has non-zero swap usage"
+}
+
 [[ "${SV1D_PROBE_AUTHORIZED:-0}" == 1 ]] || fail "set SV1D_PROBE_AUTHORIZED=1 at the explicit development-probe boundary"
 
 [[ -d "$root_dir/.git" ]] || fail "repository root is not a Git worktree"
@@ -111,57 +154,156 @@ require_regular_file SV1D-amendment "$root_dir/research/v2-r2-sv1d-activation-co
 treatment_config="$config_dir/activation-659-treatment.json"
 mode_off_config="$config_dir/activation-659-mode-off.json"
 no_roster_config="$config_dir/activation-659-no-roster.json"
-config_sha256() { sha256sum -- "$1" | awk '{print $1}'; }
-multivenue_sha256=$(sha256sum -- "$multivenue_binary" | awk '{print $1}')
-sv1dprobe_sha256=$(sha256sum -- "$sv1dprobe_binary" | awk '{print $1}')
-evsrender_sha256=$(sha256sum -- "$evsrender_binary" | awk '{print $1}')
-parent_registration_sha256=$(sha256sum -- "$root_dir/research/v2-r2-sv1d-one-sided-elastic-successor-preregistration-2026-09-10.md" | awk '{print $1}')
-amendment_sha256=$(sha256sum -- "$root_dir/research/v2-r2-sv1d-activation-contract-amendment-2026-09-11.md" | awk '{print $1}')
+config_sha256() { hash_file "$1"; }
 
 review_stage=$(mktemp -d)
 [[ -d "$review_stage" && ! -L "$review_stage" ]] || fail "invalid SV1D review staging directory"
 trap 'rm -rf -- "$review_stage"' EXIT
+mkdir -p "$review_stage/tools" "$review_stage/configs" "$review_stage/review"
+staged_multivenue_binary="$review_stage/tools/multivenue"
+staged_sv1dprobe_binary="$review_stage/tools/sv1dprobe"
+staged_evsrender_binary="$review_stage/tools/evsrender"
+copy_immutable_binary multivenue "$multivenue_binary" "$staged_multivenue_binary"
+copy_immutable_binary sv1dprobe "$sv1dprobe_binary" "$staged_sv1dprobe_binary"
+copy_immutable_binary evsrender "$evsrender_binary" "$staged_evsrender_binary"
+require_clean_pinned_binary multivenue "$staged_multivenue_binary" "$source_revision"
+require_clean_pinned_binary sv1dprobe "$staged_sv1dprobe_binary" "$source_revision"
+require_clean_pinned_binary evsrender "$staged_evsrender_binary" "$source_revision"
+multivenue_binary="$staged_multivenue_binary"
+sv1dprobe_binary="$staged_sv1dprobe_binary"
+evsrender_binary="$staged_evsrender_binary"
+multivenue_sha256=$(hash_file "$multivenue_binary")
+sv1dprobe_sha256=$(hash_file "$sv1dprobe_binary")
+evsrender_sha256=$(hash_file "$evsrender_binary")
+
+staged_treatment_config="$review_stage/configs/target-treatment.json"
+staged_mode_off_config="$review_stage/configs/target-mode-off.json"
+staged_no_roster_config="$review_stage/configs/target-no-roster.json"
+copy_immutable_file target-treatment-config "$treatment_config" "$staged_treatment_config"
+copy_immutable_file target-mode-off-config "$mode_off_config" "$staged_mode_off_config"
+copy_immutable_file target-no-roster-config "$no_roster_config" "$staged_no_roster_config"
+staged_review_attestation="$review_stage/review/attestation.json"
+staged_review_report="$review_stage/review/report.md"
+staged_trusted_review_key="$review_stage/review/trusted-key.raw"
+staged_parent_registration="$review_stage/review/parent-registration.md"
+staged_amendment="$review_stage/review/amendment.md"
+copy_immutable_file review-attestation "$review_attestation" "$staged_review_attestation"
+copy_immutable_file review-report "$review_report" "$staged_review_report"
+copy_immutable_file trusted-review-key "$trusted_review_key" "$staged_trusted_review_key"
+copy_immutable_file parent-registration "$root_dir/research/v2-r2-sv1d-one-sided-elastic-successor-preregistration-2026-09-10.md" "$staged_parent_registration"
+copy_immutable_file amendment "$root_dir/research/v2-r2-sv1d-activation-contract-amendment-2026-09-11.md" "$staged_amendment"
+parent_registration_sha256=$(hash_file "$staged_parent_registration")
+amendment_sha256=$(hash_file "$staged_amendment")
+review_attestation_sha256=$(hash_file "$staged_review_attestation")
+review_report_sha256=$(hash_file "$staged_review_report")
+
 review_plan="$review_stage/probe-plan.json"
 "$sv1dprobe_binary" -mode plan -out "$review_plan" \
-	-treatment-config "$treatment_config" -mode-off-config "$mode_off_config" \
-	-no-roster-config "$no_roster_config" -source-revision "$source_revision" \
+	-treatment-config "$staged_treatment_config" -mode-off-config "$staged_mode_off_config" \
+	-no-roster-config "$staged_no_roster_config" -source-revision "$source_revision" \
 	-binary-sha256 "$multivenue_sha256" -analyzer-sha256 "$sv1dprobe_sha256" \
 	-renderer-sha256 "$evsrender_sha256" || fail "could not derive the review-bound SV1D plan"
 review_plan_sha256=$(jq -er '.plan_sha256 | select(test("^[0-9a-f]{64}$"))' "$review_plan") || fail "review-bound SV1D plan has no canonical digest"
 "$sv1dprobe_binary" -mode verify-review \
-	-review-attestation "$review_attestation" -review-report "$review_report" -trusted-review-key "$trusted_review_key" \
+	-review-attestation "$staged_review_attestation" -review-report "$staged_review_report" -trusted-review-key "$staged_trusted_review_key" \
 	-source-revision "$source_revision" -tree-revision "$tree_revision" -plan-sha256 "$review_plan_sha256" \
 	-parent-registration-sha256 "$parent_registration_sha256" -amendment-sha256 "$amendment_sha256" \
-	-treatment-config "$treatment_config" -mode-off-config "$mode_off_config" -no-roster-config "$no_roster_config" \
+	-treatment-config "$staged_treatment_config" -mode-off-config "$staged_mode_off_config" -no-roster-config "$staged_no_roster_config" \
 	-binary-sha256 "$multivenue_sha256" -analyzer-sha256 "$sv1dprobe_sha256" -renderer-sha256 "$evsrender_sha256" ||
 	fail "externally authenticated exact-tree SV1D review was not accepted"
-review_attestation_sha256=$(sha256sum -- "$review_attestation" | awk '{print $1}')
-review_report_sha256=$(sha256sum -- "$review_report" | awk '{print $1}')
+
+[[ -n "$capacity_attestation" ]] || fail "a measured SV1D binary-capacity preflight is required"
+require_regular_file SV1D-capacity-attestation "$capacity_attestation"
+capacity_attestation_sha256=$(hash_file "$capacity_attestation")
+attested_capacity_root=$(jq -er '.measurement_root' "$capacity_attestation") || fail "capacity attestation has no measurement root"
+if [[ -n "$capacity_root" && "$capacity_root" != "$attested_capacity_root" ]]; then
+	fail "configured capacity root differs from the attestation"
+fi
+capacity_root="$attested_capacity_root"
+[[ -d "$capacity_root" && ! -L "$capacity_root" ]] || fail "retained capacity output root is missing"
+require_no_symlink_components "$capacity_root" || fail "retained capacity output root contains a symlink"
+capacity_treatment_config="$capacity_root/configs/capacity-treatment.json"
+capacity_mode_off_config="$capacity_root/configs/capacity-mode-off.json"
+capacity_no_roster_config="$capacity_root/configs/capacity-no-roster.json"
+capacity_delta_path="$capacity_root/configs/capacity-config-delta.json"
+capacity_policy_path="$capacity_root/resource-policy-v1.json"
+capacity_measurer_sha256=$(jq -er '.measurer_sha256 | select(test("^[0-9a-f]{64}$"))' "$capacity_attestation") || fail "capacity attestation has no measurer identity"
+capacity_measurer="$capacity_root/tools/sv1dresource-$capacity_measurer_sha256"
+for capacity_file in "$capacity_treatment_config" "$capacity_mode_off_config" "$capacity_no_roster_config" "$capacity_delta_path" "$capacity_policy_path" "$capacity_measurer"; do
+	require_regular_file capacity-retention "$capacity_file"
+done
+[[ "$(hash_file "$capacity_treatment_config")" == "$(jq -er '.capacity_treatment_config_sha256' "$capacity_attestation")" ]] || fail "capacity treatment config retention changed"
+[[ "$(hash_file "$capacity_mode_off_config")" == "$(jq -er '.capacity_mode_off_config_sha256' "$capacity_attestation")" ]] || fail "capacity mode-off config retention changed"
+[[ "$(hash_file "$capacity_no_roster_config")" == "$(jq -er '.capacity_no_roster_config_sha256' "$capacity_attestation")" ]] || fail "capacity no-roster config retention changed"
+[[ "$(hash_file "$capacity_delta_path")" == "$(jq -er '.capacity_config_delta_sha256' "$capacity_attestation")" ]] || fail "capacity config delta retention changed"
+[[ "$(hash_file "$capacity_policy_path")" == "$(jq -er '.resource_policy_sha256' "$capacity_attestation")" ]] || fail "capacity resource policy retention changed"
+[[ "$(hash_file "$capacity_measurer")" == "$capacity_measurer_sha256" ]] || fail "capacity measurer retention changed"
+capacity_runner_path="$root_dir/scripts/run-v2-r2-sv1d-capacity-preflight.sh"
+capacity_runner_sha256=$(hash_file "$capacity_runner_path")
+[[ "$capacity_runner_sha256" == "$(jq -er '.runner_sha256' "$capacity_attestation")" ]] || fail "capacity runner differs from the measured preflight"
+capacity_output_parent=$(jq -er '.output_parent' "$capacity_attestation") || fail "capacity attestation has no output parent"
+activation_output_parent=$(dirname -- "$output_root")
+[[ "$activation_output_parent" == "$capacity_output_parent" ]] || fail "activation output parent differs from measured capacity parent"
+capacity_records_root=$(jq -er '.measurement_records_root' "$capacity_attestation") || fail "capacity attestation has no measurement-record root"
+capacity_records_sha256=$(jq -er '.measurement_records_sha256 | select(test("^[0-9a-f]{64}$"))' "$capacity_attestation") || fail "capacity attestation has no measurement-record identity"
+capacity_filesystem_device=$(jq -er '.filesystem_device' "$capacity_attestation")
+capacity_filesystem_id=$(jq -er '.filesystem_id' "$capacity_attestation")
+capacity_filesystem_type=$(jq -er '.filesystem_type' "$capacity_attestation")
+capacity_filesystem_mount_id=$(jq -er '.filesystem_mount_id' "$capacity_attestation")
+capacity_filesystem_uuid=$(jq -er '.filesystem_uuid' "$capacity_attestation")
+"$sv1dprobe_binary" -mode verify-capacity -capacity-attestation "$capacity_attestation" \
+	-source-revision "$source_revision" -tree-revision "$tree_revision" -plan-sha256 "$review_plan_sha256" \
+	-review-attestation "$review_attestation_sha256" -review-report "$review_report_sha256" \
+	-treatment-config "$staged_treatment_config" -mode-off-config "$staged_mode_off_config" -no-roster-config "$staged_no_roster_config" \
+	-capacity-treatment-config "$capacity_treatment_config" -capacity-mode-off-config "$capacity_mode_off_config" -capacity-no-roster-config "$capacity_no_roster_config" \
+	-capacity-config-delta-sha256 "$(jq -er '.capacity_config_delta_sha256' "$capacity_attestation")" \
+	-binary-sha256 "$multivenue_sha256" -analyzer-sha256 "$sv1dprobe_sha256" -renderer-sha256 "$evsrender_sha256" \
+	-runner-sha256 "$capacity_runner_sha256" -measurer-sha256 "$capacity_measurer_sha256" -resource-policy-sha256 "$(jq -er '.resource_policy_sha256' "$capacity_attestation")" \
+	-output-parent "$capacity_output_parent" -measurement-root "$(jq -er '.measurement_root' "$capacity_attestation")" \
+	-measurement-records-root "$capacity_records_root" -measurement-records-sha256 "$capacity_records_sha256" \
+	-filesystem-device "$capacity_filesystem_device" -filesystem-id "$capacity_filesystem_id" -filesystem-type "$capacity_filesystem_type" \
+	-filesystem-mount-id "$capacity_filesystem_mount_id" -filesystem-uuid "$capacity_filesystem_uuid" ||
+	fail "measured SV1D binary-capacity preflight did not verify against this exact candidate"
 
 source "$root_dir/scripts/v2-integrated-longrun-r2-contract.sh"
-[[ -n "$capacity_attestation" ]] || fail "a measured SV1D binary-capacity preflight is required"
-v2_r2_require_binary_capacity_attestation "$multivenue_binary" "$source_revision" "$capacity_attestation" ||
-	fail "matching measured SV1D binary-evidence capacity preflight is missing or disk headroom is unsafe"
 
-[[ "$output_root" == /* ]] || fail "SV1D output root must be absolute"
+[[ "$output_root" == /* && "$output_root" != "/" && "$(realpath -m -- "$output_root")" == "$output_root" ]] || fail "SV1D output root must be a clean absolute path"
 require_no_symlink_components "$output_root" || fail "SV1D output root contains a symlink"
 [[ ! -e "$output_root" && ! -L "$output_root" ]] || fail "refusing to overwrite SV1D evidence root: $output_root"
 [[ ! -L "$lock_path" ]] || fail "SV1D namespace lock is symlinked"
 exec {lock_fd}>"$lock_path" || fail "cannot open SV1D namespace lock"
 flock -n "$lock_fd" || fail "another SV1D activation run holds the namespace lock"
 
+required_free_bytes=$(jq -er '.required_free_bytes' "$capacity_attestation") || fail "capacity attestation has no required free-space floor"
+required_available_memory_bytes=$(jq -er '.required_available_memory_bytes' "$capacity_attestation") || fail "capacity attestation has no required memory floor"
+capacity_memory_limit_bytes=$(jq -er '.cgroup_memory_limit_bytes' "$capacity_attestation") || fail "capacity attestation has no cgroup memory envelope"
+[[ "$required_free_bytes" =~ ^[0-9]+$ && "$required_available_memory_bytes" =~ ^[0-9]+$ && "$capacity_memory_limit_bytes" =~ ^[0-9]+$ && "$capacity_memory_limit_bytes" -gt 0 ]] || fail "capacity resource floors are malformed"
+available_kb=$(df -Pk -- "$capacity_output_parent" | awk 'NR == 2 {print $4}') || fail "could not measure activation output-parent free space"
+[[ "$available_kb" =~ ^[0-9]+$ && $((available_kb * 1024)) -ge "$required_free_bytes" ]] || fail "activation output-parent free space is below the measured capacity floor"
+host_available_bytes=$(awk '$1 == "MemAvailable:" {print $2 * 1024; exit}' /proc/meminfo)
+[[ "$host_available_bytes" =~ ^[0-9]+$ && "$host_available_bytes" -ge "$required_available_memory_bytes" ]] || fail "activation host available memory is below the measured capacity floor"
+require_live_resource_envelope "$capacity_memory_limit_bytes"
+
 export GOMAXPROCS=2
 export GOMEMLIMIT=4GiB
 
-mkdir -p "$output_root"
+mkdir -p "$output_root/provenance" "$output_root/tools" "$output_root/configs" "$output_root/arms" "$output_root/rendered" "$output_root/results" "$output_root/logs"
+copy_immutable_file retained-multivenue "$multivenue_binary" "$output_root/tools/multivenue-$multivenue_sha256"
+copy_immutable_file retained-sv1dprobe "$sv1dprobe_binary" "$output_root/tools/sv1dprobe-$sv1dprobe_sha256"
+copy_immutable_file retained-evsrender "$evsrender_binary" "$output_root/tools/evsrender-$evsrender_sha256"
+copy_immutable_file retained-review-attestation "$staged_review_attestation" "$output_root/provenance/review-attestation.json"
+copy_immutable_file retained-review-report "$staged_review_report" "$output_root/provenance/review-report.md"
+copy_immutable_file retained-trusted-review-key "$staged_trusted_review_key" "$output_root/provenance/trusted-review-key.raw"
+copy_immutable_file retained-capacity-attestation "$capacity_attestation" "$output_root/provenance/capacity-attestation.json"
+copy_immutable_file retained-capacity-policy "$capacity_policy_path" "$output_root/provenance/resource-policy-v1.json"
+copy_immutable_file retained-parent-registration "$staged_parent_registration" "$output_root/provenance/parent-registration.md"
+copy_immutable_file retained-amendment "$staged_amendment" "$output_root/provenance/amendment.md"
+copy_immutable_file retained-target-treatment-config "$staged_treatment_config" "$output_root/configs/target-treatment.json"
+copy_immutable_file retained-target-mode-off-config "$staged_mode_off_config" "$output_root/configs/target-mode-off.json"
+copy_immutable_file retained-target-no-roster-config "$staged_no_roster_config" "$output_root/configs/target-no-roster.json"
 
 plan_path="$output_root/probe-plan.json"
-"$sv1dprobe_binary" -mode plan -out "$plan_path" \
-	-treatment-config "$treatment_config" -mode-off-config "$mode_off_config" \
-	-no-roster-config "$no_roster_config" -source-revision "$source_revision" \
-	-binary-sha256 "$multivenue_sha256" -analyzer-sha256 "$sv1dprobe_sha256" \
-	-renderer-sha256 "$evsrender_sha256" || fail "could not publish immutable SV1D probe plan"
-[[ -f "$plan_path" && ! -L "$plan_path" ]] || fail "probe plan was not published"
+copy_immutable_file probe-plan "$review_plan" "$plan_path"
 
 simulation_start_nano=1735689600000000000
 simulation_end_nano=1735689900000000000
@@ -169,87 +311,138 @@ probe_horizon=5m
 mkdir -p "$output_root/arms"
 
 declare -A config_for=(
-	[treatment]="$treatment_config"
-	[mode-off]="$mode_off_config"
-	[no-roster]="$no_roster_config"
+	[treatment]="$staged_treatment_config"
+	[mode-off]="$staged_mode_off_config"
+	[no-roster]="$staged_no_roster_config"
 )
 
-for arm in treatment mode-off no-roster; do
-	config=${config_for[$arm]}
-	arm_dir="$output_root/arms/$arm"
-	rendered_dir="$output_root/rendered/$arm"
-	stdout_log="$output_root/$arm.simulator.stdout.log"
-	stderr_log="$output_root/$arm.simulator.stderr.log"
-	result_path="$output_root/results/$arm.json"
+activation_runner_sha256=$(hash_file "$root_dir/scripts/run-v2-r2-sv1d-activation.sh")
+activation_metadata="$output_root/provenance/activation-run-metadata.json"
+jq -S -n \
+	--arg contract "v2-r2-sv1d-activation-run-metadata-v2" --arg source_revision "$source_revision" --arg tree_revision "$tree_revision" \
+	--arg probe_id "v2-r2-sv1d-activation-659" --arg plan_sha256 "$review_plan_sha256" \
+	--arg review_attestation_sha256 "$review_attestation_sha256" --arg review_report_sha256 "$review_report_sha256" \
+	--arg capacity_attestation_sha256 "$capacity_attestation_sha256" --arg capacity_records_sha256 "$capacity_records_sha256" \
+	--arg capacity_root "$capacity_root" --arg activation_runner_sha256 "$activation_runner_sha256" --arg capacity_runner_sha256 "$capacity_runner_sha256" \
+	--arg simulator_sha256 "$multivenue_sha256" --arg analyzer_sha256 "$sv1dprobe_sha256" --arg renderer_sha256 "$evsrender_sha256" \
+	--arg output_root "$output_root" --arg output_parent "$capacity_output_parent" \
+	'{schema_version: 2, contract: $contract, development_only: true, scientific_result_eligible: false,
+	 source_revision: $source_revision, tree_revision: $tree_revision, probe_id: $probe_id, plan_sha256: $plan_sha256,
+	 review_attestation_sha256: $review_attestation_sha256, review_report_sha256: $review_report_sha256,
+	 capacity_attestation_sha256: $capacity_attestation_sha256, capacity_records_sha256: $capacity_records_sha256,
+	 capacity_root: $capacity_root, activation_runner_sha256: $activation_runner_sha256, capacity_runner_sha256: $capacity_runner_sha256,
+	 simulator_sha256: $simulator_sha256, analyzer_sha256: $analyzer_sha256, renderer_sha256: $renderer_sha256,
+	 evidence_format: "evstream_v3", evidence_schema_epoch: 4, log_mode: "full", gomaxprocs: 2, gomemlimit: "4GiB",
+	 output_root: $output_root, output_parent: $output_parent, arms: ["treatment", "mode-off", "no-roster"], holdouts_consumed: []}' \
+	>"$activation_metadata.tmp-$$"
+mv -- "$activation_metadata.tmp-$$" "$activation_metadata"
+
+arm_failure=0
+
+mark_arm_failure() {
+	local arm=$1 result_path=$2 reason=$3
+	arm_failure=1
+	if ! publish_incomplete_arm "$arm" "$result_path" "$reason"; then
+		echo "SV1D activation: could not publish incomplete result for $arm ($reason)" >&2
+		return 1
+	fi
+	echo "SV1D activation: retained incomplete arm $arm ($reason)" >&2
+}
+
+run_arm() {
+	local arm=$1 config=${config_for[$1]}
+	local arm_dir="$output_root/arms/$arm" rendered_dir="$output_root/rendered/$arm"
+	local stdout_log="$output_root/logs/$arm.simulator.stdout.log" stderr_log="$output_root/logs/$arm.simulator.stderr.log"
+	local result_path="$output_root/results/$arm.json" config_digest experiment_id hypothesis_id log_mode evidence_format
+	local run_metadata_sha256_before status audit_status renderer_status
+
 	[[ ! -e "$arm_dir" && ! -L "$arm_dir" ]] || fail "refusing to overwrite arm directory: $arm_dir"
 	[[ ! -e "$rendered_dir" && ! -L "$rendered_dir" ]] || fail "refusing to overwrite rendered directory: $rendered_dir"
 	[[ ! -e "$result_path" && ! -L "$result_path" ]] || fail "refusing to overwrite arm result: $result_path"
 	mkdir -p "$arm_dir"
-	cp -- "$config" "$arm_dir/run-config.json"
-	cmp -s "$config" "$arm_dir/run-config.json" || fail "config copy changed for $arm"
+	copy_immutable_file "arm-$arm-config" "$config" "$arm_dir/run-config.json"
 
 	config_digest=$(config_sha256 "$config")
 	experiment_id=$(jq -er '.experiment_id' "$config")
 	hypothesis_id=$(jq -er '.hypothesis_id' "$config")
 	log_mode=$(jq -er '.log_mode' "$config")
 	evidence_format=$(jq -er '.evidence_format' "$config")
-	jq -n \
+	if ! jq -S -n \
 		--arg arm "$arm" --arg experiment_id "$experiment_id" --arg hypothesis_id "$hypothesis_id" \
 		--argjson seed 659 --arg horizon "$probe_horizon" \
 		--argjson simulation_start_nano "$simulation_start_nano" --argjson simulation_end_nano "$simulation_end_nano" \
 		--arg config_sha256 "$config_digest" --arg binary_sha256 "$multivenue_sha256" \
-		--arg git_revision "$source_revision" --arg binary_path "$multivenue_binary" \
+		--arg git_revision "$source_revision" --arg tree_revision "$tree_revision" --arg binary_path "$output_root/tools/multivenue-$multivenue_sha256" \
 		--arg binary_go_version "$(binary_go_version "$multivenue_binary")" \
 		--arg analyzer_sha256 "$sv1dprobe_sha256" --arg renderer_sha256 "$evsrender_sha256" \
-		--arg log_mode "$log_mode" --arg evidence_format "$evidence_format" \
+		--arg runner_sha256 "$activation_runner_sha256" --arg review_attestation_sha256 "$review_attestation_sha256" --arg review_report_sha256 "$review_report_sha256" \
+		--arg capacity_attestation_sha256 "$capacity_attestation_sha256" --arg log_mode "$log_mode" --arg evidence_format "$evidence_format" \
 		--arg output_dir "$arm_dir" --argjson gomaxprocs 2 \
-		'{schema_version: 1, runner_contract: "v2-r2-sv1d-activation-runner-v1", probe_id: "v2-r2-sv1d-activation-659", arm: $arm,
-		  experiment_id: $experiment_id, hypothesis_id: $hypothesis_id, seed: $seed, simulated_horizon: $horizon,
+		'{schema_version: 2, runner_contract: "v2-r2-sv1d-activation-runner-v2", probe_id: "v2-r2-sv1d-activation-659", arm: $arm,
+		  experiment_id: $experiment_id, config_experiment_id: $experiment_id, hypothesis_id: $hypothesis_id, seed: $seed, simulated_horizon: $horizon,
 		  simulation_start_nano: $simulation_start_nano, simulation_end_nano: $simulation_end_nano,
-		  config_sha256: $config_sha256, binary_sha256: $binary_sha256, git_revision: $git_revision,
+		  config_sha256: $config_sha256, binary_sha256: $binary_sha256, git_revision: $git_revision, tree_revision: $tree_revision,
 		  binary_path: $binary_path, binary_go_version: $binary_go_version, binary_goos: "linux", binary_goarch: "amd64", binary_goamd64: "v1",
-		  analyzer_sha256: $analyzer_sha256, renderer_sha256: $renderer_sha256, log_mode: $log_mode, evidence_format: $evidence_format,
-		  gomaxprocs: $gomaxprocs, output_dir: $output_dir, holdout: false,
+		  analyzer_sha256: $analyzer_sha256, renderer_sha256: $renderer_sha256, runner_sha256: $runner_sha256,
+		  review_attestation_sha256: $review_attestation_sha256, review_report_sha256: $review_report_sha256, capacity_attestation_sha256: $capacity_attestation_sha256,
+		  log_mode: $log_mode, evidence_format: $evidence_format, evidence_schema_epoch: 4, gomaxprocs: $gomaxprocs, gomemlimit: "4GiB",
+		  output_dir: $output_dir, holdout: false,
 		  command: ["multivenue", "-config", "run-config.json", "-duration", "5m", "-log-mode", "full", "-evidence-format", "evstream_v3"],
 		  raw_log_policy: "retain until the complete SV1D arm and tri-arm score have passed independent review"}' \
-		>"$arm_dir/run-metadata.json"
-	run_metadata_sha256_before=$(sha256sum -- "$arm_dir/run-metadata.json" | awk '{print $1}')
+		>"$arm_dir/run-metadata.json"; then
+		mark_arm_failure "$arm" "$result_path" "run_metadata_creation_failed" || return 1
+		return 0
+	fi
+	run_metadata_sha256_before=$(hash_file "$arm_dir/run-metadata.json")
 
 	set +e
 	GOMAXPROCS=2 GOMEMLIMIT=4GiB "$multivenue_binary" -config "$arm_dir/run-config.json" -duration "$probe_horizon" \
 		-logdir "$arm_dir" -log-mode full -evidence-format evstream_v3 >"$stdout_log" 2>"$stderr_log"
 	status=$?
 	set -e
-	[[ "$status" -eq 0 ]] || fail "$arm simulator failed with status $status; retain $arm_dir"
-	[[ -s "$arm_dir/greeks.json" && -s "$arm_dir/latency.json" ]] || fail "$arm completion sentinels are missing"
-	[[ "$run_metadata_sha256_before" == "$(sha256sum -- "$arm_dir/run-metadata.json" | awk '{print $1}')" ]] || fail "$arm metadata changed during execution"
-	jq -e --arg revision "$source_revision" --arg experiment "$experiment_id" \
+	if [[ "$status" -ne 0 ]]; then
+		mark_arm_failure "$arm" "$result_path" "simulator_exit_status_$status" || return 1
+		return 0
+	fi
+	if [[ ! -s "$arm_dir/greeks.json" || ! -s "$arm_dir/latency.json" ]]; then
+		mark_arm_failure "$arm" "$result_path" "completion_sentinel_missing" || return 1
+		return 0
+	fi
+	if [[ "$run_metadata_sha256_before" != "$(hash_file "$arm_dir/run-metadata.json")" ]]; then
+		mark_arm_failure "$arm" "$result_path" "run_metadata_changed_during_execution" || return 1
+		return 0
+	fi
+	if ! jq -e --arg revision "$source_revision" --arg experiment "$experiment_id" \
 		'.schema_version == 2 and .build.revision == $revision and .build.modified == false and
 		 .build.goos == "linux" and .build.goarch == "amd64" and .build.goamd64 == "v1" and
-		 .config.seed == 659 and .config.experiment_id == $experiment and .config.log_mode == "full" and .config.evidence_format == "evstream_v3"' \
-		"$arm_dir/manifest.json" >/dev/null || fail "$arm manifest provenance/config identity mismatch"
-	jq -e --argjson start "$simulation_start_nano" --argjson end "$simulation_end_nano" \
+		 .config.seed == 659 and .config.experiment_id == $experiment and .config.log_mode == "full" and
+		 .config.evidence_format == "evstream_v3" and .config.evidence_contract_version == 2' \
+		"$arm_dir/manifest.json" >/dev/null; then
+		mark_arm_failure "$arm" "$result_path" "manifest_provenance_or_config_mismatch" || return 1
+		return 0
+	fi
+	if ! jq -e --argjson start "$simulation_start_nano" --argjson end "$simulation_end_nano" \
 		'all(.initial_accounts[]; .account.timestamp == $start) and all(.terminal_accounts[]; .account.timestamp == $end)' \
-		"$arm_dir/greeks.json" >/dev/null || fail "$arm terminal valuation does not attest the registered 5m horizon"
-
-	v2_r2_write_evidence_manifest "$arm_dir" || fail "could not write $arm evidence manifest"
-	v2_r2_verify_evidence_manifest "$arm_dir" || fail "$arm evidence manifest did not verify"
+		"$arm_dir/greeks.json" >/dev/null; then
+		mark_arm_failure "$arm" "$result_path" "terminal_valuation_horizon_mismatch" || return 1
+		return 0
+	fi
+	if ! v2_r2_write_evidence_manifest "$arm_dir" || ! v2_r2_verify_evidence_manifest "$arm_dir"; then
+		mark_arm_failure "$arm" "$result_path" "evidence_manifest_verification_failed" || return 1
+		return 0
+	fi
 	status_tmp="$arm_dir/run-status.json.tmp-$$"
-	jq -n \
-		--argjson exit_status "$status" --arg arm "$arm" --arg horizon "$probe_horizon" \
+	if ! jq -S -n \
+		--argjson exit_status "$status" --arg arm "$arm" --arg experiment_id "$experiment_id" --arg hypothesis_id "$hypothesis_id" --arg horizon "$probe_horizon" \
 		--argjson simulation_start_nano "$simulation_start_nano" --argjson simulation_end_nano "$simulation_end_nano" \
 		--arg run_metadata_sha256 "$run_metadata_sha256_before" \
-		--arg manifest_sha256 "$(sha256sum -- "$arm_dir/manifest.json" | awk '{print $1}')" \
-		--arg greeks_sha256 "$(sha256sum -- "$arm_dir/greeks.json" | awk '{print $1}')" \
-		--arg latency_sha256 "$(sha256sum -- "$arm_dir/latency.json" | awk '{print $1}')" \
-		--arg checkpoints_sha256 "$(sha256sum -- "$arm_dir/checkpoints.jsonl" | awk '{print $1}')" \
-		--arg evidence_manifest_sha256 "$(sha256sum -- "$arm_dir/evidence-manifest.json" | awk '{print $1}')" \
-		--arg binary_attestation_sha256 "$(sha256sum -- "$arm_dir/binary-evidence-attestation.json" | awk '{print $1}')" \
-		--arg market_data_evidence_sha256 "$(sha256sum -- "$arm_dir/market-data-evidence-v2.json" | awk '{print $1}')" \
-		--arg market_data_schedules_sha256 "$(sha256sum -- "$arm_dir/market-data-schedules-v2.bin" | awk '{print $1}')" \
-		--arg market_data_receipts_sha256 "$(sha256sum -- "$arm_dir/market-data-receipts-v2.bin" | awk '{print $1}')" \
-		--arg market_data_decisions_sha256 "$(sha256sum -- "$arm_dir/market-data-decisions-v2.bin" | awk '{print $1}')" \
-		'{schema_version: 1, cell: $arm, exit_status: $exit_status, completion_verified: true, simulated_horizon: $horizon,
+		--arg manifest_sha256 "$(hash_file "$arm_dir/manifest.json")" --arg greeks_sha256 "$(hash_file "$arm_dir/greeks.json")" \
+		--arg latency_sha256 "$(hash_file "$arm_dir/latency.json")" --arg checkpoints_sha256 "$(hash_file "$arm_dir/checkpoints.jsonl")" \
+		--arg evidence_manifest_sha256 "$(hash_file "$arm_dir/evidence-manifest.json")" --arg binary_attestation_sha256 "$(hash_file "$arm_dir/binary-evidence-attestation.json")" \
+		--arg market_data_evidence_sha256 "$(hash_file "$arm_dir/market-data-evidence-v2.json")" --arg market_data_schedules_sha256 "$(hash_file "$arm_dir/market-data-schedules-v2.bin")" \
+		--arg market_data_receipts_sha256 "$(hash_file "$arm_dir/market-data-receipts-v2.bin")" --arg market_data_decisions_sha256 "$(hash_file "$arm_dir/market-data-decisions-v2.bin")" \
+		'{schema_version: 1, contract: "v2-r2-sv1d-arm-status-v2", cell: $arm, experiment_id: $experiment_id, config_experiment_id: $experiment_id, hypothesis_id: $hypothesis_id,
+		  scientific_result_eligible: false, exit_status: $exit_status, completion_verified: true, simulated_horizon: $horizon,
 		  simulation_start_nano: $simulation_start_nano, simulation_end_nano: $simulation_end_nano,
 		  completion_sentinels: ["greeks.json", "latency.json"], run_metadata_sha256: $run_metadata_sha256,
 		  manifest_sha256: $manifest_sha256, greeks_sha256: $greeks_sha256, latency_sha256: $latency_sha256,
@@ -257,27 +450,58 @@ for arm in treatment mode-off no-roster; do
 		  binary_evidence_attestation_sha256: $binary_attestation_sha256,
 		  market_data_evidence_sha256: $market_data_evidence_sha256, market_data_schedules_sha256: $market_data_schedules_sha256,
 		  market_data_receipts_sha256: $market_data_receipts_sha256, market_data_decisions_sha256: $market_data_decisions_sha256}' \
-		>"$status_tmp"
+		>"$status_tmp"; then
+		mark_arm_failure "$arm" "$result_path" "run_status_creation_failed" || return 1
+		return 0
+	fi
 	mv -- "$status_tmp" "$arm_dir/run-status.json"
 
-	mkdir -p "$output_root/rendered"
-	"$evsrender_binary" -dir "$arm_dir" -out "$rendered_dir" >"$output_root/$arm.renderer-report.json" || fail "$arm renderer failed"
-	jq -e --argjson event_frames "$(jq -er '.event_frames' "$arm_dir/binary-evidence-attestation.json")" \
+	set +e
+	"$evsrender_binary" -dir "$arm_dir" -out "$rendered_dir" >"$arm_dir/renderer-report.json"
+	renderer_status=$?
+	set -e
+	if [[ "$renderer_status" -ne 0 ]]; then
+		mark_arm_failure "$arm" "$result_path" "renderer_exit_status_$renderer_status" || return 1
+		return 0
+	fi
+	if ! jq -e --argjson event_frames "$(jq -er '.event_frames' "$arm_dir/binary-evidence-attestation.json")" \
 		--argjson stream_frames "$(jq -er '.stream_frames' "$arm_dir/binary-evidence-attestation.json")" \
 		--arg execution_hash "$(jq -er '.execution_stream_hash' "$arm_dir/binary-evidence-attestation.json")" \
 		'.event_frames == $event_frames and .dictionary_frames + .event_frames == $stream_frames and .execution_stream_hash == $execution_hash and .routes > 0 and (.rendered_digest | test("^[0-9a-f]{64}$"))' \
-		"$output_root/$arm.renderer-report.json" >/dev/null || fail "$arm renderer report is not bound to the source stream"
+		"$arm_dir/renderer-report.json" >/dev/null; then
+		mark_arm_failure "$arm" "$result_path" "renderer_report_binding_failed" || return 1
+		return 0
+	fi
 
+	set +e
 	"$sv1dprobe_binary" -mode audit -out "$result_path" -plan "$plan_path" -arm "$arm" \
-		-run-dir "$arm_dir" -rendered-dir "$rendered_dir" || fail "$arm strict audit failed; retain all evidence"
+		-run-dir "$arm_dir" -rendered-dir "$rendered_dir"
+	audit_status=$?
+	set -e
+	if [[ "$audit_status" -ne 0 ]]; then
+		mark_arm_failure "$arm" "$result_path" "strict_audit_exit_status_$audit_status" || return 1
+		return 0
+	fi
 	[[ -s "$result_path" && ! -L "$result_path" ]] || fail "$arm audit result was not published"
+}
+
+for arm in treatment mode-off no-roster; do
+	run_arm "$arm" || fail "could not retain a typed result for $arm"
 done
 
 score_path="$output_root/score.json"
+set +e
 "$sv1dprobe_binary" -mode score -out "$score_path" -plan "$plan_path" \
 	-treatment-result "$output_root/results/treatment.json" \
 	-mode-off-result "$output_root/results/mode-off.json" \
-	-no-roster-result "$output_root/results/no-roster.json" || fail "could not publish tri-arm score"
+	-no-roster-result "$output_root/results/no-roster.json"
+score_status=$?
+set -e
+[[ -s "$score_path" && ! -L "$score_path" ]] || fail "could not publish tri-arm score"
 jq -e 'type == "object" and .contract == "v2-r2-sv1d-score-v1" and .probe_id == "v2-r2-sv1d-activation-659" and (.score.status | type == "string")' \
 	"$score_path" >/dev/null || fail "tri-arm score is malformed"
+if [[ "$score_status" -ne 0 || "$arm_failure" -ne 0 ]]; then
+	echo "SV1D activation probe retained evidence but did not certify an executable tri-arm result" >&2
+	exit 1
+fi
 echo "completed development-only SV1D activation probe: $output_root"
