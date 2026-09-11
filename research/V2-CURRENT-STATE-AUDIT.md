@@ -1156,3 +1156,25 @@ holdout `619/631/641` has been consumed. The performance feed remains at
 reviewed `b1847ac`; no performance implementation was imported. Acceptance of
 the exact review is required before capacity measurement and the seed-659
 probe.
+
+## Append-only operational update: strict SV1D launch provenance (`d96fa1c`) — 2026-09-11
+
+The code-bearing scientific tree is clean, pushed, and pinned at `d96fa1c`;
+this entry is documentation-only. No R2
+economic semantics or retained result was changed. Strict SV1D launch
+validation now independently rechecks the canonical plan and all external
+review, capacity, tool, runner, activation-metadata, filesystem, evidence
+epoch, and runtime identities at arm-audit and tri-arm-score time. The
+development-only shell runner monitors the finite cgroup and host envelope,
+rejects swap/OOM-counter changes and filesystem drift, and retains typed
+incomplete results for failed arms.
+
+The clean bounded `make test`, `go vet ./...`, targeted race suites, explicit
+fresh-process determinism/evidence-neutrality tests, shell syntax, and diff
+hygiene all pass. The performance feed was fetched through reviewed `b1847ac`
+and had no new commits; no performance implementation was imported. No
+capacity measurement, pinned campaign build, SV1D arm, development cell,
+freeze authorization, or holdout `619/631/641` was consumed. Promotion remains
+blocked only on one fresh exact-tree independent Sol-xhigh review, after which
+the measured binary-capacity preflight and development-only activation probe
+may proceed.

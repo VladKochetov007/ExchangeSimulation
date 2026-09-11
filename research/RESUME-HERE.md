@@ -1374,3 +1374,34 @@ accepted review permits the finite-cgroup capacity preflight, pinned build,
 and seed-659 activation probe. The performance branch was refreshed through
 reviewed `b1847ac` with no newer commit and no performance implementation was
 imported.
+
+## Append-only operational update: strict SV1D launch provenance (`d96fa1c`) — 2026-09-11
+
+The code-bearing scientific tree is clean, pushed, and pinned at `d96fa1c`;
+this entry is documentation-only. This
+checkpoint preserves the R2 calendar/lifecycle, risk, actor, and historical
+negative semantics. The SV1D successor adapter now binds strict arm audits and
+tri-arm scoring to the reviewed tree, canonical plan, parent registration,
+amendment, review attestation/report/key, measured capacity attestation and
+records, capacity runner, activation runner, activation metadata, simulator,
+analyzer, renderer, evidence epoch, and bounded runtime envelope. The runner
+also performs live filesystem-identity and cgroup/OOM/memory/disk checks while
+the simulator and renderer execute, and continues to retain typed incomplete
+arm results on failure. Legacy historical JSON audit identities remain
+accepted only through their legacy path.
+
+Verification at this exact tree passed: clean bounded `GOMAXPROCS=2
+GOMEMLIMIT=4GiB make test` including package, integrated-long-run, R2,
+archive, and parity contracts; `go vet ./...`; targeted `go test -race
+./analysis ./cmd/sv1dprobe ./cmd/mvanalyze ./cmd/prunegate ./tests -count=1`;
+fresh-process determinism and binary-evidence/log-mode neutrality checks;
+shell syntax and `git diff --check`. The first pre-commit full test was
+rejected only by the intentional dirty-tree archive/parity guard; the clean
+committed rerun passed.
+
+No capacity attestation, pinned Go 1.27 campaign build, SV1D activation,
+development cell, freeze, or successor holdout `619/631/641` has run. The
+performance branch was refreshed through last-reviewed `b1847ac`, with no
+newer commit and no imported performance code. The next boundary remains one
+fresh exact-tree independent Sol-xhigh review; only acceptance permits the
+actual binary-capacity measurement and seed-659 activation probe.
