@@ -118,8 +118,8 @@ evsrender_sha256=$(sha256sum -- "$evsrender_binary" | awk '{print $1}')
 parent_registration_sha256=$(sha256sum -- "$root_dir/research/v2-r2-sv1d-one-sided-elastic-successor-preregistration-2026-09-10.md" | awk '{print $1}')
 amendment_sha256=$(sha256sum -- "$root_dir/research/v2-r2-sv1d-activation-contract-amendment-2026-09-11.md" | awk '{print $1}')
 
-review_stage=$(mktemp -d /tmp/sv1d-review-stage.XXXXXX)
-[[ "$review_stage" == /tmp/sv1d-review-stage.* && -d "$review_stage" && ! -L "$review_stage" ]] || fail "invalid SV1D review staging directory"
+review_stage=$(mktemp -d)
+[[ -d "$review_stage" && ! -L "$review_stage" ]] || fail "invalid SV1D review staging directory"
 trap 'rm -rf -- "$review_stage"' EXIT
 review_plan="$review_stage/probe-plan.json"
 "$sv1dprobe_binary" -mode plan -out "$review_plan" \
