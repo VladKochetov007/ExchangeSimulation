@@ -1130,3 +1130,49 @@ inventory-attributable, validate complete arm artifacts fail-closed through the
 actual production extraction path, and cover the real binary/renderer/audit
 route. The branch remains blocked before capacity, pinned build, SV1D probe,
 development cells, freeze, and holdouts `619/631/641`.
+
+## Append-only current checkpoint: CDF strict-audit correction `66f5781` — 2026-09-11
+
+The exact scientific HEAD is pushed as `66f5781` on
+`autoresearch/ffa-ecology-gen0`, with a clean worktree and no cherry-pick in
+progress. This is a minimal evidence/audit correction after the two independent
+Sol-xhigh rejections of `764f10d`; it does not alter R2 economics, actor
+rosters, exchange matching, seeds, or any historical trajectory.
+
+The strict CDF audit now reconciles the documented production ordering of a
+public removal `BookDelta` followed by `OrderCancelled`: removal deltas are
+held at their exact event-time public state until the lifecycle frame updates
+the supplier order map, while additive depth transitions remain observable
+immediately. The production-like binary fixture now exercises shared aggregate
+levels, fill/cancel ordering, one-sided posting/restoration, and the complete
+renderer-to-audit path. Post-fill response credit compares the delayed public
+market/risk state and requires changed quote terms; private target/reference
+movement or a new request ID alone cannot count. The stale positive quote-term
+failure path has a direct regression.
+
+Completion evidence is now fail-closed beyond hashes: run-status schema and
+sentinels, Greek/latency sidecar structure, monotonic terminal checkpoints,
+fixed-file manifests, binary/evidence-only artifacts, and retained raw-evidence
+manifest accounting are validated. `mvanalyze -metric cdfactivation` and
+`scripts/audit-v2-r2-sv1d-activation.sh` are the production adapter path.
+
+Verification at this checkpoint:
+
+- `go test ./analysis -count=1` passed, including the strict production
+  renderer, sidecar corruption, post-fill causality, and stale-quote tests.
+- `go test ./evstream ./types ./exchange ./simulations/multivenue ./cmd/mvanalyze
+  -count=1` passed; the multivenue portion completed in 204.350 seconds.
+- `go vet ./...`, `git diff --check`, shell syntax checks, and clean
+  `GOMAXPROCS=2 GOMEMLIMIT=4GiB make test` passed; the latter included the
+  integrated-long-run, R2, and archive contract suites.
+- Targeted race/fresh-process checks and the new exact-tree independent review
+  are still pending; no acceptance is inferred from this mechanical gate.
+
+The performance branch was fetched at this checkpoint and remains unchanged
+after reviewed `b1847ac`; no performance code was imported. Host state was
+approximately 38 GiB free disk and 24 GiB available RAM. No capacity
+measurement, pinned Go 1.27 build, development cell, freeze authorization, or
+holdout `619/631/641` was consumed. Next: targeted race and fresh-process
+evidence-neutrality checks, then one fresh exact-tree Sol-xhigh review. Only an
+accepted review permits binary-evidence capacity measurement and the pinned
+build/activation sequence.

@@ -942,3 +942,32 @@ No capacity, development, freeze, or holdout action was taken. No historical
 result was rewritten. These findings supersede the prior mechanical-ready
 checkpoint; the next code correction and fresh exact-tree review are required
 before any binary capacity attestation or SV1D activation probe.
+
+## Append-only current checkpoint: strict-audit correction `66f5781` — 2026-09-11
+
+Exact scientific HEAD `66f5781` is pushed and clean. It responds to the two
+independent Sol-xhigh rejections of `764f10d` without changing economic
+semantics. Strict depth attribution now models the real producer transition
+`BookDelta` (public removal) then `OrderCancelled` (supplier-order removal),
+with additive deltas recorded immediately and removal deltas flushed only after
+the corresponding lifecycle state change. The binary fixture covers aggregate
+same-price siblings, fills, cancellations, one-sided posting/restoration, and
+production binary rendering into the strict audit.
+
+The post-fill activation predicate now requires a same delayed public
+market/coherent risk state and changed quote terms. It excludes private
+reference/target movement and request-ID churn as sufficient evidence. A
+direct stale-positive-quote regression covers `limit_or_touch_unavailable`.
+The completion contract now validates sidecar schemas/content and terminal
+checkpoint order in addition to hashes, and the production `mvanalyze` plus
+shell adapter invokes the strict activation audit with externally supplied
+provenance.
+
+Mechanical evidence: analysis tests, the requested evstream/types/exchange/
+multivenue/mvanalyze suites, `go vet ./...`, shell syntax, diff checks, and a
+clean bounded `make test` all passed. Targeted race/fresh-process checks and a
+fresh exact-tree independent review remain pending. The performance feed still
+has no commit after reviewed `b1847ac`; no performance implementation was
+merged. Disk/RAM were approximately 38 GiB free and 24 GiB available. No
+capacity or binary build, SV1D activation probe, development cell, freeze, or
+holdout `619/631/641` was run.

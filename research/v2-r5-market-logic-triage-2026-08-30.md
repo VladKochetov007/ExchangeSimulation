@@ -875,3 +875,33 @@ are evidence-contract and analyzer-causality defects, not evidence that the
 CDF economic hypothesis succeeded or failed. Preserve all previous verdicts.
 Required next step is a minimal invariant-preserving correction with focused
 regressions, full mechanical gates, and another exact-tree independent review.
+
+## Correction checkpoint — `66f5781` — 2026-09-11
+
+The correction preserves the prior rejection and does not reinterpret any
+historical result. It addresses the reported defects as follows:
+
+- Production cancellation ordering is reproduced in the strict binary fixture.
+  Removal `BookDelta` observations retain their exact public state but are
+  attributed after the matching `OrderCancelled`; additive depth updates remain
+  immediate. Shared-price siblings are only removed from aggregate depth when
+  the final sibling closes.
+- Post-fill response credit now requires unchanged delayed public market/risk
+  fields plus changed quote terms. A target-only replay, private reference
+  movement, or request-ID change is insufficient.
+- `limit_or_touch_unavailable` accepts the observable early-failure state even
+  when stale positive quote terms remain, while rejecting a valid two-sided
+  touch.
+- Strict completion validation checks sidecar structure/content, checkpoint
+  order and terminal horizon, fixed-file records, binary/evidence-only
+  artifacts, and raw-evidence manifest accounting. The production
+  `mvanalyze -metric cdfactivation` route and shell adapter are covered by the
+  strict renderer/audit path.
+
+The exact-tree focused and clean full gates passed; targeted race,
+fresh-process/evidence-neutrality, and new independent review remain required.
+The performance branch was re-fetched and has no commits after `b1847ac`.
+No capacity, development, freeze, or holdout action was taken. Classification
+of the prior findings remains **promotion-blocking evidence-contract defects**;
+no simulator economic bug or historical-impact decision was introduced by this
+correction.
