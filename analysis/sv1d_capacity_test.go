@@ -80,6 +80,14 @@ func TestVerifySV1DCapacityAttestationBindsExternalExpectationAndRejectsUnknownF
 	if _, err := VerifySV1DCapacityAttestation(path, testSV1DCapacityExpectation(attestation)); err != nil {
 		t.Fatal(err)
 	}
+	tampered := attestation
+	tampered.Arms = append([]SV1DCapacityArm(nil), attestation.Arms...)
+	tampered.Arms[0].ResourceMeasurementSHA256 = strings.Repeat("x", 64)
+	writeSV1DCapacityAttestation(t, path, tampered)
+	if _, err := VerifySV1DCapacityAttestation(path, testSV1DCapacityExpectation(attestation)); err == nil {
+		t.Fatal("capacity record with an unbound resource measurement was accepted")
+	}
+	writeSV1DCapacityAttestation(t, path, attestation)
 	wrong := testSV1DCapacityExpectation(attestation)
 	wrong.BinarySHA256 = strings.Repeat("f", 64)
 	if _, err := VerifySV1DCapacityAttestation(path, wrong); err == nil {

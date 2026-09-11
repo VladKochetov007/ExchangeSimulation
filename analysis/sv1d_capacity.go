@@ -347,6 +347,12 @@ func verifySV1DCapacityMeasurementRecords(attestation SV1DCapacityAttestation, e
 			if measurement.MeasurementRoot != attestation.MeasurementRoot || measurement.OutputParent != attestation.OutputParent || measurement.SampleIntervalNano != SV1DCapacitySampleIntervalNano {
 				return fmt.Errorf("SV1D resource measurement %s is not bound to the registered measurement", file.Path)
 			}
+			if !sameSV1DFilesystem(measurement.Filesystem, SV1DFilesystemIdentity{
+				Device: attestation.FilesystemDevice, ID: attestation.FilesystemID, Type: attestation.FilesystemType,
+				MountID: attestation.FilesystemMountID, UUID: attestation.FilesystemUUID,
+			}) {
+				return fmt.Errorf("SV1D resource measurement %s is not bound to the attested filesystem", file.Path)
+			}
 			if file.SHA256 != attestation.Arms[armIndex].ResourceMeasurementSHA256 {
 				return fmt.Errorf("SV1D resource measurement %s is not bound to its capacity arm", file.Path)
 			}
