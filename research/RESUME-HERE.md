@@ -1343,3 +1343,34 @@ immutable manifest, failure-continuing runner semantics, metadata identity,
 content-addressed launch binaries, and a separately named 24-hour SV1D config
 set. The performance feed remains at reviewed `b1847ac`; no performance code
 was imported.
+
+## Append-only checkpoint: SV1D capacity/activation runner closure (`1c870f7`) — 2026-09-11
+
+The exact scientific tree is clean, pushed, and now at `1c870f7`. The
+capacity verifier binds every retained resource trace to the attested
+filesystem identity and rejects an unbound trace. The activation adapter now
+retains a typed incomplete result when a simulator, renderer, manifest,
+terminal valuation, or strict audit step fails, then scores all three arms and
+exits nonzero; a failed arm cannot be silently omitted or counted as a
+successful control. Capacity-arm record and filesystem mutations have direct
+regressions.
+
+Verification at this exact tree:
+
+- bounded `GOMAXPROCS=2 GOMEMLIMIT=4GiB make test` passed, including package,
+  integrated-long-run, R2, archive, and renderer-parity contracts;
+- `GOMAXPROCS=2 GOMEMLIMIT=4GiB go vet ./...` passed;
+- targeted `go test -race ./analysis ./cmd/sv1dprobe ./cmd/sv1dresource
+  ./cmd/mvanalyze ./cmd/prunegate ./tests -count=1` passed;
+- fresh-process `TestRunsOfOneSeedProduceOneEventStream` plus binary evidence
+  log-mode neutrality passed; shell syntax and `git diff --check` passed.
+
+The pre-commit dirty-tree gate was retained as a diagnostic failure only; the
+clean committed gate above is the authoritative result. No capacity
+attestation, pinned Go 1.27 campaign build, SV1D probe, development cell,
+freeze, or successor holdout `619/631/641` has run. The current next boundary
+is one fresh independent Sol-xhigh review of this complete exact tree. Only an
+accepted review permits the finite-cgroup capacity preflight, pinned build,
+and seed-659 activation probe. The performance branch was refreshed through
+reviewed `b1847ac` with no newer commit and no performance implementation was
+imported.

@@ -1130,3 +1130,29 @@ and final manifest, corrected runner metadata/content-addressed binaries, and
 a measured binary-capacity preflight. No capacity, Go 1.27 campaign build,
 SV1D execution, development cell, freeze, or holdout `619/631/641` was run.
 The performance feed remains at `b1847ac`, with no imported code.
+
+## Append-only operational update: SV1D runner and capacity binding (`1c870f7`) — 2026-09-11
+
+The exact scientific tree is clean and pushed at `1c870f7`. This checkpoint
+adds no economic, roster, calendar, or historical-result change. The measured
+capacity contract now verifies that each retained resource trace carries the
+same filesystem identity as the attestation. The development-only activation
+runner retains a plan-bound typed incomplete result for each failed arm,
+continues to the remaining arms, preserves partial evidence, and publishes a
+non-success tri-arm score rather than treating a missing result as a passing
+control.
+
+The exact tree passes bounded `GOMAXPROCS=2 GOMEMLIMIT=4GiB make test`,
+`go vet ./...`, targeted race coverage for the changed analysis/CLI packages,
+fresh-process determinism and binary evidence/log-mode neutrality, shell
+syntax, and diff hygiene. The earlier dirty-tree full-test rejection is not
+used as a green gate; the clean committed rerun is the retained mechanical
+evidence.
+
+Promotion is still pending one fresh independent exact-tree Sol-xhigh review.
+No measured capacity attestation, clean pinned Go 1.27 campaign binary,
+SV1D activation probe, development cell, freeze authorization, or successor
+holdout `619/631/641` has been consumed. The performance feed remains at
+reviewed `b1847ac`; no performance implementation was imported. Acceptance of
+the exact review is required before capacity measurement and the seed-659
+probe.
