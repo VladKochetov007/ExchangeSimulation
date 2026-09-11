@@ -1102,3 +1102,31 @@ independent review of `146bc02` is now the promotion boundary. No capacity
 floor, binary rebuild, development cell, freeze authorization, or holdout has
 been consumed. Performance remains deferred at reviewed ref `b1847ac`; no
 performance code was imported. Holdouts `619/631/641` remain untouched.
+
+## Append-only current checkpoint: second exact-tree review rejection — 2026-09-11
+
+Two independent Sol-xhigh reviewers examined exact clean tree `764f10d` and
+rejected promotion without running capacity, development, or holdout work.
+They independently reproduced a reachable strict-evidence failure: production
+exchange cancellation emits the post-removal `BookDelta` before
+`OrderCancelled`, while the analyzer keeps the supplier order live until the
+latter event. A supplier-only side can therefore make reconstructed supplier
+depth exceed public depth on a legitimate withdrawal/reprice. The current
+strict E2E fixture bypasses this production event sequence.
+
+The review also identified a false-positive risk in post-fill activation:
+market/reference movement can change `TargetPosition` and satisfy the
+inventory-response count without an inventory-attributable quote/risk change;
+and a strict completion check currently verifies hashes without validating the
+required sidecar schemas/content through a production activation adapter. A
+secondary reachable false rejection was found for `limit_or_touch_unavailable`
+when an existing quote leaves positive stale quote fields in `baseDecision`.
+
+These are promotion blockers, not economic results. No historical trajectory
+was changed and no experiment was consumed. The next correction must preserve
+exchange event order and economics, make depth attribution coherent across the
+documented cancellation transition, make post-fill response independently
+inventory-attributable, validate complete arm artifacts fail-closed through the
+actual production extraction path, and cover the real binary/renderer/audit
+route. The branch remains blocked before capacity, pinned build, SV1D probe,
+development cells, freeze, and holdouts `619/631/641`.

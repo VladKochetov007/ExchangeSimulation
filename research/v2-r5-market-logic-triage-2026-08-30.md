@@ -850,3 +850,28 @@ consumed. A fresh independent exact-tree review of `146bc02` is required
 before the binary-evidence capacity floor, pinned Go 1.27 build, and repaired
 SV1D activation probe. The performance branch remains deferred at reviewed
 `b1847ac`.
+
+## Exact-tree review response — second independent Sol-xhigh wave — 2026-09-11
+
+Exact clean `764f10d` was rejected by two independent reviewers. The primary
+reproduction is a strict depth false rejection at the intentional production
+sequence `BookDelta` (post-removal public depth) followed by `OrderCancelled`
+(supplier order termination). The analyzer records supplier attribution at the
+intermediate delta while still retaining the canceled order, so a valid
+supplier-only withdrawal can make supplier depth exceed public depth. The
+existing strict fixture did not route a real producer cancellation through the
+binary sink and renderer with that ordering.
+
+Further findings: post-fill activation can be credited when only the market
+anchor changes `TargetPosition`, rather than when the participant responds to
+its changed inventory; required completion sidecars are authenticated only by
+self-reported hashes and are not schema-validated through a production CDF
+activation adapter; and `limit_or_touch_unavailable` can falsely reject a
+valid withdrawal because positive quote fields from the old live quote remain
+in the early failure decision.
+
+Disposition: **REJECT promotion; no capacity/development/holdout run**. These
+are evidence-contract and analyzer-causality defects, not evidence that the
+CDF economic hypothesis succeeded or failed. Preserve all previous verdicts.
+Required next step is a minimal invariant-preserving correction with focused
+regressions, full mechanical gates, and another exact-tree independent review.

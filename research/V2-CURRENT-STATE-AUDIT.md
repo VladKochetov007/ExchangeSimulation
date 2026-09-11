@@ -920,3 +920,25 @@ provenance-pinned build, or the SV1D activation probe. No development cell,
 freeze, or holdout ran; `619/631/641` remain untouched. The performance feed
 still has no commit after reviewed `b1847ac`, and no performance change was
 merged.
+
+## Append-only current checkpoint: second exact-tree review rejection — 2026-09-11
+
+Two independent Sol-xhigh reviewers reviewed exact clean `764f10d` and rejected
+promotion. The common blocker is production cancellation ordering: the exchange
+removes public depth and emits `BookDelta` before emitting `OrderCancelled`,
+but strict analysis attributes the intermediate delta while the supplier order
+is still live. This can invalidate a legitimate supplier withdrawal/reprice in
+the one-sided sparse-book state under investigation. The strict production
+renderer fixture did not include that actual producer sequence.
+
+Additional blockers are a post-fill response predicate that can credit
+market-driven target movement rather than an inventory-attributable response,
+hash-only validation of required completion sidecars without schema/content
+checks through a production activation adapter, and a `limit_or_touch_unavailable`
+predicate that can reject a valid existing-quote withdrawal because stale
+positive quote fields survive the producer's early failure path.
+
+No capacity, development, freeze, or holdout action was taken. No historical
+result was rewritten. These findings supersede the prior mechanical-ready
+checkpoint; the next code correction and fresh exact-tree review are required
+before any binary capacity attestation or SV1D activation probe.
