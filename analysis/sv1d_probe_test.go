@@ -135,6 +135,90 @@ func TestValidateSV1DRendererAttestationBindsRenderedAttestation(t *testing.T) {
 	}
 }
 
+func TestValidateSV1DProbeArmProvenanceRejectsStrictMutation(t *testing.T) {
+	expected := testStrictSV1DProvenance(t, "")
+	arm := SV1DProbeArmResult{
+		TreeRevision: expected.TreeRevision, PlanSHA256: expected.PlanSHA256,
+		ReviewAttestationSHA256: expected.ReviewAttestationSHA256, ReviewReportSHA256: expected.ReviewReportSHA256,
+		CapacityAttestationSHA256: expected.CapacityAttestationSHA256, CapacityRecordsSHA256: expected.CapacityRecordsSHA256,
+		CapacityRunnerSHA256: expected.CapacityRunnerSHA256, ActivationRunnerSHA256: expected.ActivationRunnerSHA256,
+		ActivationMetadataSHA256: expected.ActivationMetadataSHA256, TrustedReviewKeySHA256: expected.TrustedReviewKeySHA256,
+		EvidenceSchemaEpoch: expected.EvidenceSchemaEpoch, GOMAXPROCS: expected.GOMAXPROCS, GOMEMLIMIT: expected.GOMEMLIMIT,
+	}
+	if err := ValidateSV1DProbeArmProvenance(arm, expected); err != nil {
+		t.Fatal(err)
+	}
+	arm.TreeRevision = strings.Repeat("f", 40)
+	if err := ValidateSV1DProbeArmProvenance(arm, expected); err == nil {
+		t.Fatal("strict arm tree mutation was accepted")
+	}
+}
+
+func TestValidateSV1DActivationMetadataBindsPathAndDigest(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "activation")
+	metadataPath := filepath.Join(root, "provenance", "activation-run-metadata.json")
+	metadata := sv1dActivationRunMetadata{
+		SchemaVersion: 2, Contract: sv1dActivationMetadataContract, DevelopmentOnly: true,
+		SourceRevision: strings.Repeat("a", 40), TreeRevision: strings.Repeat("b", 40),
+		ProbeID: "v2-r2-sv1d-activation-659", PlanSHA256: strings.Repeat("c", 64),
+		ReviewAttestationSHA256: strings.Repeat("d", 64), ReviewReportSHA256: strings.Repeat("e", 64),
+		CapacityAttestationSHA256: strings.Repeat("1", 64), CapacityRecordsSHA256: strings.Repeat("2", 64),
+		TrustedReviewKeySHA256: strings.Repeat("3", 64), CapacityRoot: filepath.Join(filepath.Dir(root), "capacity"),
+		ActivationRunnerSHA256: strings.Repeat("4", 64), CapacityRunnerSHA256: strings.Repeat("5", 64),
+		SimulatorSHA256: strings.Repeat("6", 64), AnalyzerSHA256: strings.Repeat("7", 64), RendererSHA256: strings.Repeat("8", 64),
+		EvidenceFormat: "evstream_v3", EvidenceSchemaEpoch: 4, LogMode: "full", GOMAXPROCS: 2, GOMEMLIMIT: "4GiB",
+		OutputRoot: root, OutputParent: filepath.Dir(root), Arms: []string{"treatment", "mode-off", "no-roster"}, HoldoutsConsumed: []string{},
+	}
+	raw, err := json.Marshal(metadata)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(metadataPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(metadataPath, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	expected := testStrictSV1DProvenance(t, metadataPath)
+	expected.ActivationMetadataSHA256 = sha256DigestHex(raw)
+	if err := ValidateSV1DActivationMetadata(metadataPath, expected); err != nil {
+		t.Fatal(err)
+	}
+	metadata.OutputParent = filepath.Join(filepath.Dir(root), "different")
+	mutated, err := json.Marshal(metadata)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(metadataPath, mutated, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateSV1DActivationMetadata(metadataPath, expected); err == nil {
+		t.Fatal("mutated strict activation metadata was accepted")
+	}
+}
+
+func testStrictSV1DProvenance(t *testing.T, metadataPath string) CDFExpectedProvenance {
+	t.Helper()
+	if metadataPath == "" {
+		metadataPath = filepath.Join(t.TempDir(), "activation", "provenance", "activation-run-metadata.json")
+	}
+	return CDFExpectedProvenance{
+		ConfigSHA256: strings.Repeat("9", 64), TreatmentConfigSHA256: strings.Repeat("9", 64),
+		ModeOffConfigSHA256: strings.Repeat("a", 64), NoRosterConfigSHA256: strings.Repeat("b", 64),
+		SourceRevision: strings.Repeat("a", 40), TreeRevision: strings.Repeat("b", 40), PlanSHA256: strings.Repeat("c", 64),
+		ParentRegistrationSHA256: strings.Repeat("c", 64), AmendmentSHA256: strings.Repeat("d", 64),
+		BinarySHA256: strings.Repeat("6", 64), AnalyzerSHA256: strings.Repeat("7", 64),
+		BinaryGOOS: "linux", BinaryGOARCH: "amd64", BinaryGOAMD64: "v1",
+		RendererSHA256: strings.Repeat("8", 64), RendererSourceRevision: strings.Repeat("a", 40),
+		RendererGOOS: "linux", RendererGOARCH: "amd64", RendererGOAMD64: "v1", RendererTrimpath: true, RendererCGOEnabled: "0",
+		ReviewAttestationSHA256: strings.Repeat("d", 64), ReviewReportSHA256: strings.Repeat("e", 64),
+		CapacityAttestationSHA256: strings.Repeat("1", 64), CapacityRecordsSHA256: strings.Repeat("2", 64),
+		CapacityRunnerSHA256: strings.Repeat("5", 64), ActivationRunnerSHA256: strings.Repeat("4", 64),
+		ActivationMetadataSHA256: strings.Repeat("0", 64), ActivationMetadataPath: metadataPath,
+		TrustedReviewKeySHA256: strings.Repeat("3", 64), EvidenceSchemaEpoch: 4, GOMAXPROCS: 2, GOMEMLIMIT: "4GiB",
+	}
+}
+
 func TestValidateSV1DConfigTriadRejectsEconomicOrArmDrift(t *testing.T) {
 	root := filepath.Join("..", "research", "configs", "v2-r2-sv1d-activation")
 	read := func(name string) []byte {

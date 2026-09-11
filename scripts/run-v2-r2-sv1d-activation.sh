@@ -37,7 +37,7 @@ normalize_input_path() {
 	if [[ "$path" != /* ]]; then
 		path="$PWD/$path"
 	fi
-	realpath -m -- "$path"
+	realpath -ms -- "$path"
 }
 
 require_no_symlink_components() {
@@ -114,22 +114,120 @@ hash_file() {
 publish_incomplete_arm() {
 	local arm=$1 result_path=$2 reason=$3
 	[[ ! -e "$result_path" && ! -L "$result_path" ]] || return 1
-	"$sv1dprobe_binary" -mode failure -out "$result_path" -plan "$plan_path" -arm "$arm" -failure-reason "$reason"
+	"$sv1dprobe_binary" -mode failure -out "$result_path" -plan "$plan_path" -arm "$arm" -failure-reason "$reason" \
+		-source-revision "$source_revision" -tree-revision "$tree_revision" -plan-sha256 "$review_plan_sha256" \
+		-parent-registration-sha256 "$parent_registration_sha256" -amendment-sha256 "$amendment_sha256" \
+		-activation-metadata "$activation_metadata" -review-attestation-sha256 "$review_attestation_sha256" \
+		-review-report-sha256 "$review_report_sha256" -capacity-attestation-sha256 "$capacity_attestation_sha256" \
+		-capacity-records-sha256 "$capacity_records_sha256" -capacity-runner-sha256 "$capacity_runner_sha256" \
+		-activation-runner-sha256 "$activation_runner_sha256" -activation-metadata-sha256 "$activation_metadata_sha256" \
+		-trusted-review-key-sha256 "$trusted_review_key_sha256" -evidence-schema-epoch 4 -gomaxprocs 2 -gomemlimit 4GiB
+}
+
+activation_cgroup_path=""
+activation_baseline_oom_events=""
+activation_baseline_oom_kill_events=""
+resource_violation_reason=""
+
+read_cgroup_event() {
+	local event_name=$1
+	awk -v event_name="$event_name" '$1 == event_name {print $2; exit}' "$activation_cgroup_path/memory.events"
 }
 
 require_live_resource_envelope() {
 	local expected_limit=$1
-	local cgroup_relative cgroup_path current_limit swap_total
+	local cgroup_relative current_limit swap_total
 	cgroup_relative=$(awk -F: '$1 == "0" {print $3; exit}' /proc/self/cgroup)
 	[[ -n "$cgroup_relative" && "$cgroup_relative" != *$'\n'* ]] || fail "could not resolve the current cgroup"
-	cgroup_path="/sys/fs/cgroup$cgroup_relative"
-	[[ -f "$cgroup_path/memory.max" && -f "$cgroup_path/memory.swap.current" ]] || fail "current cgroup lacks the registered memory controls"
-	current_limit=$(<"$cgroup_path/memory.max")
+	activation_cgroup_path="/sys/fs/cgroup$cgroup_relative"
+	[[ -f "$activation_cgroup_path/memory.max" && -f "$activation_cgroup_path/memory.current" && -f "$activation_cgroup_path/memory.swap.current" && -f "$activation_cgroup_path/memory.events" ]] || fail "current cgroup lacks the registered memory controls"
+	current_limit=$(<"$activation_cgroup_path/memory.max")
 	[[ "$current_limit" =~ ^[0-9]+$ && "$current_limit" -gt 0 ]] || fail "activation must run inside a finite memory cgroup"
 	[[ "$current_limit" == "$expected_limit" ]] || fail "activation cgroup limit differs from measured capacity envelope"
 	swap_total=$(awk '$1 == "SwapTotal:" {print $2; exit}' /proc/meminfo)
 	[[ "$swap_total" == 0 ]] || fail "activation host exposes swap although the capacity contract forbids it"
-	[[ "$(<"$cgroup_path/memory.swap.current")" == 0 ]] || fail "activation cgroup has non-zero swap usage"
+	[[ "$(<"$activation_cgroup_path/memory.swap.current")" == 0 ]] || fail "activation cgroup has non-zero swap usage"
+	activation_baseline_oom_events=$(read_cgroup_event oom)
+	activation_baseline_oom_kill_events=$(read_cgroup_event oom_kill)
+	[[ "$activation_baseline_oom_events" =~ ^[0-9]+$ && "$activation_baseline_oom_kill_events" =~ ^[0-9]+$ ]] || fail "activation cgroup has no readable OOM counters"
+}
+
+active_resource_check() {
+	local current_memory swap_current host_available_kb available_kb oom_events oom_kill_events
+	resource_violation_reason=""
+	if [[ -z "$activation_cgroup_path" ]]; then
+		resource_violation_reason="activation cgroup is not initialized"
+		return 1
+	fi
+	current_memory=$(<"$activation_cgroup_path/memory.current") || {
+		resource_violation_reason="could not read activation cgroup memory.current"
+		return 1
+	}
+	if [[ ! "$current_memory" =~ ^[0-9]+$ ]] || (( current_memory > capacity_memory_limit_bytes )); then
+		resource_violation_reason="activation cgroup memory exceeded measured limit"
+		return 1
+	fi
+	swap_current=$(<"$activation_cgroup_path/memory.swap.current") || {
+		resource_violation_reason="could not read activation cgroup swap usage"
+		return 1
+	}
+	if [[ "$swap_current" != 0 ]]; then
+		resource_violation_reason="activation cgroup swap usage became non-zero"
+		return 1
+	fi
+	host_available_kb=$(awk '$1 == "MemAvailable:" {print $2; exit}' /proc/meminfo) || {
+		resource_violation_reason="could not read host available memory"
+		return 1
+	}
+	if [[ ! "$host_available_kb" =~ ^[0-9]+$ ]] || (( host_available_kb * 1024 < required_available_memory_bytes )); then
+		resource_violation_reason="host available memory fell below measured floor"
+		return 1
+	fi
+	available_kb=$(df -Pk -- "$capacity_output_parent" | awk 'NR == 2 {print $4}') || {
+		resource_violation_reason="could not read activation filesystem free space"
+		return 1
+	}
+	if [[ ! "$available_kb" =~ ^[0-9]+$ ]] || (( available_kb * 1024 < required_free_bytes )); then
+		resource_violation_reason="activation filesystem free space fell below measured floor"
+		return 1
+	fi
+	oom_events=$(read_cgroup_event oom)
+	oom_kill_events=$(read_cgroup_event oom_kill)
+	if [[ ! "$oom_events" =~ ^[0-9]+$ || ! "$oom_kill_events" =~ ^[0-9]+$ ]] ||
+		(( oom_events != activation_baseline_oom_events || oom_kill_events != activation_baseline_oom_kill_events )); then
+		resource_violation_reason="activation cgroup OOM counters changed"
+		return 1
+	fi
+	return 0
+}
+
+run_monitored_command() {
+	local stdout_path=$1 stderr_path=$2
+	shift 2
+	local child_pid child_status
+	setsid -- "$@" >"$stdout_path" 2>"$stderr_path" &
+	child_pid=$!
+	while kill -0 "$child_pid" 2>/dev/null; do
+		if ! active_resource_check; then
+			printf 'activation resource monitor terminated process: %s\n' "$resource_violation_reason" >>"$stderr_path" || true
+			kill -TERM -- "-$child_pid" 2>/dev/null || kill -TERM "$child_pid" 2>/dev/null || true
+			sleep 0.25
+			kill -KILL -- "-$child_pid" 2>/dev/null || kill -KILL "$child_pid" 2>/dev/null || true
+			wait "$child_pid" 2>/dev/null || true
+			return 125
+		fi
+		sleep 0.25
+	done
+	if wait "$child_pid"; then
+		child_status=0
+	else
+		child_status=$?
+	fi
+	if ! active_resource_check; then
+		printf 'activation resource monitor rejected completed process: %s\n' "$resource_violation_reason" >>"$stderr_path" || true
+		return 125
+	fi
+	return "$child_status"
 }
 
 multivenue_binary=$(normalize_input_path "$multivenue_binary") || fail "could not normalize multivenue binary"
@@ -310,6 +408,10 @@ available_kb=$(df -Pk -- "$capacity_output_parent" | awk 'NR == 2 {print $4}') |
 [[ "$available_kb" =~ ^[0-9]+$ && $((available_kb * 1024)) -ge "$required_free_bytes" ]] || fail "activation output-parent free space is below the measured capacity floor"
 host_available_bytes=$(awk '$1 == "MemAvailable:" {print $2 * 1024; exit}' /proc/meminfo)
 [[ "$host_available_bytes" =~ ^[0-9]+$ && "$host_available_bytes" -ge "$required_available_memory_bytes" ]] || fail "activation host available memory is below the measured capacity floor"
+live_filesystem_identity=$("$capacity_measurer" -inspect-filesystem "$capacity_output_parent") || fail "could not inspect the activation output-parent filesystem"
+expected_filesystem_identity=$(jq -S -c '{device: .filesystem_device, id: .filesystem_id, type: .filesystem_type, mount_id: .filesystem_mount_id, uuid: .filesystem_uuid}' "$capacity_attestation") || fail "could not derive the measured filesystem identity"
+actual_filesystem_identity=$(jq -S -c '{device, id, type, mount_id, uuid}' <<<"$live_filesystem_identity") || fail "capacity measurer returned malformed filesystem identity"
+[[ "$actual_filesystem_identity" == "$expected_filesystem_identity" ]] || fail "activation filesystem identity differs from measured capacity"
 require_live_resource_envelope "$capacity_memory_limit_bytes"
 
 export GOMAXPROCS=2
@@ -323,6 +425,8 @@ copy_immutable_file retained-review-attestation "$staged_review_attestation" "$o
 copy_immutable_file retained-review-report "$staged_review_report" "$output_root/provenance/review-report.md"
 copy_immutable_file retained-trusted-review-key "$staged_trusted_review_key" "$output_root/provenance/trusted-review-key.raw"
 copy_immutable_file retained-capacity-attestation "$staged_capacity_attestation" "$output_root/provenance/capacity-attestation.json"
+activation_runner_sha256=$(hash_file "$root_dir/scripts/run-v2-r2-sv1d-activation.sh")
+copy_immutable_file retained-activation-runner "$root_dir/scripts/run-v2-r2-sv1d-activation.sh" "$output_root/provenance/activation-runner.sh"
 copy_immutable_file retained-capacity-policy "$capacity_policy_path" "$output_root/provenance/resource-policy-v1.json"
 copy_immutable_file retained-parent-registration "$staged_parent_registration" "$output_root/provenance/parent-registration.md"
 copy_immutable_file retained-amendment "$staged_amendment" "$output_root/provenance/amendment.md"
@@ -344,7 +448,6 @@ declare -A config_for=(
 	[no-roster]="$staged_no_roster_config"
 )
 
-activation_runner_sha256=$(hash_file "$root_dir/scripts/run-v2-r2-sv1d-activation.sh")
 activation_metadata="$output_root/provenance/activation-run-metadata.json"
 jq -S -n \
 	--arg contract "v2-r2-sv1d-activation-run-metadata-v2" --arg source_revision "$source_revision" --arg tree_revision "$tree_revision" \
@@ -366,6 +469,7 @@ jq -S -n \
 	 output_root: $output_root, output_parent: $output_parent, arms: ["treatment", "mode-off", "no-roster"], holdouts_consumed: []}' \
 	>"$activation_metadata.tmp-$$"
 mv -- "$activation_metadata.tmp-$$" "$activation_metadata"
+activation_metadata_sha256=$(hash_file "$activation_metadata")
 
 arm_failure=0
 
@@ -380,17 +484,20 @@ mark_arm_failure() {
 }
 
 run_arm() {
+	(
+	set -euo pipefail
 	local arm=$1 config=${config_for[$1]}
 	local arm_dir="$output_root/arms/$arm" rendered_dir="$output_root/rendered/$arm"
 	local stdout_log="$output_root/logs/$arm.simulator.stdout.log" stderr_log="$output_root/logs/$arm.simulator.stderr.log"
+	local renderer_stderr_log="$output_root/logs/$arm.renderer.stderr.log"
 	local result_path="$output_root/results/$arm.json" config_digest experiment_id hypothesis_id log_mode evidence_format
 	local run_metadata_sha256_before status audit_status renderer_status
 
-	[[ ! -e "$arm_dir" && ! -L "$arm_dir" ]] || fail "refusing to overwrite arm directory: $arm_dir"
-	[[ ! -e "$rendered_dir" && ! -L "$rendered_dir" ]] || fail "refusing to overwrite rendered directory: $rendered_dir"
-	[[ ! -e "$result_path" && ! -L "$result_path" ]] || fail "refusing to overwrite arm result: $result_path"
-	mkdir -p "$arm_dir"
-	copy_immutable_file "arm-$arm-config" "$config" "$arm_dir/run-config.json"
+	if ! [[ ! -e "$arm_dir" && ! -L "$arm_dir" ]]; then return 1; fi
+	if ! [[ ! -e "$rendered_dir" && ! -L "$rendered_dir" ]]; then return 1; fi
+	if ! [[ ! -e "$result_path" && ! -L "$result_path" ]]; then return 1; fi
+	if ! mkdir -p "$arm_dir"; then return 1; fi
+	if ! copy_immutable_file "arm-$arm-config" "$config" "$arm_dir/run-config.json"; then return 1; fi
 
 	config_digest=$(config_sha256 "$config")
 	experiment_id=$(jq -er '.experiment_id' "$config")
@@ -428,8 +535,8 @@ run_arm() {
 	run_metadata_sha256_before=$(hash_file "$arm_dir/run-metadata.json")
 
 	set +e
-	GOMAXPROCS=2 GOMEMLIMIT=4GiB "$multivenue_binary" -config "$arm_dir/run-config.json" -duration "$probe_horizon" \
-		-logdir "$arm_dir" -log-mode full -evidence-format evstream_v3 >"$stdout_log" 2>"$stderr_log"
+	run_monitored_command "$stdout_log" "$stderr_log" env GOMAXPROCS=2 GOMEMLIMIT=4GiB "$multivenue_binary" -config "$arm_dir/run-config.json" -duration "$probe_horizon" \
+		-logdir "$arm_dir" -log-mode full -evidence-format evstream_v3
 	status=$?
 	set -e
 	if [[ "$status" -ne 0 ]]; then
@@ -489,7 +596,7 @@ run_arm() {
 	mv -- "$status_tmp" "$arm_dir/run-status.json"
 
 	set +e
-	"$evsrender_binary" -dir "$arm_dir" -out "$rendered_dir" >"$arm_dir/renderer-report.json"
+	run_monitored_command "$arm_dir/renderer-report.json" "$renderer_stderr_log" "$evsrender_binary" -dir "$arm_dir" -out "$rendered_dir"
 	renderer_status=$?
 	set -e
 	if [[ "$renderer_status" -ne 0 ]]; then
@@ -507,7 +614,14 @@ run_arm() {
 
 	set +e
 	"$sv1dprobe_binary" -mode audit -out "$result_path" -plan "$plan_path" -arm "$arm" \
-		-run-dir "$arm_dir" -rendered-dir "$rendered_dir"
+		-run-dir "$arm_dir" -rendered-dir "$rendered_dir" -source-revision "$source_revision" \
+		-tree-revision "$tree_revision" -plan-sha256 "$review_plan_sha256" \
+		-parent-registration-sha256 "$parent_registration_sha256" -amendment-sha256 "$amendment_sha256" \
+		-activation-metadata "$activation_metadata" -review-attestation-sha256 "$review_attestation_sha256" \
+		-review-report-sha256 "$review_report_sha256" -capacity-attestation-sha256 "$capacity_attestation_sha256" \
+		-capacity-records-sha256 "$capacity_records_sha256" -capacity-runner-sha256 "$capacity_runner_sha256" \
+		-activation-runner-sha256 "$activation_runner_sha256" -activation-metadata-sha256 "$activation_metadata_sha256" \
+		-trusted-review-key-sha256 "$trusted_review_key_sha256" -evidence-schema-epoch 4 -gomaxprocs 2 -gomemlimit 4GiB
 	audit_status=$?
 	set -e
 	if [[ "$audit_status" -ne 0 ]]; then
@@ -515,10 +629,25 @@ run_arm() {
 		return 0
 	fi
 	[[ -s "$result_path" && ! -L "$result_path" ]] || fail "$arm audit result was not published"
+)
 }
 
 for arm in treatment mode-off no-roster; do
-	run_arm "$arm" || fail "could not retain a typed result for $arm"
+	set +e
+	run_arm "$arm"
+	run_arm_status=$?
+	set -e
+	result_path="$output_root/results/$arm.json"
+	if [[ "$run_arm_status" -ne 0 ]]; then
+		if [[ ! -s "$result_path" ]]; then
+			mark_arm_failure "$arm" "$result_path" "activation_runner_failure_$run_arm_status" || fail "could not retain a typed result for $arm"
+		elif ! jq -e '.arm.complete == false' "$result_path" >/dev/null 2>&1; then
+			fail "activation runner failed without an incomplete typed result for $arm"
+		fi
+	fi
+	if [[ -s "$result_path" ]] && jq -e '.arm.complete == false' "$result_path" >/dev/null 2>&1; then
+		arm_failure=1
+	fi
 done
 
 score_path="$output_root/score.json"
@@ -526,7 +655,14 @@ set +e
 "$sv1dprobe_binary" -mode score -out "$score_path" -plan "$plan_path" \
 	-treatment-result "$output_root/results/treatment.json" \
 	-mode-off-result "$output_root/results/mode-off.json" \
-	-no-roster-result "$output_root/results/no-roster.json"
+	-no-roster-result "$output_root/results/no-roster.json" -source-revision "$source_revision" \
+	-tree-revision "$tree_revision" -plan-sha256 "$review_plan_sha256" \
+	-parent-registration-sha256 "$parent_registration_sha256" -amendment-sha256 "$amendment_sha256" \
+	-activation-metadata "$activation_metadata" -review-attestation-sha256 "$review_attestation_sha256" \
+	-review-report-sha256 "$review_report_sha256" -capacity-attestation-sha256 "$capacity_attestation_sha256" \
+	-capacity-records-sha256 "$capacity_records_sha256" -capacity-runner-sha256 "$capacity_runner_sha256" \
+	-activation-runner-sha256 "$activation_runner_sha256" -activation-metadata-sha256 "$activation_metadata_sha256" \
+	-trusted-review-key-sha256 "$trusted_review_key_sha256" -evidence-schema-epoch 4 -gomaxprocs 2 -gomemlimit 4GiB
 score_status=$?
 set -e
 [[ -s "$score_path" && ! -L "$score_path" ]] || fail "could not publish tri-arm score"

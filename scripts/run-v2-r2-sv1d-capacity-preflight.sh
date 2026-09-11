@@ -32,7 +32,7 @@ normalize_input_path() {
 	if [[ "$path" != /* ]]; then
 		path="$PWD/$path"
 	fi
-	realpath -m -- "$path"
+	realpath -ms -- "$path"
 }
 
 require_no_symlink_components() {
@@ -229,6 +229,7 @@ fi
 
 root_dir=$(normalize_input_path "$root_dir") || fail "could not normalize the repository root"
 capacity_script=$(normalize_input_path "$capacity_script") || fail "could not normalize the capacity runner"
+require_no_symlink_components "$root_dir" || fail "repository root contains a symlink"
 
 multivenue_binary=${1:-"$root_dir/bin/multivenue"}
 sv1dprobe_binary=${2:-"$root_dir/bin/sv1dprobe"}

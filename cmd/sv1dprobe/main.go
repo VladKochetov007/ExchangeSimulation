@@ -81,6 +81,17 @@ func run() error {
 	trustedReviewKeySHA256 := flag.String("trusted-review-key-sha256", "", "externally resolved trusted review key SHA-256")
 	treeRevision := flag.String("tree-revision", "", "externally resolved reviewed Git tree revision")
 	planSHA256 := flag.String("plan-sha256", "", "externally resolved canonical SV1D plan SHA-256")
+	activationMetadata := flag.String("activation-metadata", "", "externally resolved activation run metadata")
+	reviewAttestationSHA256 := flag.String("review-attestation-sha256", "", "externally resolved review attestation SHA-256")
+	reviewReportSHA256 := flag.String("review-report-sha256", "", "externally resolved review report SHA-256")
+	capacityAttestationSHA256 := flag.String("capacity-attestation-sha256", "", "externally resolved capacity attestation SHA-256")
+	capacityRecordsSHA256 := flag.String("capacity-records-sha256", "", "externally resolved capacity measurement-records SHA-256")
+	capacityRunnerSHA256 := flag.String("capacity-runner-sha256", "", "externally resolved capacity runner SHA-256")
+	activationRunnerSHA256 := flag.String("activation-runner-sha256", "", "externally resolved activation runner SHA-256")
+	activationMetadataSHA256 := flag.String("activation-metadata-sha256", "", "externally resolved activation metadata SHA-256")
+	evidenceSchemaEpoch := flag.Uint("evidence-schema-epoch", 0, "externally resolved evidence schema epoch")
+	gomaxprocs := flag.Int("gomaxprocs", 0, "externally resolved GOMAXPROCS envelope")
+	gomemlimit := flag.String("gomemlimit", "", "externally resolved GOMEMLIMIT envelope")
 	failureReason := flag.String("failure-reason", "", "machine-readable reason for an incomplete arm result")
 	parentRegistrationSHA256 := flag.String("parent-registration-sha256", "", "raw parent preregistration SHA-256")
 	amendmentSHA256 := flag.String("amendment-sha256", "", "raw SV1D amendment SHA-256")
@@ -107,11 +118,38 @@ func run() error {
 	case "plan":
 		return createPlan(*out, *treatmentConfig, *modeOffConfig, *noRosterConfig, *sourceRevision, *binarySHA256, *analyzerSHA256, *rendererSHA256)
 	case "audit":
-		return auditArm(*out, *planPath, *armName, *runDir, *renderedDir)
+		return auditArm(*out, *planPath, *armName, *runDir, *renderedDir, strictProvenanceInputs{
+			SourceRevision: *sourceRevision, TreeRevision: *treeRevision, PlanSHA256: *planSHA256,
+			ParentRegistrationSHA256: *parentRegistrationSHA256, AmendmentSHA256: *amendmentSHA256,
+			ActivationMetadataPath: *activationMetadata, ReviewAttestationSHA256: *reviewAttestationSHA256,
+			ReviewReportSHA256: *reviewReportSHA256, CapacityAttestationSHA256: *capacityAttestationSHA256,
+			CapacityRecordsSHA256: *capacityRecordsSHA256, CapacityRunnerSHA256: *capacityRunnerSHA256,
+			ActivationRunnerSHA256: *activationRunnerSHA256, ActivationMetadataSHA256: *activationMetadataSHA256,
+			TrustedReviewKeySHA256: *trustedReviewKeySHA256, EvidenceSchemaEpoch: uint32(*evidenceSchemaEpoch),
+			GOMAXPROCS: *gomaxprocs, GOMEMLIMIT: *gomemlimit,
+		})
 	case "failure":
-		return publishFailedArm(*out, *planPath, *armName, *failureReason)
+		return publishFailedArm(*out, *planPath, *armName, *failureReason, strictProvenanceInputs{
+			SourceRevision: *sourceRevision, TreeRevision: *treeRevision, PlanSHA256: *planSHA256,
+			ParentRegistrationSHA256: *parentRegistrationSHA256, AmendmentSHA256: *amendmentSHA256,
+			ActivationMetadataPath: *activationMetadata, ReviewAttestationSHA256: *reviewAttestationSHA256,
+			ReviewReportSHA256: *reviewReportSHA256, CapacityAttestationSHA256: *capacityAttestationSHA256,
+			CapacityRecordsSHA256: *capacityRecordsSHA256, CapacityRunnerSHA256: *capacityRunnerSHA256,
+			ActivationRunnerSHA256: *activationRunnerSHA256, ActivationMetadataSHA256: *activationMetadataSHA256,
+			TrustedReviewKeySHA256: *trustedReviewKeySHA256, EvidenceSchemaEpoch: uint32(*evidenceSchemaEpoch),
+			GOMAXPROCS: *gomaxprocs, GOMEMLIMIT: *gomemlimit,
+		})
 	case "score":
-		return scoreArms(*out, *planPath, *treatmentResult, *modeOffResult, *noRosterResult)
+		return scoreArms(*out, *planPath, *treatmentResult, *modeOffResult, *noRosterResult, strictProvenanceInputs{
+			SourceRevision: *sourceRevision, TreeRevision: *treeRevision, PlanSHA256: *planSHA256,
+			ParentRegistrationSHA256: *parentRegistrationSHA256, AmendmentSHA256: *amendmentSHA256,
+			ActivationMetadataPath: *activationMetadata, ReviewAttestationSHA256: *reviewAttestationSHA256,
+			ReviewReportSHA256: *reviewReportSHA256, CapacityAttestationSHA256: *capacityAttestationSHA256,
+			CapacityRecordsSHA256: *capacityRecordsSHA256, CapacityRunnerSHA256: *capacityRunnerSHA256,
+			ActivationRunnerSHA256: *activationRunnerSHA256, ActivationMetadataSHA256: *activationMetadataSHA256,
+			TrustedReviewKeySHA256: *trustedReviewKeySHA256, EvidenceSchemaEpoch: uint32(*evidenceSchemaEpoch),
+			GOMAXPROCS: *gomaxprocs, GOMEMLIMIT: *gomemlimit,
+		})
 	case "verify-review":
 		return verifyReview(reviewVerificationInputs{
 			AttestationPath: *reviewAttestation, ReportPath: *reviewReport, TrustedKeyPath: *trustedReviewKey,
@@ -164,7 +202,75 @@ func createPlan(out, treatmentPath, modeOffPath, noRosterPath, sourceRevision, b
 	return publishJSON(out, planDocument{SchemaVersion: 1, Contract: probePlanContract, ProbeID: probeID, PlanSHA256: planSHA256, Plan: plan})
 }
 
-func auditArm(out, planPath, armName, runDir, renderedDir string) error {
+type strictProvenanceInputs struct {
+	SourceRevision            string
+	TreeRevision              string
+	PlanSHA256                string
+	ParentRegistrationSHA256  string
+	AmendmentSHA256           string
+	ActivationMetadataPath    string
+	ReviewAttestationSHA256   string
+	ReviewReportSHA256        string
+	CapacityAttestationSHA256 string
+	CapacityRecordsSHA256     string
+	CapacityRunnerSHA256      string
+	ActivationRunnerSHA256    string
+	ActivationMetadataSHA256  string
+	TrustedReviewKeySHA256    string
+	EvidenceSchemaEpoch       uint32
+	GOMAXPROCS                int
+	GOMEMLIMIT                string
+}
+
+func expectedSV1DProvenance(plan analysis.SV1DProbePlan, spec analysis.SV1DProbeArmSpec, inputs strictProvenanceInputs) analysis.CDFExpectedProvenance {
+	return analysis.CDFExpectedProvenance{
+		ConfigSHA256: spec.ConfigSHA256, TreatmentConfigSHA256: plan.Treatment.ConfigSHA256,
+		ModeOffConfigSHA256:  plan.ModeOff.ConfigSHA256,
+		NoRosterConfigSHA256: plan.NoRoster.ConfigSHA256, SourceRevision: inputs.SourceRevision,
+		TreeRevision: inputs.TreeRevision, PlanSHA256: inputs.PlanSHA256,
+		ParentRegistrationSHA256: inputs.ParentRegistrationSHA256, AmendmentSHA256: inputs.AmendmentSHA256,
+		BinarySHA256: spec.BinarySHA256, AnalyzerSHA256: plan.AnalyzerSHA256,
+		BinaryGOOS: "linux", BinaryGOARCH: "amd64", BinaryGOAMD64: "v1",
+		RendererSHA256: plan.RendererSHA256, RendererSourceRevision: inputs.SourceRevision,
+		RendererGOOS: "linux", RendererGOARCH: "amd64", RendererGOAMD64: "v1",
+		RendererTrimpath: true, RendererCGOEnabled: "0",
+		ReviewAttestationSHA256: inputs.ReviewAttestationSHA256, ReviewReportSHA256: inputs.ReviewReportSHA256,
+		CapacityAttestationSHA256: inputs.CapacityAttestationSHA256, CapacityRecordsSHA256: inputs.CapacityRecordsSHA256,
+		CapacityRunnerSHA256: inputs.CapacityRunnerSHA256, ActivationRunnerSHA256: inputs.ActivationRunnerSHA256,
+		ActivationMetadataSHA256: inputs.ActivationMetadataSHA256, ActivationMetadataPath: inputs.ActivationMetadataPath,
+		TrustedReviewKeySHA256: inputs.TrustedReviewKeySHA256, EvidenceSchemaEpoch: inputs.EvidenceSchemaEpoch,
+		GOMAXPROCS: inputs.GOMAXPROCS, GOMEMLIMIT: inputs.GOMEMLIMIT,
+	}
+}
+
+func armSpecForName(plan analysis.SV1DProbePlan, name string) analysis.SV1DProbeArmSpec {
+	switch name {
+	case plan.Treatment.Name:
+		return plan.Treatment
+	case plan.ModeOff.Name:
+		return plan.ModeOff
+	case plan.NoRoster.Name:
+		return plan.NoRoster
+	default:
+		return analysis.SV1DProbeArmSpec{}
+	}
+}
+
+func validateStrictProvenanceInputs(plan analysis.SV1DProbePlan, inputs strictProvenanceInputs) error {
+	planDigest, err := analysis.SV1DProbePlanSHA256(plan)
+	if err != nil {
+		return fmt.Errorf("hash canonical probe plan: %w", err)
+	}
+	if inputs.SourceRevision != plan.Treatment.SourceRevision || plan.ModeOff.SourceRevision != inputs.SourceRevision || plan.NoRoster.SourceRevision != inputs.SourceRevision {
+		return fmt.Errorf("strict source revision does not match the registered probe plan")
+	}
+	if inputs.PlanSHA256 != planDigest {
+		return fmt.Errorf("strict plan digest does not match the registered probe plan")
+	}
+	return nil
+}
+
+func auditArm(out, planPath, armName, runDir, renderedDir string, provenanceInputs strictProvenanceInputs) error {
 	if out == "" || planPath == "" || armName == "" || runDir == "" || renderedDir == "" {
 		return fmt.Errorf("audit mode requires -out, -plan, -arm, -run-dir, and -rendered-dir")
 	}
@@ -179,6 +285,10 @@ func auditArm(out, planPath, armName, runDir, renderedDir string) error {
 	if err := verifyCurrentAnalyzer(document.Plan.AnalyzerSHA256); err != nil {
 		return err
 	}
+	if err := validateStrictProvenanceInputs(document.Plan, provenanceInputs); err != nil {
+		return err
+	}
+	expectedProvenance := expectedSV1DProvenance(document.Plan, spec, provenanceInputs)
 	run, err := analysis.Open(runDir)
 	if err != nil {
 		return err
@@ -187,13 +297,7 @@ func auditArm(out, planPath, armName, runDir, renderedDir string) error {
 		Spec: spec, Contract: contract, Treatment: treatment, PlanSHA256: document.PlanSHA256,
 		Activation: analysis.CDFActivationOptions{
 			Contract: contract, EvidenceDir: runDir, RenderedEvidenceDir: renderedDir,
-			ExpectedProvenance: analysis.CDFExpectedProvenance{
-				ConfigSHA256: spec.ConfigSHA256, SourceRevision: spec.SourceRevision,
-				BinarySHA256: spec.BinarySHA256, BinaryGOOS: "linux", BinaryGOARCH: "amd64", BinaryGOAMD64: "v1",
-				RendererSHA256: spec.RendererSHA256, RendererSourceRevision: spec.SourceRevision,
-				RendererGOOS: "linux", RendererGOARCH: "amd64", RendererGOAMD64: "v1",
-				RendererTrimpath: true, RendererCGOEnabled: "0",
-			},
+			ExpectedProvenance: expectedProvenance,
 		},
 	})
 	if err != nil {
@@ -202,7 +306,7 @@ func auditArm(out, planPath, armName, runDir, renderedDir string) error {
 	return publishJSON(out, armResultDocument{SchemaVersion: 1, Contract: armResultContract, ProbeID: probeID, Arm: result})
 }
 
-func publishFailedArm(out, planPath, armName, reason string) error {
+func publishFailedArm(out, planPath, armName, reason string, inputs ...strictProvenanceInputs) error {
 	if out == "" || planPath == "" || armName == "" || strings.TrimSpace(reason) == "" {
 		return fmt.Errorf("failure mode requires -out, -plan, -arm, and -failure-reason")
 	}
@@ -217,17 +321,38 @@ func publishFailedArm(out, planPath, armName, reason string) error {
 	if err := verifyCurrentAnalyzer(document.Plan.AnalyzerSHA256); err != nil {
 		return err
 	}
+	var expectedProvenance analysis.CDFExpectedProvenance
+	if len(inputs) == 0 {
+		expectedProvenance = analysis.CDFExpectedProvenance{
+			ConfigSHA256: spec.ConfigSHA256, SourceRevision: spec.SourceRevision,
+			BinarySHA256: spec.BinarySHA256, BinaryGOOS: "linux", BinaryGOARCH: "amd64", BinaryGOAMD64: "v1",
+		}
+	} else {
+		if err := validateStrictProvenanceInputs(document.Plan, inputs[0]); err != nil {
+			return err
+		}
+		expectedProvenance = expectedSV1DProvenance(document.Plan, spec, inputs[0])
+	}
 	result := analysis.SV1DProbeArmResult{
 		ArmName: spec.Name, ExperimentID: spec.ExperimentID, HypothesisID: spec.HypothesisID,
 		ConfigSHA256: spec.ConfigSHA256, SourceRevision: spec.SourceRevision, BinarySHA256: spec.BinarySHA256,
 		AnalyzerSHA256: spec.AnalyzerSHA256, RendererSHA256: spec.RendererSHA256, PlanSHA256: document.PlanSHA256,
+		TreeRevision: expectedProvenance.TreeRevision, ReviewAttestationSHA256: expectedProvenance.ReviewAttestationSHA256,
+		ReviewReportSHA256: expectedProvenance.ReviewReportSHA256, CapacityAttestationSHA256: expectedProvenance.CapacityAttestationSHA256,
+		CapacityRecordsSHA256: expectedProvenance.CapacityRecordsSHA256, CapacityRunnerSHA256: expectedProvenance.CapacityRunnerSHA256,
+		ActivationRunnerSHA256: expectedProvenance.ActivationRunnerSHA256, ActivationMetadataSHA256: expectedProvenance.ActivationMetadataSHA256,
+		TrustedReviewKeySHA256: expectedProvenance.TrustedReviewKeySHA256, EvidenceSchemaEpoch: expectedProvenance.EvidenceSchemaEpoch,
+		GOMAXPROCS: expectedProvenance.GOMAXPROCS, GOMEMLIMIT: expectedProvenance.GOMEMLIMIT,
 		Complete: false, EvidenceValid: false, StrictMechanicsValid: false, TerminalValuationValid: false,
 		ActivationSatisfied: false, AntiCheatingSatisfied: false, FailureReasons: []string{reason},
+	}
+	if err := analysis.ValidateSV1DProbeArmProvenance(result, expectedProvenance); err != nil {
+		return err
 	}
 	return publishJSON(out, armResultDocument{SchemaVersion: 1, Contract: armResultContract, ProbeID: probeID, Arm: result})
 }
 
-func scoreArms(out, planPath, treatmentPath, modeOffPath, noRosterPath string) error {
+func scoreArms(out, planPath, treatmentPath, modeOffPath, noRosterPath string, provenanceInputs strictProvenanceInputs) error {
 	if out == "" || planPath == "" || treatmentPath == "" || modeOffPath == "" || noRosterPath == "" {
 		return fmt.Errorf("score mode requires -out, -plan, and all three arm result paths")
 	}
@@ -236,6 +361,13 @@ func scoreArms(out, planPath, treatmentPath, modeOffPath, noRosterPath string) e
 		return err
 	}
 	if err := verifyCurrentAnalyzer(document.Plan.AnalyzerSHA256); err != nil {
+		return err
+	}
+	if err := validateStrictProvenanceInputs(document.Plan, provenanceInputs); err != nil {
+		return err
+	}
+	expectedProvenance := expectedSV1DProvenance(document.Plan, document.Plan.Treatment, provenanceInputs)
+	if err := analysis.ValidateSV1DActivationLaunchProvenance(provenanceInputs.ActivationMetadataPath, expectedProvenance); err != nil {
 		return err
 	}
 	paths := []string{treatmentPath, modeOffPath, noRosterPath}
@@ -248,6 +380,9 @@ func scoreArms(out, planPath, treatmentPath, modeOffPath, noRosterPath string) e
 		if result.SchemaVersion != 1 || result.Contract != armResultContract || result.ProbeID != probeID {
 			return fmt.Errorf("arm result %s has an invalid contract identity", path)
 		}
+		if err := analysis.ValidateSV1DProbeArmProvenance(result.Arm, expectedSV1DProvenance(document.Plan, armSpecForName(document.Plan, result.Arm.ArmName), provenanceInputs)); err != nil {
+			return fmt.Errorf("arm result %s has invalid strict provenance: %w", path, err)
+		}
 		arms = append(arms, result.Arm)
 	}
 	score := analysis.ScoreSV1DProbe(document.Plan, arms)
@@ -257,7 +392,7 @@ func scoreArms(out, planPath, treatmentPath, modeOffPath, noRosterPath string) e
 	if err := publishJSON(out, scoreDocument{SchemaVersion: 1, Contract: scoreContract, ProbeID: probeID, PlanSHA256: score.PlanSHA256, Score: score, Arms: arms}); err != nil {
 		return err
 	}
-	if score.Status == analysis.SV1DProbeStatusInvalidEvidence || score.Status == analysis.SV1DProbeStatusIncompleteArm {
+	if score.Status != analysis.SV1DProbeStatusPass {
 		return fmt.Errorf("probe score is not executable: %s", score.Status)
 	}
 	return nil

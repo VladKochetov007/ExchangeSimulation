@@ -57,23 +57,35 @@ type SV1DProbeArmSpec struct {
 // arm. Controls do not need supplier activation; they do need complete,
 // strict, identity-bound evidence before they can enter a comparison.
 type SV1DProbeArmResult struct {
-	ArmName                string                       `json:"arm_name"`
-	ExperimentID           string                       `json:"experiment_id"`
-	HypothesisID           string                       `json:"hypothesis_id"`
-	ConfigSHA256           string                       `json:"config_sha256"`
-	SourceRevision         string                       `json:"source_revision"`
-	BinarySHA256           string                       `json:"binary_sha256"`
-	AnalyzerSHA256         string                       `json:"analyzer_sha256"`
-	RendererSHA256         string                       `json:"renderer_sha256"`
-	PlanSHA256             string                       `json:"plan_sha256"`
-	Complete               bool                         `json:"complete"`
-	EvidenceValid          bool                         `json:"evidence_valid"`
-	StrictMechanicsValid   bool                         `json:"strict_mechanics_valid"`
-	TerminalValuationValid bool                         `json:"terminal_valuation_valid"`
-	ActivationSatisfied    bool                         `json:"activation_satisfied"`
-	AntiCheatingSatisfied  bool                         `json:"anti_cheating_satisfied"`
-	Venues                 []CDFVenueConcentrationAudit `json:"venues"`
-	FailureReasons         []string                     `json:"failure_reasons,omitempty"`
+	ArmName                   string                       `json:"arm_name"`
+	ExperimentID              string                       `json:"experiment_id"`
+	HypothesisID              string                       `json:"hypothesis_id"`
+	ConfigSHA256              string                       `json:"config_sha256"`
+	SourceRevision            string                       `json:"source_revision"`
+	BinarySHA256              string                       `json:"binary_sha256"`
+	AnalyzerSHA256            string                       `json:"analyzer_sha256"`
+	RendererSHA256            string                       `json:"renderer_sha256"`
+	PlanSHA256                string                       `json:"plan_sha256"`
+	TreeRevision              string                       `json:"tree_revision,omitempty"`
+	ReviewAttestationSHA256   string                       `json:"review_attestation_sha256,omitempty"`
+	ReviewReportSHA256        string                       `json:"review_report_sha256,omitempty"`
+	CapacityAttestationSHA256 string                       `json:"capacity_attestation_sha256,omitempty"`
+	CapacityRecordsSHA256     string                       `json:"capacity_records_sha256,omitempty"`
+	CapacityRunnerSHA256      string                       `json:"capacity_runner_sha256,omitempty"`
+	ActivationRunnerSHA256    string                       `json:"activation_runner_sha256,omitempty"`
+	ActivationMetadataSHA256  string                       `json:"activation_metadata_sha256,omitempty"`
+	TrustedReviewKeySHA256    string                       `json:"trusted_review_key_sha256,omitempty"`
+	EvidenceSchemaEpoch       uint32                       `json:"evidence_schema_epoch,omitempty"`
+	GOMAXPROCS                int                          `json:"gomaxprocs,omitempty"`
+	GOMEMLIMIT                string                       `json:"gomemlimit,omitempty"`
+	Complete                  bool                         `json:"complete"`
+	EvidenceValid             bool                         `json:"evidence_valid"`
+	StrictMechanicsValid      bool                         `json:"strict_mechanics_valid"`
+	TerminalValuationValid    bool                         `json:"terminal_valuation_valid"`
+	ActivationSatisfied       bool                         `json:"activation_satisfied"`
+	AntiCheatingSatisfied     bool                         `json:"anti_cheating_satisfied"`
+	Venues                    []CDFVenueConcentrationAudit `json:"venues"`
+	FailureReasons            []string                     `json:"failure_reasons,omitempty"`
 }
 
 // SV1DProbeArmAuditOptions binds one arm audit to identities supplied by the
@@ -97,7 +109,19 @@ func (r *Run) AuditSV1DProbeArm(options SV1DProbeArmAuditOptions) (SV1DProbeArmR
 		HypothesisID: options.Spec.HypothesisID, ConfigSHA256: options.Spec.ConfigSHA256,
 		SourceRevision: options.Spec.SourceRevision, BinarySHA256: options.Spec.BinarySHA256,
 		AnalyzerSHA256: options.Spec.AnalyzerSHA256, RendererSHA256: options.Spec.RendererSHA256,
-		PlanSHA256: options.PlanSHA256,
+		PlanSHA256:                options.PlanSHA256,
+		TreeRevision:              options.Activation.ExpectedProvenance.TreeRevision,
+		ReviewAttestationSHA256:   options.Activation.ExpectedProvenance.ReviewAttestationSHA256,
+		ReviewReportSHA256:        options.Activation.ExpectedProvenance.ReviewReportSHA256,
+		CapacityAttestationSHA256: options.Activation.ExpectedProvenance.CapacityAttestationSHA256,
+		CapacityRecordsSHA256:     options.Activation.ExpectedProvenance.CapacityRecordsSHA256,
+		CapacityRunnerSHA256:      options.Activation.ExpectedProvenance.CapacityRunnerSHA256,
+		ActivationRunnerSHA256:    options.Activation.ExpectedProvenance.ActivationRunnerSHA256,
+		ActivationMetadataSHA256:  options.Activation.ExpectedProvenance.ActivationMetadataSHA256,
+		TrustedReviewKeySHA256:    options.Activation.ExpectedProvenance.TrustedReviewKeySHA256,
+		EvidenceSchemaEpoch:       options.Activation.ExpectedProvenance.EvidenceSchemaEpoch,
+		GOMAXPROCS:                options.Activation.ExpectedProvenance.GOMAXPROCS,
+		GOMEMLIMIT:                options.Activation.ExpectedProvenance.GOMEMLIMIT,
 	}
 	if r == nil {
 		return result, fmt.Errorf("SV1D arm audit has a nil run")
@@ -115,6 +139,12 @@ func (r *Run) AuditSV1DProbeArm(options SV1DProbeArmAuditOptions) (SV1DProbeArmR
 		return result, fmt.Errorf("SV1D strict arm audit requires a canonical plan digest")
 	}
 	if !options.Activation.AllowLegacyJSON {
+		if err := validateSV1DStrictExpectedProvenance(expected); err != nil {
+			return result, err
+		}
+		if expected.PlanSHA256 != options.PlanSHA256 {
+			return result, fmt.Errorf("SV1D arm spec and expected plan provenance disagree")
+		}
 		if !isSV1DHexDigest(options.Spec.AnalyzerSHA256) || !isSV1DHexDigest(options.Spec.RendererSHA256) {
 			return result, fmt.Errorf("SV1D arm spec has incomplete successor tool identity")
 		}
@@ -134,6 +164,11 @@ func (r *Run) AuditSV1DProbeArm(options SV1DProbeArmAuditOptions) (SV1DProbeArmR
 	_, metadata, err := loadCDFActivationIdentity(evidenceDir)
 	if err != nil {
 		return result, err
+	}
+	if !options.Activation.AllowLegacyJSON {
+		if err := validateSV1DActivationArmProvenance(evidenceDir, options.Activation.RenderedEvidenceDir, options.Spec, options); err != nil {
+			return result, err
+		}
 	}
 	terminalErr := validateCDFTerminalValuation(r, metadata, options.Contract)
 	result.TerminalValuationValid = terminalErr == nil
@@ -234,6 +269,450 @@ func validateSV1DRendererAttestationRaw(raw, mainRaw []byte, expected CDFExpecte
 	mainAttestationSHA256 := hex.EncodeToString(mainAttestationDigest[:])
 	if mainAttestationSHA256 != attestation.RenderedAttestationSHA256 {
 		return fmt.Errorf("SV1D renderer attestation is not bound to rendered evidence")
+	}
+	return nil
+}
+
+const (
+	sv1dActivationRunnerContract   = "v2-r2-sv1d-activation-runner-v2"
+	sv1dActivationMetadataContract = "v2-r2-sv1d-activation-run-metadata-v2"
+)
+
+type sv1dActivationRunMetadata struct {
+	SchemaVersion             int      `json:"schema_version"`
+	Contract                  string   `json:"contract"`
+	DevelopmentOnly           bool     `json:"development_only"`
+	ScientificResultEligible  bool     `json:"scientific_result_eligible"`
+	SourceRevision            string   `json:"source_revision"`
+	TreeRevision              string   `json:"tree_revision"`
+	ProbeID                   string   `json:"probe_id"`
+	PlanSHA256                string   `json:"plan_sha256"`
+	ReviewAttestationSHA256   string   `json:"review_attestation_sha256"`
+	ReviewReportSHA256        string   `json:"review_report_sha256"`
+	CapacityAttestationSHA256 string   `json:"capacity_attestation_sha256"`
+	CapacityRecordsSHA256     string   `json:"capacity_records_sha256"`
+	TrustedReviewKeySHA256    string   `json:"trusted_review_key_sha256"`
+	CapacityRoot              string   `json:"capacity_root"`
+	ActivationRunnerSHA256    string   `json:"activation_runner_sha256"`
+	CapacityRunnerSHA256      string   `json:"capacity_runner_sha256"`
+	SimulatorSHA256           string   `json:"simulator_sha256"`
+	AnalyzerSHA256            string   `json:"analyzer_sha256"`
+	RendererSHA256            string   `json:"renderer_sha256"`
+	EvidenceFormat            string   `json:"evidence_format"`
+	EvidenceSchemaEpoch       uint32   `json:"evidence_schema_epoch"`
+	LogMode                   string   `json:"log_mode"`
+	GOMAXPROCS                int      `json:"gomaxprocs"`
+	GOMEMLIMIT                string   `json:"gomemlimit"`
+	OutputRoot                string   `json:"output_root"`
+	OutputParent              string   `json:"output_parent"`
+	Arms                      []string `json:"arms"`
+	HoldoutsConsumed          []string `json:"holdouts_consumed"`
+}
+
+type sv1dActivationArmMetadata struct {
+	SchemaVersion             int      `json:"schema_version"`
+	RunnerContract            string   `json:"runner_contract"`
+	ProbeID                   string   `json:"probe_id"`
+	Arm                       string   `json:"arm"`
+	ExperimentID              string   `json:"experiment_id"`
+	ConfigExperimentID        string   `json:"config_experiment_id"`
+	HypothesisID              string   `json:"hypothesis_id"`
+	Seed                      int64    `json:"seed"`
+	SimulatedHorizon          string   `json:"simulated_horizon"`
+	SimulationStartNano       int64    `json:"simulation_start_nano"`
+	SimulationEndNano         int64    `json:"simulation_end_nano"`
+	ConfigSHA256              string   `json:"config_sha256"`
+	BinarySHA256              string   `json:"binary_sha256"`
+	GitRevision               string   `json:"git_revision"`
+	TreeRevision              string   `json:"tree_revision"`
+	BinaryPath                string   `json:"binary_path"`
+	BinaryGoVersion           string   `json:"binary_go_version"`
+	BinaryGOOS                string   `json:"binary_goos"`
+	BinaryGOARCH              string   `json:"binary_goarch"`
+	BinaryGOAMD64             string   `json:"binary_goamd64"`
+	AnalyzerSHA256            string   `json:"analyzer_sha256"`
+	RendererSHA256            string   `json:"renderer_sha256"`
+	RunnerSHA256              string   `json:"runner_sha256"`
+	ReviewAttestationSHA256   string   `json:"review_attestation_sha256"`
+	ReviewReportSHA256        string   `json:"review_report_sha256"`
+	CapacityAttestationSHA256 string   `json:"capacity_attestation_sha256"`
+	CapacityRecordsSHA256     string   `json:"capacity_records_sha256"`
+	TrustedReviewKeySHA256    string   `json:"trusted_review_key_sha256"`
+	LogMode                   string   `json:"log_mode"`
+	EvidenceFormat            string   `json:"evidence_format"`
+	EvidenceSchemaEpoch       uint32   `json:"evidence_schema_epoch"`
+	GOMAXPROCS                int      `json:"gomaxprocs"`
+	GOMEMLIMIT                string   `json:"gomemlimit"`
+	OutputDir                 string   `json:"output_dir"`
+	Holdout                   bool     `json:"holdout"`
+	Command                   []string `json:"command"`
+	RawLogPolicy              string   `json:"raw_log_policy"`
+}
+
+func validateSV1DStrictExpectedProvenance(expected CDFExpectedProvenance) error {
+	if err := expected.validate(); err != nil {
+		return err
+	}
+	for name, value := range map[string]string{
+		"analyzer":                     expected.AnalyzerSHA256,
+		"renderer":                     expected.RendererSHA256,
+		"plan":                         expected.PlanSHA256,
+		"treatment config":             expected.TreatmentConfigSHA256,
+		"parent registration":          expected.ParentRegistrationSHA256,
+		"amendment":                    expected.AmendmentSHA256,
+		"mode-off config":              expected.ModeOffConfigSHA256,
+		"no-roster config":             expected.NoRosterConfigSHA256,
+		"review attestation":           expected.ReviewAttestationSHA256,
+		"review report":                expected.ReviewReportSHA256,
+		"capacity attestation":         expected.CapacityAttestationSHA256,
+		"capacity measurement records": expected.CapacityRecordsSHA256,
+		"capacity runner":              expected.CapacityRunnerSHA256,
+		"activation runner":            expected.ActivationRunnerSHA256,
+		"activation metadata":          expected.ActivationMetadataSHA256,
+		"trusted review key":           expected.TrustedReviewKeySHA256,
+	} {
+		if !isSV1DHexDigest(value) {
+			return fmt.Errorf("SV1D strict provenance has an invalid %s digest", name)
+		}
+	}
+	if !isCDFHex(expected.TreeRevision, 20) {
+		return fmt.Errorf("SV1D strict provenance has an invalid tree revision")
+	}
+	if !isCDFHex(expected.RendererSourceRevision, 20) || expected.RendererSourceRevision != expected.SourceRevision {
+		return fmt.Errorf("SV1D strict provenance has an invalid renderer source revision")
+	}
+	if !absoluteCleanPath(expected.ActivationMetadataPath) {
+		return fmt.Errorf("SV1D strict provenance has an invalid activation metadata path")
+	}
+	if expected.EvidenceSchemaEpoch != 4 || expected.GOMAXPROCS != 2 || expected.GOMEMLIMIT != "4GiB" {
+		return fmt.Errorf("SV1D strict provenance has an unregistered evidence epoch or runtime envelope")
+	}
+	if expected.RendererSourceModified || expected.RendererGOOS != "linux" || expected.RendererGOARCH != "amd64" ||
+		expected.RendererGOAMD64 != "v1" || !expected.RendererTrimpath || expected.RendererCGOEnabled != "0" {
+		return fmt.Errorf("SV1D strict provenance has an unsafe renderer identity")
+	}
+	return nil
+}
+
+func (p CDFExpectedProvenance) hasSV1DStrictProvenance() bool {
+	return p.AnalyzerSHA256 != "" || p.TreeRevision != "" || p.PlanSHA256 != "" ||
+		p.ReviewAttestationSHA256 != "" || p.ReviewReportSHA256 != "" ||
+		p.CapacityAttestationSHA256 != "" || p.CapacityRecordsSHA256 != "" ||
+		p.CapacityRunnerSHA256 != "" || p.ActivationRunnerSHA256 != "" ||
+		p.ActivationMetadataSHA256 != "" || p.ActivationMetadataPath != "" ||
+		p.TrustedReviewKeySHA256 != ""
+}
+
+// ValidateSV1DProbeArmProvenance checks the fields that are copied into an arm
+// result against launch identities supplied from outside the run. Legacy
+// historical results have no successor fields and remain accepted by the
+// legacy analyzer; strict successor results must carry every field.
+func ValidateSV1DProbeArmProvenance(arm SV1DProbeArmResult, expected CDFExpectedProvenance) error {
+	if !expected.hasSV1DStrictProvenance() {
+		return nil
+	}
+	if err := validateSV1DStrictExpectedProvenance(expected); err != nil {
+		return err
+	}
+	if arm.TreeRevision != expected.TreeRevision || arm.PlanSHA256 != expected.PlanSHA256 ||
+		arm.ReviewAttestationSHA256 != expected.ReviewAttestationSHA256 || arm.ReviewReportSHA256 != expected.ReviewReportSHA256 ||
+		arm.CapacityAttestationSHA256 != expected.CapacityAttestationSHA256 || arm.CapacityRecordsSHA256 != expected.CapacityRecordsSHA256 ||
+		arm.CapacityRunnerSHA256 != expected.CapacityRunnerSHA256 || arm.ActivationRunnerSHA256 != expected.ActivationRunnerSHA256 ||
+		arm.ActivationMetadataSHA256 != expected.ActivationMetadataSHA256 || arm.TrustedReviewKeySHA256 != expected.TrustedReviewKeySHA256 ||
+		arm.EvidenceSchemaEpoch != expected.EvidenceSchemaEpoch || arm.GOMAXPROCS != expected.GOMAXPROCS || arm.GOMEMLIMIT != expected.GOMEMLIMIT {
+		return fmt.Errorf("SV1D arm result does not match strict launch provenance")
+	}
+	return nil
+}
+
+func readSV1DActivationMetadata(path string) (sv1dActivationRunMetadata, []byte, error) {
+	var metadata sv1dActivationRunMetadata
+	raw, err := readSV1DRegularFile(path)
+	if err != nil {
+		return metadata, nil, fmt.Errorf("read SV1D activation metadata: %w", err)
+	}
+	fields := []string{
+		"schema_version", "contract", "development_only", "scientific_result_eligible",
+		"source_revision", "tree_revision", "probe_id", "plan_sha256",
+		"review_attestation_sha256", "review_report_sha256", "capacity_attestation_sha256",
+		"capacity_records_sha256", "trusted_review_key_sha256", "capacity_root",
+		"activation_runner_sha256", "capacity_runner_sha256", "simulator_sha256",
+		"analyzer_sha256", "renderer_sha256", "evidence_format", "evidence_schema_epoch",
+		"log_mode", "gomaxprocs", "gomemlimit", "output_root", "output_parent",
+		"arms", "holdouts_consumed",
+	}
+	if err := decodeStrictSV1DCapacityJSON(raw, &metadata, fields...); err != nil {
+		return metadata, nil, fmt.Errorf("decode SV1D activation metadata: %w", err)
+	}
+	return metadata, raw, nil
+}
+
+func validateSV1DActivationMetadata(metadataPath string, expected CDFExpectedProvenance) error {
+	metadata, raw, err := readSV1DActivationMetadata(metadataPath)
+	if err != nil {
+		return err
+	}
+	if sha256DigestHex(raw) != expected.ActivationMetadataSHA256 {
+		return fmt.Errorf("SV1D activation metadata digest does not match the externally expected launch record")
+	}
+	cleanMetadataPath := filepath.Clean(metadataPath)
+	outputRootFromPath := filepath.Dir(filepath.Dir(cleanMetadataPath))
+	if !absoluteCleanPath(cleanMetadataPath) || cleanMetadataPath != expected.ActivationMetadataPath ||
+		metadata.OutputRoot != outputRootFromPath {
+		return fmt.Errorf("SV1D activation metadata path is not bound to its declared output root")
+	}
+	if metadata.SchemaVersion != 2 || metadata.Contract != sv1dActivationMetadataContract ||
+		!metadata.DevelopmentOnly || metadata.ScientificResultEligible ||
+		metadata.SourceRevision != expected.SourceRevision || metadata.TreeRevision != expected.TreeRevision ||
+		metadata.ProbeID != "v2-r2-sv1d-activation-659" || metadata.PlanSHA256 != expected.PlanSHA256 ||
+		metadata.ReviewAttestationSHA256 != expected.ReviewAttestationSHA256 || metadata.ReviewReportSHA256 != expected.ReviewReportSHA256 ||
+		metadata.CapacityAttestationSHA256 != expected.CapacityAttestationSHA256 || metadata.CapacityRecordsSHA256 != expected.CapacityRecordsSHA256 ||
+		metadata.TrustedReviewKeySHA256 != expected.TrustedReviewKeySHA256 || metadata.ActivationRunnerSHA256 != expected.ActivationRunnerSHA256 ||
+		metadata.CapacityRunnerSHA256 != expected.CapacityRunnerSHA256 || metadata.SimulatorSHA256 != expected.BinarySHA256 ||
+		metadata.AnalyzerSHA256 != expected.AnalyzerSHA256 || metadata.RendererSHA256 != expected.RendererSHA256 ||
+		metadata.EvidenceFormat != "evstream_v3" || metadata.EvidenceSchemaEpoch != expected.EvidenceSchemaEpoch ||
+		metadata.LogMode != "full" || metadata.GOMAXPROCS != expected.GOMAXPROCS || metadata.GOMEMLIMIT != expected.GOMEMLIMIT ||
+		len(metadata.Arms) != 3 || !sameSV1DStrings(metadata.Arms, []string{"treatment", "mode-off", "no-roster"}) ||
+		len(metadata.HoldoutsConsumed) != 0 {
+		return fmt.Errorf("SV1D activation metadata does not match the registered strict launch contract")
+	}
+	if !absoluteCleanPath(metadata.OutputRoot) || !absoluteCleanPath(metadata.OutputParent) ||
+		!absoluteCleanPath(metadata.CapacityRoot) || filepath.Dir(metadata.OutputRoot) != metadata.OutputParent {
+		return fmt.Errorf("SV1D activation metadata has an invalid output or capacity path")
+	}
+	return nil
+}
+
+// ValidateSV1DActivationMetadata exposes the strict launch-record check to
+// the scorer. A legacy expected identity intentionally remains a no-op so
+// historical JSON reconstructions keep their pre-successor contract.
+func ValidateSV1DActivationMetadata(metadataPath string, expected CDFExpectedProvenance) error {
+	if !expected.hasSV1DStrictProvenance() {
+		return nil
+	}
+	if err := validateSV1DStrictExpectedProvenance(expected); err != nil {
+		return err
+	}
+	return validateSV1DActivationMetadata(metadataPath, expected)
+}
+
+// ValidateSV1DActivationLaunchProvenance rechecks the immutable launch bundle
+// at scoring time. This prevents a valid arm audit from being combined later
+// with a replaced review, capacity record, or retained tool.
+func ValidateSV1DActivationLaunchProvenance(metadataPath string, expected CDFExpectedProvenance) error {
+	if !expected.hasSV1DStrictProvenance() {
+		return nil
+	}
+	if err := validateSV1DStrictExpectedProvenance(expected); err != nil {
+		return err
+	}
+	metadata, _, err := readSV1DActivationMetadata(metadataPath)
+	if err != nil {
+		return err
+	}
+	if err := validateSV1DActivationMetadata(metadataPath, expected); err != nil {
+		return err
+	}
+	outputRoot := metadata.OutputRoot
+	if err := validateSV1DReviewRetention(outputRoot, expected); err != nil {
+		return err
+	}
+	if err := validateSV1DCapacityRetention(outputRoot, metadata, expected); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateSV1DReviewRetention(outputRoot string, expected CDFExpectedProvenance) error {
+	attestationPath := filepath.Join(outputRoot, "provenance", "review-attestation.json")
+	reportPath := filepath.Join(outputRoot, "provenance", "review-report.md")
+	keyPath := filepath.Join(outputRoot, "provenance", "trusted-review-key.raw")
+	parentPath := filepath.Join(outputRoot, "provenance", "parent-registration.md")
+	amendmentPath := filepath.Join(outputRoot, "provenance", "amendment.md")
+	configPaths := map[string]string{
+		"treatment": filepath.Join(outputRoot, "configs", "target-treatment.json"),
+		"mode-off":  filepath.Join(outputRoot, "configs", "target-mode-off.json"),
+		"no-roster": filepath.Join(outputRoot, "configs", "target-no-roster.json"),
+	}
+	for name, path := range map[string]string{
+		"review attestation": attestationPath, "review report": reportPath, "trusted review key": keyPath,
+		"parent registration": parentPath, "amendment": amendmentPath,
+	} {
+		raw, err := readSV1DRegularFile(path)
+		if err != nil {
+			return fmt.Errorf("read retained %s: %w", name, err)
+		}
+		expectedDigest := ""
+		switch name {
+		case "review attestation":
+			expectedDigest = expected.ReviewAttestationSHA256
+		case "review report":
+			expectedDigest = expected.ReviewReportSHA256
+		case "trusted review key":
+			expectedDigest = expected.TrustedReviewKeySHA256
+		case "parent registration":
+			expectedDigest = expected.ParentRegistrationSHA256
+		case "amendment":
+			expectedDigest = expected.AmendmentSHA256
+		}
+		if sha256DigestHex(raw) != expectedDigest {
+			return fmt.Errorf("retained %s does not match its strict launch digest", name)
+		}
+	}
+	configDigest := make(map[string]string, len(configPaths))
+	for name, path := range configPaths {
+		raw, err := readSV1DRegularFile(path)
+		if err != nil {
+			return fmt.Errorf("read retained %s config: %w", name, err)
+		}
+		configDigest[name] = sha256DigestHex(raw)
+	}
+	if configDigest["treatment"] != expected.TreatmentConfigSHA256 || configDigest["mode-off"] != expected.ModeOffConfigSHA256 || configDigest["no-roster"] != expected.NoRosterConfigSHA256 {
+		return fmt.Errorf("retained target configs do not match strict launch identities")
+	}
+	keyRaw, err := readSV1DRegularFile(keyPath)
+	if err != nil {
+		return err
+	}
+	if len(keyRaw) != 32 {
+		return fmt.Errorf("retained trusted review key has invalid length")
+	}
+	_, err = VerifySV1DReviewAttestation(attestationPath, reportPath, SV1DReviewExpectation{
+		SourceRevision: expected.SourceRevision, TreeRevision: expected.TreeRevision,
+		ProbeID: "v2-r2-sv1d-activation-659", PlanSHA256: expected.PlanSHA256,
+		ParentRegistrationSHA256: expected.ParentRegistrationSHA256, AmendmentSHA256: expected.AmendmentSHA256,
+		TreatmentConfigSHA256: expected.TreatmentConfigSHA256, ModeOffConfigSHA256: expected.ModeOffConfigSHA256,
+		NoRosterConfigSHA256: expected.NoRosterConfigSHA256, BinarySHA256: expected.BinarySHA256,
+		AnalyzerSHA256: expected.AnalyzerSHA256, RendererSHA256: expected.RendererSHA256,
+		TrustedPublicKey: append([]byte(nil), keyRaw...),
+	})
+	if err != nil {
+		return fmt.Errorf("retained SV1D review is not independently valid: %w", err)
+	}
+	return nil
+}
+
+func validateSV1DCapacityRetention(outputRoot string, metadata sv1dActivationRunMetadata, expected CDFExpectedProvenance) error {
+	path := filepath.Join(outputRoot, "provenance", "capacity-attestation.json")
+	raw, err := readSV1DRegularFile(path)
+	if err != nil {
+		return fmt.Errorf("read retained capacity attestation: %w", err)
+	}
+	if sha256DigestHex(raw) != expected.CapacityAttestationSHA256 {
+		return fmt.Errorf("retained capacity attestation does not match its strict launch digest")
+	}
+	var attestation SV1DCapacityAttestation
+	if err := validateSV1DCapacityAttestationJSONPresence(raw); err != nil {
+		return fmt.Errorf("retained capacity attestation field contract: %w", err)
+	}
+	if err := decodeStrictSV1DCapacityJSON(raw, &attestation); err != nil {
+		return fmt.Errorf("decode retained capacity attestation: %w", err)
+	}
+	if err := ValidateSV1DCapacityAttestation(attestation); err != nil {
+		return fmt.Errorf("retained capacity attestation: %w", err)
+	}
+	if attestation.SourceRevision != expected.SourceRevision || attestation.TreeRevision != expected.TreeRevision ||
+		attestation.PlanSHA256 != expected.PlanSHA256 || attestation.ReviewAttestationSHA256 != expected.ReviewAttestationSHA256 ||
+		attestation.ReviewReportSHA256 != expected.ReviewReportSHA256 || attestation.TrustedReviewKeySHA256 != expected.TrustedReviewKeySHA256 ||
+		attestation.BinarySHA256 != expected.BinarySHA256 || attestation.AnalyzerSHA256 != expected.AnalyzerSHA256 ||
+		attestation.RendererSHA256 != expected.RendererSHA256 || attestation.RunnerSHA256 != expected.CapacityRunnerSHA256 ||
+		attestation.MeasurementRecordsSHA256 != expected.CapacityRecordsSHA256 || attestation.OutputParent != metadata.OutputParent {
+		return fmt.Errorf("retained capacity attestation does not match strict activation provenance")
+	}
+	if attestation.TargetTreatmentConfigSHA256 != expected.TreatmentConfigSHA256 || attestation.TargetModeOffConfigSHA256 != expected.ModeOffConfigSHA256 || attestation.TargetNoRosterConfigSHA256 != expected.NoRosterConfigSHA256 {
+		return fmt.Errorf("retained capacity attestation target config identities do not match the probe")
+	}
+	return nil
+}
+
+func validateSV1DActivationArmProvenance(evidenceDir, renderedDir string, spec SV1DProbeArmSpec, options SV1DProbeArmAuditOptions) error {
+	expected := options.Activation.ExpectedProvenance
+	armDirectory, err := filepath.Abs(evidenceDir)
+	if err != nil {
+		return fmt.Errorf("resolve SV1D arm directory: %w", err)
+	}
+	outputRoot := filepath.Clean(filepath.Join(armDirectory, "..", ".."))
+	metadataPath := filepath.Clean(expected.ActivationMetadataPath)
+	if metadataPath != filepath.Join(outputRoot, "provenance", "activation-run-metadata.json") {
+		return fmt.Errorf("SV1D activation metadata path is not bound to the arm directory")
+	}
+	metadata, _, err := readSV1DActivationMetadata(metadataPath)
+	if err != nil {
+		return err
+	}
+	if err := validateSV1DActivationMetadata(metadataPath, expected); err != nil {
+		return err
+	}
+	if err := validateSV1DReviewRetention(outputRoot, expected); err != nil {
+		return err
+	}
+	if err := validateSV1DCapacityRetention(outputRoot, metadata, expected); err != nil {
+		return err
+	}
+	armMetadataPath := filepath.Join(armDirectory, "run-metadata.json")
+	raw, err := readSV1DRegularFile(armMetadataPath)
+	if err != nil {
+		return fmt.Errorf("read SV1D arm run metadata: %w", err)
+	}
+	var armMetadata sv1dActivationArmMetadata
+	if err := decodeStrictSV1DCapacityJSON(raw, &armMetadata,
+		"schema_version", "runner_contract", "probe_id", "arm", "experiment_id", "config_experiment_id",
+		"hypothesis_id", "seed", "simulated_horizon", "simulation_start_nano", "simulation_end_nano",
+		"config_sha256", "binary_sha256", "git_revision", "tree_revision", "binary_path",
+		"binary_go_version", "binary_goos", "binary_goarch", "binary_goamd64", "analyzer_sha256",
+		"renderer_sha256", "runner_sha256", "review_attestation_sha256", "review_report_sha256",
+		"capacity_attestation_sha256", "capacity_records_sha256", "trusted_review_key_sha256", "log_mode",
+		"evidence_format", "evidence_schema_epoch", "gomaxprocs", "gomemlimit", "output_dir", "holdout",
+		"command", "raw_log_policy"); err != nil {
+		return fmt.Errorf("decode SV1D arm run metadata: %w", err)
+	}
+	expectedCommand := []string{"multivenue", "-config", "run-config.json", "-duration", "5m", "-log-mode", "full", "-evidence-format", "evstream_v3"}
+	if armMetadata.SchemaVersion != 2 || armMetadata.RunnerContract != sv1dActivationRunnerContract || armMetadata.ProbeID != "v2-r2-sv1d-activation-659" ||
+		armMetadata.Arm != spec.Name || armMetadata.ExperimentID != spec.ExperimentID || armMetadata.ConfigExperimentID != spec.ExperimentID ||
+		armMetadata.HypothesisID != spec.HypothesisID || armMetadata.Seed != options.Contract.Seed || armMetadata.SimulatedHorizon != options.Contract.Horizon ||
+		armMetadata.SimulationStartNano != options.Contract.SimulationStartNano || armMetadata.SimulationEndNano != options.Contract.SimulationEndNano ||
+		armMetadata.ConfigSHA256 != spec.ConfigSHA256 || armMetadata.BinarySHA256 != expected.BinarySHA256 || armMetadata.GitRevision != expected.SourceRevision ||
+		armMetadata.TreeRevision != expected.TreeRevision || armMetadata.BinaryPath != filepath.Join(outputRoot, "tools", "multivenue-"+expected.BinarySHA256) ||
+		!strings.HasPrefix(armMetadata.BinaryGoVersion, "go1.27") || armMetadata.BinaryGOOS != "linux" || armMetadata.BinaryGOARCH != "amd64" || armMetadata.BinaryGOAMD64 != "v1" ||
+		armMetadata.AnalyzerSHA256 != expected.AnalyzerSHA256 || armMetadata.RendererSHA256 != expected.RendererSHA256 || armMetadata.RunnerSHA256 != expected.ActivationRunnerSHA256 ||
+		armMetadata.ReviewAttestationSHA256 != expected.ReviewAttestationSHA256 || armMetadata.ReviewReportSHA256 != expected.ReviewReportSHA256 ||
+		armMetadata.CapacityAttestationSHA256 != expected.CapacityAttestationSHA256 || armMetadata.CapacityRecordsSHA256 != expected.CapacityRecordsSHA256 ||
+		armMetadata.TrustedReviewKeySHA256 != expected.TrustedReviewKeySHA256 || armMetadata.LogMode != "full" || armMetadata.EvidenceFormat != "evstream_v3" ||
+		armMetadata.EvidenceSchemaEpoch != expected.EvidenceSchemaEpoch || armMetadata.GOMAXPROCS != expected.GOMAXPROCS || armMetadata.GOMEMLIMIT != expected.GOMEMLIMIT ||
+		armMetadata.OutputDir != armDirectory || armMetadata.Holdout || !sameSV1DStrings(armMetadata.Command, expectedCommand) ||
+		armMetadata.RawLogPolicy != "retain until the complete SV1D arm and tri-arm score have passed independent review" {
+		return fmt.Errorf("SV1D arm run metadata does not match the strict activation contract")
+	}
+	if !absoluteCleanPath(armMetadata.BinaryPath) || !absoluteCleanPath(armMetadata.OutputDir) {
+		return fmt.Errorf("SV1D arm run metadata has an invalid binary or output path")
+	}
+	if renderedDir == "" || !absoluteCleanPath(renderedDir) {
+		return fmt.Errorf("SV1D strict arm provenance has an invalid rendered directory")
+	}
+	for name, digest := range map[string]string{
+		"activation runner": expected.ActivationRunnerSHA256,
+		"simulator":         expected.BinarySHA256,
+		"analyzer":          expected.AnalyzerSHA256,
+		"renderer":          expected.RendererSHA256,
+	} {
+		path := ""
+		switch name {
+		case "activation runner":
+			path = filepath.Join(outputRoot, "provenance", "activation-runner.sh")
+		case "simulator":
+			path = filepath.Join(outputRoot, "tools", "multivenue-"+expected.BinarySHA256)
+		case "analyzer":
+			path = filepath.Join(outputRoot, "tools", "sv1dprobe-"+expected.AnalyzerSHA256)
+		case "renderer":
+			path = filepath.Join(outputRoot, "tools", "evsrender-"+expected.RendererSHA256)
+		}
+		fileRaw, err := readSV1DRegularFile(path)
+		if err != nil {
+			return fmt.Errorf("read retained %s: %w", name, err)
+		}
+		if sha256DigestHex(fileRaw) != digest {
+			return fmt.Errorf("retained %s does not match strict activation identity", name)
+		}
 	}
 	return nil
 }

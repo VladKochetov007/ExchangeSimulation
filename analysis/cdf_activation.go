@@ -65,24 +65,44 @@ type CDFActivationContract struct {
 // CDFExpectedProvenance is the external identity recorded before a strict run.
 // The analyzer does not derive these values from files in the run directory.
 type CDFExpectedProvenance struct {
-	ConfigSHA256   string
-	SourceRevision string
-	BinarySHA256   string
-	BinaryGOOS     string
-	BinaryGOARCH   string
-	BinaryGOAMD64  string
+	ConfigSHA256             string
+	TreatmentConfigSHA256    string
+	ModeOffConfigSHA256      string
+	NoRosterConfigSHA256     string
+	SourceRevision           string
+	TreeRevision             string
+	PlanSHA256               string
+	ParentRegistrationSHA256 string
+	AmendmentSHA256          string
+	BinarySHA256             string
+	AnalyzerSHA256           string
+	BinaryGOOS               string
+	BinaryGOARCH             string
+	BinaryGOAMD64            string
 	// Renderer identity is required by the SV1D successor adapter. Historical
 	// CDF audits leave these fields empty because their contract predates the
 	// explicit renderer attestation.
-	RendererSHA256         string
-	RendererSourceRevision string
-	RendererSourceModified bool
-	RendererGOOS           string
-	RendererGOARCH         string
-	RendererGOAMD64        string
-	RendererGoVersion      string
-	RendererTrimpath       bool
-	RendererCGOEnabled     string
+	RendererSHA256            string
+	RendererSourceRevision    string
+	RendererSourceModified    bool
+	RendererGOOS              string
+	RendererGOARCH            string
+	RendererGOAMD64           string
+	RendererGoVersion         string
+	RendererTrimpath          bool
+	RendererCGOEnabled        string
+	ReviewAttestationSHA256   string
+	ReviewReportSHA256        string
+	CapacityAttestationSHA256 string
+	CapacityRecordsSHA256     string
+	CapacityRunnerSHA256      string
+	ActivationRunnerSHA256    string
+	ActivationMetadataSHA256  string
+	ActivationMetadataPath    string
+	TrustedReviewKeySHA256    string
+	EvidenceSchemaEpoch       uint32
+	GOMAXPROCS                int
+	GOMEMLIMIT                string
 }
 
 // CDFSupplierContract is one immutable finite-capital roster entry.
