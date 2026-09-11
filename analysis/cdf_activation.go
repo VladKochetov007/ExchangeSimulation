@@ -532,8 +532,10 @@ type cdfPublicDepthState struct {
 }
 
 type cdfPendingDepthObservation struct {
-	event Event
-	state cdfPublicDepthState
+	event        Event
+	state        cdfPublicDepthState
+	causalOrders map[cdfOrderKey]int64
+	isSnapshot   bool
 }
 
 type cdfReceiptKey struct {
@@ -2291,19 +2293,49 @@ func (r *CDFActivationAudit) recordCDFPostFillResponse(event Event, state *cdfSu
 			state.audit.PostFillResponsiveCount++
 			continue
 		}
+		if !cdfDecisionUsesFreshObservation(response.preFillDecision, decision, response.fillAt) {
+			continue
+		}
 		marketStateUnchanged := cdfDecisionMarketStateEqual(response.preFillDecision, decision)
-		if response.preFillKnown && marketStateUnchanged && decision.Action == "wait" && decision.Reason == "inventory_at_target" &&
+		privateInventoryStateUnchanged := response.preFillDecision.ReferencePrice == decision.ReferencePrice &&
+			response.preFillDecision.TargetPosition == decision.TargetPosition
+		if response.preFillKnown && marketStateUnchanged && privateInventoryStateUnchanged && decision.Action == "wait" && decision.Reason == "inventory_at_target" &&
 			decision.TargetPosition == decision.Position && decision.TargetPosition == response.preFillDecision.TargetPosition {
 			response.responded = true
-		} else if response.preFillKnown && marketStateUnchanged &&
+		} else if response.preFillKnown && marketStateUnchanged && privateInventoryStateUnchanged &&
 			(decision.Action == "submit" || decision.Action == "cancel" || decision.Action == "withdraw") {
 			quoteChanged := decision.Side != response.preFillDecision.Side || decision.QuotePrice != response.preFillDecision.QuotePrice ||
-				decision.QuoteQty != response.preFillDecision.QuoteQty || decision.QuoteOrderID != response.preFillDecision.QuoteOrderID
-			response.responded = quoteChanged
+				decision.QuoteQty != response.preFillDecision.QuoteQty
+			response.responded = quoteChanged || decision.Action == "withdraw" && cdfPostFillWithdrawalJustified(decision)
 		}
 		if response.responded {
 			state.audit.PostFillResponsiveCount++
 		}
+	}
+}
+
+func cdfDecisionUsesFreshObservation(previous, current cdfDecisionEvidence, fillAt int64) bool {
+	if previous.ObservationSequence == 0 || current.ObservationSequence == 0 {
+		return false
+	}
+	if current.ObservationSequence < previous.ObservationSequence {
+		return false
+	}
+	if current.ObservationSequence == previous.ObservationSequence && current.ObservationDeliveredAt <= previous.ObservationDeliveredAt {
+		return false
+	}
+	return current.ObservationDeliveredAt > fillAt ||
+		(current.ObservationDeliveredAt == fillAt && current.ObservationSequence > previous.ObservationSequence)
+}
+
+func cdfPostFillWithdrawalJustified(decision cdfDecisionEvidence) bool {
+	switch decision.Reason {
+	case "loss_limit", "equity_unavailable", "stale_or_missing_observation", "one_sided_or_locked_book",
+		"limit_or_touch_unavailable", "below_minimum_executable_qty", "position_gap_overflow",
+		"inventory_at_target", "quote_cash_limit":
+		return true
+	default:
+		return false
 	}
 }
 
@@ -2849,7 +2881,7 @@ func (r *CDFActivationAudit) processCDFCancelled(
 		delete(orders, orderKey)
 		r.forgetCDFLiveOrder(cdfParticipantKey{event.VenueID, event.ClientID}, orderKey)
 		if r.strictMechanics && publicDepth[event.VenueID] != nil {
-			r.recordCDFDepthObservation(event, states, orders, depth, publicDepth[event.VenueID])
+			r.recordCDFDepthObservation(event, states, orders, depth, publicDepth[event.VenueID], false)
 		}
 		return
 	}
@@ -2899,7 +2931,7 @@ func (r *CDFActivationAudit) processCDFCancelled(
 		}
 	}
 	if r.strictMechanics && publicDepth[event.VenueID] != nil {
-		r.recordCDFDepthObservation(event, states, orders, depth, publicDepth[event.VenueID])
+		r.recordCDFDepthObservation(event, states, orders, depth, publicDepth[event.VenueID], false)
 	}
 }
 
@@ -3094,10 +3126,13 @@ func (r *CDFActivationAudit) processCDFDepthSnapshot(event Event, states map[cdf
 	}
 	publicDepth[event.VenueID] = state
 	if r.strictMechanics && len(pendingDepth[event.VenueID]) > 0 {
-		r.deferCDFDepthObservation(event, state, pendingDepth)
-		return
+		// A new snapshot is a complete public state boundary. If the previous
+		// aggregate reduction still has no matching lifecycle transition, fail
+		// that transition against the state visible before this snapshot rather
+		// than letting a later replacement order rewrite its history.
+		r.flushCDFPendingDepth(event.VenueID, states, orders, depth, pendingDepth, true)
 	}
-	r.recordCDFDepthObservation(event, states, orders, depth, state)
+	r.recordCDFDepthObservation(event, states, orders, depth, state, true)
 }
 
 func (r *CDFActivationAudit) processCDFDepthDelta(event Event, states map[cdfParticipantKey]*cdfSupplierState, orders map[cdfOrderKey]*cdfOrderState, depth map[string][]cdfDepthObservation, publicDepth map[string]*cdfPublicDepthState, pendingDepth map[string][]cdfPendingDepthObservation) {
@@ -3119,21 +3154,25 @@ func (r *CDFActivationAudit) processCDFDepthDelta(event Event, states map[cdfPar
 	if delta.Side == "SELL" {
 		levels = state.asks
 	}
+	previousVisible := levels[delta.Price]
 	if delta.VisibleQty == 0 {
 		delete(levels, delta.Price)
 	} else {
 		levels[delta.Price] = delta.VisibleQty
 	}
-	// The exchange deliberately emits a removal BookDelta before the matching
-	// OrderCancelled frame. In that interval the public book has already
-	// removed the order while the supplier order is still live in this replay
-	// state. Retain the exact public transition, but attribute it only after the
-	// lifecycle frame updates the supplier order map.
-	if r.strictMechanics && delta.VisibleQty == 0 {
-		r.deferCDFDepthObservation(event, state, pendingDepth)
-		return
+	// The exchange may publish an aggregate level reduction before the matching
+	// cancellation frame. At that instant the supplier order map still contains
+	// the order that caused the public reduction. Defer only a transition whose
+	// currently reconstructed supplier depth would exceed the new public level;
+	// unrelated reductions can be reconciled immediately.
+	if r.strictMechanics && delta.VisibleQty < previousVisible {
+		causalOrders := cdfOrdersAtDepthLevel(orders, states, event.VenueID, delta.Side, delta.Price)
+		if cdfSupplierDepthAtLevel(causalOrders) > delta.VisibleQty {
+			r.deferCDFDepthObservation(event, state, pendingDepth, causalOrders, false)
+			return
+		}
 	}
-	r.recordCDFDepthObservation(event, states, orders, depth, state)
+	r.recordCDFDepthObservation(event, states, orders, depth, state, false)
 }
 
 func cloneCDFPublicDepthState(state *cdfPublicDepthState) cdfPublicDepthState {
@@ -3151,14 +3190,49 @@ func cloneCDFPublicDepthState(state *cdfPublicDepthState) cdfPublicDepthState {
 	return clone
 }
 
-func (r *CDFActivationAudit) deferCDFDepthObservation(event Event, state *cdfPublicDepthState, pending map[string][]cdfPendingDepthObservation) {
+func (r *CDFActivationAudit) deferCDFDepthObservation(event Event, state *cdfPublicDepthState, pending map[string][]cdfPendingDepthObservation, causalOrders map[cdfOrderKey]int64, isSnapshot bool) {
 	if state == nil {
 		return
 	}
 	pending[event.VenueID] = append(pending[event.VenueID], cdfPendingDepthObservation{
-		event: event,
-		state: cloneCDFPublicDepthState(state),
+		event: event, state: cloneCDFPublicDepthState(state), causalOrders: causalOrders, isSnapshot: isSnapshot,
 	})
+}
+
+func cdfOrdersAtDepthLevel(orders map[cdfOrderKey]*cdfOrderState, states map[cdfParticipantKey]*cdfSupplierState, venueID, side string, price int64) map[cdfOrderKey]int64 {
+	causalOrders := make(map[cdfOrderKey]int64)
+	for key, order := range orders {
+		if key.venueID != venueID || order == nil || order.side != side || order.price != price || order.remainingQty <= 0 {
+			continue
+		}
+		if states[cdfParticipantKey{venueID: key.venueID, clientID: key.clientID}] == nil {
+			continue
+		}
+		causalOrders[key] = order.remainingQty
+	}
+	return causalOrders
+}
+
+func cdfSupplierDepthAtLevel(orders map[cdfOrderKey]int64) int64 {
+	var total int64
+	for _, quantity := range orders {
+		updated, ok := checkedCDFAdd(total, quantity)
+		if !ok {
+			return math.MaxInt64
+		}
+		total = updated
+	}
+	return total
+}
+
+func cdfPendingDepthResolved(observation cdfPendingDepthObservation, orders map[cdfOrderKey]*cdfOrderState) bool {
+	for key, previousQuantity := range observation.causalOrders {
+		current, exists := orders[key]
+		if !exists || current == nil || current.remainingQty != previousQuantity {
+			return true
+		}
+	}
+	return false
 }
 
 func (r *CDFActivationAudit) flushCDFPendingDepth(
@@ -3167,16 +3241,27 @@ func (r *CDFActivationAudit) flushCDFPendingDepth(
 	orders map[cdfOrderKey]*cdfOrderState,
 	depth map[string][]cdfDepthObservation,
 	pending map[string][]cdfPendingDepthObservation,
+	force ...bool,
 ) {
 	observations := pending[venueID]
 	if len(observations) == 0 {
 		return
 	}
+	forceFlush := len(force) > 0 && force[0]
+	remaining := observations[:0]
 	for _, observation := range observations {
+		if !forceFlush && !cdfPendingDepthResolved(observation, orders) {
+			remaining = append(remaining, observation)
+			continue
+		}
 		state := observation.state
-		r.recordCDFDepthObservation(observation.event, states, orders, depth, &state)
+		r.recordCDFDepthObservation(observation.event, states, orders, depth, &state, observation.isSnapshot)
 	}
-	delete(pending, venueID)
+	if len(remaining) == 0 {
+		delete(pending, venueID)
+	} else {
+		pending[venueID] = remaining
+	}
 }
 
 func (r *CDFActivationAudit) flushAllCDFPendingDepth(
@@ -3191,11 +3276,11 @@ func (r *CDFActivationAudit) flushAllCDFPendingDepth(
 	}
 	sort.Strings(venues)
 	for _, venueID := range venues {
-		r.flushCDFPendingDepth(venueID, states, orders, depth, pending)
+		r.flushCDFPendingDepth(venueID, states, orders, depth, pending, true)
 	}
 }
 
-func (r *CDFActivationAudit) recordCDFDepthObservation(event Event, states map[cdfParticipantKey]*cdfSupplierState, orders map[cdfOrderKey]*cdfOrderState, depth map[string][]cdfDepthObservation, publicDepth *cdfPublicDepthState) {
+func (r *CDFActivationAudit) recordCDFDepthObservation(event Event, states map[cdfParticipantKey]*cdfSupplierState, orders map[cdfOrderKey]*cdfOrderState, depth map[string][]cdfDepthObservation, publicDepth *cdfPublicDepthState, allowRestoration bool) {
 	bidDepth, bidOK := totalCDFDepthMap(publicDepth.bids)
 	askDepth, askOK := totalCDFDepthMap(publicDepth.asks)
 	if !bidOK || !askOK {
@@ -3227,7 +3312,7 @@ func (r *CDFActivationAudit) recordCDFDepthObservation(event Event, states map[c
 			r.addCheck(CDFActivationCheck{VenueID: event.VenueID, Ordinal: event.Ordinal, Failure: "supplier resting depth overflows"})
 			return
 		}
-		if order.oneSidedCandidate && !order.restored && event.SimTS > order.acceptedAt &&
+		if allowRestoration && order.oneSidedCandidate && !order.restored && event.SimTS > order.acceptedAt &&
 			cdfDepthRestoresOrder(publicDepth, order.side, order.price, order.minimumQualifying) {
 			order.restored = true
 			r.OneSidedRestorationCount++

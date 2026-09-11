@@ -393,6 +393,45 @@ func TestAuditCDFLiquidityActivationStrictProductionRenderer(t *testing.T) {
 	}
 }
 
+func TestCDFStrictDepthDeltaDefersSharedPricePartialReduction(t *testing.T) {
+	contract := RegisteredSV1DActivationContract().Suppliers[0]
+	const venueID = "north"
+	const clientID = uint64(7)
+	const price = int64(300_300_000)
+	states := map[cdfParticipantKey]*cdfSupplierState{
+		{venueID: venueID, clientID: clientID}: {contract: contract},
+	}
+	orders := map[cdfOrderKey]*cdfOrderState{
+		{venueID: venueID, clientID: clientID, orderID: 1}: {side: "BUY", price: price, remainingQty: 60, originalQty: 60},
+		{venueID: venueID, clientID: clientID, orderID: 2}: {side: "BUY", price: price, remainingQty: 40, originalQty: 40},
+	}
+	publicDepth := map[string]*cdfPublicDepthState{
+		venueID: {initialized: true, bids: map[int64]int64{price: 100}, asks: map[int64]int64{}},
+	}
+	depth := make(map[string][]cdfDepthObservation)
+	pending := make(map[string][]cdfPendingDepthObservation)
+	audit := &CDFActivationAudit{strictMechanics: true}
+	deltaRaw, err := json.Marshal(cdfBookDeltaEvidence{Side: "BUY", Price: price, VisibleQty: 60})
+	if err != nil {
+		t.Fatal(err)
+	}
+	audit.processCDFDepthDelta(Event{
+		SimTS: 2, GlobalSequence: 2, VenueID: venueID, payload: deltaRaw,
+	}, states, orders, depth, publicDepth, pending)
+	if len(pending[venueID]) != 1 || len(depth[venueID]) != 0 {
+		t.Fatalf("partial shared-price reduction was not deferred: pending=%+v depth=%+v checks=%+v", pending, depth, audit.Checks)
+	}
+	delete(orders, cdfOrderKey{venueID: venueID, clientID: clientID, orderID: 2})
+	audit.flushCDFPendingDepth(venueID, states, orders, depth, pending)
+	if len(pending[venueID]) != 0 || len(depth[venueID]) != 1 {
+		t.Fatalf("causal order closure did not reconcile pending reduction: pending=%+v depth=%+v checks=%+v", pending, depth, audit.Checks)
+	}
+	observation := depth[venueID][0]
+	if observation.bidDepth != 60 || observation.supplierBid != 60 || len(audit.Checks) != 0 {
+		t.Fatalf("reconciled shared-price depth = %+v checks=%+v, want public and supplier depth 60", observation, audit.Checks)
+	}
+}
+
 func TestValidateCDFCompletionSidecarsRejectsStructurallyIncompleteLatency(t *testing.T) {
 	run := writeRegisteredCDFActivationFixture(t, cdfActivationFixtureOptions{strictMechanics: true})
 	contract := RegisteredSV1DActivationContract()
@@ -841,7 +880,7 @@ func writeRegisteredCDFActivationFixture(t *testing.T, options cdfActivationFixt
 	firstAt := contract.SimulationStartNano + 1_000_000_000
 	secondAt := contract.SimulationStartNano + 10_000_000_000
 	if options.strictMechanics {
-		secondAt = contract.SimulationStartNano + 14_000_000_000
+		secondAt = contract.SimulationStartNano + 2_000_000_004
 	}
 	firstSnapshots := make(map[string]etypes.BookSnapshot, len(contract.VenueIDs))
 	secondSnapshots := make(map[string]etypes.BookSnapshot, len(contract.VenueIDs))
@@ -854,11 +893,15 @@ func writeRegisteredCDFActivationFixture(t *testing.T, options cdfActivationFixt
 	})
 	for _, participant := range participants {
 		decisionAt := contract.SimulationStartNano + 2_000_000_000 + participant.contract.DecisionPhaseOffset
+		if options.strictMechanics {
+			decisionAt = contract.SimulationStartNano + 2_000_000_000
+		}
 		decisionSide := etypes.Buy
 		decisionPrice := participant.contract.ReferencePrice - 2*participant.contract.TickSize
 		decisionQty := participant.contract.MinimumQualifyingQty
 		if options.strictMechanics {
 			strictDecision := cdfStrictFixtureDecision(participant, participant.first, firstSnapshots[participant.venueID], firstAt, decisionAt, 0, 0, 0, false, "submit")
+			strictDecision.QuoteQty = participant.contract.MinimumQualifyingQty
 			decisionSide = cdfFixtureSide(strictDecision.Side)
 			decisionPrice = strictDecision.QuotePrice
 			decisionQty = strictDecision.QuoteQty
@@ -876,14 +919,14 @@ func writeRegisteredCDFActivationFixture(t *testing.T, options cdfActivationFixt
 	for _, participant := range participants {
 		decisionAt := contract.SimulationStartNano + 12_000_000_000 + participant.contract.DecisionPhaseOffset
 		if options.strictMechanics {
-			decisionAt = contract.SimulationStartNano + 18_000_000_000 + participant.contract.DecisionPhaseOffset
+			decisionAt = contract.SimulationStartNano + 2_000_000_005
 		}
 		decisionSide := etypes.Sell
 		decisionPrice := cdfFixturePostPrice(participant)
 		decisionQty := participant.contract.MinimumQualifyingQty
 		if options.strictMechanics {
 			quantity := cdfFixtureActivationQuantity(participant.venueID, participant.contract, options)
-			strictDecision := cdfStrictFixtureDecision(participant, participant.second, secondSnapshots[participant.venueID], secondAt, decisionAt, -quantity, participant.contract.ReferencePrice, contract.SimulationStartNano+2_000_000_000+participant.contract.DecisionPhaseOffset, true, "submit")
+			strictDecision := cdfStrictFixtureDecision(participant, participant.second, secondSnapshots[participant.venueID], secondAt, decisionAt, -quantity, 0, 0, false, "submit")
 			decisionSide = cdfFixtureSide(strictDecision.Side)
 			decisionPrice = strictDecision.QuotePrice
 			decisionQty = strictDecision.QuoteQty
@@ -1017,7 +1060,7 @@ func recordCDFFixtureReceiptRound(
 		schedule := simulation.MarketDataSchedule{
 			ClientID: participant.clientID, SourceVenue: participant.venueID, Link: participant.link,
 			Symbol: cdfActivationSymbol, Type: etypes.MDSnapshot, Sequence: sequence,
-			Fingerprint: fingerprint, PublishedAt: publishedAt, ScheduledAt: publishedAt + 10_000_000,
+			Fingerprint: fingerprint, PublishedAt: publishedAt, ScheduledAt: publishedAt + 1,
 			LinkOrdinal: sequence,
 		}
 		if recorder.RecordSchedule(schedule) == 0 {
@@ -1027,7 +1070,7 @@ func recordCDFFixtureReceiptRound(
 	}
 	for _, participant := range participants {
 		frontier := recorder.RecordReceipt(simulation.MarketDataReceipt{
-			MarketDataSchedule: schedules[participant], DeliveredAt: publishedAt + 10_000_000,
+			MarketDataSchedule: schedules[participant], DeliveredAt: publishedAt + 1,
 		})
 		if frontier.LinkID == 0 {
 			t.Fatal("record CDF fixture receipt")
@@ -1073,9 +1116,12 @@ func appendCDFParticipantEvents(
 	cancelDecisionAt := start + 20_000_000_000 + supplier.DecisionPhaseOffset
 	cancelledAt := start + 22_000_000_000 + supplier.DecisionPhaseOffset
 	if options.strictMechanics {
-		fillAt = start + 12_000_000_000 + supplier.DecisionPhaseOffset
-		postBalanceAt = start + 16_000_000_000 + supplier.DecisionPhaseOffset
-		postDecisionAt = start + 18_000_000_000 + supplier.DecisionPhaseOffset
+		strictBase := start + 2_000_000_000
+		firstDecisionAt = strictBase
+		acceptedOneAt = strictBase + 1
+		fillAt = strictBase + 2
+		postBalanceAt = strictBase + 3
+		postDecisionAt = strictBase + 5
 		acceptedTwoAt = start + 20_000_000_000 + supplier.DecisionPhaseOffset
 		cancelDecisionAt = start + 26_000_000_000 + supplier.DecisionPhaseOffset
 		cancelledAt = start + 28_000_000_000 + supplier.DecisionPhaseOffset
@@ -1085,6 +1131,7 @@ func appendCDFParticipantEvents(
 	firstDecision := cdfFixtureDecision(participant, participant.first, firstSnapshot, firstAt, firstDecisionAt, "submit")
 	if options.strictMechanics {
 		firstDecision = cdfStrictFixtureDecision(participant, participant.first, firstSnapshot, firstAt, firstDecisionAt, 0, 0, 0, false, "submit")
+		firstDecision.QuoteQty = supplier.MinimumQualifyingQty
 		quantity = firstDecision.QuoteQty
 	}
 	if options.badFingerprint && participantOrdinal == 0 {
@@ -1126,15 +1173,6 @@ func appendCDFParticipantEvents(
 	if options.badExchangeFill && participantOrdinal == 0 {
 		exchangeFillQty++
 	}
-	if options.strictMechanics && participantOrdinal == len(RegisteredSV1DActivationContract().Suppliers)-1 {
-		// Matching removes the filled level before emitting OrderFill. The
-		// strict scanner defers this removal until the fill closes the order.
-		// Earlier fills leave sibling orders at the same aggregate level.
-		(*bookEvents)[participant.venueID] = append((*bookEvents)[participant.venueID], cdfFixtureEvent{
-			at: fillAt, event: "BookDelta", symbol: cdfActivationSymbol,
-			payload: cdfBookDeltaEvidence{Side: firstDecision.Side, Price: firstDecision.QuotePrice, VisibleQty: 0},
-		})
-	}
 	(*bookEvents)[participant.venueID] = append((*bookEvents)[participant.venueID], cdfFixtureEvent{
 		at: fillAt, clientID: participant.clientID, event: "OrderFill", symbol: cdfActivationSymbol,
 		payload: cdfOrderFillEvidence{
@@ -1142,6 +1180,15 @@ func appendCDFParticipantEvents(
 			FeeAmount: fee, FeeAsset: "USD", FilledQty: exchangeFillQty, RemainingQty: 0, IsFull: true,
 		},
 	})
+	if options.strictMechanics && participantOrdinal == len(RegisteredSV1DActivationContract().Suppliers)-1 {
+		// The production exchange reports the fill before publishing the
+		// resulting aggregate public-level reduction. The strict fixture follows
+		// that order so a later replacement cannot rewrite the fill observation.
+		(*bookEvents)[participant.venueID] = append((*bookEvents)[participant.venueID], cdfFixtureEvent{
+			at: fillAt, event: "BookDelta", symbol: cdfActivationSymbol,
+			payload: cdfBookDeltaEvidence{Side: firstDecision.Side, Price: firstDecision.QuotePrice, VisibleQty: 0},
+		})
+	}
 	borrowed := options.borrowedSupplier && participantOrdinal == 0
 	(*generalEvents)[participant.venueID] = append((*generalEvents)[participant.venueID], cdfFixtureEvent{
 		at: postBalanceAt, clientID: participant.clientID, event: "balance_snapshot",
@@ -1154,7 +1201,9 @@ func appendCDFParticipantEvents(
 	secondSnapshot := cdfFixtureSnapshot(participant.venueID, secondSnapshotSequence, options)
 	postDecision := cdfFixtureDecision(participant, participant.second, secondSnapshot, secondAt, postDecisionAt, "submit")
 	if options.strictMechanics {
-		postDecision = cdfStrictFixtureDecision(participant, participant.second, secondSnapshot, secondAt, postDecisionAt, positionAfter, firstDecision.ReferencePrice, firstDecision.DecisionTime, true, "submit")
+		postDecision = cdfStrictFixtureDecision(participant, participant.second, secondSnapshot, secondAt, postDecisionAt, positionAfter, 0, 0, false, "submit")
+		postDecision.PeakEquityQuote = maxCDFTestInt64(firstDecision.PeakEquityQuote, postDecision.EquityQuote)
+		postDecision.DrawdownQuote = postDecision.PeakEquityQuote - postDecision.EquityQuote
 	}
 	if !options.strictMechanics {
 		postDecision.Position = quantity
@@ -1276,24 +1325,7 @@ func cdfFixtureDecision(
 }
 
 func cdfFixtureActivationQuantity(venueID string, supplier CDFSupplierContract, options cdfActivationFixtureOptions) int64 {
-	if !options.strictMechanics {
-		return supplier.MinimumQualifyingQty
-	}
-	snapshot := cdfFixtureSnapshot(venueID, 1, options)
-	bestBid, bestBidQty := cdfBestBid(snapshot.Bids)
-	bestAsk, bestAskQty := cdfBestAsk(snapshot.Asks)
-	anchor, ok := cdfLocalAnchor(cdfDecisionEvidence{
-		BestBid: bestBid, BestBidQty: bestBidQty, BestAsk: bestAsk, BestAskQty: bestAskQty,
-		LocalBookMode: cdfLocalBookMode(bestBid, bestBidQty, bestAsk, bestAskQty, supplier.TickSize),
-	}, supplier)
-	if !ok {
-		return supplier.MinimumQualifyingQty
-	}
-	quantity := absCDFTestInt64(cdfTargetPosition(supplier.ReferencePrice, anchor, supplier))
-	if quantity > supplier.MaxQuoteQty {
-		quantity = supplier.MaxQuoteQty
-	}
-	return quantity
+	return supplier.MinimumQualifyingQty
 }
 
 func cdfFixtureActivationTrade(venueID string, supplier CDFSupplierContract, options cdfActivationFixtureOptions) (string, int64) {
@@ -1974,13 +2006,13 @@ func TestCDFPostFillResponseAcceptsLaterObservation(t *testing.T) {
 	state := &cdfSupplierState{
 		fillResponses: []cdfFillResponseWindow{{
 			fillAt: 10, fillGlobalSeq: 3, positionAfter: 5,
-			preFillDecision: cdfDecisionEvidence{ObservationSequence: 1, ReferencePrice: 100, MarkPrice: 100, TargetPosition: 2, Position: 0, QuotePrice: 99, QuoteQty: 2},
+			preFillDecision: cdfDecisionEvidence{ObservationSequence: 1, ObservationDeliveredAt: 5, ReferencePrice: 100, MarkPrice: 100, TargetPosition: 2, Position: 0, QuotePrice: 99, QuoteQty: 2},
 			preFillKnown:    true,
 		}},
 	}
 	audit := &CDFActivationAudit{strictMechanics: true}
 	audit.recordCDFPostFillResponse(Event{SimTS: 20, GlobalSequence: 5}, state, cdfDecisionEvidence{
-		ObservationSequence: 2, ReferencePrice: 100, MarkPrice: 100, Position: 5, TargetPosition: 0,
+		ObservationSequence: 2, ObservationDeliveredAt: 20, ReferencePrice: 100, MarkPrice: 100, Position: 5, TargetPosition: 2,
 		Action: "submit", Side: "SELL", QuotePrice: 102, QuoteQty: 5,
 	})
 	if state.audit.PostFillResponsiveCount != 1 || !state.fillResponses[0].responded {
@@ -2001,6 +2033,7 @@ func TestCDFPostFillResponseRejectsMarketOnlyTargetMovement(t *testing.T) {
 	}
 	audit := &CDFActivationAudit{strictMechanics: true}
 	audit.recordCDFPostFillResponse(Event{SimTS: 20, GlobalSequence: 5}, state, cdfDecisionEvidence{
+		ObservationSequence: 2, ObservationDeliveredAt: 20,
 		ReferencePrice: 100, MarkPrice: 100, Position: 5, TargetPosition: 5,
 		LocalBookMode: "two_sided", RiskMarkSource: "two_sided_midpoint",
 		Action: "rest", QuotePrice: 100, QuoteQty: 2,
@@ -2025,6 +2058,7 @@ func TestCDFPostFillResponseRejectsTargetOnlyQuoteReplay(t *testing.T) {
 	}
 	audit := &CDFActivationAudit{strictMechanics: true}
 	audit.recordCDFPostFillResponse(Event{SimTS: 20, GlobalSequence: 5}, state, cdfDecisionEvidence{
+		ObservationSequence: 2, ObservationDeliveredAt: 20,
 		BestBid: 99, BestBidQty: 10, BestAsk: 101, BestAskQty: 10,
 		MarkPrice: 100, RiskMarkPrice: 100, RiskMarkCurrent: true,
 		LocalBookMode: "two_sided", Position: 5, TargetPosition: 5,
@@ -2032,6 +2066,60 @@ func TestCDFPostFillResponseRejectsTargetOnlyQuoteReplay(t *testing.T) {
 	})
 	if state.audit.PostFillResponsiveCount != 0 || state.fillResponses[0].responded {
 		t.Fatalf("target-only quote replay was credited as an inventory response: %+v", state)
+	}
+}
+
+func TestCDFPostFillResponseRejectsOrderIdentityOnlyChurn(t *testing.T) {
+	state := &cdfSupplierState{
+		fillResponses: []cdfFillResponseWindow{{
+			fillAt: 10, fillGlobalSeq: 3, positionAfter: 5,
+			preFillDecision: cdfDecisionEvidence{
+				ObservationSequence: 1, ObservationDeliveredAt: 5,
+				BestBid: 99, BestBidQty: 10, BestAsk: 101, BestAskQty: 10,
+				MarkPrice: 100, RiskMarkPrice: 100, RiskMarkCurrent: true,
+				LocalBookMode: "two_sided", ReferencePrice: 100, TargetPosition: 2, Position: 0,
+				Action: "submit", Side: "BUY", QuotePrice: 99, QuoteQty: 2, QuoteOrderID: 11,
+			},
+			preFillKnown: true,
+		}},
+	}
+	audit := &CDFActivationAudit{strictMechanics: true}
+	audit.recordCDFPostFillResponse(Event{SimTS: 20, GlobalSequence: 5}, state, cdfDecisionEvidence{
+		ObservationSequence: 2, ObservationDeliveredAt: 20,
+		BestBid: 99, BestBidQty: 10, BestAsk: 101, BestAskQty: 10,
+		MarkPrice: 100, RiskMarkPrice: 100, RiskMarkCurrent: true,
+		LocalBookMode: "two_sided", ReferencePrice: 100, TargetPosition: 2, Position: 5,
+		Action: "submit", Side: "BUY", QuotePrice: 99, QuoteQty: 2, QuoteOrderID: 99, QuoteRequestID: 100,
+	})
+	if state.audit.PostFillResponsiveCount != 0 || state.fillResponses[0].responded {
+		t.Fatalf("order identity churn was credited as an inventory response: %+v", state)
+	}
+}
+
+func TestCDFPostFillResponseRejectsReferenceDrivenQuoteChange(t *testing.T) {
+	state := &cdfSupplierState{
+		fillResponses: []cdfFillResponseWindow{{
+			fillAt: 10, fillGlobalSeq: 3, positionAfter: 5,
+			preFillDecision: cdfDecisionEvidence{
+				ObservationSequence: 1, ObservationDeliveredAt: 5,
+				BestBid: 99, BestBidQty: 10, BestAsk: 101, BestAskQty: 10,
+				MarkPrice: 100, RiskMarkPrice: 100, RiskMarkCurrent: true,
+				LocalBookMode: "two_sided", ReferencePrice: 100, TargetPosition: 2, Position: 0,
+				Action: "submit", Side: "BUY", QuotePrice: 99, QuoteQty: 2,
+			},
+			preFillKnown: true,
+		}},
+	}
+	audit := &CDFActivationAudit{strictMechanics: true}
+	audit.recordCDFPostFillResponse(Event{SimTS: 20, GlobalSequence: 5}, state, cdfDecisionEvidence{
+		ObservationSequence: 2, ObservationDeliveredAt: 20,
+		BestBid: 99, BestBidQty: 10, BestAsk: 101, BestAskQty: 10,
+		MarkPrice: 100, RiskMarkPrice: 100, RiskMarkCurrent: true,
+		LocalBookMode: "two_sided", ReferencePrice: 101, TargetPosition: 3, Position: 5,
+		Action: "submit", Side: "SELL", QuotePrice: 102, QuoteQty: 5,
+	})
+	if state.audit.PostFillResponsiveCount != 0 || state.fillResponses[0].responded {
+		t.Fatalf("reference-driven quote change was credited as an inventory response: %+v", state)
 	}
 }
 
