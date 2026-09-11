@@ -65,14 +65,23 @@ for sentinel in greeks.json latency.json; do
 done
 log_mode=$(jq -er '.log_mode' "$cell/run-config.json")
 evidence_format=$(jq -er '.evidence_format // "jsonl"' "$cell/run-config.json")
+record_market_data_receipts=$(jq -r '.record_market_data_receipts // false' "$cell/run-config.json")
 case "$evidence_format" in
 	jsonl) required_inputs=(manifest.json evidence-artifact-hash.json evidence-manifest.json run-config.json run-metadata.json run-status.json) ;;
 	evstream_v3) required_inputs=(manifest.json binary-evidence-attestation.json evidence-manifest.json events.evs run-config.json run-metadata.json run-status.json) ;;
 	*) fail "unsupported evidence format: $evidence_format" ;;
 esac
+if [[ "$record_market_data_receipts" == true ]]; then
+	required_inputs+=(market-data-evidence-v2.json market-data-schedules-v2.bin market-data-receipts-v2.bin market-data-decisions-v2.bin)
+fi
 for input in "${required_inputs[@]}"; do
 	require_file "$cell/$input"
-	require_json_object "$cell/$input"
+	case "$input" in
+		*.bin|events.evs)
+			[[ -f "$cell/$input" && ! -L "$cell/$input" ]] || fail "binary evidence input is not a regular file: $cell/$input"
+			;;
+		*) require_json_object "$cell/$input" ;;
+	esac
 done
 
 raw_stage_marker="$cell/.raw-evidence-staged.$$"
@@ -135,6 +144,23 @@ jq -e --arg cell "$cell_name" \
 	.simulation_start_nano == 1735689600000000000 and .simulation_end_nano == 1735776000000000000 and
 	(.evidence_manifest_sha256 | test("^[0-9a-f]{64}$"))' \
 	"$cell/run-status.json" >/dev/null || fail "invalid run status contract"
+if [[ "$record_market_data_receipts" == true ]]; then
+	jq -e '(.market_data_evidence_sha256 | test("^[0-9a-f]{64}$")) and
+		(.market_data_schedules_sha256 | test("^[0-9a-f]{64}$")) and
+		(.market_data_receipts_sha256 | test("^[0-9a-f]{64}$")) and
+		(.market_data_decisions_sha256 | test("^[0-9a-f]{64}$"))' \
+		"$cell/run-status.json" >/dev/null || fail "run status omits market-data evidence hashes"
+	for receipt_file in market-data-evidence-v2.json market-data-schedules-v2.bin market-data-receipts-v2.bin market-data-decisions-v2.bin; do
+		case "$receipt_file" in
+			market-data-evidence-v2.json) status_field=market_data_evidence_sha256 ;;
+			market-data-schedules-v2.bin) status_field=market_data_schedules_sha256 ;;
+			market-data-receipts-v2.bin) status_field=market_data_receipts_sha256 ;;
+			market-data-decisions-v2.bin) status_field=market_data_decisions_sha256 ;;
+		esac
+		[[ "$(sha256sum "$cell/$receipt_file" | awk '{print $1}')" == "$(jq -er ".${status_field}" "$cell/run-status.json")" ]] ||
+			fail "market-data evidence status hash mismatch: $receipt_file"
+	done
+fi
 
 head_revision=$(git -C "$root_dir" rev-parse HEAD)
 [[ -z "$(git -C "$root_dir" status --porcelain --untracked-files=all)" ]] || fail "source worktree is dirty"

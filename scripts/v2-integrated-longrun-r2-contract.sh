@@ -226,6 +226,9 @@ v2_r2_write_evidence_manifest() {
 			;;
 		*) return 1 ;;
 	 esac
+	if [[ "$(jq -r '.record_market_data_receipts // false' "$cell/run-config.json")" == true ]]; then
+		fixed_files+=(market-data-evidence-v2.json market-data-schedules-v2.bin market-data-receipts-v2.bin market-data-decisions-v2.bin)
+	fi
 	local fixed_records='[]'
 	local relative path bytes digest
 	for relative in "${fixed_files[@]}"; do
@@ -289,14 +292,19 @@ v2_r2_verify_evidence_manifest() {
 		evstream_v3) expected_contract="v2-integrated-longrun-evidence-manifest-v2"; expected_schema=2 ;;
 		*) return 1 ;;
 	esac
-	local expected_fixed
+	local -a expected_fixed_files
 	case "$evidence_format:$log_mode" in
-		jsonl:full) expected_fixed=$(printf '%s\n' run-config.json run-metadata.json manifest.json greeks.json latency.json checkpoints.jsonl evidence-artifact-hash.json | sort) ;;
-		jsonl:none) expected_fixed=$(printf '%s\n' run-config.json run-metadata.json manifest.json greeks.json latency.json checkpoints.jsonl | sort) ;;
-		evstream_v3:full) expected_fixed=$(printf '%s\n' run-config.json run-metadata.json manifest.json greeks.json latency.json checkpoints.jsonl events.evs binary-evidence-attestation.json | sort) ;;
-		evstream_v3:none) expected_fixed=$(printf '%s\n' run-config.json run-metadata.json manifest.json greeks.json latency.json checkpoints.jsonl events.evs binary-evidence-attestation.json | sort) ;;
+		jsonl:full) expected_fixed_files=(run-config.json run-metadata.json manifest.json greeks.json latency.json checkpoints.jsonl evidence-artifact-hash.json) ;;
+		jsonl:none) expected_fixed_files=(run-config.json run-metadata.json manifest.json greeks.json latency.json checkpoints.jsonl) ;;
+		evstream_v3:full) expected_fixed_files=(run-config.json run-metadata.json manifest.json greeks.json latency.json checkpoints.jsonl events.evs binary-evidence-attestation.json) ;;
+		evstream_v3:none) expected_fixed_files=(run-config.json run-metadata.json manifest.json greeks.json latency.json checkpoints.jsonl events.evs binary-evidence-attestation.json) ;;
 		*) return 1 ;;
 	 esac
+	if [[ "$(jq -r '.record_market_data_receipts // false' "$cell/run-config.json")" == true ]]; then
+		expected_fixed_files+=(market-data-evidence-v2.json market-data-schedules-v2.bin market-data-receipts-v2.bin market-data-decisions-v2.bin)
+	fi
+	local expected_fixed
+	expected_fixed=$(printf '%s\n' "${expected_fixed_files[@]}" | sort)
 	jq -e --arg cell "$(basename "$cell")" --arg log_mode "$log_mode" --arg evidence_format "$evidence_format" \
 		--arg expected_contract "$expected_contract" --argjson expected_schema "$expected_schema" \
 		'.schema_version == $expected_schema and .contract == $expected_contract and .cell == $cell and

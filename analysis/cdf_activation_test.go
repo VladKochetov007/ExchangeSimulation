@@ -393,6 +393,89 @@ func TestAuditCDFLiquidityActivationStrictProductionRenderer(t *testing.T) {
 	}
 }
 
+func TestValidateCDFCompletionArtifactsRejectsMarketDataMutation(t *testing.T) {
+	run := writeRegisteredCDFActivationFixture(t, cdfActivationFixtureOptions{strictMechanics: true})
+	contract := RegisteredSV1DActivationContract()
+	rows := readStrictCDFFixtureRows(t, filepath.Join(run.Dir, "venues"))
+	writeStrictCDFBinaryEvidence(t, run.Dir, rows, contract.BinarySchemaEpoch)
+	rewriteStrictCDFCompletionIdentity(t, run.Dir, contract)
+	if err := os.RemoveAll(filepath.Join(run.Dir, "venues")); err != nil {
+		t.Fatal(err)
+	}
+	metadataRaw, err := os.ReadFile(filepath.Join(run.Dir, "run-metadata.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var metadata cdfActivationMetadata
+	if err := json.Unmarshal(metadataRaw, &metadata); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateCDFCompletionArtifacts(run.Dir, metadata, contract.BinarySchemaEpoch); err != nil {
+		t.Fatalf("complete binary evidence fixture rejected before mutation: %v", err)
+	}
+	schedulesPath := filepath.Join(run.Dir, "market-data-schedules-v2.bin")
+	schedulesRaw, err := os.ReadFile(schedulesPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeCDFFixtureFile(t, schedulesPath, append(schedulesRaw, byte('x')))
+	if err := validateCDFCompletionArtifacts(run.Dir, metadata, contract.BinarySchemaEpoch); err == nil || !strings.Contains(err.Error(), "market-data schedules hash mismatch") {
+		t.Fatalf("mutated market-data evidence was accepted: %v", err)
+	}
+}
+
+func TestValidateCDFCheckpointPrefixesRejectsMismatchedIntermediateHash(t *testing.T) {
+	run := writeRegisteredCDFActivationFixture(t, cdfActivationFixtureOptions{strictMechanics: true})
+	contract := RegisteredSV1DActivationContract()
+	rows := readStrictCDFFixtureRows(t, filepath.Join(run.Dir, "venues"))
+	writeStrictCDFBinaryEvidence(t, run.Dir, rows, contract.BinarySchemaEpoch)
+	attestationRaw, err := os.ReadFile(filepath.Join(run.Dir, "binary-evidence-attestation.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var attestation cdfBinaryEvidenceAttestation
+	if err := json.Unmarshal(attestationRaw, &attestation); err != nil {
+		t.Fatal(err)
+	}
+	if attestation.EventFrames < 2 {
+		t.Fatalf("strict fixture has too few event frames for an intermediate checkpoint: %d", attestation.EventFrames)
+	}
+	checkpoints := map[uint64]string{
+		1:                       strings.Repeat("0", sha256.Size*2),
+		attestation.EventFrames: attestation.ExecutionStreamHash,
+	}
+	if err := validateCDFCheckpointPrefixes(run.Dir, checkpoints, attestation, contract.BinarySchemaEpoch); err == nil || !strings.Contains(err.Error(), "checkpoint hash does not match binary prefix") {
+		t.Fatalf("mismatched intermediate checkpoint was accepted: %v", err)
+	}
+}
+
+func TestValidateCDFCompletionSidecarsRejectsFixedFileSymlink(t *testing.T) {
+	run := writeRegisteredCDFActivationFixture(t, cdfActivationFixtureOptions{strictMechanics: true})
+	contract := RegisteredSV1DActivationContract()
+	rows := readStrictCDFFixtureRows(t, filepath.Join(run.Dir, "venues"))
+	writeStrictCDFBinaryEvidence(t, run.Dir, rows, contract.BinarySchemaEpoch)
+	rewriteStrictCDFCompletionIdentity(t, run.Dir, contract)
+	metadataRaw, err := os.ReadFile(filepath.Join(run.Dir, "run-metadata.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var metadata cdfActivationMetadata
+	if err := json.Unmarshal(metadataRaw, &metadata); err != nil {
+		t.Fatal(err)
+	}
+	original := filepath.Join(run.Dir, "greeks.json")
+	target := filepath.Join(run.Dir, "greeks-target.json")
+	if err := os.Rename(original, target); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, original); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateCDFCompletionSidecars(run.Dir, metadata, contract.BinarySchemaEpoch); err == nil || !strings.Contains(err.Error(), "evidence manifest fixed file") {
+		t.Fatalf("fixed-file symlink was accepted: %v", err)
+	}
+}
+
 func TestCDFStrictDepthDeltaDefersSharedPricePartialReduction(t *testing.T) {
 	contract := RegisteredSV1DActivationContract().Suppliers[0]
 	const venueID = "north"
@@ -631,13 +714,13 @@ func rewriteStrictCDFCompletionIdentity(t *testing.T, dir string, contract CDFAc
 	greeks["initial_risk"] = map[string]any{}
 	greeks["terminal_risk"] = map[string]any{}
 	greeks["risk_timeline"] = map[string]any{}
-	greeks["microstructure"] = []any{}
+	greeks["microstructure"] = []any{map[string]any{"venue_id": "north", "timestamp": contract.SimulationEndNano}}
 	greeksRaw, err = json.Marshal(greeks)
 	if err != nil {
 		t.Fatal(err)
 	}
 	writeCDFFixtureFile(t, greeksPath, append(greeksRaw, '\n'))
-	writeCDFFixtureFile(t, filepath.Join(dir, "latency.json"), []byte("{\"domain\":\"courier_delivery\",\"rows\":[]}\n"))
+	writeCDFFixtureFile(t, filepath.Join(dir, "latency.json"), []byte("{\"domain\":\"courier_delivery\",\"rows\":[{\"link\":\"north/cdf_elastic_supplier/client/1\",\"channel\":\"market_data\",\"scheduled\":1,\"delivered\":1,\"undelivered\":0}]}\n"))
 	attestationRaw, err := os.ReadFile(filepath.Join(dir, "binary-evidence-attestation.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -647,7 +730,7 @@ func rewriteStrictCDFCompletionIdentity(t *testing.T, dir string, contract CDFAc
 		t.Fatal(err)
 	}
 	writeCDFFixtureFile(t, filepath.Join(dir, "checkpoints.jsonl"), []byte(fmt.Sprintf("{\"domain\":\"execution_observations\",\"ordering\":\"ordered_stream\",\"sim_time\":%d,\"event_count\":%d,\"execution_stream_hash\":%q,\"representation\":\"evstream_v3\",\"unencodable_payloads\":0}\n", contract.SimulationEndNano, attestation.EventFrames, attestation.ExecutionStreamHash)))
-	fixedPaths := []string{"run-config.json", "run-metadata.json", "manifest.json", "greeks.json", "latency.json", "checkpoints.jsonl", "events.evs", "binary-evidence-attestation.json"}
+	fixedPaths := []string{"run-config.json", "run-metadata.json", "manifest.json", "greeks.json", "latency.json", "checkpoints.jsonl", "events.evs", "binary-evidence-attestation.json", "market-data-evidence-v2.json", "market-data-schedules-v2.bin", "market-data-receipts-v2.bin", "market-data-decisions-v2.bin"}
 	fixedFiles := make([]map[string]any, 0, len(fixedPaths))
 	for _, relative := range fixedPaths {
 		path := filepath.Join(dir, relative)
@@ -669,13 +752,17 @@ func rewriteStrictCDFCompletionIdentity(t *testing.T, dir string, contract CDFAc
 	status := cdfRunStatus{
 		SchemaVersion: 1, ExitStatus: 0, CompletionVerified: true, CompletionSentinels: []string{"greeks.json", "latency.json"}, SimulatedHorizon: contract.Horizon,
 		SimulationStartNano: contract.SimulationStartNano, SimulationEndNano: contract.SimulationEndNano,
-		RunMetadataSHA256:    mustCDFFileHash(t, filepath.Join(dir, "run-metadata.json")),
-		ManifestSHA256:       mustCDFFileHash(t, filepath.Join(dir, "manifest.json")),
-		GreeksSHA256:         mustCDFFileHash(t, filepath.Join(dir, "greeks.json")),
-		LatencySHA256:        mustCDFFileHash(t, filepath.Join(dir, "latency.json")),
-		CheckpointsSHA256:    mustCDFFileHash(t, filepath.Join(dir, "checkpoints.jsonl")),
-		EvidenceManifestSHA:  mustCDFFileHash(t, filepath.Join(dir, "evidence-manifest.json")),
-		BinaryAttestationSHA: mustCDFFileHash(t, filepath.Join(dir, "binary-evidence-attestation.json")),
+		RunMetadataSHA256:      mustCDFFileHash(t, filepath.Join(dir, "run-metadata.json")),
+		ManifestSHA256:         mustCDFFileHash(t, filepath.Join(dir, "manifest.json")),
+		GreeksSHA256:           mustCDFFileHash(t, filepath.Join(dir, "greeks.json")),
+		LatencySHA256:          mustCDFFileHash(t, filepath.Join(dir, "latency.json")),
+		CheckpointsSHA256:      mustCDFFileHash(t, filepath.Join(dir, "checkpoints.jsonl")),
+		EvidenceManifestSHA:    mustCDFFileHash(t, filepath.Join(dir, "evidence-manifest.json")),
+		BinaryAttestationSHA:   mustCDFFileHash(t, filepath.Join(dir, "binary-evidence-attestation.json")),
+		MarketDataEvidenceSHA:  mustCDFFileHash(t, filepath.Join(dir, "market-data-evidence-v2.json")),
+		MarketDataSchedulesSHA: mustCDFFileHash(t, filepath.Join(dir, "market-data-schedules-v2.bin")),
+		MarketDataReceiptsSHA:  mustCDFFileHash(t, filepath.Join(dir, "market-data-receipts-v2.bin")),
+		MarketDataDecisionsSHA: mustCDFFileHash(t, filepath.Join(dir, "market-data-decisions-v2.bin")),
 	}
 	statusRaw, err := json.Marshal(status)
 	if err != nil {

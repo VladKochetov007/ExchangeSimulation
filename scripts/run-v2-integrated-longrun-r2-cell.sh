@@ -124,6 +124,7 @@ v2_r2_is_go_127 "$prunegate_go_version" || {
 
 log_mode=$(jq -er '.log_mode' "$config")
 evidence_format=$(jq -er '.evidence_format' "$config")
+record_market_data_receipts=$(jq -r '.record_market_data_receipts // false' "$config")
 [[ "$evidence_format" == "evstream_v3" ]] || {
 	echo "registered successor cell requires evstream_v3 evidence (got $evidence_format)" >&2
 	exit 1
@@ -247,14 +248,18 @@ jq -e --argjson simulation_start_nano "$simulation_start_nano" --argjson simulat
 	exit 1
 }
 jq -e -s --argjson simulation_end_nano "$simulation_end_nano" \
+	--argjson attestation_event_frames "$(jq -er '.event_frames' "$output/binary-evidence-attestation.json")" \
+	--arg attestation_execution_hash "$(jq -er '.execution_stream_hash' "$output/binary-evidence-attestation.json")" \
 	'. as $checkpoints |
 	 ($checkpoints | length) > 0 and
 	 all($checkpoints[]; .domain == "execution_observations" and .ordering == "ordered_stream" and
-		(.sim_time | type) == "number" and (.event_count | type) == "number" and
+		(.sim_time | type) == "number" and (.event_count | type) == "number" and .event_count > 0 and
 		(.execution_stream_hash | test("^[0-9a-f]{64}$")) and .representation == "evstream_v3" and
 		(.unencodable_payloads // 0) == 0) and
 	 all(range(1; ($checkpoints | length)); $checkpoints[. - 1].sim_time < $checkpoints[.].sim_time and $checkpoints[. - 1].event_count < $checkpoints[.].event_count) and
-	 $checkpoints[-1].sim_time == $simulation_end_nano' \
+	 $checkpoints[-1].sim_time == $simulation_end_nano and
+	 $checkpoints[-1].event_count == $attestation_event_frames and
+	 $checkpoints[-1].execution_stream_hash == $attestation_execution_hash' \
 	"$output/checkpoints.jsonl" >/dev/null || {
 	echo "checkpoint stream does not attest the registered 24-hour horizon: $output" >&2
 	exit 1
@@ -286,6 +291,11 @@ jq -n \
 	--arg checkpoints_sha256 "$(sha256sum "$output/checkpoints.jsonl" | awk '{print $1}')" \
 	--arg evidence_manifest_sha256 "$(sha256sum "$output/evidence-manifest.json" | awk '{print $1}')" \
 	--arg binary_attestation_sha256 "$(sha256sum "$output/binary-evidence-attestation.json" | awk '{print $1}')" \
+	--argjson record_market_data_receipts "$record_market_data_receipts" \
+	--arg market_data_evidence_sha256 "$(if [[ "$record_market_data_receipts" == true ]]; then sha256sum "$output/market-data-evidence-v2.json" | awk '{print $1}'; fi)" \
+	--arg market_data_schedules_sha256 "$(if [[ "$record_market_data_receipts" == true ]]; then sha256sum "$output/market-data-schedules-v2.bin" | awk '{print $1}'; fi)" \
+	--arg market_data_receipts_sha256 "$(if [[ "$record_market_data_receipts" == true ]]; then sha256sum "$output/market-data-receipts-v2.bin" | awk '{print $1}'; fi)" \
+	--arg market_data_decisions_sha256 "$(if [[ "$record_market_data_receipts" == true ]]; then sha256sum "$output/market-data-decisions-v2.bin" | awk '{print $1}'; fi)" \
 	--argjson sentinels '["greeks.json", "latency.json"]' \
 	'{schema_version: 1, cell: $cell, exit_status: $exit_status,
 	  completion_verified: true, simulated_horizon: $horizon,
@@ -295,7 +305,13 @@ jq -n \
 	  manifest_sha256: $manifest_sha256, greeks_sha256: $greeks_sha256,
 	  latency_sha256: $latency_sha256, checkpoints_sha256: $checkpoints_sha256,
 	  evidence_manifest_sha256: $evidence_manifest_sha256,
-	  binary_evidence_attestation_sha256: $binary_attestation_sha256}' >"$status_tmp"
+	  binary_evidence_attestation_sha256: $binary_attestation_sha256} |
+	 (if $record_market_data_receipts then . + {
+		market_data_evidence_sha256: $market_data_evidence_sha256,
+		market_data_schedules_sha256: $market_data_schedules_sha256,
+		market_data_receipts_sha256: $market_data_receipts_sha256,
+		market_data_decisions_sha256: $market_data_decisions_sha256
+	 } else . end)' >"$status_tmp"
 mv "$status_tmp" "$output/run-status.json"
 v2_r2_write_attestation "$output" || {
 	echo "failed to write external evidence attestation: $output" >&2

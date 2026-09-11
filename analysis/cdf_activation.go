@@ -726,6 +726,9 @@ func (r *Run) AuditCDFLiquidityActivation(options CDFActivationOptions) (*CDFAct
 		return nil, fmt.Errorf("cdf activation receipts: %w", err)
 	}
 	if !receiptAudit.Valid {
+		if strictMechanics {
+			return nil, fmt.Errorf("cdf activation: market-data receipt contract is invalid")
+		}
 		result.addCheck(CDFActivationCheck{Failure: "market-data receipt contract is invalid"})
 	}
 	states := result.indexCDFAccounts(r.Report, config, options.Contract)
@@ -932,20 +935,24 @@ type cdfRenderedEvidenceAttestation struct {
 }
 
 type cdfRunStatus struct {
-	SchemaVersion        int      `json:"schema_version"`
-	ExitStatus           int      `json:"exit_status"`
-	CompletionVerified   bool     `json:"completion_verified"`
-	SimulatedHorizon     string   `json:"simulated_horizon"`
-	SimulationStartNano  int64    `json:"simulation_start_nano"`
-	SimulationEndNano    int64    `json:"simulation_end_nano"`
-	RunMetadataSHA256    string   `json:"run_metadata_sha256"`
-	ManifestSHA256       string   `json:"manifest_sha256"`
-	GreeksSHA256         string   `json:"greeks_sha256"`
-	LatencySHA256        string   `json:"latency_sha256"`
-	CheckpointsSHA256    string   `json:"checkpoints_sha256"`
-	EvidenceManifestSHA  string   `json:"evidence_manifest_sha256"`
-	BinaryAttestationSHA string   `json:"binary_evidence_attestation_sha256"`
-	CompletionSentinels  []string `json:"completion_sentinels"`
+	SchemaVersion          int      `json:"schema_version"`
+	ExitStatus             int      `json:"exit_status"`
+	CompletionVerified     bool     `json:"completion_verified"`
+	SimulatedHorizon       string   `json:"simulated_horizon"`
+	SimulationStartNano    int64    `json:"simulation_start_nano"`
+	SimulationEndNano      int64    `json:"simulation_end_nano"`
+	RunMetadataSHA256      string   `json:"run_metadata_sha256"`
+	ManifestSHA256         string   `json:"manifest_sha256"`
+	GreeksSHA256           string   `json:"greeks_sha256"`
+	LatencySHA256          string   `json:"latency_sha256"`
+	CheckpointsSHA256      string   `json:"checkpoints_sha256"`
+	EvidenceManifestSHA    string   `json:"evidence_manifest_sha256"`
+	BinaryAttestationSHA   string   `json:"binary_evidence_attestation_sha256"`
+	MarketDataEvidenceSHA  string   `json:"market_data_evidence_sha256,omitempty"`
+	MarketDataSchedulesSHA string   `json:"market_data_schedules_sha256,omitempty"`
+	MarketDataReceiptsSHA  string   `json:"market_data_receipts_sha256,omitempty"`
+	MarketDataDecisionsSHA string   `json:"market_data_decisions_sha256,omitempty"`
+	CompletionSentinels    []string `json:"completion_sentinels"`
 }
 
 type cdfEvidenceManifestRecord struct {
@@ -995,6 +1002,10 @@ func validateCDFCompletionArtifacts(dir string, metadata cdfActivationMetadata, 
 		{"checkpoints", "checkpoints.jsonl", status.CheckpointsSHA256},
 		{"evidence manifest", "evidence-manifest.json", status.EvidenceManifestSHA},
 		{"binary evidence attestation", "binary-evidence-attestation.json", status.BinaryAttestationSHA},
+		{"market-data evidence manifest", "market-data-evidence-v2.json", status.MarketDataEvidenceSHA},
+		{"market-data schedules", "market-data-schedules-v2.bin", status.MarketDataSchedulesSHA},
+		{"market-data receipts", "market-data-receipts-v2.bin", status.MarketDataReceiptsSHA},
+		{"market-data decisions", "market-data-decisions-v2.bin", status.MarketDataDecisionsSHA},
 	}
 	for _, check := range checks {
 		if !isCDFHex(check.want, sha256.Size) {
@@ -1037,7 +1048,7 @@ func validateCDFCompletionSidecars(dir string, metadata cdfActivationMetadata, e
 		!cdfJSONArrayNonEmpty(greeks["initial_accounts"]) ||
 		!cdfJSONArrayNonEmpty(greeks["terminal_accounts"]) ||
 		!cdfJSONObject(greeks["initial_risk"]) || !cdfJSONObject(greeks["terminal_risk"]) ||
-		!cdfJSONObject(greeks["risk_timeline"]) || !cdfJSONArray(greeks["microstructure"]) {
+		!cdfJSONObject(greeks["risk_timeline"]) || !cdfJSONArrayNonEmpty(greeks["microstructure"]) {
 		return fmt.Errorf("cdf activation: greeks sidecar is structurally incomplete")
 	}
 
@@ -1049,7 +1060,7 @@ func validateCDFCompletionSidecars(dir string, metadata cdfActivationMetadata, e
 		Domain string            `json:"domain"`
 		Rows   []json.RawMessage `json:"rows"`
 	}
-	if err := json.Unmarshal(latencyRaw, &latency); err != nil || latency.Domain != "courier_delivery" || latency.Rows == nil {
+	if err := json.Unmarshal(latencyRaw, &latency); err != nil || latency.Domain != "courier_delivery" || len(latency.Rows) == 0 {
 		return fmt.Errorf("cdf activation: latency sidecar is structurally incomplete")
 	}
 
@@ -1077,6 +1088,7 @@ func validateCDFCompletionSidecars(dir string, metadata cdfActivationMetadata, e
 	scanner := bufio.NewScanner(checkpointFile)
 	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
 	checkpointCount := 0
+	checkpointsByEventCount := make(map[uint64]string)
 	var previousSimTime, previousEventCount int64
 	for scanner.Scan() {
 		line := scanner.Bytes()
@@ -1097,9 +1109,14 @@ func validateCDFCompletionSidecars(dir string, metadata cdfActivationMetadata, e
 			return fmt.Errorf("cdf activation: checkpoint sidecar contains an invalid sequence")
 		}
 		previousSimTime, previousEventCount = checkpoint.SimTime, checkpoint.EventCount
-		if checkpointCount > 0 && checkpoint.EventCount > int64(attestation.EventFrames) {
+		if uint64(checkpoint.EventCount) > attestation.EventFrames {
 			return fmt.Errorf("cdf activation: checkpoint event count exceeds binary attestation")
 		}
+		checkpointKey := uint64(checkpoint.EventCount)
+		if _, duplicate := checkpointsByEventCount[checkpointKey]; duplicate {
+			return fmt.Errorf("cdf activation: checkpoint event count is repeated")
+		}
+		checkpointsByEventCount[checkpointKey] = checkpoint.ExecutionStreamHash
 		checkpointCount++
 	}
 	if err := scanner.Err(); err != nil {
@@ -1120,6 +1137,9 @@ func validateCDFCompletionSidecars(dir string, metadata cdfActivationMetadata, e
 	if len(checkpointLines) == 0 || json.Unmarshal(checkpointLines[len(checkpointLines)-1], &terminalCheckpoint) != nil ||
 		terminalCheckpoint.ExecutionStreamHash != attestation.ExecutionStreamHash {
 		return fmt.Errorf("cdf activation: terminal checkpoint is not bound to the binary attestation")
+	}
+	if err := validateCDFCheckpointPrefixes(dir, checkpointsByEventCount, attestation, expectedSchemaEpoch); err != nil {
+		return err
 	}
 
 	manifestRaw, err := os.ReadFile(filepath.Join(dir, "evidence-manifest.json"))
@@ -1144,7 +1164,7 @@ func validateCDFCompletionSidecars(dir string, metadata cdfActivationMetadata, e
 		}
 		fixed[record.Path] = record
 		path := filepath.Join(dir, filepath.FromSlash(record.Path))
-		info, err := os.Stat(path)
+		info, err := os.Lstat(path)
 		if err != nil || !info.Mode().IsRegular() {
 			return fmt.Errorf("cdf activation: evidence manifest fixed file %q is unavailable", record.Path)
 		}
@@ -1156,7 +1176,12 @@ func validateCDFCompletionSidecars(dir string, metadata cdfActivationMetadata, e
 			return fmt.Errorf("cdf activation: evidence manifest digest mismatch for %q", record.Path)
 		}
 	}
-	requiredFiles := []string{"run-config.json", "run-metadata.json", "manifest.json", "greeks.json", "latency.json", "checkpoints.jsonl", "events.evs", "binary-evidence-attestation.json"}
+	requiredFiles := []string{
+		"run-config.json", "run-metadata.json", "manifest.json", "greeks.json", "latency.json",
+		"checkpoints.jsonl", "events.evs", "binary-evidence-attestation.json",
+		"market-data-evidence-v2.json", "market-data-schedules-v2.bin",
+		"market-data-receipts-v2.bin", "market-data-decisions-v2.bin",
+	}
 	for _, required := range requiredFiles {
 		if _, exists := fixed[required]; !exists {
 			return fmt.Errorf("cdf activation: evidence manifest omits required file %q", required)
@@ -1186,6 +1211,43 @@ func validateCDFCompletionSidecars(dir string, metadata cdfActivationMetadata, e
 		}
 	} else if !os.IsNotExist(err) {
 		return fmt.Errorf("cdf activation: inspect binary evidence venue namespace: %w", err)
+	}
+	return nil
+}
+
+func validateCDFCheckpointPrefixes(dir string, checkpoints map[uint64]string, attestation cdfBinaryEvidenceAttestation, expectedSchemaEpoch uint32) error {
+	file, err := os.Open(filepath.Join(dir, "events.evs"))
+	if err != nil {
+		return fmt.Errorf("cdf activation: open binary evidence for checkpoint validation: %w", err)
+	}
+	defer file.Close()
+	reader, err := evstream.NewReader(file, evstream.ReaderOptions{VerifyHash: true})
+	if err != nil {
+		return fmt.Errorf("cdf activation: read binary evidence for checkpoint validation: %w", err)
+	}
+	if reader.Codec() != evstream.CodecNone || reader.SchemaEpoch() != expectedSchemaEpoch {
+		return fmt.Errorf("cdf activation: checkpoint source codec or schema epoch is not registered")
+	}
+	matched := make(map[uint64]struct{}, len(checkpoints))
+	var eventFrames uint64
+	if err := reader.Range(func(_ evstream.Frame) error {
+		eventFrames++
+		if expected, ok := checkpoints[eventFrames]; ok {
+			actual := reader.ExecutionHash()
+			if hex.EncodeToString(actual[:]) != expected {
+				return fmt.Errorf("cdf activation: checkpoint hash does not match binary prefix at event count %d", eventFrames)
+			}
+			matched[eventFrames] = struct{}{}
+		}
+		return nil
+	}); err != nil {
+		return fmt.Errorf("cdf activation: validate checkpoint binary prefixes: %w", err)
+	}
+	if !reader.Terminated() || eventFrames != attestation.EventFrames || reader.Count() != attestation.StreamFrames {
+		return fmt.Errorf("cdf activation: checkpoint source does not match binary attestation")
+	}
+	if len(matched) != len(checkpoints) {
+		return fmt.Errorf("cdf activation: checkpoint stream contains a prefix not present in binary evidence")
 	}
 	return nil
 }

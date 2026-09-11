@@ -106,6 +106,8 @@ write_common_files() {
 write_status() {
 	local cell=$1
 	local metadata_sha256 manifest_sha256 greeks_sha256 latency_sha256 checkpoints_sha256 evidence_manifest_sha256 binary_attestation_sha256
+	local record_market_data_receipts market_data_evidence_sha256 market_data_schedules_sha256 market_data_receipts_sha256 market_data_decisions_sha256
+	record_market_data_receipts=$(jq -r '.record_market_data_receipts // false' "$cell/run-config.json")
 	metadata_sha256=$(sha256sum -- "$cell/run-metadata.json" | awk '{print $1}')
 	manifest_sha256=$(sha256sum -- "$cell/manifest.json" | awk '{print $1}')
 	greeks_sha256=$(sha256sum -- "$cell/greeks.json" | awk '{print $1}')
@@ -113,17 +115,34 @@ write_status() {
 	checkpoints_sha256=$(sha256sum -- "$cell/checkpoints.jsonl" | awk '{print $1}')
 	evidence_manifest_sha256=$(sha256sum -- "$cell/evidence-manifest.json" | awk '{print $1}')
 	binary_attestation_sha256=$(sha256sum -- "$cell/binary-evidence-attestation.json" | awk '{print $1}')
+	if [[ "$record_market_data_receipts" == true ]]; then
+		market_data_evidence_sha256=$(sha256sum -- "$cell/market-data-evidence-v2.json" | awk '{print $1}')
+		market_data_schedules_sha256=$(sha256sum -- "$cell/market-data-schedules-v2.bin" | awk '{print $1}')
+		market_data_receipts_sha256=$(sha256sum -- "$cell/market-data-receipts-v2.bin" | awk '{print $1}')
+		market_data_decisions_sha256=$(sha256sum -- "$cell/market-data-decisions-v2.bin" | awk '{print $1}')
+	fi
 	jq -n --arg metadata_sha256 "$metadata_sha256" --arg manifest_sha256 "$manifest_sha256" \
 		--arg greeks_sha256 "$greeks_sha256" --arg latency_sha256 "$latency_sha256" \
 		--arg checkpoints_sha256 "$checkpoints_sha256" --arg evidence_manifest_sha256 "$evidence_manifest_sha256" \
 		--arg binary_attestation_sha256 "$binary_attestation_sha256" \
+		--argjson record_market_data_receipts "$record_market_data_receipts" \
+		--arg market_data_evidence_sha256 "$market_data_evidence_sha256" \
+		--arg market_data_schedules_sha256 "$market_data_schedules_sha256" \
+		--arg market_data_receipts_sha256 "$market_data_receipts_sha256" \
+		--arg market_data_decisions_sha256 "$market_data_decisions_sha256" \
 		'{schema_version: 1, exit_status: 0, completion_verified: true, simulated_horizon: "24h",
 		 simulation_start_nano: 1735689600000000000, simulation_end_nano: 1735776000000000000,
 		 completion_sentinels: ["greeks.json", "latency.json"],
 		 run_metadata_sha256: $metadata_sha256, manifest_sha256: $manifest_sha256,
 		 greeks_sha256: $greeks_sha256, latency_sha256: $latency_sha256,
 		 checkpoints_sha256: $checkpoints_sha256, evidence_manifest_sha256: $evidence_manifest_sha256,
-		 binary_evidence_attestation_sha256: $binary_attestation_sha256}' \
+		 binary_evidence_attestation_sha256: $binary_attestation_sha256} |
+		(if $record_market_data_receipts then . + {
+			market_data_evidence_sha256: $market_data_evidence_sha256,
+			market_data_schedules_sha256: $market_data_schedules_sha256,
+			market_data_receipts_sha256: $market_data_receipts_sha256,
+			market_data_decisions_sha256: $market_data_decisions_sha256
+		} else . end)' \
 		>"$cell/run-status.json"
 }
 
@@ -138,6 +157,10 @@ write_full_cell() {
 	write_metadata "$cell" 607 full "$gomaxprocs" "$config" "$hypothesis_id"
 	write_common_files "$cell" "$experiment_id"
 	"$fixture_binary" -out "$cell/events.evs" -attestation "$cell/binary-evidence-attestation.json" -sequence 2
+	printf '%s\n' '{}' >"$cell/market-data-evidence-v2.json"
+	printf '%s\n' 'schedule-fixture' >"$cell/market-data-schedules-v2.bin"
+	printf '%s\n' 'receipt-fixture' >"$cell/market-data-receipts-v2.bin"
+	printf '%s\n' 'decision-fixture' >"$cell/market-data-decisions-v2.bin"
 	v2_r2_write_evidence_manifest "$cell" || fail "could not create full evidence manifest: $cell"
 	write_status "$cell"
 }

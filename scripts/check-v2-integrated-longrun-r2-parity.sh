@@ -151,6 +151,18 @@ for cell in dev-607 dev-607-none dev-607-g8; do
 		esac
 		[[ "$actual_sha256" == "$declared_sha256" ]] || fail "run-status hash mismatch: $cell/$file"
 	done
+	if [[ "$(jq -r '.record_market_data_receipts // false' "$output_root/$cell/run-config.json")" == true ]]; then
+		for file in market-data-evidence-v2.json market-data-schedules-v2.bin market-data-receipts-v2.bin market-data-decisions-v2.bin; do
+			actual_sha256=$(sha256sum "$output_root/$cell/$file" | awk '{print $1}')
+			case "$file" in
+				market-data-evidence-v2.json) declared_sha256=$(jq -er '.market_data_evidence_sha256' "$output_root/$cell/run-status.json") ;;
+				market-data-schedules-v2.bin) declared_sha256=$(jq -er '.market_data_schedules_sha256' "$output_root/$cell/run-status.json") ;;
+				market-data-receipts-v2.bin) declared_sha256=$(jq -er '.market_data_receipts_sha256' "$output_root/$cell/run-status.json") ;;
+				market-data-decisions-v2.bin) declared_sha256=$(jq -er '.market_data_decisions_sha256' "$output_root/$cell/run-status.json") ;;
+			esac
+			[[ "$actual_sha256" == "$declared_sha256" ]] || fail "run-status hash mismatch: $cell/$file"
+		done
+	fi
 done
 
 for file in checkpoints.jsonl greeks.json latency.json; do
@@ -162,6 +174,9 @@ cmp -s "$output_root/dev-607/events.evs" "$output_root/dev-607-none/events.evs" 
 cmp -s "$output_root/dev-607/events.evs" "$output_root/dev-607-g8/events.evs" || fail "binary execution stream differs between g4 and g8"
 cmp -s "$output_root/dev-607/binary-evidence-attestation.json" "$output_root/dev-607-none/binary-evidence-attestation.json" || fail "binary attestation differs between full and no-log"
 cmp -s "$output_root/dev-607/binary-evidence-attestation.json" "$output_root/dev-607-g8/binary-evidence-attestation.json" || fail "binary attestation differs between g4 and g8"
+for file in market-data-evidence-v2.json market-data-schedules-v2.bin market-data-receipts-v2.bin market-data-decisions-v2.bin; do
+	cmp -s "$output_root/dev-607/$file" "$output_root/dev-607-g8/$file" || fail "$file differs between g4 and g8"
+done
 v2_r2_compare_ordered_raw_manifests "$output_root/dev-607" "$output_root/dev-607-g8" ||
 	fail "full g4/g8 ordered raw evidence manifest differs"
 
