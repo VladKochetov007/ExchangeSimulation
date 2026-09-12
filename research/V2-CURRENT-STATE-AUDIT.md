@@ -1351,3 +1351,34 @@ on acceptance, one binary-capacity measurement, pinned Go 1.27 build, and the
 development-only seed-659 SV1D activation probe. `dev-607`, `dev-613`,
 `dev-617`, parity controls, freeze, and holdouts `619/631/641` remain
 unauthorized.
+
+## Append-only exact-tree audit update: binary evidence and lock findings closed (`fdbf077`) — 2026-09-12
+
+The exact scientific HEAD is `fdbf077`, clean and pushed. The fresh mechanical
+gate is complete after the prior Sol-xhigh review findings were independently
+implemented and regression-tested. Required dictionary references now reject
+zero, undefined, and empty values; optional values use explicit presence
+bits with reserved reference zero. New schema revisions preserve legitimate
+optional blanks in CDF decisions and global balance-change records. Index
+loading rejects descriptor counts and body sizes before allocation. Renderer
+ingestion is constant-time per record, while deferred validation remains
+linear and safe for forged maximum sequence values. The private capacity
+internal-arm path now requires the expected inherited descriptor and a
+successful nonblocking `flock -n 3`, not merely an environment marker.
+
+The exact-tree evidence consists of focused package tests, a bounded clean
+`make test`, `go vet ./...`, the prescribed targeted race matrix plus changed
+evidence-package race coverage, fresh-process baseline/binary/log-mode/perp
+exposure determinism checks, shell syntax, and diff hygiene. All passed under
+`GOMAXPROCS=2 GOMEMLIMIT=4GiB`; no OOM or swap event occurred. The performance
+branch remains reviewed through `b1847ac` with no newer commit and no imported
+performance code.
+
+Adjudication remains operational, not scientific: R2 calendar/lifecycle
+semantics, SV1D economics, configurations, historical results, and retained
+evidence are unchanged. No capacity measurement, pinned Go 1.27 campaign
+binary, activation probe, development cell, parity control, freeze, or holdout
+was run. The next and only promotion gate is one fresh exact-tree independent
+Sol-xhigh review. Acceptance may authorize the measured binary-capacity
+preflight and pinned build, followed by the development-only seed-659 probe;
+holdouts `619/631/641` remain unauthorized.

@@ -1573,3 +1573,43 @@ performance commits newer than `b1847ac`, obtain one independent exact-tree
 Sol-xhigh review, and proceed only if accepted to the registered binary
 capacity preflight and seed-659 activation probe. Do not launch `dev-607` or
 touch holdouts before those gates and explicit freeze authorization.
+
+## Append-only mechanical promotion update: binary contract hardening (`fdbf077`) — 2026-09-12
+
+The exact scientific tree is clean, pushed, and pinned at `fdbf077`. Two
+code-bearing commits close the latest independent-review findings without
+changing R2 economics, SV1D behavior, registered configurations, historical
+evidence, or experiment authorization. `f1d5807` makes required binary
+dictionary references fail closed, reserves id zero for optional absence,
+rejects empty dictionary definitions, bounds index allocations before reading,
+versions optional CDF decision strings to schema v4 and global balance symbols
+to schema v2, and moves rendered-route duplicate/gap validation out of the
+per-record O(n^2) path. `fdbf077` additionally validates the inherited lock
+descriptor at the private capacity `--internal-arm` entrypoint, closing the
+environment-marker bypass.
+
+Verification at this exact tree:
+
+- bounded `GOMAXPROCS=2 GOMEMLIMIT=4GiB make test`: passed all Go packages and
+  integrated-long-run, R2, archive, and parity contracts;
+- `GOMAXPROCS=2 GOMEMLIMIT=4GiB go vet ./...`: passed;
+- prescribed targeted race matrix for `analysis`, `cmd/sv1dprobe`,
+  `cmd/sv1dresource`, `cmd/mvanalyze`, `cmd/prunegate`, and `tests`: passed;
+- race coverage for changed evidence packages and exchange: passed;
+- fresh-process matrix for baseline determinism, binary evidence neutrality,
+  and perp-exposure evidence neutrality: passed;
+- shell syntax, R2 contract checks, focused corruption/reference tests, and
+  `git diff --check`: passed.
+
+The performance feed was fetched through `b1847ac` and has no newer commit;
+no performance implementation was imported. The host currently has about
+32 GiB free disk, about 26 GiB available RAM, and no swap. No capacity
+attestation, pinned campaign build, SV1D activation, `dev-607`, `dev-613`,
+`dev-617`, freeze, or holdout `619/631/641` has run.
+
+The sole remaining promotion action is one fresh independent Sol-xhigh review
+of exact `fdbf077`, covering the R2 calendar/lifecycle semantics, current risk
+hardening, binary evidence contract, strict scoring/provenance, resource
+manifests, and both lock entrypoints. Only an accepted review permits the
+measured binary-capacity preflight and pinned Go 1.27 build; the next scientific
+execution remains the development-only seed-659 activation probe.
