@@ -88,9 +88,12 @@ type SV1DResourceMeasurement struct {
 
 // SV1DResourceOptions configures one measured child command.
 type SV1DResourceOptions struct {
-	Command                  []string
-	OutputParent             string
-	MeasurementRoot          string
+	Command         []string
+	OutputParent    string
+	MeasurementRoot string
+	// SampleInterval is the maximum permitted gap between observed samples.
+	// The measurer derives a shorter deadline cadence so filesystem, process,
+	// and cgroup collection time cannot consume the entire contract interval.
 	SampleInterval           time.Duration
 	RequireFiniteCgroupLimit bool
 	InheritedFileDescriptors []int
@@ -302,11 +305,13 @@ func MeasureSV1DCommand(ctx context.Context, options SV1DResourceOptions) (SV1DR
 
 	waitResult := make(chan error, 1)
 	go func() { waitResult <- command.Wait() }()
-	ticker := time.NewTicker(options.SampleInterval)
-	defer ticker.Stop()
+	samplingCadence := sv1dResourceSamplingCadence(options.SampleInterval)
+	nextSampleDeadline := time.Now().Add(samplingCadence)
 	for {
+		sampleTimer := time.NewTimer(time.Until(nextSampleDeadline))
 		select {
 		case waitErr := <-waitResult:
+			stopSV1DResourceTimer(sampleTimer)
 			measurement.ExitStatus = command.ProcessState.ExitCode()
 			measurement.Complete = waitErr == nil && measurement.ExitStatus == 0
 			if waitErr != nil {
@@ -325,7 +330,7 @@ func MeasureSV1DCommand(ctx context.Context, options SV1DResourceOptions) (SV1DR
 				return measurement, errors.New("measured command has no finite cgroup memory limit")
 			}
 			return measurement, nil
-		case <-ticker.C:
+		case <-sampleTimer.C:
 			sample, sampleErr := captureSV1DResourceSample(command.Process.Pid, options.OutputParent, options.MeasurementRoot, cgroupPath)
 			if sampleErr != nil {
 				killResourceProcessGroup(command.Process.Pid)
@@ -335,13 +340,34 @@ func MeasureSV1DCommand(ctx context.Context, options SV1DResourceOptions) (SV1DR
 				return measurement, fmt.Errorf("capture resource sample: %w", sampleErr)
 			}
 			measurement.Samples = append(measurement.Samples, sample)
+			nextSampleDeadline = nextSampleDeadline.Add(samplingCadence)
+			if !nextSampleDeadline.After(time.Now()) {
+				nextSampleDeadline = time.Now().Add(samplingCadence)
+			}
 		case <-ctx.Done():
+			stopSV1DResourceTimer(sampleTimer)
 			killResourceProcessGroup(command.Process.Pid)
 			<-waitResult
 			measurement.ExitStatus = -1
 			measurement.Error = ctx.Err().Error()
 			finalizeSV1DResourceMeasurement(&measurement)
 			return measurement, ctx.Err()
+		}
+	}
+}
+
+func sv1dResourceSamplingCadence(maximumSampleGap time.Duration) time.Duration {
+	if maximumSampleGap <= time.Nanosecond {
+		return time.Nanosecond
+	}
+	return maximumSampleGap / 2
+}
+
+func stopSV1DResourceTimer(timer *time.Timer) {
+	if !timer.Stop() {
+		select {
+		case <-timer.C:
+		default:
 		}
 	}
 }

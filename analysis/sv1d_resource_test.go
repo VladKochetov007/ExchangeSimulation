@@ -42,6 +42,31 @@ func TestMeasureSV1DCommandRetainsResourceTraceAndCompletion(t *testing.T) {
 	}
 }
 
+func TestMeasureSV1DCommandMaintainsStrictGapAcrossMultipleTicks(t *testing.T) {
+	root := t.TempDir()
+	payload := filepath.Join(root, "payload.bin")
+	const maximumSampleGap = 100 * time.Millisecond
+	measurement, err := MeasureSV1DCommand(context.Background(), SV1DResourceOptions{
+		Command:                  []string{"/bin/sh", "-c", "printf payload > \"$1\"; sleep 0.75", "sh", payload},
+		OutputParent:             root,
+		MeasurementRoot:          root,
+		SampleInterval:           maximumSampleGap,
+		RequireFiniteCgroupLimit: false,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if measurement.SampleCount < 5 {
+		t.Fatalf("measurement did not cover multiple sampling deadlines: %d samples", measurement.SampleCount)
+	}
+	if measurement.MaximumSampleGapNano > uint64(maximumSampleGap) {
+		t.Fatalf("maximum observed gap = %d ns, contract = %d ns", measurement.MaximumSampleGapNano, maximumSampleGap)
+	}
+	if err := ValidateSV1DResourceMeasurement(measurement, false); err != nil {
+		t.Fatalf("strict resource validation rejected a multi-tick trace: %v", err)
+	}
+}
+
 func TestMeasureSV1DCommandRecordsFailedChildWithoutCertifyingIt(t *testing.T) {
 	root := t.TempDir()
 	measurement, err := MeasureSV1DCommand(context.Background(), SV1DResourceOptions{
