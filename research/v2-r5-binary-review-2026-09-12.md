@@ -109,3 +109,33 @@ creating an arm directory. The latest performance-feed fetch from
 The promotion gate remains closed. One fresh exact-tree Sol-xhigh review of
 the current clean tree (including code checkpoint `86854e3`) is required before binary capacity, pinned Go 1.27 builds, the
 seed-659 activation probe, `dev-607`, freeze, or holdout `619/631/641`.
+
+## Append-only follow-up review rejection: sampler cadence — 2026-09-12
+
+The next fresh independent Sol-xhigh review was run against the exact clean
+tree `f258af91338b0df41ce7017ab5ba1a68ae7ba045` (tree
+`14670c42a06ff4fc88d62d11b85979bb2fdc59ef`) and returned `REJECT`. Reviewer
+`McClintock` (`01a0964e-ef84-7821-b711-7a4f3c7feb89`, `gpt-5.6-sol`) accepted
+the R2 calendar, correctness hardening, SV1D economics, binary evidence,
+scoring, provenance, and authorization design, but found reachable blocker
+`SV1D-RSRC-001`: post-collection wall timestamps could exceed the strict
+250-ms sample-gap contract. The independent reproduction observed
+`maximum_sample_gap_nano=250894382` with 15 samples during a three-second
+`/bin/sleep` only; no simulator or scientific cell was run.
+
+This is an operational measurement defect classified as reachable but not
+historically activated. The minimal correction is `5cd7b4d`: actual timestamps
+remain post-collection, while fixed half-interval deadlines leave collection
+headroom and rebase after an overrun. The registered maximum and fail-closed
+validator are unchanged. A real multi-tick strict-validation regression passed
+five repetitions; the repaired CLI reproduction reported 26 samples and a
+`125773682` ns maximum gap. Clean `make test`, vet, targeted race, fresh-process
+determinism/evidence-neutrality, focused binary-evidence tests, and diff checks
+all pass at the corrected tree.
+
+The performance feed was refetched through reviewed `b1847ac` with no newer
+commit and no imported performance code. No capacity, activation, development
+cell, freeze, or holdout `619/631/641` was consumed. The promotion gate remains
+closed pending one fresh exact-tree Sol-xhigh review of the complete corrected
+candidate. Full remediation details are recorded in
+`research/v2-r5-sv1d-sampler-cadence-fix-2026-09-12.md`.

@@ -1682,3 +1682,34 @@ append-only state records that followed them. The next exact-tree review must
 resolve `git rev-parse HEAD` at launch and include every current documentation
 record. The authorization gate remains closed: no capacity, activation,
 development cell, freeze, or holdout has run.
+
+## Append-only sampler review remediation — 2026-09-12
+
+The fresh Sol-xhigh review of exact `f258af9` was independently rejected for
+`SV1D-RSRC-001`: the resource sampler could record a maximum inter-sample gap
+of `250894382` ns against the registered `250000000` ns ceiling because a
+250-ms ticker was followed by variable-cost resource collection. The finding
+was reproduced with a non-campaign three-second `/bin/sleep`; it is an
+operational capacity-measurement defect with no historical impact because no
+capacity or scientific run used this successor path.
+
+Commit `5cd7b4d` corrects the sampler without changing R2 economics, SV1D
+behavior, evidence format, or registered configs. The recorded interval stays
+the strict maximum permitted observed gap; actual post-collection timestamps
+are retained, and fixed half-interval deadlines provide collection headroom.
+The strict validator remains fail-closed. A real multi-tick regression passes
+five repetitions, and the repaired CLI reproduction reports 26 samples with a
+maximum gap of `125773682` ns.
+
+At the exact clean `5cd7b4d` tree, bounded `make test`, `go vet ./...`, the
+targeted race matrix, fresh-process determinism/evidence-neutrality checks,
+focused binary-evidence suites, and `git diff --check` pass. The performance
+feed remains unchanged after reviewed `b1847ac`; no performance code was
+imported. No capacity, pinned build, activation, development cell, freeze, or
+holdout `619/631/641` was consumed.
+
+Promotion remains closed pending one fresh exact-tree Sol-xhigh review of the
+complete candidate. Acceptance is required before binary capacity and the
+seed-659 activation probe; all development cells and holdouts remain
+unauthorized. Full details are in
+`research/v2-r5-sv1d-sampler-cadence-fix-2026-09-12.md`.

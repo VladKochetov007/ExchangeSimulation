@@ -1455,3 +1455,37 @@ records. Resolve the exact current `HEAD` and tree at the next review launch;
 the required review scope is the complete current tree, not a stale historical
 hash. Promotion remains closed pending that review. No capacity, activation,
 development cell, freeze, or holdout `619/631/641` has run.
+
+## Append-only exact-tree sampler correction — 2026-09-12
+
+The independent Sol-xhigh review of exact scientific tree `f258af9` returned
+`REJECT` for reachable blocker `SV1D-RSRC-001`. A 250-ms ticker did not itself
+bound timestamps recorded after filesystem/process/cgroup collection. The
+reviewer and the scientific branch independently reproduced a three-second
+non-campaign run with 15 samples and `maximum_sample_gap_nano=250894382`,
+exceeding the strict `250000000` ns contract. This cannot affect historical
+results: no binary-capacity arm, activation, development, freeze, or holdout
+run had started.
+
+The minimal correction is pushed as `5cd7b4d`. `SampleInterval` remains the
+registered maximum observation gap and the validator still rejects any
+violation. Actual timestamps remain post-collection; the sampler now schedules
+fixed half-interval deadlines and rebases after an overrun, providing
+measurement headroom without weakening the contract or changing economics.
+The new real multi-tick strict-validation regression passed five repetitions;
+the repaired three-second reproduction produced 26 samples with a maximum gap
+of `125773682` ns.
+
+Exact-tree mechanical evidence at `5cd7b4d`: clean bounded `make test`,
+`go vet ./...`, targeted race tests, fresh-process determinism and binary
+evidence/log-mode/perp-exposure neutrality checks, focused binary evidence
+contract tests, and `git diff --check` all pass. The performance feed was
+refetched through `b1847ac` with no newer commit; no performance implementation
+was imported. No capacity, pinned Go 1.27 build, activation, development cell,
+freeze, or holdout `619/631/641` has run.
+
+The next boundary is one fresh independent exact-tree Sol-xhigh review of the
+complete candidate. Until acceptance, capacity and seed-659 activation remain
+unauthorized, as do `dev-607`, `dev-613`, `dev-617`, freeze, and all holdouts.
+The detailed remediation record is
+`research/v2-r5-sv1d-sampler-cadence-fix-2026-09-12.md`.
