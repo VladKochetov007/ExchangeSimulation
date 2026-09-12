@@ -1243,3 +1243,55 @@ historical evidence, capacity artifact, or experiment changed. A clean
 post-commit full gate and one fresh exact-tree independent review remain before
 capacity or SV1D activation; development cells, freeze, and holdouts
 `619/631/641` remain untouched.
+
+## Append-only current checkpoint: weekly pause after resource-evidence hardening (`aaf751e`) — 2026-09-12
+
+The exact scientific HEAD is `aaf751e` on
+`autoresearch/ffa-ecology-gen0`; it is clean and pushed. The change is limited
+to the SV1D activation runner's resource evidence. It monitors every simulator,
+renderer, audit, and score stage under the existing bounded envelope and writes
+one immutable stage record per stage. The successful result contains exactly
+ten records (three arms times three stages plus scoring), with cgroup peak,
+host/disk minima, swap and OOM deltas. The final resource manifest binds those
+records to activation metadata, score, score-corpus manifest, and resource
+policy hashes. Incomplete or out-of-envelope runs cannot produce a successful
+resource manifest.
+
+The clean post-commit `GOMAXPROCS=2 GOMEMLIMIT=4GiB make test` passed, including
+all package, integrated-long-run, R2, archive, and parity contracts. The
+focused `go test ./cmd/sv1dprobe -count=1`, `bash -n
+scripts/run-v2-r2-sv1d-activation.sh`, and `git diff --check` passed. The
+pre-commit full run's sole failure was the expected dirty-tree archive/parity
+guard; it is not treated as a green gate. Prior exact-tree vet, targeted race,
+fresh-process determinism, and evidence-neutrality checks belong to the
+preceding checkpoint and remain to be rerun or explicitly revalidated against
+`aaf751e` before fresh review.
+
+Adjudication: no R2 economic semantics, SV1D participant behavior,
+configuration, historical evidence, or experiment result changed. The
+performance red-team feed remains reviewed through `b1847ac`, with no newer
+commit and no imported performance optimization. The host snapshot is about
+33 GiB free disk, 27 GiB available RAM, and no swap; no binary capacity
+attestation has been issued.
+
+Promotion state remains closed: no fresh exact-tree Sol-xhigh review has yet
+accepted `aaf751e`; no pinned Go 1.27 campaign build, capacity run, SV1D
+activation, `dev-607`, `dev-613`, `dev-617`, parity control, freeze, or holdout
+`619/631/641` has run. The R2 predecessor remains archived as
+`NON-VIABLE AT THE 24H MARKET-SURVIVAL GATE` and is not being rescued.
+
+Weekly quota pause / next controlled sequence:
+
+1. Recheck exact Git state and fetch only performance commits newer than
+   `b1847ac`.
+2. Rerun final-tree vet, targeted race, fresh-process determinism, and binary
+   evidence-contract checks.
+3. Obtain one independent Sol-xhigh review of the complete exact tree.
+4. If accepted, measure binary capacity with the registered resource contract,
+   then build pinned Go 1.27 binaries.
+5. Run only the development seed-659 SV1D activation probe; inspect its
+   immutable tri-arm/resource manifests before any `dev-607` run.
+
+No holdout may be read or consumed before explicit freeze authorization.
+Historical evidence may be archived only after its own measurement contract
+passes; no evidence deletion is required for this pause.

@@ -1480,3 +1480,41 @@ economic mechanism or historical artifact. After the commit, rerun the clean
 full/archive gate, then obtain the next exact-tree independent Sol-xhigh review;
 capacity preflight, SV1D activation, development cells, freeze, and holdouts
 `619/631/641` remain unauthorized.
+
+## Append-only pause checkpoint: resource-bound SV1D runner (`aaf751e`) — 2026-09-12
+
+The exact scientific tree is now clean, pushed, and pinned at `aaf751e`. This
+checkpoint adds only operational evidence hardening to the development-only
+SV1D runner. Each monitored simulator, renderer, audit, and score stage now
+retains a fail-closed resource record containing sample count, cgroup peak,
+host/disk minima, swap, and OOM deltas. A successful tri-arm run additionally
+publishes a content-bound ten-stage resource manifest linked to activation
+metadata, score, score-corpus manifest, and the measured resource policy. A
+resource manifest is not emitted for an incomplete or out-of-envelope run.
+
+The pre-commit bounded full gate completed all Go packages and contract tests;
+the only failure was the intentional dirty-worktree archive/parity guard. The
+post-commit clean `GOMAXPROCS=2 GOMEMLIMIT=4GiB make test` passed, as did the
+focused `cmd/sv1dprobe` test, shell syntax, and `git diff --check`. Earlier
+exact-tree vet, targeted race, fresh-process determinism, and evidence
+neutrality checks remain attached to the preceding code checkpoint; they must
+be rerun or explicitly revalidated on this final tree before review. No
+economic mechanism, R2 calendar, configuration, historical evidence, or
+binary trajectory changed.
+
+The last resource observation was approximately 33 GiB filesystem free, 27 GiB
+host memory available, and zero swap; this is an operational snapshot, not a
+capacity attestation. The performance feed was fetched through reviewed
+`b1847ac` and has no newer commit. No fresh exact-tree Sol-xhigh review,
+capacity measurement, pinned campaign build, SV1D activation probe,
+development cell, freeze authorization, or holdout `619/631/641` has run.
+
+This is the deliberate weekly quota pause. Next session, use the smallest
+promotion loop: verify the clean exact tree and performance delta; rerun the
+remaining final-tree vet/race/fresh-process checks; obtain one independent
+Sol-xhigh review; only if accepted perform the binary-capacity preflight and
+build pinned Go 1.27 binaries; then run the development-only seed-659 SV1D
+activation probe before considering `dev-607`. Do not spend another large
+experiment or touch holdouts until those gates are accepted. Preserve failed
+and historical artifacts; prune only files whose retention/measurement
+contract has already passed.
