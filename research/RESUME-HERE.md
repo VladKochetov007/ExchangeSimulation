@@ -1613,3 +1613,28 @@ hardening, binary evidence contract, strict scoring/provenance, resource
 manifests, and both lock entrypoints. Only an accepted review permits the
 measured binary-capacity preflight and pinned Go 1.27 build; the next scientific
 execution remains the development-only seed-659 activation probe.
+
+## Append-only review-closure checkpoint: binary evidence and arm handoff (`11da855`) — 2026-09-12
+
+The exact scientific tree is clean, pushed, and pinned at `11da855`. The fresh
+Sol-xhigh review of `81a6665` rejected two concrete promotion defects: CDF v4
+numeric presence/value contradictions were silently normalized, and a direct
+caller could enter the capacity internal arm with only a forged marker and
+caller-opened lock descriptor. These were reproduced independently and closed
+in separate commits `0d9c5e1` and `11da855`. The CDF decoder now rejects both
+contradiction directions. The capacity path now requires the one-shot
+pipe-backed handoff supplied by `sv1dresource`, validates its parent identity,
+and has a regression proving direct forged entry cannot create an arm.
+
+The exact post-fix tree passed focused package/control suites, clean bounded
+`make test`, vet, prescribed race tests, changed evidence-package race tests,
+fresh-process determinism/evidence-neutrality checks, shell syntax, and diff
+hygiene. The performance feed was fetched through `b1847ac` with no newer
+commit. No economics, configurations, historical evidence, capacity, binary,
+activation, development cell, freeze, or holdout changed.
+
+The weekly quota stop is at the next promotion boundary: obtain one fresh
+independent Sol-xhigh review of exact `11da855`. Only acceptance permits the
+measured binary-capacity preflight, pinned Go 1.27 build, and development-only
+seed-659 activation probe. Do not launch `dev-607` or touch holdouts
+`619/631/641` before those steps and explicit freeze authorization.

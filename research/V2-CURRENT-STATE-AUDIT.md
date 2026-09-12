@@ -1382,3 +1382,31 @@ was run. The next and only promotion gate is one fresh exact-tree independent
 Sol-xhigh review. Acceptance may authorize the measured binary-capacity
 preflight and pinned build, followed by the development-only seed-659 probe;
 holdouts `619/631/641` remain unauthorized.
+
+## Append-only exact-tree review closure: `11da855` — 2026-09-12
+
+The independent Sol-xhigh review of exact tree `81a6665` was a `REJECT` for
+two reproducible promotion blockers. First, the capacity private arm could be
+reached directly using `SV1D_LOCK_HELD=1` and a caller-opened expected lock
+descriptor; the direct reproduction reached arm setup before a later fixture
+failure. Second, CDF v4 optional numeric slots did not enforce canonical
+presence/value agreement. `0d9c5e1` closes the latter with both wire-level
+regressions. `11da855` closes the former with an opt-in one-shot pipe handoff
+from `sv1dresource`, parent-PID/parent-executable validation, a production
+handoff probe, and a control test rejecting forged direct entry before arm
+creation.
+
+The exact `11da855` tree passed the focused evidence/risk packages, clean
+bounded `make test`, `go vet ./...`, targeted race matrices, fresh-process
+determinism/evidence-neutrality checks, shell contracts, and diff hygiene.
+The performance feed remains reviewed through `b1847ac` with no new commit.
+No economic semantics, registered configuration, historical result, capacity
+attestation, campaign binary, activation, development cell, freeze, or
+holdout was consumed.
+
+Promotion is intentionally paused at the next independent-review boundary.
+The next required action is one fresh exact-tree Sol-xhigh review of R2
+calendar/lifecycle, correctness hardening, binary evidence/rendering,
+provenance/scoring, resource manifests, and both lock entrypoints. Acceptance
+is required before capacity, pinned binaries, seed-659 activation, or `dev-607`;
+holdouts `619/631/641` remain unauthorized.
