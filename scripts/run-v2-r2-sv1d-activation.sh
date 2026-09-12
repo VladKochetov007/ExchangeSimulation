@@ -656,8 +656,9 @@ for arm in treatment mode-off no-roster; do
 done
 
 score_path="$output_root/score.json"
+corpus_manifest_path="$output_root/provenance/score-corpus-manifest.json"
 set +e
-"$sv1dprobe_binary" -mode score -out "$score_path" -plan "$plan_path" \
+"$sv1dprobe_binary" -mode score -out "$score_path" -corpus-manifest "$corpus_manifest_path" -plan "$plan_path" \
 	-treatment-result "${retained_result_for[treatment]}" \
 	-mode-off-result "${retained_result_for[mode-off]}" \
 	-no-roster-result "${retained_result_for[no-roster]}" \
@@ -677,6 +678,9 @@ set -e
 [[ -s "$score_path" && ! -L "$score_path" ]] || fail "could not publish tri-arm score"
 jq -e 'type == "object" and .contract == "v2-r2-sv1d-score-v1" and .probe_id == "v2-r2-sv1d-activation-659" and (.score.status | type == "string")' \
 	"$score_path" >/dev/null || fail "tri-arm score is malformed"
+[[ -s "$corpus_manifest_path" && ! -L "$corpus_manifest_path" ]] || fail "could not publish strict score corpus manifest"
+jq -e 'type == "object" and .schema_version == 1 and .contract == "v2-r2-sv1d-score-corpus-manifest-v1" and .probe_id == "v2-r2-sv1d-activation-659" and (.arm_corpus | length == 3)' \
+	"$corpus_manifest_path" >/dev/null || fail "strict score corpus manifest is malformed"
 if [[ "$score_status" -ne 0 || "$arm_failure" -ne 0 ]]; then
 	echo "SV1D activation probe retained evidence but did not certify an executable tri-arm result" >&2
 	exit 1

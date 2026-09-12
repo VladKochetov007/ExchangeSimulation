@@ -50,6 +50,28 @@ type scoreDocument struct {
 	PlanSHA256    string                        `json:"plan_sha256"`
 	Score         analysis.SV1DProbeScore       `json:"score"`
 	Arms          []analysis.SV1DProbeArmResult `json:"arms"`
+	ArmCorpus     []scoreCorpusEntry            `json:"arm_corpus"`
+}
+
+const scoreCorpusManifestContract = "v2-r2-sv1d-score-corpus-manifest-v1"
+
+type scoreCorpusEntry struct {
+	Arm    string `json:"arm"`
+	Path   string `json:"path"`
+	SHA256 string `json:"sha256"`
+	Bytes  int64  `json:"bytes"`
+}
+
+type scoreCorpusManifest struct {
+	SchemaVersion            int                `json:"schema_version"`
+	Contract                 string             `json:"contract"`
+	ProbeID                  string             `json:"probe_id"`
+	PlanSHA256               string             `json:"plan_sha256"`
+	ActivationMetadataPath   string             `json:"activation_metadata_path"`
+	ActivationMetadataSHA256 string             `json:"activation_metadata_sha256"`
+	ScorePath                string             `json:"score_path"`
+	ScoreSHA256              string             `json:"score_sha256"`
+	ArmCorpus                []scoreCorpusEntry `json:"arm_corpus"`
 }
 
 func main() {
@@ -114,6 +136,7 @@ func run() error {
 	measurementRoot := flag.String("measurement-root", "", "capacity measurement root path")
 	measurementRecordsRoot := flag.String("measurement-records-root", "", "capacity measurement-records root path")
 	measurementRecordsSHA256 := flag.String("measurement-records-sha256", "", "canonical measurement-records manifest SHA-256")
+	corpusManifest := flag.String("corpus-manifest", "", "immutable strict-score corpus manifest output path")
 	filesystemDevice := flag.String("filesystem-device", "", "measured filesystem device")
 	filesystemID := flag.String("filesystem-id", "", "measured filesystem ID")
 	filesystemType := flag.String("filesystem-type", "", "measured filesystem type")
@@ -147,7 +170,7 @@ func run() error {
 			GOMAXPROCS: *gomaxprocs, GOMEMLIMIT: *gomemlimit,
 		})
 	case "score":
-		return scoreArms(*out, *planPath, *treatmentResult, *modeOffResult, *noRosterResult, scoreArmEvidencePaths{
+		return scoreArms(*out, *corpusManifest, *planPath, *treatmentResult, *modeOffResult, *noRosterResult, scoreArmEvidencePaths{
 			"treatment": {RunDir: *treatmentRunDir, RenderedDir: *treatmentRenderedDir},
 			"mode-off":  {RunDir: *modeOffRunDir, RenderedDir: *modeOffRenderedDir},
 			"no-roster": {RunDir: *noRosterRunDir, RenderedDir: *noRosterRenderedDir},
@@ -370,7 +393,7 @@ type scoreArmEvidencePath struct {
 
 type scoreArmEvidencePaths map[string]scoreArmEvidencePath
 
-func scoreArms(out, planPath, treatmentPath, modeOffPath, noRosterPath string, evidencePaths scoreArmEvidencePaths, provenanceInputs strictProvenanceInputs) error {
+func scoreArms(out, corpusManifestPath, planPath, treatmentPath, modeOffPath, noRosterPath string, evidencePaths scoreArmEvidencePaths, provenanceInputs strictProvenanceInputs) error {
 	if out == "" || planPath == "" || treatmentPath == "" || modeOffPath == "" || noRosterPath == "" {
 		return fmt.Errorf("score mode requires -out, -plan, and all three arm result paths")
 	}
@@ -384,13 +407,23 @@ func scoreArms(out, planPath, treatmentPath, modeOffPath, noRosterPath string, e
 	if err := validateStrictProvenanceInputs(document.Plan, provenanceInputs); err != nil {
 		return err
 	}
+	strictScoring := provenanceInputs.ActivationMetadataPath != ""
+	if strictScoring && corpusManifestPath == "" {
+		return fmt.Errorf("strict score requires -corpus-manifest")
+	}
 	expectedProvenance := expectedSV1DProvenance(document.Plan, document.Plan.Treatment, provenanceInputs)
 	if err := analysis.ValidateSV1DActivationLaunchProvenance(provenanceInputs.ActivationMetadataPath, expectedProvenance); err != nil {
 		return err
 	}
 	paths := []string{treatmentPath, modeOffPath, noRosterPath}
 	armNames := []string{document.Plan.Treatment.Name, document.Plan.ModeOff.Name, document.Plan.NoRoster.Name}
-	strictScoring := provenanceInputs.ActivationMetadataPath != ""
+	var corpusEntries []scoreCorpusEntry
+	if strictScoring {
+		corpusEntries, err = captureScoreCorpus(provenanceInputs.ActivationMetadataPath, armNames, paths)
+		if err != nil {
+			return err
+		}
+	}
 	arms := make([]analysis.SV1DProbeArmResult, 0, len(paths))
 	for index, path := range paths {
 		armName := armNames[index]
@@ -435,11 +468,343 @@ func scoreArms(out, planPath, treatmentPath, modeOffPath, noRosterPath string, e
 	if score.PlanSHA256 == "" {
 		return fmt.Errorf("could not derive canonical probe plan digest")
 	}
-	if err := publishJSON(out, scoreDocument{SchemaVersion: 1, Contract: scoreContract, ProbeID: probeID, PlanSHA256: score.PlanSHA256, Score: score, Arms: arms}); err != nil {
+	scoreDocumentPath, err := filepath.Abs(out)
+	if err != nil {
+		return fmt.Errorf("resolve score output path: %w", err)
+	}
+	scoreDocumentValue := scoreDocument{SchemaVersion: 1, Contract: scoreContract, ProbeID: probeID, PlanSHA256: score.PlanSHA256, Score: score, Arms: arms, ArmCorpus: corpusEntries}
+	if err := publishJSON(scoreDocumentPath, scoreDocumentValue); err != nil {
 		return err
+	}
+	if strictScoring {
+		if err := publishScoreCorpusManifest(corpusManifestPath, provenanceInputs.ActivationMetadataPath, scoreDocumentPath, score.PlanSHA256, scoreDocumentValue.ArmCorpus); err != nil {
+			return err
+		}
 	}
 	if score.Status != analysis.SV1DProbeStatusPass {
 		return fmt.Errorf("probe score is not executable: %s", score.Status)
+	}
+	return nil
+}
+
+func activationOutputRoot(metadataPath string) (string, error) {
+	absolute, err := filepath.Abs(metadataPath)
+	if err != nil {
+		return "", err
+	}
+	clean := filepath.Clean(absolute)
+	if filepath.Base(clean) != "activation-run-metadata.json" || filepath.Base(filepath.Dir(clean)) != "provenance" {
+		return "", fmt.Errorf("activation metadata path must be provenance/activation-run-metadata.json")
+	}
+	root := filepath.Dir(filepath.Dir(clean))
+	if root == string(filepath.Separator) {
+		return "", fmt.Errorf("activation metadata path has no output root")
+	}
+	return root, nil
+}
+
+func relativeScorePath(root, path string) (string, error) {
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	relative, err := filepath.Rel(root, filepath.Clean(absolute))
+	if err != nil || relative == "." || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) || filepath.IsAbs(relative) {
+		return "", fmt.Errorf("path %s is outside output root %s", path, root)
+	}
+	return filepath.ToSlash(relative), nil
+}
+
+func readDirectoryEntriesNoSymlink(path string) ([]os.FileInfo, error) {
+	fileDescriptor, absolute, err := openNoSymlink(path, true)
+	if err != nil {
+		return nil, err
+	}
+	file := os.NewFile(uintptr(fileDescriptor), absolute)
+	if file == nil {
+		_ = syscall.Close(fileDescriptor)
+		return nil, fmt.Errorf("could not wrap directory descriptor for %s", path)
+	}
+	defer file.Close()
+	entries, err := file.Readdir(-1)
+	if err != nil {
+		return nil, err
+	}
+	return entries, nil
+}
+
+func captureScoreCorpus(activationMetadataPath string, armNames, resultPaths []string) ([]scoreCorpusEntry, error) {
+	if len(armNames) != 3 || len(resultPaths) != len(armNames) {
+		return nil, fmt.Errorf("strict score corpus must contain exactly three arm results")
+	}
+	outputRoot, err := activationOutputRoot(activationMetadataPath)
+	if err != nil {
+		return nil, err
+	}
+	resultRoot := filepath.Join(outputRoot, "provenance", "arm-results")
+	entries, err := readDirectoryEntriesNoSymlink(resultRoot)
+	if err != nil {
+		return nil, fmt.Errorf("read strict score corpus directory: %w", err)
+	}
+	expectedByBase := make(map[string]string, len(armNames))
+	for index, armName := range armNames {
+		if armName == "" {
+			return nil, fmt.Errorf("strict score corpus has an empty arm name")
+		}
+		absolute, err := filepath.Abs(resultPaths[index])
+		if err != nil {
+			return nil, err
+		}
+		absolute = filepath.Clean(absolute)
+		if filepath.Dir(absolute) != resultRoot {
+			return nil, fmt.Errorf("arm result %s is outside the strict score corpus directory", resultPaths[index])
+		}
+		baseName := filepath.Base(absolute)
+		if previous, duplicate := expectedByBase[baseName]; duplicate {
+			return nil, fmt.Errorf("arm result path %s is assigned to both %s and %s", baseName, previous, armName)
+		}
+		expectedByBase[baseName] = armName
+	}
+	seen := make(map[string]struct{}, len(entries))
+	for _, entry := range entries {
+		if entry.Mode()&os.ModeSymlink != 0 {
+			return nil, fmt.Errorf("strict score corpus contains symlink %s", entry.Name())
+		}
+		if !entry.Mode().IsRegular() {
+			return nil, fmt.Errorf("strict score corpus contains non-regular entry %s", entry.Name())
+		}
+		if _, expected := expectedByBase[entry.Name()]; !expected {
+			return nil, fmt.Errorf("strict score corpus contains unexpected file %s", entry.Name())
+		}
+		seen[entry.Name()] = struct{}{}
+	}
+	if len(seen) != len(expectedByBase) {
+		return nil, fmt.Errorf("strict score corpus is missing an expected arm result")
+	}
+	corpus := make([]scoreCorpusEntry, 0, len(armNames))
+	for index, armName := range armNames {
+		absolute, err := filepath.Abs(resultPaths[index])
+		if err != nil {
+			return nil, err
+		}
+		absolute = filepath.Clean(absolute)
+		baseName := filepath.Base(absolute)
+		if expectedByBase[baseName] != armName {
+			return nil, fmt.Errorf("arm result %s is not assigned to %s", resultPaths[index], armName)
+		}
+		prefix := armName + "-"
+		if !strings.HasPrefix(baseName, prefix) || !strings.HasSuffix(baseName, ".json") {
+			return nil, fmt.Errorf("arm result %s is not content addressed for %s", resultPaths[index], armName)
+		}
+		declaredDigest := strings.TrimSuffix(strings.TrimPrefix(baseName, prefix), ".json")
+		if !isHexDigest(declaredDigest) {
+			return nil, fmt.Errorf("arm result %s has an invalid content digest", resultPaths[index])
+		}
+		raw, err := readRegularNoSymlink(absolute)
+		if err != nil {
+			return nil, fmt.Errorf("read strict score corpus arm %s: %w", armName, err)
+		}
+		digest := sha256.Sum256(raw)
+		actualDigest := hex.EncodeToString(digest[:])
+		if actualDigest != declaredDigest {
+			return nil, fmt.Errorf("strict score corpus arm %s failed its content-addressed digest", armName)
+		}
+		document, err := readContentAddressedArmResult(absolute, armName, activationMetadataPath)
+		if err != nil {
+			return nil, err
+		}
+		if document.SchemaVersion != 1 || document.Contract != armResultContract || document.ProbeID != probeID || document.Arm.ArmName != armName {
+			return nil, fmt.Errorf("strict score corpus arm %s has an invalid arm-result identity", armName)
+		}
+		relative, err := relativeScorePath(outputRoot, absolute)
+		if err != nil {
+			return nil, err
+		}
+		corpus = append(corpus, scoreCorpusEntry{Arm: armName, Path: relative, SHA256: actualDigest, Bytes: int64(len(raw))})
+	}
+	return corpus, nil
+}
+
+func scoreCorpusEntriesEqual(left, right []scoreCorpusEntry) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
+}
+
+func publishScoreCorpusManifest(path, activationMetadataPath, scorePath, planSHA256 string, corpus []scoreCorpusEntry) error {
+	outputRoot, err := activationOutputRoot(activationMetadataPath)
+	if err != nil {
+		return err
+	}
+	manifestPath, err := filepath.Abs(path)
+	if err != nil {
+		return err
+	}
+	expectedManifestPath := filepath.Join(outputRoot, "provenance", "score-corpus-manifest.json")
+	if filepath.Clean(manifestPath) != expectedManifestPath {
+		return fmt.Errorf("score corpus manifest must be %s", expectedManifestPath)
+	}
+	metadataPath, err := filepath.Abs(activationMetadataPath)
+	if err != nil {
+		return err
+	}
+	metadataRelative, err := relativeScorePath(outputRoot, metadataPath)
+	if err != nil {
+		return err
+	}
+	scoreAbsolute, err := filepath.Abs(scorePath)
+	if err != nil {
+		return err
+	}
+	scoreRelative, err := relativeScorePath(outputRoot, scoreAbsolute)
+	if err != nil {
+		return err
+	}
+	if scoreAbsolute == manifestPath {
+		return fmt.Errorf("score and score corpus manifest must be different files")
+	}
+	metadataRaw, err := readRegularNoSymlink(metadataPath)
+	if err != nil {
+		return fmt.Errorf("read activation metadata for score corpus: %w", err)
+	}
+	scoreRaw, err := readRegularNoSymlink(scoreAbsolute)
+	if err != nil {
+		return fmt.Errorf("read score for score corpus: %w", err)
+	}
+	metadataDigest := sha256.Sum256(metadataRaw)
+	scoreDigest := sha256.Sum256(scoreRaw)
+	manifest := scoreCorpusManifest{
+		SchemaVersion: 1, Contract: scoreCorpusManifestContract, ProbeID: probeID,
+		PlanSHA256: planSHA256, ActivationMetadataPath: metadataRelative,
+		ActivationMetadataSHA256: hex.EncodeToString(metadataDigest[:]), ScorePath: scoreRelative,
+		ScoreSHA256: hex.EncodeToString(scoreDigest[:]), ArmCorpus: corpus,
+	}
+	if err := publishJSON(manifestPath, manifest); err != nil {
+		return fmt.Errorf("publish score corpus manifest: %w", err)
+	}
+	return verifyScoreCorpusManifest(manifestPath, activationMetadataPath, scorePath, planSHA256)
+}
+
+func verifyScoreCorpusManifest(path, activationMetadataPath, scorePath, expectedPlanSHA256 string) error {
+	manifestRaw, err := readRegularNoSymlink(path)
+	if err != nil {
+		return fmt.Errorf("read score corpus manifest: %w", err)
+	}
+	var manifest scoreCorpusManifest
+	if err := decodeStrictJSON(manifestRaw, &manifest); err != nil {
+		return fmt.Errorf("decode score corpus manifest: %w", err)
+	}
+	if manifest.SchemaVersion != 1 || manifest.Contract != scoreCorpusManifestContract || manifest.ProbeID != probeID || !isHexDigest(manifest.PlanSHA256) || !isHexDigest(manifest.ActivationMetadataSHA256) || !isHexDigest(manifest.ScoreSHA256) {
+		return fmt.Errorf("score corpus manifest has an invalid contract identity")
+	}
+	if expectedPlanSHA256 != "" && manifest.PlanSHA256 != expectedPlanSHA256 {
+		return fmt.Errorf("score corpus manifest plan digest does not match expected plan")
+	}
+	outputRoot, err := activationOutputRoot(activationMetadataPath)
+	if err != nil {
+		return err
+	}
+	manifestAbsolute, err := filepath.Abs(path)
+	if err != nil {
+		return err
+	}
+	if filepath.Clean(manifestAbsolute) != filepath.Join(outputRoot, "provenance", "score-corpus-manifest.json") {
+		return fmt.Errorf("score corpus manifest is outside its registered path")
+	}
+	metadataAbsolute, err := filepath.Abs(activationMetadataPath)
+	if err != nil {
+		return err
+	}
+	metadataRelative, err := relativeScorePath(outputRoot, metadataAbsolute)
+	if err != nil || manifest.ActivationMetadataPath != metadataRelative {
+		return fmt.Errorf("score corpus manifest activation metadata path is not bound")
+	}
+	metadataRaw, err := readRegularNoSymlink(metadataAbsolute)
+	if err != nil {
+		return fmt.Errorf("read score corpus activation metadata: %w", err)
+	}
+	metadataDigest := sha256.Sum256(metadataRaw)
+	if manifest.ActivationMetadataSHA256 != hex.EncodeToString(metadataDigest[:]) {
+		return fmt.Errorf("score corpus activation metadata digest mismatch")
+	}
+	scoreAbsolute, err := filepath.Abs(scorePath)
+	if err != nil {
+		return err
+	}
+	scoreRelative, err := relativeScorePath(outputRoot, scoreAbsolute)
+	if err != nil || manifest.ScorePath != scoreRelative {
+		return fmt.Errorf("score corpus manifest score path is not bound")
+	}
+	scoreRaw, err := readRegularNoSymlink(scoreAbsolute)
+	if err != nil {
+		return fmt.Errorf("read score corpus score: %w", err)
+	}
+	scoreDigest := sha256.Sum256(scoreRaw)
+	if manifest.ScoreSHA256 != hex.EncodeToString(scoreDigest[:]) {
+		return fmt.Errorf("score corpus score digest mismatch")
+	}
+	var score scoreDocument
+	if err := decodeStrictJSON(scoreRaw, &score); err != nil {
+		return fmt.Errorf("decode score corpus score: %w", err)
+	}
+	if score.SchemaVersion != 1 || score.Contract != scoreContract || score.ProbeID != probeID || score.PlanSHA256 != manifest.PlanSHA256 || !scoreCorpusEntriesEqual(score.ArmCorpus, manifest.ArmCorpus) {
+		return fmt.Errorf("score document is not bound to the score corpus manifest")
+	}
+	if len(manifest.ArmCorpus) != 3 {
+		return fmt.Errorf("score corpus manifest must contain exactly three arm results")
+	}
+	armNames := []string{"treatment", "mode-off", "no-roster"}
+	resultPaths := make([]string, len(armNames))
+	seenArms := make(map[string]struct{}, len(armNames))
+	for _, entry := range manifest.ArmCorpus {
+		if _, duplicate := seenArms[entry.Arm]; duplicate {
+			return fmt.Errorf("score corpus manifest repeats arm %s", entry.Arm)
+		}
+		seenArms[entry.Arm] = struct{}{}
+		index := -1
+		for candidateIndex, armName := range armNames {
+			if entry.Arm == armName {
+				index = candidateIndex
+				break
+			}
+		}
+		if index < 0 {
+			return fmt.Errorf("score corpus manifest contains unknown arm %s", entry.Arm)
+		}
+		if entry.Bytes <= 0 || !isHexDigest(entry.SHA256) {
+			return fmt.Errorf("score corpus manifest arm %s has an invalid file identity", entry.Arm)
+		}
+		if !strings.HasPrefix(entry.Path, "provenance/arm-results/") {
+			return fmt.Errorf("score corpus manifest arm %s has an invalid relative path", entry.Arm)
+		}
+		absolute := filepath.Join(outputRoot, filepath.FromSlash(entry.Path))
+		relative, err := relativeScorePath(outputRoot, absolute)
+		if err != nil || relative != entry.Path || filepath.Dir(absolute) != filepath.Join(outputRoot, "provenance", "arm-results") {
+			return fmt.Errorf("score corpus manifest arm %s escapes its registered directory", entry.Arm)
+		}
+		baseName := filepath.Base(absolute)
+		if !strings.HasPrefix(baseName, entry.Arm+"-") || !strings.HasSuffix(baseName, ".json") || strings.TrimSuffix(strings.TrimPrefix(baseName, entry.Arm+"-"), ".json") != entry.SHA256 {
+			return fmt.Errorf("score corpus manifest arm %s path does not contain its digest", entry.Arm)
+		}
+		resultPaths[index] = absolute
+	}
+	for index, armName := range armNames {
+		if _, ok := seenArms[armName]; !ok || resultPaths[index] == "" {
+			return fmt.Errorf("score corpus manifest omits arm %s", armName)
+		}
+	}
+	captured, err := captureScoreCorpus(activationMetadataPath, armNames, resultPaths)
+	if err != nil {
+		return err
+	}
+	if !scoreCorpusEntriesEqual(captured, manifest.ArmCorpus) {
+		return fmt.Errorf("score corpus manifest arm identities do not match retained files")
 	}
 	return nil
 }
