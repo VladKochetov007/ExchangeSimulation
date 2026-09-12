@@ -77,6 +77,8 @@ for runner in \
 	rg -n 'flock -n 3' "$runner" >/dev/null ||
 		fail "SV1D runner does not revalidate inherited lock ownership: $runner"
 done
+rg -n 'SV1D_LOCK_HELD.*== 1' "$root_dir/scripts/run-v2-r2-sv1d-capacity-preflight.sh" >/dev/null ||
+	fail "SV1D capacity runner does not guard its internal arm entrypoint"
 
 expected_calendar_timeline=$(cat <<'EOF'
 [

@@ -20,6 +20,7 @@ simulation_end_nano=1735689900000000000
 capacity_hypothesis="V2-R2-SV1D-CAPACITY-ONLY"
 capacity_contract="v2-r2-sv1d-capacity-runner-v1"
 capacity_probe_id="v2-r2-sv1d-activation-659"
+capacity_lock_path="/home/vlad/v2-r2-sv1d-capacity-977.lock"
 
 fail() {
 	echo "SV1D capacity preflight: $*" >&2
@@ -217,6 +218,8 @@ run_capacity_arm() {
 if [[ "${1:-}" == "--internal-arm" ]]; then
 	shift
 	[[ "${SV1D_LOCK_HELD:-0}" == 1 ]] || exit 1
+	[[ "$(readlink "/proc/$$/fd/3" 2>/dev/null)" == "$capacity_lock_path" ]] || exit 3
+	flock -n 3 || exit 4
 	[[ $# -eq 11 ]] || exit 2
 	source "$root_dir/scripts/v2-integrated-longrun-r2-contract.sh"
 	run_capacity_arm "$@"
@@ -242,8 +245,6 @@ capacity_attestation=${SV1D_CAPACITY_PREFLIGHT_ATTESTATION:-"/home/vlad/v2-r2-sv
 review_attestation=${SV1D_REVIEW_ATTESTATION:-}
 review_report=${SV1D_REVIEW_REPORT:-}
 trusted_review_key=${SV1D_TRUSTED_REVIEW_KEY:-}
-capacity_lock_path="/home/vlad/v2-r2-sv1d-capacity-977.lock"
-
 multivenue_binary=$(normalize_input_path "$multivenue_binary") || fail "could not normalize multivenue binary"
 sv1dprobe_binary=$(normalize_input_path "$sv1dprobe_binary") || fail "could not normalize sv1dprobe binary"
 evsrender_binary=$(normalize_input_path "$evsrender_binary") || fail "could not normalize evsrender binary"
