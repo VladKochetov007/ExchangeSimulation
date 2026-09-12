@@ -1295,3 +1295,30 @@ Weekly quota pause / next controlled sequence:
 No holdout may be read or consumed before explicit freeze authorization.
 Historical evidence may be archived only after its own measurement contract
 passes; no evidence deletion is required for this pause.
+
+## Append-only mechanical-gate update: final-tree checks passed (`24f3ee1`) — 2026-09-12
+
+The code-bearing source remains `aaf751e`; `24f3ee1` adds only this
+append-only state record. On the exact final tree, bounded `go vet ./...`
+passed, as did targeted `go test -race ./analysis ./cmd/sv1dprobe
+./cmd/sv1dresource ./cmd/mvanalyze ./cmd/prunegate ./tests -count=1`.
+The focused fresh-process checks for the baseline execution stream, binary
+evidence determinism/log-mode neutrality, and perp-exposure evidence
+determinism/log-mode neutrality also passed. The clean bounded `make test`
+at `aaf751e` passed all package, integrated-long-run, R2, archive, and parity
+contracts; shell syntax and `git diff --check` passed.
+
+These checks add no economic or historical claim. The performance feed remains
+at reviewed `b1847ac` with no newer commit. Resource state remains about 33
+GiB free disk, 27 GiB available RAM, and zero swap. No capacity attestation,
+campaign binary, SV1D activation, development cell, freeze, or holdout
+execution has occurred.
+
+The remaining promotion gate is one fresh independent Sol-xhigh review of the
+complete exact tree, including R2 calendar semantics, correctness hardening,
+binary evidence, strict scoring/provenance, and resource manifests. Review
+acceptance is required before one measured binary-capacity run and the pinned
+Go 1.27 build. The next scientific execution is the development-only seed-659
+activation probe, not `dev-607`; its complete tri-arm and resource evidence
+must be accepted before the registered development sequence. Holdouts
+`619/631/641` remain untouched and unauthorized.

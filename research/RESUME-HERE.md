@@ -1518,3 +1518,31 @@ activation probe before considering `dev-607`. Do not spend another large
 experiment or touch holdouts until those gates are accepted. Preserve failed
 and historical artifacts; prune only files whose retention/measurement
 contract has already passed.
+
+## Append-only checkpoint: final-tree mechanical gate complete (`24f3ee1`) — 2026-09-12
+
+The source tree remains unchanged from `aaf751e`; `24f3ee1` contains only the
+pause documentation. The final-tree checks are now complete: `GOMAXPROCS=2
+GOMEMLIMIT=4GiB go vet ./...` passed; targeted race coverage for
+`analysis`, `cmd/sv1dprobe`, `cmd/sv1dresource`, `cmd/mvanalyze`,
+`cmd/prunegate`, and `tests` passed; and the focused fresh-process matrix for
+`TestRunsOfOneSeedProduceOneEventStream`,
+`TestBinaryEvidenceIsFreshProcessDeterministicAndNeutral`, and
+`TestPerpExposureEvidenceIsFreshProcessDeterministicAndNeutral` passed. The
+clean bounded `make test` at the preceding source commit passed all package,
+integrated-long-run, R2, archive, and parity contracts. Shell syntax and diff
+hygiene also pass.
+
+No economic semantics, configuration, historical evidence, or experiment
+authorization changed. The performance feed still has no commit after
+`b1847ac`. The final resource observation is approximately 33 GiB free disk,
+27 GiB available RAM, and zero swap. No capacity attestation, pinned campaign
+build, SV1D activation, development cell, freeze, or holdout has run.
+
+This closes the mechanical work for the week, not scientific promotion. The
+next action is one independent Sol-xhigh review of exact tree `24f3ee1` using
+the raw R2/SV1D contracts and provenance changes. If accepted, measure binary
+capacity once, build pinned Go 1.27 binaries, and run only the development
+seed-659 activation probe. Do not rerun completed gates or consume `dev-607`
+until that probe is independently inspected; do not read holdouts `619/631/641`
+before explicit freeze authorization.
