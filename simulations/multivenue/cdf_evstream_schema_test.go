@@ -184,3 +184,69 @@ func TestCDFDecisionRequiredReferenceRejectsZero(t *testing.T) {
 		t.Fatalf("zero required CDF reference error = %v, want ErrCorrupt", err)
 	}
 }
+
+type cdfDecisionTestDictionary struct {
+	dictionary *evstream.Dictionary
+}
+
+func (d *cdfDecisionTestDictionary) Intern(value string) (uint32, error) {
+	return d.dictionary.Assign(value)
+}
+
+func (d *cdfDecisionTestDictionary) Lookup(reference uint32) (string, bool) {
+	return d.dictionary.Value(reference)
+}
+
+func cdfDecisionQuotePriceOffset(payload []byte) int {
+	cursor := evstream.NewCursor(payload)
+	cursor.Presence(cdfDecisionOptionalFields)
+	for index := 0; index < 10; index++ {
+		cursor.Uint32()
+	}
+	cursor.Uint64()
+	for index := 0; index < 4; index++ {
+		cursor.Int64()
+	}
+	cursor.Uint64()
+	cursor.Uint32()
+	cursor.Uint64()
+	cursor.Int64()
+	for index := 0; index < 13; index++ {
+		cursor.Int64()
+	}
+	return cursor.Offset()
+}
+
+func TestCDFDecisionV4RejectsContradictoryOptionalNumericPresence(t *testing.T) {
+	base := ElasticLiquiditySupplierDecision{
+		Role: "cdf_elastic_supplier_1", ClientID: 7, Symbol: "CDF/USD",
+		Action: "withdraw", Reason: "risk_limit",
+	}
+	for _, test := range []struct {
+		name    string
+		encoded int64
+		mutated int64
+	}{
+		{name: "absent slot is nonzero", encoded: 0, mutated: 1},
+		{name: "present slot is zero", encoded: 1, mutated: 0},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			interner := &cdfDecisionTestDictionary{dictionary: evstream.NewDictionary()}
+			decision := base
+			decision.QuotePrice = test.encoded
+			payload, err := decision.AppendPayloadInterning(nil, interner)
+			if err != nil {
+				t.Fatal(err)
+			}
+			quotePriceOffset := cdfDecisionQuotePriceOffset(payload)
+			if quotePriceOffset+8 > len(payload) {
+				t.Fatalf("quote price offset %d exceeds payload length %d", quotePriceOffset, len(payload))
+			}
+			binary.LittleEndian.PutUint64(payload[quotePriceOffset:], uint64(test.mutated))
+			var decoded ElasticLiquiditySupplierDecision
+			if err := decodeElasticLiquiditySupplierDecisionVersioned(payload, interner, &decoded, 4); !errors.Is(err, evstream.ErrCorrupt) {
+				t.Fatalf("contradictory optional numeric presence error = %v, want ErrCorrupt", err)
+			}
+		})
+	}
+}

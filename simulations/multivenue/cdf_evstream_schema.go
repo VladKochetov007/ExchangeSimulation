@@ -241,6 +241,11 @@ func decodeElasticLiquiditySupplierDecisionVersioned(payload []byte, resolve evs
 	if cdfPresenceHasUnknownBits(presence, optionalFields) {
 		return fmt.Errorf("%w: unknown CDF decision presence bit", evstream.ErrCorrupt)
 	}
+	if schemaVersion >= 4 {
+		if err := validateCDFDecisionOptionalNumbers(presence, *into); err != nil {
+			return err
+		}
+	}
 	if schemaVersion < 4 {
 		legacyValues := [...]*string{
 			&into.Role, &into.Symbol, &into.ObservationFingerprint, &into.ObservationDigest,
@@ -332,6 +337,43 @@ func decodeElasticLiquiditySupplierDecisionVersioned(payload []byte, resolve evs
 		into.ReplacesOrderID = 0
 	}
 	return finishCDFSchemaCursor(cursor)
+}
+
+func validateCDFDecisionOptionalNumbers(presence evstream.PresenceSet, decision ElasticLiquiditySupplierDecision) error {
+	int64Fields := [...]struct {
+		name    string
+		present bool
+		value   int64
+	}{
+		{"QuotePrice", presence.Has(cdfDecisionQuotePriceBit), decision.QuotePrice},
+		{"QuoteQty", presence.Has(cdfDecisionQuoteQtyBit), decision.QuoteQty},
+		{"MinimumQualifyingQty", presence.Has(cdfDecisionMinimumQtyBit), decision.MinimumQualifyingQty},
+		{"RegisteredMinimumExecutableQty", presence.Has(cdfDecisionRegisteredQtyBit), decision.RegisteredMinimumExecutableQty},
+		{"QuoteSubmittedAt", presence.Has(cdfDecisionSubmittedAtBit), decision.QuoteSubmittedAt},
+		{"QuoteCashAvailable", presence.Has(cdfDecisionCashAvailableBit), decision.QuoteCashAvailable},
+		{"QuoteCashRequired", presence.Has(cdfDecisionCashRequiredBit), decision.QuoteCashRequired},
+	}
+	for _, field := range int64Fields {
+		if field.present == (field.value == 0) {
+			return fmt.Errorf("%w: CDF decision optional numeric field %s has contradictory presence and value", evstream.ErrCorrupt, field.name)
+		}
+	}
+	uint64Fields := [...]struct {
+		name    string
+		present bool
+		value   uint64
+	}{
+		{"QuoteOrderID", presence.Has(cdfDecisionQuoteOrderBit), decision.QuoteOrderID},
+		{"QuoteRequestID", presence.Has(cdfDecisionQuoteRequestBit), decision.QuoteRequestID},
+		{"CancelRequestID", presence.Has(cdfDecisionCancelRequestBit), decision.CancelRequestID},
+		{"ReplacesOrderID", presence.Has(cdfDecisionReplacesOrderBit), decision.ReplacesOrderID},
+	}
+	for _, field := range uint64Fields {
+		if field.present == (field.value == 0) {
+			return fmt.Errorf("%w: CDF decision optional numeric field %s has contradictory presence and value", evstream.ErrCorrupt, field.name)
+		}
+	}
+	return nil
 }
 
 func resolveOptionalCDFString(resolve evstream.Resolver, presence evstream.PresenceSet, bit int, ref uint32) (string, error) {
