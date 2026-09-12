@@ -164,6 +164,7 @@ func TestValidateSV1DActivationMetadataBindsPathAndDigest(t *testing.T) {
 		ReviewAttestationSHA256: strings.Repeat("d", 64), ReviewReportSHA256: strings.Repeat("e", 64),
 		CapacityAttestationSHA256: strings.Repeat("1", 64), CapacityRecordsSHA256: strings.Repeat("2", 64),
 		TrustedReviewKeySHA256: strings.Repeat("3", 64), CapacityRoot: filepath.Join(filepath.Dir(root), "capacity"), CapacityRecordsRoot: filepath.Join(filepath.Dir(root), "capacity-records"),
+		ArmResultRoot:          filepath.Join(root, "provenance", "arm-results"),
 		ActivationRunnerSHA256: strings.Repeat("4", 64), CapacityRunnerSHA256: strings.Repeat("5", 64),
 		SimulatorSHA256: strings.Repeat("6", 64), AnalyzerSHA256: strings.Repeat("7", 64), RendererSHA256: strings.Repeat("8", 64),
 		EvidenceFormat: "evstream_v3", EvidenceSchemaEpoch: 4, LogMode: "full", GOMAXPROCS: 2, GOMEMLIMIT: "4GiB",
@@ -534,6 +535,56 @@ func TestScoreSV1DProbeRejectsInvalidIncompleteAndNonDirectionalInputs(t *testin
 				t.Fatalf("probe status = %q; want %q", got, test.want)
 			}
 		})
+	}
+}
+
+func TestScoreSV1DProbeRetainsDiagnosticsForScientificRejections(t *testing.T) {
+	plan := testSV1DProbePlan()
+	base := []SV1DProbeArmResult{
+		testSV1DProbeArm(plan.Treatment, true, true, true, true, true, []CDFVenueConcentrationAudit{
+			testSV1DVenue("north", 10, 0, 0, 10, 10, "two_sided"), testSV1DVenue("central", 20, 0, 0, 20, 20, "two_sided"), testSV1DVenue("south", 30, 0, 0, 30, 30, "two_sided"),
+		}),
+		testSV1DProbeArm(plan.ModeOff, true, true, true, true, false, []CDFVenueConcentrationAudit{
+			testSV1DVenue("north", 40, 0, 0, 40, 40, "two_sided"), testSV1DVenue("central", 50, 0, 0, 50, 50, "two_sided"), testSV1DVenue("south", 60, 0, 0, 60, 60, "two_sided"),
+		}),
+		testSV1DProbeArm(plan.NoRoster, true, true, true, true, false, []CDFVenueConcentrationAudit{
+			testSV1DVenue("north", 70, 0, 0, 70, 70, "two_sided"), testSV1DVenue("central", 80, 0, 0, 80, 80, "two_sided"), testSV1DVenue("south", 90, 0, 0, 90, 90, "two_sided"),
+		}),
+	}
+	for _, test := range []struct {
+		name   string
+		mutate func(*SV1DProbeArmResult)
+		want   string
+	}{
+		{name: "activation", mutate: func(treatment *SV1DProbeArmResult) { treatment.ActivationSatisfied = false }, want: SV1DProbeStatusTreatmentNotActivated},
+		{name: "anti-cheating", mutate: func(treatment *SV1DProbeArmResult) { treatment.AntiCheatingSatisfied = false }, want: SV1DProbeStatusAntiCheatingRejected},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			arms := cloneSV1DProbeArms(base)
+			test.mutate(&arms[0])
+			score := ScoreSV1DProbe(plan, arms)
+			if score.Status != test.want {
+				t.Fatalf("status = %q, want %q; failures = %v", score.Status, test.want, score.FailedPredicates)
+			}
+			if len(score.Venues) != len(plan.VenueIDs) || score.TreatmentNonTwoSidedDurationNano == 0 || score.ModeOffNonTwoSidedDurationNano == 0 || score.NoRosterNonTwoSidedDurationNano == 0 {
+				t.Fatalf("scientific rejection lost diagnostics: venues=%d durations=%d/%d/%d", len(score.Venues), score.TreatmentNonTwoSidedDurationNano, score.ModeOffNonTwoSidedDurationNano, score.NoRosterNonTwoSidedDurationNano)
+			}
+			if len(score.FailedPredicates) == 0 {
+				t.Fatal("scientific rejection did not retain its failed predicate")
+			}
+		})
+	}
+
+	venueFailureArms := cloneSV1DProbeArms(base)
+	venueFailureArms[0].ActivationSatisfied = false
+	venueFailureArms[0].Venues[0].BidOnlyDurationNano = plan.MaxUninterruptedNonTwoSidedDurationNano + 1
+	venueFailureArms[0].Venues[0].OneSidedDurationNano = plan.MaxUninterruptedNonTwoSidedDurationNano + 1
+	venueFailureArms[0].Venues[0].NonTwoSidedDurationNano = plan.MaxUninterruptedNonTwoSidedDurationNano + 1
+	venueFailureArms[0].Venues[0].MaxUninterruptedNonTwoSidedDurationNano = plan.MaxUninterruptedNonTwoSidedDurationNano + 1
+	venueFailureScore := ScoreSV1DProbe(plan, venueFailureArms)
+	if venueFailureScore.Status != SV1DProbeStatusTreatmentNotActivated ||
+		!strings.Contains(strings.Join(venueFailureScore.FailedPredicates, "\n"), "treatment exceeds per-venue persistence threshold: north") {
+		t.Fatalf("activation rejection discarded venue failure: status=%q failures=%v", venueFailureScore.Status, venueFailureScore.FailedPredicates)
 	}
 }
 

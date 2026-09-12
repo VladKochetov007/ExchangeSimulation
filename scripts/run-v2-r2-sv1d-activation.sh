@@ -417,7 +417,7 @@ require_live_resource_envelope "$capacity_memory_limit_bytes"
 export GOMAXPROCS=2
 export GOMEMLIMIT=4GiB
 
-mkdir -p "$output_root/provenance" "$output_root/tools" "$output_root/configs" "$output_root/arms" "$output_root/rendered" "$output_root/results" "$output_root/logs"
+mkdir -p "$output_root/provenance" "$output_root/provenance/arm-results" "$output_root/tools" "$output_root/configs" "$output_root/arms" "$output_root/rendered" "$output_root/results" "$output_root/logs"
 copy_immutable_file retained-multivenue "$multivenue_binary" "$output_root/tools/multivenue-$multivenue_sha256"
 copy_immutable_file retained-sv1dprobe "$sv1dprobe_binary" "$output_root/tools/sv1dprobe-$sv1dprobe_sha256"
 copy_immutable_file retained-evsrender "$evsrender_binary" "$output_root/tools/evsrender-$evsrender_sha256"
@@ -447,6 +447,7 @@ declare -A config_for=(
 	[mode-off]="$staged_mode_off_config"
 	[no-roster]="$staged_no_roster_config"
 )
+declare -A retained_result_for
 
 activation_metadata="$output_root/provenance/activation-run-metadata.json"
 jq -S -n \
@@ -455,7 +456,7 @@ jq -S -n \
 	--arg review_attestation_sha256 "$review_attestation_sha256" --arg review_report_sha256 "$review_report_sha256" \
 		--arg capacity_attestation_sha256 "$capacity_attestation_sha256" --arg capacity_records_sha256 "$capacity_records_sha256" \
 		--arg trusted_review_key_sha256 "$trusted_review_key_sha256" \
-	--arg capacity_root "$capacity_root" --arg capacity_records_root "$capacity_records_root" --arg activation_runner_sha256 "$activation_runner_sha256" --arg capacity_runner_sha256 "$capacity_runner_sha256" \
+	--arg capacity_root "$capacity_root" --arg capacity_records_root "$capacity_records_root" --arg arm_result_root "$output_root/provenance/arm-results" --arg activation_runner_sha256 "$activation_runner_sha256" --arg capacity_runner_sha256 "$capacity_runner_sha256" \
 	--arg simulator_sha256 "$multivenue_sha256" --arg analyzer_sha256 "$sv1dprobe_sha256" --arg renderer_sha256 "$evsrender_sha256" \
 	--arg output_root "$output_root" --arg output_parent "$capacity_output_parent" \
 	'{schema_version: 2, contract: $contract, development_only: true, scientific_result_eligible: false,
@@ -463,7 +464,7 @@ jq -S -n \
 	 review_attestation_sha256: $review_attestation_sha256, review_report_sha256: $review_report_sha256,
 		 capacity_attestation_sha256: $capacity_attestation_sha256, capacity_records_sha256: $capacity_records_sha256,
 		 trusted_review_key_sha256: $trusted_review_key_sha256,
-	 capacity_root: $capacity_root, capacity_records_root: $capacity_records_root, activation_runner_sha256: $activation_runner_sha256, capacity_runner_sha256: $capacity_runner_sha256,
+	 capacity_root: $capacity_root, capacity_records_root: $capacity_records_root, arm_result_root: $arm_result_root, activation_runner_sha256: $activation_runner_sha256, capacity_runner_sha256: $capacity_runner_sha256,
 	 simulator_sha256: $simulator_sha256, analyzer_sha256: $analyzer_sha256, renderer_sha256: $renderer_sha256,
 	 evidence_format: "evstream_v3", evidence_schema_epoch: 4, log_mode: "full", gomaxprocs: 2, gomemlimit: "4GiB",
 	 output_root: $output_root, output_parent: $output_parent, arms: ["treatment", "mode-off", "no-roster"], holdouts_consumed: []}' \
@@ -648,14 +649,22 @@ for arm in treatment mode-off no-roster; do
 	if [[ -s "$result_path" ]] && jq -e '.arm.complete == false' "$result_path" >/dev/null 2>&1; then
 		arm_failure=1
 	fi
+	result_digest=$(hash_file "$result_path")
+	retained_result_path="$output_root/provenance/arm-results/$arm-$result_digest.json"
+	copy_immutable_file "retained-$arm-arm-result" "$result_path" "$retained_result_path"
+	retained_result_for[$arm]="$retained_result_path"
 done
 
 score_path="$output_root/score.json"
 set +e
 "$sv1dprobe_binary" -mode score -out "$score_path" -plan "$plan_path" \
-	-treatment-result "$output_root/results/treatment.json" \
-	-mode-off-result "$output_root/results/mode-off.json" \
-	-no-roster-result "$output_root/results/no-roster.json" -source-revision "$source_revision" \
+	-treatment-result "${retained_result_for[treatment]}" \
+	-mode-off-result "${retained_result_for[mode-off]}" \
+	-no-roster-result "${retained_result_for[no-roster]}" \
+	-treatment-run-dir "$output_root/arms/treatment" -treatment-rendered-dir "$output_root/rendered/treatment" \
+	-mode-off-run-dir "$output_root/arms/mode-off" -mode-off-rendered-dir "$output_root/rendered/mode-off" \
+	-no-roster-run-dir "$output_root/arms/no-roster" -no-roster-rendered-dir "$output_root/rendered/no-roster" \
+	-source-revision "$source_revision" \
 	-tree-revision "$tree_revision" -plan-sha256 "$review_plan_sha256" \
 	-parent-registration-sha256 "$parent_registration_sha256" -amendment-sha256 "$amendment_sha256" \
 	-activation-metadata "$activation_metadata" -review-attestation-sha256 "$review_attestation_sha256" \

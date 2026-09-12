@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 )
 
 const (
@@ -196,32 +197,66 @@ func sv1dReviewSignedPayloadFrom(attestation SV1DReviewAttestation) sv1dReviewSi
 }
 
 func readSV1DRegularFile(path string) ([]byte, error) {
-	absolute, err := filepath.Abs(path)
+	fileDescriptor, absolute, err := openSV1DNoSymlink(path, false)
 	if err != nil {
 		return nil, err
 	}
-	current := string(filepath.Separator)
-	for _, component := range strings.Split(strings.TrimPrefix(absolute, current), string(filepath.Separator)) {
-		if component == "" {
-			continue
-		}
-		current = filepath.Join(current, component)
-		info, err := os.Lstat(current)
-		if err != nil {
-			return nil, err
-		}
-		if info.Mode()&os.ModeSymlink != 0 {
-			return nil, fmt.Errorf("path contains a symlink: %s", path)
-		}
+	file := os.NewFile(uintptr(fileDescriptor), absolute)
+	if file == nil {
+		_ = syscall.Close(fileDescriptor)
+		return nil, fmt.Errorf("could not wrap file descriptor for %s", path)
 	}
-	info, err := os.Stat(absolute)
+	defer file.Close()
+	info, err := file.Stat()
 	if err != nil {
 		return nil, err
 	}
 	if !info.Mode().IsRegular() {
 		return nil, fmt.Errorf("path is not a regular file: %s", path)
 	}
-	return os.ReadFile(absolute)
+	return io.ReadAll(file)
+}
+
+func openSV1DNoSymlink(path string, directory bool) (int, string, error) {
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return -1, "", err
+	}
+	if !filepath.IsAbs(absolute) || absolute == string(filepath.Separator) {
+		return -1, absolute, fmt.Errorf("path is not a non-root absolute path: %s", path)
+	}
+	components := strings.Split(strings.TrimPrefix(absolute, string(filepath.Separator)), string(filepath.Separator))
+	directoryDescriptor, err := syscall.Open(string(filepath.Separator), syscall.O_RDONLY|syscall.O_DIRECTORY|syscall.O_CLOEXEC, 0)
+	if err != nil {
+		return -1, absolute, fmt.Errorf("open path root: %w", err)
+	}
+	for index, component := range components {
+		if component == "" || component == "." || component == ".." {
+			_ = syscall.Close(directoryDescriptor)
+			return -1, absolute, fmt.Errorf("path contains an invalid component: %s", path)
+		}
+		if index == len(components)-1 {
+			flags := syscall.O_RDONLY | syscall.O_CLOEXEC | syscall.O_NOFOLLOW
+			if directory {
+				flags |= syscall.O_DIRECTORY
+			}
+			fileDescriptor, openErr := syscall.Openat(directoryDescriptor, component, flags, 0)
+			_ = syscall.Close(directoryDescriptor)
+			if openErr != nil {
+				return -1, absolute, openErr
+			}
+			return fileDescriptor, absolute, nil
+		}
+		nextDirectoryDescriptor, openErr := syscall.Openat(directoryDescriptor, component, syscall.O_RDONLY|syscall.O_DIRECTORY|syscall.O_CLOEXEC|syscall.O_NOFOLLOW, 0)
+		if openErr != nil {
+			_ = syscall.Close(directoryDescriptor)
+			return -1, absolute, openErr
+		}
+		_ = syscall.Close(directoryDescriptor)
+		directoryDescriptor = nextDirectoryDescriptor
+	}
+	_ = syscall.Close(directoryDescriptor)
+	return -1, absolute, fmt.Errorf("path has no final component: %s", path)
 }
 
 func isSV1DEOF(err error) bool { return err == io.EOF }

@@ -1436,3 +1436,47 @@ performance branch remains reviewed through `b1847ac` with no newer commit or
 imported implementation. Promotion again awaits one fresh exact-tree
 independent Sol-xhigh review; only acceptance permits capacity preflight and
 the seed-659 activation probe.
+
+## Append-only pause checkpoint: SV1D scoring provenance correction in progress — 2026-09-11
+
+Following the second fresh exact-tree Sol-xhigh rejection, the worktree retains
+an uncommitted correction on scientific HEAD `96c34065`. Complete arm scoring
+now re-audits the retained run/rendered evidence and compares the result with
+the retained arm record; strict result records are copied by the runner under
+the metadata-bound `provenance/arm-results/<arm>-<sha256>.json` layout and read
+with descriptor-bound no-symlink traversal. Scientific rejection statuses now
+populate venue diagnostics, aggregate durations/fractions, and failed
+predicates before branching to `TREATMENT_NOT_ACTIVATED` or
+`ANTI_CHEATING_REJECTED`. The activation metadata contract records the result
+root. No economic semantics, historical evidence, capacity artifact, or
+experiment was changed.
+
+The focused `analysis`/`cmd/sv1dprobe` tests and the focused
+`evstream`/`types`/`exchange`/`simulations/multivenue` suites passed; shell
+syntax and `git diff --check` passed. A new bounded full `make test` reached
+the package suites through `simulations/latencylab` but was deliberately
+stopped with SIGINT at the quota boundary before completion, so this patch is
+not yet committed or promoted. No child test process remains; latest resource
+check showed about 24 GiB available RAM and 34 GiB free disk. Next session:
+rerun cleanly in tmux, then vet/race/fresh-process checks, commit and push this
+checkpoint, append the review correction record, and obtain one fresh exact-tree
+independent review. Do not run capacity, SV1D activation, development cells,
+freeze, or holdouts `619/631/641` before that review.
+
+## Append-only checkpoint: SV1D scoring provenance correction mechanically green — 2026-09-12
+
+The previously paused correction was revalidated after resuming. The full
+bounded `make test` completed every package, integrated-long-run, R2,
+multivenue, and test-suite check; its only nonzero result was the intentional
+dirty-worktree archive/parity refusal. `go vet ./...`, targeted race coverage,
+fresh-process determinism/evidence-neutrality, shell syntax, and
+`git diff --check` all pass. The added regression now also proves a valid
+per-venue threshold failure is retained alongside a treatment activation
+failure. The performance branch was fetched again and has no commit after
+reviewed `b1847ac`; no performance code was imported.
+
+The correction is ready for one attributable commit/push. It changes no
+economic mechanism or historical artifact. After the commit, rerun the clean
+full/archive gate, then obtain the next exact-tree independent Sol-xhigh review;
+capacity preflight, SV1D activation, development cells, freeze, and holdouts
+`619/631/641` remain unauthorized.

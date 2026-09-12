@@ -16,6 +16,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"exchange_sim/analysis"
 )
@@ -75,6 +76,12 @@ func run() error {
 	modeOffResult := flag.String("mode-off-result", "", "audited mode-off arm result")
 	noRosterResult := flag.String("no-roster-result", "", "audited no-roster arm result")
 	treatmentResult := flag.String("treatment-result", "", "audited treatment arm result")
+	treatmentRunDir := flag.String("treatment-run-dir", "", "retained treatment arm evidence directory")
+	treatmentRenderedDir := flag.String("treatment-rendered-dir", "", "retained treatment rendered evidence directory")
+	modeOffRunDir := flag.String("mode-off-run-dir", "", "retained mode-off arm evidence directory")
+	modeOffRenderedDir := flag.String("mode-off-rendered-dir", "", "retained mode-off rendered evidence directory")
+	noRosterRunDir := flag.String("no-roster-run-dir", "", "retained no-roster arm evidence directory")
+	noRosterRenderedDir := flag.String("no-roster-rendered-dir", "", "retained no-roster rendered evidence directory")
 	reviewAttestation := flag.String("review-attestation", "", "externally signed SV1D review attestation")
 	reviewReport := flag.String("review-report", "", "externally produced SV1D review report")
 	trustedReviewKey := flag.String("trusted-review-key", "", "raw 32-byte trusted Ed25519 public key")
@@ -140,7 +147,11 @@ func run() error {
 			GOMAXPROCS: *gomaxprocs, GOMEMLIMIT: *gomemlimit,
 		})
 	case "score":
-		return scoreArms(*out, *planPath, *treatmentResult, *modeOffResult, *noRosterResult, strictProvenanceInputs{
+		return scoreArms(*out, *planPath, *treatmentResult, *modeOffResult, *noRosterResult, scoreArmEvidencePaths{
+			"treatment": {RunDir: *treatmentRunDir, RenderedDir: *treatmentRenderedDir},
+			"mode-off":  {RunDir: *modeOffRunDir, RenderedDir: *modeOffRenderedDir},
+			"no-roster": {RunDir: *noRosterRunDir, RenderedDir: *noRosterRenderedDir},
+		}, strictProvenanceInputs{
 			SourceRevision: *sourceRevision, TreeRevision: *treeRevision, PlanSHA256: *planSHA256,
 			ParentRegistrationSHA256: *parentRegistrationSHA256, AmendmentSHA256: *amendmentSHA256,
 			ActivationMetadataPath: *activationMetadata, ReviewAttestationSHA256: *reviewAttestationSHA256,
@@ -352,7 +363,14 @@ func publishFailedArm(out, planPath, armName, reason string, inputs ...strictPro
 	return publishJSON(out, armResultDocument{SchemaVersion: 1, Contract: armResultContract, ProbeID: probeID, Arm: result})
 }
 
-func scoreArms(out, planPath, treatmentPath, modeOffPath, noRosterPath string, provenanceInputs strictProvenanceInputs) error {
+type scoreArmEvidencePath struct {
+	RunDir      string
+	RenderedDir string
+}
+
+type scoreArmEvidencePaths map[string]scoreArmEvidencePath
+
+func scoreArms(out, planPath, treatmentPath, modeOffPath, noRosterPath string, evidencePaths scoreArmEvidencePaths, provenanceInputs strictProvenanceInputs) error {
 	if out == "" || planPath == "" || treatmentPath == "" || modeOffPath == "" || noRosterPath == "" {
 		return fmt.Errorf("score mode requires -out, -plan, and all three arm result paths")
 	}
@@ -371,17 +389,45 @@ func scoreArms(out, planPath, treatmentPath, modeOffPath, noRosterPath string, p
 		return err
 	}
 	paths := []string{treatmentPath, modeOffPath, noRosterPath}
+	armNames := []string{document.Plan.Treatment.Name, document.Plan.ModeOff.Name, document.Plan.NoRoster.Name}
+	strictScoring := provenanceInputs.ActivationMetadataPath != ""
 	arms := make([]analysis.SV1DProbeArmResult, 0, len(paths))
-	for _, path := range paths {
-		result, err := readArmResult(path)
+	for index, path := range paths {
+		armName := armNames[index]
+		var result armResultDocument
+		if strictScoring {
+			result, err = readContentAddressedArmResult(path, armName, provenanceInputs.ActivationMetadataPath)
+		} else {
+			result, err = readArmResult(path)
+		}
 		if err != nil {
 			return err
 		}
 		if result.SchemaVersion != 1 || result.Contract != armResultContract || result.ProbeID != probeID {
 			return fmt.Errorf("arm result %s has an invalid contract identity", path)
 		}
-		if err := analysis.ValidateSV1DProbeArmProvenance(result.Arm, expectedSV1DProvenance(document.Plan, armSpecForName(document.Plan, result.Arm.ArmName), provenanceInputs)); err != nil {
+		if result.Arm.ArmName != armName {
+			return fmt.Errorf("arm result %s is for %q, want %q", path, result.Arm.ArmName, armName)
+		}
+		if err := analysis.ValidateSV1DProbeArmProvenance(result.Arm, expectedSV1DProvenance(document.Plan, armSpecForName(document.Plan, armName), provenanceInputs)); err != nil {
 			return fmt.Errorf("arm result %s has invalid strict provenance: %w", path, err)
+		}
+		if strictScoring && result.Arm.Complete {
+			evidencePath, ok := evidencePaths[armName]
+			if !ok {
+				return fmt.Errorf("strict score has no retained evidence paths for %s", armName)
+			}
+			if err := validateStrictScoreEvidencePath(evidencePath, armName); err != nil {
+				return err
+			}
+			freshResult, err := reAuditStrictArm(document.Plan, armName, evidencePath, provenanceInputs)
+			if err != nil {
+				return fmt.Errorf("re-audit retained %s arm: %w", armName, err)
+			}
+			if !sameSV1DProbeArmResult(result.Arm, freshResult) {
+				return fmt.Errorf("arm result %s differs from its retained-evidence re-audit", path)
+			}
+			result.Arm = freshResult
 		}
 		arms = append(arms, result.Arm)
 	}
@@ -396,6 +442,43 @@ func scoreArms(out, planPath, treatmentPath, modeOffPath, noRosterPath string, p
 		return fmt.Errorf("probe score is not executable: %s", score.Status)
 	}
 	return nil
+}
+
+func validateStrictScoreEvidencePath(path scoreArmEvidencePath, armName string) error {
+	if path.RunDir == "" || path.RenderedDir == "" {
+		return fmt.Errorf("strict score requires retained run and rendered evidence paths for %s", armName)
+	}
+	if err := validateExistingDirectoryPath(path.RunDir); err != nil {
+		return fmt.Errorf("retained run directory for %s: %w", armName, err)
+	}
+	if err := validateExistingDirectoryPath(path.RenderedDir); err != nil {
+		return fmt.Errorf("retained rendered directory for %s: %w", armName, err)
+	}
+	return nil
+}
+
+func reAuditStrictArm(plan analysis.SV1DProbePlan, armName string, evidencePath scoreArmEvidencePath, inputs strictProvenanceInputs) (analysis.SV1DProbeArmResult, error) {
+	spec, contract, treatment, err := planArm(plan, armName)
+	if err != nil {
+		return analysis.SV1DProbeArmResult{}, err
+	}
+	run, err := analysis.Open(evidencePath.RunDir)
+	if err != nil {
+		return analysis.SV1DProbeArmResult{}, err
+	}
+	return run.AuditSV1DProbeArm(analysis.SV1DProbeArmAuditOptions{
+		Spec: spec, Contract: contract, Treatment: treatment, PlanSHA256: inputs.PlanSHA256,
+		Activation: analysis.CDFActivationOptions{
+			Contract: contract, EvidenceDir: evidencePath.RunDir, RenderedEvidenceDir: evidencePath.RenderedDir,
+			ExpectedProvenance: expectedSV1DProvenance(plan, spec, inputs),
+		},
+	})
+}
+
+func sameSV1DProbeArmResult(left, right analysis.SV1DProbeArmResult) bool {
+	leftRaw, leftErr := json.Marshal(left)
+	rightRaw, rightErr := json.Marshal(right)
+	return leftErr == nil && rightErr == nil && bytes.Equal(leftRaw, rightRaw)
 }
 
 func verifyCurrentAnalyzer(expectedSHA256 string) error {
@@ -519,38 +602,119 @@ func readTrustedReviewKey(path string) (ed25519.PublicKey, error) {
 }
 
 func readRegularNoSymlink(path string) ([]byte, error) {
-	absolute, err := filepath.Abs(path)
+	fileDescriptor, absolute, err := openNoSymlink(path, false)
 	if err != nil {
 		return nil, err
 	}
-	current := string(filepath.Separator)
-	for _, component := range strings.Split(strings.TrimPrefix(absolute, current), string(filepath.Separator)) {
-		if component == "" {
-			continue
-		}
-		current = filepath.Join(current, component)
-		info, err := os.Lstat(current)
-		if err != nil {
-			return nil, err
-		}
-		if info.Mode()&os.ModeSymlink != 0 {
-			return nil, fmt.Errorf("path contains a symlink: %s", path)
-		}
+	file := os.NewFile(uintptr(fileDescriptor), absolute)
+	if file == nil {
+		_ = syscall.Close(fileDescriptor)
+		return nil, fmt.Errorf("could not wrap file descriptor for %s", path)
 	}
-	info, err := os.Stat(absolute)
+	defer file.Close()
+	info, err := file.Stat()
 	if err != nil {
 		return nil, err
 	}
 	if !info.Mode().IsRegular() {
 		return nil, fmt.Errorf("path is not a regular file: %s", path)
 	}
-	return os.ReadFile(absolute)
+	return io.ReadAll(file)
+}
+
+func validateExistingDirectoryPath(path string) error {
+	fileDescriptor, _, err := openNoSymlink(path, true)
+	if err != nil {
+		return err
+	}
+	return syscall.Close(fileDescriptor)
+}
+
+func openNoSymlink(path string, directory bool) (int, string, error) {
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return -1, "", err
+	}
+	if !filepath.IsAbs(absolute) || absolute == string(filepath.Separator) {
+		return -1, absolute, fmt.Errorf("path is not a non-root absolute path: %s", path)
+	}
+	components := strings.Split(strings.TrimPrefix(absolute, string(filepath.Separator)), string(filepath.Separator))
+	directoryDescriptor, err := syscall.Open(string(filepath.Separator), syscall.O_RDONLY|syscall.O_DIRECTORY|syscall.O_CLOEXEC, 0)
+	if err != nil {
+		return -1, absolute, fmt.Errorf("open path root: %w", err)
+	}
+	for index, component := range components {
+		if component == "" || component == "." || component == ".." {
+			_ = syscall.Close(directoryDescriptor)
+			return -1, absolute, fmt.Errorf("path contains an invalid component: %s", path)
+		}
+		isFinal := index == len(components)-1
+		if isFinal {
+			flags := syscall.O_RDONLY | syscall.O_CLOEXEC | syscall.O_NOFOLLOW
+			if directory {
+				flags |= syscall.O_DIRECTORY
+			}
+			fileDescriptor, openErr := syscall.Openat(directoryDescriptor, component, flags, 0)
+			_ = syscall.Close(directoryDescriptor)
+			if openErr != nil {
+				return -1, absolute, openErr
+			}
+			return fileDescriptor, absolute, nil
+		}
+		nextDirectoryDescriptor, openErr := syscall.Openat(directoryDescriptor, component, syscall.O_RDONLY|syscall.O_DIRECTORY|syscall.O_CLOEXEC|syscall.O_NOFOLLOW, 0)
+		if openErr != nil {
+			_ = syscall.Close(directoryDescriptor)
+			return -1, absolute, openErr
+		}
+		_ = syscall.Close(directoryDescriptor)
+		directoryDescriptor = nextDirectoryDescriptor
+	}
+	_ = syscall.Close(directoryDescriptor)
+	return -1, absolute, fmt.Errorf("path has no final component: %s", path)
 }
 
 func readArmResult(path string) (armResultDocument, error) {
 	var document armResultDocument
 	if err := readStrictJSON(path, &document); err != nil {
 		return armResultDocument{}, fmt.Errorf("read arm result %s: %w", path, err)
+	}
+	return document, nil
+}
+
+func readContentAddressedArmResult(path, armName, activationMetadataPath string) (armResultDocument, error) {
+	absolutePath, err := filepath.Abs(path)
+	if err != nil {
+		return armResultDocument{}, err
+	}
+	metadataPath, err := filepath.Abs(activationMetadataPath)
+	if err != nil {
+		return armResultDocument{}, err
+	}
+	outputRoot := filepath.Dir(filepath.Dir(filepath.Clean(metadataPath)))
+	expectedRoot := filepath.Join(outputRoot, "provenance", "arm-results")
+	if filepath.Dir(filepath.Clean(absolutePath)) != expectedRoot {
+		return armResultDocument{}, fmt.Errorf("arm result %s is outside the activation arm-result root", path)
+	}
+	baseName := filepath.Base(absolutePath)
+	prefix := armName + "-"
+	if !strings.HasPrefix(baseName, prefix) || !strings.HasSuffix(baseName, ".json") {
+		return armResultDocument{}, fmt.Errorf("arm result %s is not content addressed for %s", path, armName)
+	}
+	digest := strings.TrimSuffix(strings.TrimPrefix(baseName, prefix), ".json")
+	if !isHexDigest(digest) {
+		return armResultDocument{}, fmt.Errorf("arm result %s has an invalid content digest", path)
+	}
+	raw, err := readRegularNoSymlink(absolutePath)
+	if err != nil {
+		return armResultDocument{}, fmt.Errorf("read retained arm result %s: %w", path, err)
+	}
+	actualDigest := sha256.Sum256(raw)
+	if hex.EncodeToString(actualDigest[:]) != digest {
+		return armResultDocument{}, fmt.Errorf("retained arm result %s failed its content-addressed digest", path)
+	}
+	var document armResultDocument
+	if err := decodeStrictJSON(raw, &document); err != nil {
+		return armResultDocument{}, fmt.Errorf("decode retained arm result %s: %w", path, err)
 	}
 	return document, nil
 }
@@ -620,10 +784,14 @@ func publishJSON(path string, value any) error {
 }
 
 func readStrictJSON(path string, target any) error {
-	raw, err := os.ReadFile(path)
+	raw, err := readRegularNoSymlink(path)
 	if err != nil {
 		return err
 	}
+	return decodeStrictJSON(raw, target)
+}
+
+func decodeStrictJSON(raw []byte, target any) error {
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.UseNumber()
 	if err := walkJSONTokens(decoder); err != nil {

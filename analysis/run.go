@@ -148,7 +148,7 @@ type Run struct {
 
 // Open reads a run's report and indexes its event logs.
 func Open(dir string) (*Run, error) {
-	raw, err := os.ReadFile(filepath.Join(dir, "greeks.json"))
+	raw, err := readSV1DRegularFile(filepath.Join(dir, "greeks.json"))
 	if err != nil {
 		return nil, fmt.Errorf("analysis: read report: %w", err)
 	}

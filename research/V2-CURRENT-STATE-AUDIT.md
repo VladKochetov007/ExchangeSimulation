@@ -1204,3 +1204,42 @@ campaign build, SV1D activation, development cell, freeze, or holdout
 with no newer commit and no imported code. Promotion awaits another fresh
 exact-tree independent Sol-xhigh review; acceptance alone permits capacity
 preflight and the seed-659 activation probe.
+
+## Append-only pause checkpoint: SV1D scoring provenance correction in progress — 2026-09-11
+
+After the second fresh exact-tree Sol-xhigh rejection, scientific HEAD remains
+`96c34065` with an uncommitted correction. Strict scoring now binds complete
+arm results to a fresh re-audit of retained run/rendered evidence, while the
+runner retains content-addressed arm result records below the metadata-bound
+`provenance/arm-results` root and uses descriptor-bound no-symlink reads.
+`TREATMENT_NOT_ACTIVATED` and `ANTI_CHEATING_REJECTED` scores now retain all
+validated venue and aggregate diagnostics before returning. This is provenance
+and scoring hardening only; R2 economics, retained evidence, and experiment
+authorization are unchanged.
+
+Focused analysis/CLI and `evstream`/`types`/`exchange`/`simulations/multivenue`
+tests passed, as did shell syntax and diff hygiene. A new full `make test`
+reached the package suites through `simulations/latencylab` and was stopped
+with SIGINT when the quota boundary was reached; its final clean/archive gate
+was not observed. The patch is therefore intentionally uncommitted and awaits
+next-session full test, vet/race/fresh-process validation, commit/push, and a
+fresh exact-tree independent review. No capacity preflight, pinned campaign
+build, SV1D probe, development cell, freeze, or holdout `619/631/641` was run.
+
+## Append-only checkpoint: SV1D scoring provenance correction mechanically green — 2026-09-12
+
+The saved correction was resumed and fully checked. All package,
+integrated-long-run, R2, multivenue, and test suites completed successfully;
+the only nonzero `make test` result was the expected dirty-tree archive/parity
+guard. `go vet ./...`, targeted race tests, fresh-process
+determinism/evidence-neutrality, shell syntax, and diff hygiene passed. The
+performance feed was fetched through reviewed `b1847ac` and remains unchanged.
+
+The correction is ready to commit and push: complete strict arm results are
+re-audited from retained evidence, content-addressed arm records are rooted in
+the activation metadata, no-symlink reads are descriptor-bound, and negative
+scientific statuses retain all validated diagnostics. No economic semantics,
+historical evidence, capacity artifact, or experiment changed. A clean
+post-commit full gate and one fresh exact-tree independent review remain before
+capacity or SV1D activation; development cells, freeze, and holdouts
+`619/631/641` remain untouched.

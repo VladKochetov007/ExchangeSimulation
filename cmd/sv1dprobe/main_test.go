@@ -39,6 +39,49 @@ func TestReadStrictJSONRejectsUnknownFields(t *testing.T) {
 	}
 }
 
+func TestReadStrictJSONRejectsSymlinkedFile(t *testing.T) {
+	directory := t.TempDir()
+	target := filepath.Join(directory, "target.json")
+	link := filepath.Join(directory, "link.json")
+	if err := os.WriteFile(target, []byte(`{"schema_version":1}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	var document planDocument
+	if err := readStrictJSON(link, &document); err == nil {
+		t.Fatal("symlinked JSON file was accepted")
+	}
+}
+
+func TestReadContentAddressedArmResultRejectsMutation(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "activation")
+	metadataPath := filepath.Join(root, "provenance", "activation-run-metadata.json")
+	resultRoot := filepath.Join(root, "provenance", "arm-results")
+	if err := os.MkdirAll(resultRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(armResultDocument{SchemaVersion: 1, Contract: armResultContract, ProbeID: probeID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256(raw)
+	path := filepath.Join(resultRoot, "treatment-"+hex.EncodeToString(digest[:])+".json")
+	if err := os.WriteFile(path, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readContentAddressedArmResult(path, "treatment", metadataPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, append(raw, 'x'), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readContentAddressedArmResult(path, "treatment", metadataPath); err == nil {
+		t.Fatal("mutated content-addressed arm result was accepted")
+	}
+}
+
 func TestPublishJSONRefusesOverwrite(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "nested", "result.json")
 	if err := publishJSON(path, map[string]string{"value": "first"}); err != nil {

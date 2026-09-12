@@ -294,6 +294,7 @@ type sv1dActivationRunMetadata struct {
 	TrustedReviewKeySHA256    string   `json:"trusted_review_key_sha256"`
 	CapacityRoot              string   `json:"capacity_root"`
 	CapacityRecordsRoot       string   `json:"capacity_records_root"`
+	ArmResultRoot             string   `json:"arm_result_root"`
 	ActivationRunnerSHA256    string   `json:"activation_runner_sha256"`
 	CapacityRunnerSHA256      string   `json:"capacity_runner_sha256"`
 	SimulatorSHA256           string   `json:"simulator_sha256"`
@@ -437,7 +438,7 @@ func readSV1DActivationMetadata(path string) (sv1dActivationRunMetadata, []byte,
 		"source_revision", "tree_revision", "probe_id", "plan_sha256",
 		"review_attestation_sha256", "review_report_sha256", "capacity_attestation_sha256",
 		"capacity_records_sha256", "trusted_review_key_sha256", "capacity_root",
-		"capacity_records_root",
+		"capacity_records_root", "arm_result_root",
 		"activation_runner_sha256", "capacity_runner_sha256", "simulator_sha256",
 		"analyzer_sha256", "renderer_sha256", "evidence_format", "evidence_schema_epoch",
 		"log_mode", "gomaxprocs", "gomemlimit", "output_root", "output_parent",
@@ -480,7 +481,9 @@ func validateSV1DActivationMetadata(metadataPath string, expected CDFExpectedPro
 	}
 	if !absoluteCleanPath(metadata.OutputRoot) || !absoluteCleanPath(metadata.OutputParent) ||
 		!absoluteCleanPath(metadata.CapacityRoot) || !absoluteCleanPath(metadata.CapacityRecordsRoot) ||
-		filepath.Dir(metadata.OutputRoot) != metadata.OutputParent {
+		!absoluteCleanPath(metadata.ArmResultRoot) ||
+		filepath.Dir(metadata.OutputRoot) != metadata.OutputParent ||
+		metadata.ArmResultRoot != filepath.Join(metadata.OutputRoot, "provenance", "arm-results") {
 		return fmt.Errorf("SV1D activation metadata has an invalid output or capacity path")
 	}
 	return nil
@@ -869,18 +872,6 @@ func ScoreSV1DProbe(plan SV1DProbePlan, arms []SV1DProbeArmResult) SV1DProbeScor
 		return score
 	}
 
-	treatment := armByName[plan.Treatment.Name]
-	if !treatment.ActivationSatisfied {
-		score.Status = SV1DProbeStatusTreatmentNotActivated
-		score.FailedPredicates = []string{"treatment did not satisfy the registered supplier activation contract"}
-		return score
-	}
-	if !treatment.AntiCheatingSatisfied {
-		score.Status = SV1DProbeStatusAntiCheatingRejected
-		score.FailedPredicates = []string{"treatment failed a registered anti-cheating predicate"}
-		return score
-	}
-
 	for _, venueID := range plan.VenueIDs {
 		treatmentAvailability := availabilityByArm[plan.Treatment.Name][venueID]
 		modeOffAvailability := availabilityByArm[plan.ModeOff.Name][venueID]
@@ -925,6 +916,18 @@ func ScoreSV1DProbe(plan SV1DProbePlan, arms []SV1DProbeArmResult) SV1DProbeScor
 	score.TreatmentNonTwoSidedFraction = float64(score.TreatmentNonTwoSidedDurationNano) / denominator
 	score.ModeOffNonTwoSidedFraction = float64(score.ModeOffNonTwoSidedDurationNano) / denominator
 	score.NoRosterNonTwoSidedFraction = float64(score.NoRosterNonTwoSidedDurationNano) / denominator
+
+	treatment := armByName[plan.Treatment.Name]
+	if !treatment.ActivationSatisfied {
+		score.Status = SV1DProbeStatusTreatmentNotActivated
+		score.FailedPredicates = append(score.FailedPredicates, "treatment did not satisfy the registered supplier activation contract")
+		return score
+	}
+	if !treatment.AntiCheatingSatisfied {
+		score.Status = SV1DProbeStatusAntiCheatingRejected
+		score.FailedPredicates = append(score.FailedPredicates, "treatment failed a registered anti-cheating predicate")
+		return score
+	}
 
 	if len(score.FailedPredicates) > 0 || score.TreatmentNonTwoSidedDurationNano >= score.ModeOffNonTwoSidedDurationNano ||
 		score.TreatmentNonTwoSidedDurationNano >= score.NoRosterNonTwoSidedDurationNano {
