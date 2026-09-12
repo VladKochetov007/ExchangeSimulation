@@ -149,3 +149,11 @@ correctly declining to fabricate ACCEPT or REJECT. The candidate remains at
 the independent-review boundary; no capacity, activation, development cell,
 freeze, or holdout was run. Retry the complete exact-tree review when the
 Sol-xhigh service/quota is available.
+
+## Append-only repeated review-availability stop — 2026-09-12
+
+Two further fresh Sol-xhigh launch attempts against exact HEAD
+`b1d66fec96281e82bafcc3c7b052cd9c68c3281a` failed before inference with
+backend HTTP 403 over WebSocket and HTTPS fallback. No scientific verdict was
+produced. The promotion gate remains closed and no capacity, activation,
+development cell, freeze, or holdout was run.

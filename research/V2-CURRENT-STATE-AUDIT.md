@@ -1503,3 +1503,17 @@ No capacity measurement, pinned Go 1.27 build, activation probe, development
 cell, freeze, or holdout `619/631/641` was run. Retry the same complete
 exact-tree review when Sol-xhigh service/quota is available; acceptance is
 still required before the binary-capacity preflight and seed-659 probe.
+
+## Append-only repeated review-availability stop — 2026-09-12
+
+The next fresh Sol-xhigh review was attempted twice against exact clean HEAD
+`b1d66fec96281e82bafcc3c7b052cd9c68c3281a` (tree
+`1475134b48e9cc05476938154689d5184c9d9835`). Both launches failed before
+inference with backend HTTP 403 over WebSocket and HTTPS fallback. No
+scientific verdict was produced. The candidate remains unpromoted at the
+independent-review gate; no capacity, activation, development, freeze, or
+holdout was run.
+
+When service/quota is available, retry the same complete exact-tree review.
+Acceptance remains required before the binary-capacity preflight and seed-659
+activation probe.

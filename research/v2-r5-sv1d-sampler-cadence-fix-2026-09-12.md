@@ -85,3 +85,12 @@ before inference with backend HTTP 403. No verdict is recorded. The candidate
 remains unpromoted; no capacity, activation, development, freeze, or holdout
 run occurred. Retry the same complete-tree review when the independent review
 service/quota is available.
+
+## Append-only repeated review-availability stop — 2026-09-12
+
+The subsequent review was attempted twice against exact clean HEAD
+`b1d66fec96281e82bafcc3c7b052cd9c68c3281a` (tree
+`1475134b48e9cc05476938154689d5184c9d9835`). Both Sol-xhigh launches failed
+before inference with backend HTTP 403 over WebSocket and HTTPS fallback. No
+verdict is recorded, and the candidate remains unpromoted. No capacity,
+activation, development, freeze, or holdout run occurred.
