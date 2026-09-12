@@ -2,6 +2,7 @@ package evstream_test
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"testing"
 
@@ -136,4 +137,73 @@ func TestReaderRejectsBytesAfterCompletionTrailer(t *testing.T) {
 	if _, err := readProbeStream(complete, false); err == nil {
 		t.Fatal("trailing bytes after completion trailer were accepted")
 	}
+}
+
+func TestReaderRejectsOversizedBlockBeforeReadingPayload(t *testing.T) {
+	stream := writeCompleteProbeStream(t, 1)
+	binary.LittleEndian.PutUint32(stream[evstream.StreamHeaderSize+4:evstream.StreamHeaderSize+8], ^uint32(0))
+	binary.LittleEndian.PutUint32(stream[evstream.StreamHeaderSize+8:evstream.StreamHeaderSize+12], ^uint32(0))
+
+	reader, err := evstream.NewReader(bytes.NewReader(stream[:evstream.StreamHeaderSize+evstream.BlockHeaderSize]), evstream.ReaderOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readReaderFrames(reader); !errors.Is(err, evstream.ErrCorrupt) {
+		t.Fatalf("oversized block error = %v, want ErrCorrupt", err)
+	}
+}
+
+type ratioProbeDecompressor struct{ called bool }
+
+func (*ratioProbeDecompressor) Codec() evstream.Codec { return evstream.CodecLZ4 }
+
+func (d *ratioProbeDecompressor) Decompress(dst, src []byte, uncompressedLen int) ([]byte, error) {
+	d.called = true
+	return dst, nil
+}
+
+func TestReaderRejectsCompressionExpansionBeforeDecompression(t *testing.T) {
+	stream := make([]byte, evstream.StreamHeaderSize+evstream.BlockHeaderSize)
+	copy(stream[:8], evstream.Magic)
+	binary.LittleEndian.PutUint16(stream[8:10], evstream.FormatMajor)
+	binary.LittleEndian.PutUint16(stream[10:12], evstream.FormatMinor)
+	stream[12] = byte(evstream.CodecLZ4)
+	binary.LittleEndian.PutUint32(stream[evstream.StreamHeaderSize:evstream.StreamHeaderSize+4], evstream.BlockMagic)
+	binary.LittleEndian.PutUint32(stream[evstream.StreamHeaderSize+4:evstream.StreamHeaderSize+8], 3)
+	binary.LittleEndian.PutUint32(stream[evstream.StreamHeaderSize+8:evstream.StreamHeaderSize+12], 1)
+
+	decompressor := &ratioProbeDecompressor{}
+	reader, err := evstream.NewReader(bytes.NewReader(stream), evstream.ReaderOptions{
+		Decompressor: decompressor,
+		Limits:       evstream.BlockReadLimits{MaxCompressionRatio: 2},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readReaderFrames(reader); !errors.Is(err, evstream.ErrCorrupt) {
+		t.Fatalf("expansion-ratio error = %v, want ErrCorrupt", err)
+	}
+	if decompressor.called {
+		t.Fatal("decompressor was called before the expansion ratio was validated")
+	}
+}
+
+func TestIndexedReaderRejectsOversizedDescriptorBeforeReading(t *testing.T) {
+	reader := evstream.NewIndexedReader(bytes.NewReader(nil), evstream.CodecNone, evstream.NewDictionary(), nil)
+	err := reader.RangeSelected([]evstream.BlockDescriptor{{
+		StoredLen:       ^uint32(0),
+		UncompressedLen: ^uint32(0),
+	}}, evstream.Query{}, func(evstream.Frame) error { return nil })
+	if !errors.Is(err, evstream.ErrCorrupt) {
+		t.Fatalf("oversized descriptor error = %v, want ErrCorrupt", err)
+	}
+}
+
+func readReaderFrames(reader *evstream.Reader) (uint64, error) {
+	var frames uint64
+	err := reader.Range(func(evstream.Frame) error {
+		frames++
+		return nil
+	})
+	return frames, err
 }

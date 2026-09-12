@@ -233,6 +233,40 @@ func TestRenderBinaryEvidenceV2RejectsLegacySidecars(t *testing.T) {
 	}
 }
 
+func TestRenderBinaryEvidenceRejectsDuplicateSidecarJSONKeys(t *testing.T) {
+	inputDir := filepath.Join(t.TempDir(), "input")
+	writeMinimalBinaryRenderInput(t, inputDir, "north")
+	venueDir := filepath.Join(inputDir, "venues", "north")
+	if err := os.MkdirAll(venueDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	duplicate := []byte(`{"client_id":7,"data":{"venue_id":"north","sequence":1,"payload":{"value":1}},"event":"sidecar","event":"tampered","sim_ts":1}`)
+	if err := os.WriteFile(filepath.Join(venueDir, "general.jsonl"), append(duplicate, '\n'), 0644); err != nil {
+		t.Fatal(err)
+	}
+	manifest := []byte(`{"schema_version":2,"config":{"log_mode":"full","evidence_format":"evstream_v3"}}`)
+	if err := os.WriteFile(filepath.Join(inputDir, "manifest.json"), append(manifest, '\n'), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// The sidecar digest is deliberately made internally consistent; rejection
+	// must come from the duplicate-key parser, not from an unrelated hash check.
+	var sidecarDigest renderArtifactDigest
+	sidecarDigest.add(duplicate)
+	artifact, err := json.MarshalIndent(evidenceArtifactRecord{
+		Domain: "persisted_json_log_evidence_only", Ordering: "unordered_multiset",
+		Events: sidecarDigest.events, Digest: sidecarDigest.hex(),
+	}, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(inputDir, "evidence-only-artifact-hash.json"), append(artifact, '\n'), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := RenderBinaryEvidence(inputDir, filepath.Join(t.TempDir(), "rendered")); err == nil {
+		t.Fatal("renderer accepted duplicate sidecar JSON keys")
+	}
+}
+
 func TestRenderBinaryEvidenceRejectsSchemaEpochAttestationMismatch(t *testing.T) {
 	inputDir := t.TempDir()
 	eventsPath := filepath.Join(inputDir, "events.evs")

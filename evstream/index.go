@@ -3,6 +3,7 @@ package evstream
 import (
 	"encoding/binary"
 	"fmt"
+	"hash/crc32"
 	"io"
 	"math"
 )
@@ -318,6 +319,9 @@ type IndexedReader struct {
 	dict         *Dictionary
 	block        []byte
 	stored       []byte
+	blockFrames  uint32
+	limits       BlockReadLimits
+	initErr      error
 }
 
 // NewIndexedReader prepares random-access reads over a stream.
@@ -329,18 +333,45 @@ type IndexedReader struct {
 // pattern — and it is why the dictionary is small enough to keep resident.
 func NewIndexedReader(source io.ReaderAt, codec Codec, dict *Dictionary,
 	decompressor BlockDecompressor) *IndexedReader {
+	reader, err := NewIndexedReaderWithLimits(source, codec, dict, decompressor, BlockReadLimits{})
+	if err != nil {
+		return &IndexedReader{initErr: err}
+	}
+	return reader
+}
+
+// NewIndexedReaderWithLimits prepares a random-access reader with explicit
+// allocation and decompression bounds. The limits are the same policy used by
+// NewReader, so sequential and selective analysis fail closed consistently.
+func NewIndexedReaderWithLimits(source io.ReaderAt, codec Codec, dict *Dictionary,
+	decompressor BlockDecompressor, limits BlockReadLimits) (*IndexedReader, error) {
+	normalized, err := normalizeBlockReadLimits(limits)
+	if err != nil {
+		return nil, err
+	}
+	if codec != CodecNone && decompressor == nil {
+		return nil, fmt.Errorf("%w: indexed stream is %s but no decompressor supplied", ErrUnsupportedVersion, codec)
+	}
+	if codec != CodecNone && decompressor.Codec() != codec {
+		return nil, fmt.Errorf("%w: indexed stream is %s but decompressor is %s", ErrUnsupportedVersion, codec, decompressor.Codec())
+	}
 	return &IndexedReader{
 		source: source, codec: codec, dict: dict, decompressor: decompressor,
-	}
+		limits: normalized,
+	}, nil
 }
 
 // RangeSelected walks the frames of the given blocks in order, calling visit
 // only for frames matching the query exactly.
 func (r *IndexedReader) RangeSelected(blocks []BlockDescriptor, q Query, visit func(Frame) error) error {
+	if r.initErr != nil {
+		return r.initErr
+	}
 	for _, descriptor := range blocks {
 		if err := r.readBlock(descriptor); err != nil {
 			return err
 		}
+		var seen uint32
 		for offset := 0; offset < len(r.block); {
 			header, err := ParseFrameHeader(r.block[offset:])
 			if err != nil {
@@ -363,30 +394,59 @@ func (r *IndexedReader) RangeSelected(blocks []BlockDescriptor, q Query, visit f
 					return err
 				}
 			}
+			seen++
 			offset = end
+		}
+		if seen != r.blockFrames {
+			return fmt.Errorf("%w: block declares %d frames, found %d", ErrCorrupt, r.blockFrames, seen)
 		}
 	}
 	return nil
 }
 
 func (r *IndexedReader) readBlock(d BlockDescriptor) error {
+	if d.Offset > uint64(^uint64(0)>>1) {
+		return fmt.Errorf("%w: block offset %d exceeds reader offset range", ErrCorrupt, d.Offset)
+	}
+	storedLenValue := uint64(d.StoredLen)
+	uncompressedLenValue := uint64(d.UncompressedLen)
+	if err := validateBlockLengths(r.codec, storedLenValue, uncompressedLenValue, r.limits); err != nil {
+		return err
+	}
 	total := BlockHeaderSize + int(d.StoredLen)
 	r.stored = growTo(r.stored, total)
-	if _, err := r.source.ReadAt(r.stored[:total], int64(d.Offset)); err != nil {
+	read, err := r.source.ReadAt(r.stored[:total], int64(d.Offset))
+	if err != nil || read != total {
 		return ErrShortBuffer
 	}
 	if binary.LittleEndian.Uint32(r.stored[0:4]) != BlockMagic {
 		return fmt.Errorf("%w: block magic at offset %d", ErrCorrupt, d.Offset)
 	}
+	headerStoredLen := uint64(binary.LittleEndian.Uint32(r.stored[8:12]))
+	headerUncompressedLen := uint64(binary.LittleEndian.Uint32(r.stored[4:8]))
+	if headerStoredLen != storedLenValue || headerUncompressedLen != uncompressedLenValue {
+		return fmt.Errorf("%w: index descriptor length disagrees with block header at offset %d", ErrCorrupt, d.Offset)
+	}
+	if err := validateBlockLengths(r.codec, headerStoredLen, headerUncompressedLen, r.limits); err != nil {
+		return err
+	}
 	stored := r.stored[BlockHeaderSize:total]
 	if r.codec == CodecNone {
 		r.block = stored
-		return nil
+	} else {
+		block, decompressErr := r.decompressor.Decompress(r.block[:0], stored, int(d.UncompressedLen))
+		if decompressErr != nil {
+			return fmt.Errorf("%w: decompress at offset %d: %v", ErrCorrupt, d.Offset, decompressErr)
+		}
+		if len(block) != int(d.UncompressedLen) {
+			return fmt.Errorf("%w: decompressed to %d, header says %d at offset %d", ErrCorrupt, len(block), d.UncompressedLen, d.Offset)
+		}
+		r.block = block
 	}
-	block, err := r.decompressor.Decompress(r.block[:0], stored, int(d.UncompressedLen))
-	if err != nil {
-		return fmt.Errorf("%w: decompress at offset %d: %v", ErrCorrupt, d.Offset, err)
+	wantCRC := binary.LittleEndian.Uint32(r.stored[16:20])
+	if crc32.Checksum(r.block, crcTable) != wantCRC {
+		return fmt.Errorf("%w: block CRC mismatch at offset %d", ErrCorrupt, d.Offset)
 	}
-	r.block = block
+	r.blockFrames = binary.LittleEndian.Uint32(r.stored[12:16])
 	return nil
 }

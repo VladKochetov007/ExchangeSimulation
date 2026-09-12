@@ -2,11 +2,14 @@ package multivenue
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -191,7 +194,7 @@ func readRenderRunContract(inputDir string) (renderRunContract, error) {
 		return renderRunContract{}, fmt.Errorf("multivenue: read binary run manifest: %w", err)
 	}
 	var contract renderRunContract
-	if err := json.Unmarshal(raw, &contract); err != nil {
+	if err := decodeRenderJSON(raw, &contract, false); err != nil {
 		return renderRunContract{}, fmt.Errorf("multivenue: decode binary run manifest: %w", err)
 	}
 	if contract.SchemaVersion < 2 || contract.Config.EvidenceFormat != binaryRepresentation {
@@ -215,7 +218,7 @@ func validateBinaryAttestation(inputDir string, eventFrames uint64, reader *evst
 		return fmt.Errorf("multivenue: read binary evidence attestation: %w", err)
 	}
 	var attestation binaryEvidenceArtifactRecord
-	if err := json.Unmarshal(raw, &attestation); err != nil {
+	if err := decodeRenderJSON(raw, &attestation, false); err != nil {
 		return fmt.Errorf("multivenue: decode binary evidence attestation: %w", err)
 	}
 	digest := reader.ExecutionHash()
@@ -238,7 +241,7 @@ func validateBinaryAttestation(inputDir string, eventFrames uint64, reader *evst
 			return fmt.Errorf("multivenue: read evidence-only attestation: %w", err)
 		}
 		var artifact evidenceArtifactRecord
-		if err := json.Unmarshal(raw, &artifact); err != nil {
+		if err := decodeRenderJSON(raw, &artifact, false); err != nil {
 			return fmt.Errorf("multivenue: decode evidence-only attestation: %w", err)
 		}
 		if artifact.Domain != "persisted_json_log_evidence_only" || artifact.Ordering != "unordered_multiset" ||
@@ -365,7 +368,7 @@ func readEvidenceOnlySidecars(venuesDir string) (map[renderRouteKey][]renderReco
 		for scanner.Scan() {
 			raw := append([]byte(nil), scanner.Bytes()...)
 			var event renderPersistedEvent
-			if err := json.Unmarshal(raw, &event); err != nil {
+			if err := decodeRenderJSON(raw, &event, true); err != nil {
 				return fmt.Errorf("multivenue: sidecar %q malformed JSON: %w", relative, err)
 			}
 			if event.Event == "" || event.Data.VenueID != venue || event.Data.Sequence == 0 || len(event.Data.Payload) == 0 {
@@ -477,7 +480,7 @@ func validateRenderedGlobalSequences(routes map[renderRouteKey][]renderRecord, e
 	for key, records := range routes {
 		for _, record := range records {
 			var event renderPersistedEvent
-			if err := json.Unmarshal(record.raw, &event); err != nil {
+			if err := decodeRenderJSON(record.raw, &event, true); err != nil {
 				return fmt.Errorf("multivenue: decode rendered %s/%s: %w", key.venue, key.route, err)
 			}
 			globalSequence := event.Data.GlobalSequence
@@ -494,6 +497,80 @@ func validateRenderedGlobalSequences(routes map[renderRouteKey][]renderRecord, e
 		return fmt.Errorf("multivenue: rendered global sequence count %d does not match event frames %d", len(seen), eventFrames)
 	}
 	return nil
+}
+
+func decodeRenderJSON(raw []byte, target any, rejectUnknownFields bool) error {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	if err := walkRenderJSONTokens(decoder); err != nil {
+		return err
+	}
+	if _, err := decoder.Token(); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return errors.New("multiple top-level JSON values")
+		}
+		return fmt.Errorf("trailing JSON: %w", err)
+	}
+
+	decoder = json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	if rejectUnknownFields {
+		decoder.DisallowUnknownFields()
+	}
+	if err := decoder.Decode(target); err != nil {
+		return err
+	}
+	if _, err := decoder.Token(); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return errors.New("multiple top-level JSON values")
+		}
+		return fmt.Errorf("trailing JSON: %w", err)
+	}
+	return nil
+}
+
+func walkRenderJSONTokens(decoder *json.Decoder) error {
+	token, err := decoder.Token()
+	if err != nil {
+		return err
+	}
+	delimiter, isDelimiter := token.(json.Delim)
+	if !isDelimiter {
+		return nil
+	}
+	switch delimiter {
+	case '{':
+		seen := make(map[string]struct{})
+		for decoder.More() {
+			keyToken, err := decoder.Token()
+			if err != nil {
+				return err
+			}
+			key, ok := keyToken.(string)
+			if !ok {
+				return errors.New("object key is not a string")
+			}
+			if _, duplicate := seen[key]; duplicate {
+				return fmt.Errorf("duplicate JSON object key: %s", key)
+			}
+			seen[key] = struct{}{}
+			if err := walkRenderJSONTokens(decoder); err != nil {
+				return err
+			}
+		}
+		_, err = decoder.Token()
+		return err
+	case '[':
+		for decoder.More() {
+			if err := walkRenderJSONTokens(decoder); err != nil {
+				return err
+			}
+		}
+		_, err = decoder.Token()
+		return err
+	default:
+		return fmt.Errorf("unexpected JSON delimiter %q", delimiter)
+	}
 }
 
 func digestRenderedRoutes(routes map[renderRouteKey][]renderRecord) string {

@@ -670,9 +670,20 @@ func readResourceCounters(path string) (map[string]uint64, error) {
 		if err != nil {
 			return nil, fmt.Errorf("parse cgroup counter in %s: %w", path, err)
 		}
+		if _, duplicate := counters[fields[0]]; duplicate {
+			return nil, fmt.Errorf("duplicate cgroup counter %q in %s", fields[0], path)
+		}
 		counters[fields[0]] = value
 	}
-	return counters, scanner.Err()
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	for _, required := range []string{"oom", "oom_kill"} {
+		if _, present := counters[required]; !present {
+			return nil, fmt.Errorf("cgroup counter %q is missing in %s", required, path)
+		}
+	}
+	return counters, nil
 }
 
 func hostMemorySnapshot() (uint64, uint64, error) {
@@ -680,30 +691,52 @@ func hostMemorySnapshot() (uint64, uint64, error) {
 	if err != nil {
 		return 0, 0, err
 	}
+	return parseHostMemorySnapshot(string(raw))
+}
+
+func parseHostMemorySnapshot(raw string) (uint64, uint64, error) {
 	var available, swapTotal, swapFree uint64
+	var seenAvailable, seenSwapTotal, seenSwapFree bool
 	scanner := bufio.NewScanner(strings.NewReader(string(raw)))
 	for scanner.Scan() {
 		fields := strings.Fields(scanner.Text())
-		if len(fields) < 2 {
+		if len(fields) == 0 {
 			continue
+		}
+		isRequired := fields[0] == "MemAvailable:" || fields[0] == "SwapTotal:" || fields[0] == "SwapFree:"
+		if !isRequired {
+			continue
+		}
+		if len(fields) != 3 || fields[2] != "kB" {
+			return 0, 0, fmt.Errorf("malformed host memory counter %q", fields[0])
 		}
 		value, parseErr := strconv.ParseUint(fields[1], 10, 64)
-		if parseErr != nil {
-			continue
+		if parseErr != nil || value > ^uint64(0)/1024 {
+			return 0, 0, fmt.Errorf("malformed host memory counter %q", fields[0])
 		}
+		bytes := value * 1024
 		switch fields[0] {
 		case "MemAvailable:":
-			available = value * 1024
+			if seenAvailable {
+				return 0, 0, errors.New("duplicate MemAvailable host memory counter")
+			}
+			available, seenAvailable = bytes, true
 		case "SwapTotal:":
-			swapTotal = value * 1024
+			if seenSwapTotal {
+				return 0, 0, errors.New("duplicate SwapTotal host memory counter")
+			}
+			swapTotal, seenSwapTotal = bytes, true
 		case "SwapFree:":
-			swapFree = value * 1024
+			if seenSwapFree {
+				return 0, 0, errors.New("duplicate SwapFree host memory counter")
+			}
+			swapFree, seenSwapFree = bytes, true
 		}
 	}
 	if err := scanner.Err(); err != nil {
 		return 0, 0, err
 	}
-	if available == 0 || swapFree > swapTotal {
+	if !seenAvailable || !seenSwapTotal || !seenSwapFree || available == 0 || swapFree > swapTotal {
 		return 0, 0, errors.New("host memory counters are incomplete")
 	}
 	return available, swapTotal - swapFree, nil

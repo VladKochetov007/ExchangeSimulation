@@ -74,3 +74,57 @@ func TestResourceTreeFootprintRejectsSymlink(t *testing.T) {
 		t.Fatal("resource tree followed a symlink")
 	}
 }
+
+func TestReadResourceCountersRejectsMissingAndDuplicateRequiredFields(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "memory.events")
+	cases := []struct {
+		name string
+		body string
+	}{
+		{name: "missing oom kill", body: "oom 0\n"},
+		{name: "duplicate oom", body: "oom 0\noom 1\noom_kill 0\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := os.WriteFile(path, []byte(tc.body), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := readResourceCounters(path); err == nil {
+				t.Fatalf("accepted malformed counters: %s", tc.body)
+			}
+		})
+	}
+}
+
+func TestReadResourceCountersRetainsRequiredAndExtensionFields(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "memory.events")
+	if err := os.WriteFile(path, []byte("low 0\noom 0\nfoo 3\noom_kill 0\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	counters, err := readResourceCounters(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if counters["oom"] != 0 || counters["oom_kill"] != 0 || counters["foo"] != 3 {
+		t.Fatalf("counters = %#v", counters)
+	}
+}
+
+func TestParseHostMemorySnapshotRequiresUniqueCompleteCounters(t *testing.T) {
+	valid := "MemTotal: 100 kB\nMemAvailable: 50 kB\nSwapTotal: 20 kB\nSwapFree: 20 kB\n"
+	available, swapUsed, err := parseHostMemorySnapshot(valid)
+	if err != nil || available != 50*1024 || swapUsed != 0 {
+		t.Fatalf("valid snapshot = %d/%d/%v", available, swapUsed, err)
+	}
+	cases := []string{
+		"MemAvailable: 50 kB\nSwapTotal: 20 kB\n",
+		"MemAvailable: 50 kB\nMemAvailable: 40 kB\nSwapTotal: 20 kB\nSwapFree: 20 kB\n",
+		"MemAvailable: 50 MB\nSwapTotal: 20 kB\nSwapFree: 20 kB\n",
+	}
+	for _, raw := range cases {
+		if _, _, err := parseHostMemorySnapshot(raw); err == nil {
+			t.Fatalf("accepted malformed host memory snapshot: %q", raw)
+		}
+	}
+}

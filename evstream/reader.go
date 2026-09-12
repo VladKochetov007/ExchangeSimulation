@@ -22,6 +22,69 @@ type Frame struct {
 	Venue string
 }
 
+// BlockReadLimits bounds memory and decompression work for one block. The
+// limits are a reader policy rather than a wire-format restriction: callers
+// that deliberately write larger blocks can opt in explicitly, while an
+// untrusted stream cannot turn a four-byte length into an unbounded
+// allocation.
+type BlockReadLimits struct {
+	MaxStoredBlockBytes       uint64
+	MaxUncompressedBlockBytes uint64
+	MaxCompressionRatio       uint64
+}
+
+const (
+	// DefaultMaxStoredBlockBytes is large enough for the registered evidence
+	// block sizes while bounding a malformed stored payload before allocation.
+	DefaultMaxStoredBlockBytes uint64 = 64 << 20
+	// DefaultMaxUncompressedBlockBytes bounds the decompressor output buffer.
+	DefaultMaxUncompressedBlockBytes uint64 = 64 << 20
+	// DefaultMaxCompressionRatio prevents a tiny compressed block from
+	// requesting an unexpectedly large expansion. It is intentionally
+	// configurable because compression ratios depend on the caller's schema.
+	DefaultMaxCompressionRatio uint64 = 4096
+)
+
+func normalizeBlockReadLimits(limits BlockReadLimits) (BlockReadLimits, error) {
+	if limits.MaxStoredBlockBytes == 0 {
+		limits.MaxStoredBlockBytes = DefaultMaxStoredBlockBytes
+	}
+	if limits.MaxUncompressedBlockBytes == 0 {
+		limits.MaxUncompressedBlockBytes = DefaultMaxUncompressedBlockBytes
+	}
+	if limits.MaxCompressionRatio == 0 {
+		limits.MaxCompressionRatio = DefaultMaxCompressionRatio
+	}
+	maxInt := uint64(^uint(0) >> 1)
+	if limits.MaxStoredBlockBytes > maxInt-uint64(BlockHeaderSize) || limits.MaxUncompressedBlockBytes > maxInt {
+		return BlockReadLimits{}, fmt.Errorf("%w: block read limit exceeds platform int", ErrCorrupt)
+	}
+	return limits, nil
+}
+
+func validateBlockLengths(codec Codec, storedLen, uncompressedLen uint64, limits BlockReadLimits) error {
+	if storedLen > limits.MaxStoredBlockBytes {
+		return fmt.Errorf("%w: stored block length %d exceeds limit %d", ErrCorrupt, storedLen, limits.MaxStoredBlockBytes)
+	}
+	if uncompressedLen > limits.MaxUncompressedBlockBytes {
+		return fmt.Errorf("%w: uncompressed block length %d exceeds limit %d", ErrCorrupt, uncompressedLen, limits.MaxUncompressedBlockBytes)
+	}
+	if codec == CodecNone {
+		if storedLen != uncompressedLen {
+			return fmt.Errorf("%w: uncompressed block length mismatch", ErrCorrupt)
+		}
+		return nil
+	}
+	if storedLen == 0 && uncompressedLen != 0 {
+		return fmt.Errorf("%w: compressed block has no stored bytes", ErrCorrupt)
+	}
+	if storedLen != 0 && storedLen <= ^uint64(0)/limits.MaxCompressionRatio &&
+		uncompressedLen > storedLen*limits.MaxCompressionRatio {
+		return fmt.Errorf("%w: compressed block expansion exceeds ratio limit", ErrCorrupt)
+	}
+	return nil
+}
+
 // ReaderOptions configures a Reader.
 type ReaderOptions struct {
 	// Decompressor must match the codec in the stream header. Nil is correct
@@ -39,6 +102,9 @@ type ReaderOptions struct {
 	// Finished evidence must use the default false value so a missing tail is
 	// reported rather than interpreted as a shorter successful run.
 	AllowUnterminated bool
+	// Limits bounds block allocations and decompression expansion. The zero
+	// value uses the package defaults.
+	Limits BlockReadLimits
 }
 
 // Reader walks a stream, verifying structure as it goes.
@@ -66,16 +132,22 @@ type Reader struct {
 	streamHdr         bool
 	terminated        bool
 	allowUnterminated bool
+	limits            BlockReadLimits
 }
 
 // NewReader validates the stream header and prepares to read blocks.
 func NewReader(in io.Reader, opts ReaderOptions) (*Reader, error) {
+	limits, err := normalizeBlockReadLimits(opts.Limits)
+	if err != nil {
+		return nil, err
+	}
 	r := &Reader{
 		in:                in,
 		decompressor:      opts.Decompressor,
 		dict:              NewDictionary(),
 		verify:            opts.VerifyHash,
 		allowUnterminated: opts.AllowUnterminated,
+		limits:            limits,
 	}
 	if opts.VerifyHash {
 		r.hasher = sha256.New()
@@ -184,23 +256,22 @@ func (r *Reader) nextBlock() (bool, error) {
 		}
 		return false, fmt.Errorf("%w: block magic", ErrCorrupt)
 	}
-	uncompressedLen := int(binary.LittleEndian.Uint32(r.blockHdr[4:8]))
-	storedLen := int(binary.LittleEndian.Uint32(r.blockHdr[8:12]))
+	uncompressedLenValue := uint64(binary.LittleEndian.Uint32(r.blockHdr[4:8]))
+	storedLenValue := uint64(binary.LittleEndian.Uint32(r.blockHdr[8:12]))
 	wantFrames := binary.LittleEndian.Uint32(r.blockHdr[12:16])
 	wantCRC := binary.LittleEndian.Uint32(r.blockHdr[16:20])
 
-	if uncompressedLen < 0 || storedLen < 0 {
-		return false, fmt.Errorf("%w: negative block length", ErrCorrupt)
+	if err := validateBlockLengths(r.codec, storedLenValue, uncompressedLenValue, r.limits); err != nil {
+		return false, err
 	}
+	uncompressedLen := int(uncompressedLenValue)
+	storedLen := int(storedLenValue)
 	r.stored = growTo(r.stored, storedLen)
 	if _, err := io.ReadFull(r.in, r.stored[:storedLen]); err != nil {
 		return false, ErrShortBuffer
 	}
 
 	if r.codec == CodecNone {
-		if storedLen != uncompressedLen {
-			return false, fmt.Errorf("%w: uncompressed block length mismatch", ErrCorrupt)
-		}
 		r.block = r.stored[:storedLen]
 	} else {
 		block, err := r.decompressor.Decompress(r.block[:0], r.stored[:storedLen], uncompressedLen)
