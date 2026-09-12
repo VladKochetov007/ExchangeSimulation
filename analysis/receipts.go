@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"syscall"
 )
 
 const (
@@ -407,9 +408,14 @@ func openEvidenceRecordStream(dir, name string, recordBytes int, records int64, 
 		return nil, fmt.Errorf("invalid evidence stream contract for %s", name)
 	}
 	path := filepath.Join(dir, name)
-	file, err := os.Open(path)
+	fileDescriptor, absolute, err := openSV1DNoSymlink(path, false)
 	if err != nil {
 		return nil, fmt.Errorf("open market-data evidence %s: %w", name, err)
+	}
+	file := os.NewFile(uintptr(fileDescriptor), absolute)
+	if file == nil {
+		_ = syscall.Close(fileDescriptor)
+		return nil, fmt.Errorf("wrap market-data evidence %s", name)
 	}
 	return &evidenceRecordStream{
 		file: file, path: path, recordBytes: recordBytes, expected: records,
@@ -763,12 +769,13 @@ func (s *evidenceEventStream) advance() error {
 }
 
 func auditMarketDataReceiptsStreaming(dir string) (*MarketDataReceiptAudit, error) {
-	manifestRaw, err := os.ReadFile(filepath.Join(dir, "market-data-evidence-v2.json"))
+	manifestRaw, err := readSV1DRegularFile(filepath.Join(dir, "market-data-evidence-v2.json"))
 	if err != nil {
 		return nil, fmt.Errorf("read market-data evidence manifest: %w", err)
 	}
 	var manifest marketDataEvidenceManifest
-	if err := json.Unmarshal(manifestRaw, &manifest); err != nil {
+	if err := decodeSV1DJSONWithRequiredFields(manifestRaw, &manifest,
+		"schema_version", "domain", "ordering", "terminal_at", "schedules", "receipts", "decisions", "links", "symbols"); err != nil {
 		return nil, fmt.Errorf("decode market-data evidence manifest: %w", err)
 	}
 	if manifest.SchemaVersion != 2 || manifest.Domain != "participant_information_boundary_v2" ||
@@ -967,7 +974,7 @@ func readEvidenceFile(dir, name string, recordBytes int, records int64, wantDige
 	if len(wantDigest) != 64 {
 		return nil, false, fmt.Errorf("invalid evidence digest for %s", name)
 	}
-	raw, err := os.ReadFile(filepath.Join(dir, name))
+	raw, err := readSV1DRegularFile(filepath.Join(dir, name))
 	if err != nil {
 		return nil, false, fmt.Errorf("read market-data evidence %s: %w", name, err)
 	}

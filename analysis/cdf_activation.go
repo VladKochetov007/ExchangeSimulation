@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 
 	"exchange_sim/evstream"
 	etypes "exchange_sim/types"
@@ -332,34 +333,70 @@ type cdfActivationConfig struct {
 }
 
 type cdfActivationManifest struct {
-	Config   json.RawMessage `json:"config"`
-	VenueIDs []string        `json:"venue_ids"`
-	Build    struct {
+	SchemaVersion int             `json:"schema_version"`
+	Config        json.RawMessage `json:"config"`
+	VenueIDs      []string        `json:"venue_ids"`
+	Build         struct {
 		Revision string `json:"revision"`
+		Time     string `json:"time"`
 		Modified bool   `json:"modified"`
 		GOOS     string `json:"goos"`
 		GOARCH   string `json:"goarch"`
 		GOAMD64  string `json:"goamd64"`
 	} `json:"build"`
+	Notes []string `json:"notes"`
 }
 
 type cdfActivationMetadata struct {
-	Seed                int64  `json:"seed"`
-	SimulatedHorizon    string `json:"simulated_horizon"`
-	SimulationStartNano int64  `json:"simulation_start_nano"`
-	SimulationEndNano   int64  `json:"simulation_end_nano"`
-	ConfigSHA256        string `json:"config_sha256"`
-	BinarySHA256        string `json:"binary_sha256"`
-	BinaryPath          string `json:"binary_path"`
-	BinaryGOOS          string `json:"binary_goos"`
-	BinaryGOARCH        string `json:"binary_goarch"`
-	BinaryGOAMD64       string `json:"binary_goamd64"`
-	GitRevision         string `json:"git_revision"`
-	ConfigExperimentID  string `json:"config_experiment_id"`
-	HypothesisID        string `json:"hypothesis_id"`
-	LogMode             string `json:"log_mode"`
-	EvidenceFormat      string `json:"evidence_format"`
-	SourceModified      bool   `json:"-"`
+	SchemaVersion               int             `json:"schema_version"`
+	RunnerContract              string          `json:"runner_contract"`
+	Contract                    string          `json:"contract"`
+	ProbeID                     string          `json:"probe_id"`
+	Arm                         string          `json:"arm"`
+	Mode                        string          `json:"mode"`
+	Cell                        string          `json:"cell"`
+	ExperimentID                string          `json:"experiment_id"`
+	Seed                        int64           `json:"seed"`
+	SimulatedHorizon            string          `json:"simulated_horizon"`
+	SimulationStartNano         int64           `json:"simulation_start_nano"`
+	SimulationEndNano           int64           `json:"simulation_end_nano"`
+	ConfigSHA256                string          `json:"config_sha256"`
+	BinarySHA256                string          `json:"binary_sha256"`
+	TreeRevision                string          `json:"tree_revision"`
+	PlanSHA256                  string          `json:"plan_sha256"`
+	BinaryPath                  string          `json:"binary_path"`
+	BinaryGoVersion             string          `json:"binary_go_version"`
+	BinaryGOOS                  string          `json:"binary_goos"`
+	BinaryGOARCH                string          `json:"binary_goarch"`
+	BinaryGOAMD64               string          `json:"binary_goamd64"`
+	GitRevision                 string          `json:"git_revision"`
+	ConfigExperimentID          string          `json:"config_experiment_id"`
+	HypothesisID                string          `json:"hypothesis_id"`
+	AnalyzerSHA256              string          `json:"analyzer_sha256"`
+	RendererSHA256              string          `json:"renderer_sha256"`
+	RunnerSHA256                string          `json:"runner_sha256"`
+	ReviewAttestationSHA256     string          `json:"review_attestation_sha256"`
+	ReviewReportSHA256          string          `json:"review_report_sha256"`
+	CapacityAttestationSHA256   string          `json:"capacity_attestation_sha256"`
+	CapacityRecordsSHA256       string          `json:"capacity_records_sha256"`
+	TrustedReviewKeySHA256      string          `json:"trusted_review_key_sha256"`
+	LogMode                     string          `json:"log_mode"`
+	EvidenceFormat              string          `json:"evidence_format"`
+	EvidenceSchemaEpoch         uint32          `json:"evidence_schema_epoch"`
+	GOMAXPROCS                  int             `json:"gomaxprocs"`
+	GOMEMLIMIT                  string          `json:"gomemlimit"`
+	OutputDir                   string          `json:"output_dir"`
+	Holdout                     bool            `json:"holdout"`
+	Command                     []string        `json:"command"`
+	RawLogPolicy                string          `json:"raw_log_policy"`
+	VenueIDs                    []string        `json:"venue_ids"`
+	CheckpointValidatorPath     string          `json:"checkpoint_validator_path"`
+	CheckpointValidatorRevision string          `json:"checkpoint_validator_revision"`
+	CheckpointValidatorSHA256   string          `json:"checkpoint_validator_sha256"`
+	ReviewAttestationPath       string          `json:"review_attestation_path"`
+	ReviewReportPath            string          `json:"review_report_path"`
+	ResourcePolicy              json.RawMessage `json:"resource_policy"`
+	SourceModified              bool            `json:"-"`
 }
 
 type cdfParticipantKey struct {
@@ -733,7 +770,7 @@ func (r *Run) AuditCDFLiquidityActivation(options CDFActivationOptions) (*CDFAct
 		actualFillGlobal:    make(map[cdfFillKey]uint64),
 		tradeGlobal:         make(map[cdfTradeKey]uint64),
 	}
-	config, metadata, err := loadCDFActivationIdentity(evidenceDir)
+	config, metadata, err := loadCDFActivationIdentity(evidenceDir, !options.AllowLegacyJSON)
 	if err != nil {
 		return nil, err
 	}
@@ -894,25 +931,110 @@ func cdfActivationScanRun(run *Run, renderedDir string) (*Run, error) {
 	return &clone, nil
 }
 
-func loadCDFActivationIdentity(dir string) (cdfActivationConfig, cdfActivationMetadata, error) {
-	manifestRaw, err := os.ReadFile(filepath.Join(dir, "manifest.json"))
+var cdfStrictActivationConfigRequiredFields = []string{
+	"venue_ids", "seed", "log_mode", "evidence_format", "evidence_contract_version",
+	"experiment_id", "hypothesis_id", "strict_population_accounting", "strict_risk_contract",
+	"auto_borrow_spot", "cross_asset_spot_graph", "cross_asset_collateral_marks",
+	"record_market_data_receipts", "market_data_receipt_roles",
+}
+
+var cdfStrictActivationMetadataRequiredFields = []string{
+	"schema_version", "runner_contract", "probe_id", "arm", "experiment_id", "config_experiment_id",
+	"hypothesis_id", "seed", "simulated_horizon", "simulation_start_nano", "simulation_end_nano",
+	"config_sha256", "binary_sha256", "git_revision", "tree_revision", "binary_path", "binary_go_version",
+	"binary_goos", "binary_goarch", "binary_goamd64", "analyzer_sha256", "renderer_sha256", "runner_sha256",
+	"review_attestation_sha256", "review_report_sha256", "capacity_attestation_sha256", "capacity_records_sha256",
+	"trusted_review_key_sha256", "log_mode", "evidence_format", "evidence_schema_epoch", "gomaxprocs",
+	"gomemlimit", "output_dir", "holdout", "command", "raw_log_policy",
+}
+
+var cdfKnownActivationConfigFields = func() map[string]struct{} {
+	fields := strings.Fields(`
+		log_dir experiment_id hypothesis_id date status description log_mode evidence_format evidence_contract_version
+		dated_future_delivery_fee_policy record_market_data_receipts market_data_receipt_roles
+		record_decision_frontier_vectors record_maker_quote_size_decisions record_maker_inventory_rebalance_decisions
+		record_perp_maker_replenishment_decisions record_liability_hedger_decisions record_noise_flow_phase_decisions
+		record_funding_carry_decisions record_term_carry_decisions record_dated_execution_mandate_decisions
+		record_dated_term_carry_decisions record_perp_exposure_hedger_decisions record_option_liability_user_decisions
+		record_elastic_liquidity_supplier_decisions checkpoint_interval_seconds trace_from_nano trace_to_nano
+		seed venue_ids strict_population_accounting strict_risk_contract auto_borrow_spot venue_rules
+		cross_asset_spot_graph cross_asset_collateral_marks step snapshot_interval automation_interval quote_interval
+		noise_interval noise_flow_decision_phase_offset greek_interval noise_trader_count option_flow_count
+		stoikov_max_variance_multiple stoikov_volatility_sample_interval spot_tick_quote_units maker_anchor
+		spot_maker_local_reference_cache remote_maker_feed remote_maker_feeds round_trip_trader_count round_trip_hold
+		round_trip_lot_qty maker_forward_half_life maker_quote_size_vol_elasticity maker_min_quote_size_fraction
+		elastic_supplier_reference_half_life noise_order_qty noise_target_qty_by_symbol noise_funding_lots
+		noise_size_pareto_alpha noise_size_cap_multiple noise_imbalance_coupling noise_excite_alpha noise_excite_beta_per_sec
+		round_trip_inventory_lots elastic_supplier_count elastic_supplier_units_per_percent carry_arbitrageur_count
+		carry_entry_bps carry_exit_bps carry_max_position carry_lot_qty perp_maker_inventory_limit perp_maker_replenish_below_bps
+		funding_interval_seconds funding_max_rate_bps option_dealer_count option_liability_user dated_carry_arb_count
+		parity_arb_count dated_carry_edge_bps dated_carry_slippage_bps dated_carry_check_interval parity_edge_bps
+		dated_carry_scale_edge futures_maker_count option_flow_include_futures futures_maker_self_anchored degraded_index
+		taker_fee_bps rate_limit_tiers fixed_distance_maker_count fixed_distance_maker imbalance_maker_count imbalance_maker
+		triangle_arb_count triangle_arb bootstrap_depth_count bootstrap_depth spot_maker_requote_bps spot_maker_requote_bps_tiers
+		spot_maker_submit_before_cancel spot_passive_maker_post_only spot_passive_maker_cancel_before_replace spot_maker_count
+		maker_quote_qty maker_hedge_symbol maker_hedge_band_qty maker_hedge_slippage_bps maker_inventory_limit
+		maker_min_half_spread_ticks maker_hedge_interval maker_inventory_skew_bps spot_stoikov_inventory_size_skew_bps
+		cdf_inventory_rebalance cdf_liability_hedger perp_exposure_hedger funding_carry_arbitrageur term_carry_allocator
+		dated_future_execution_mandate dated_term_carry_allocator maker_index_weight latent_liquidity_count latent_liquidity
+		metaorder_trader_count metaorder_traders short_option_tenor long_option_tenor short_future_tenor long_future_tenor
+		r2_expiry_calendar option_iv strikes_per_side strike_step_usd option_max_strikes_per_expiry stoikov_risk_aversion
+		stoikov_fill_decay stoikov_variance_per_second stoikov_inventory_horizon stoikov_volatility_half_life
+		option_buy_probability future_flow_count future_flow_lot_qty future_flow_interval vanna_volga_desk_count
+		vanna_volga_vega_tolerance vanna_volga_vanna_tolerance vanna_volga_volga_tolerance vanna_volga_lot_qty
+		vanna_volga_max_contracts vanna_volga_interval vanna_volga_vol latency_profiles default_latency_profile
+		 elastic_supplier_symbols elastic_liquidity_suppliers fixed_distance_maker_symbols imbalance_maker_symbols
+		option_dealer_vol option_dealer_hedge_policies option_dealer_hedge_interval_seconds option_value_taker_count
+		option_value_taker_edge_bps option_value_taker_lot_qty option_value_taker_max_position option_value_taker_interval
+		option_value_taker_vol dealer_hedge_mode cross_venue_arb_tiers cross_venue_base_latency cross_venue_arb_lot_qty
+		cross_venue_arb_max_attempts`)
+	known := make(map[string]struct{}, len(fields))
+	for _, field := range fields {
+		known[field] = struct{}{}
+	}
+	return known
+}()
+
+func loadCDFActivationIdentity(dir string, strict bool) (cdfActivationConfig, cdfActivationMetadata, error) {
+	readArtifact := func(name string) ([]byte, error) {
+		path := filepath.Join(dir, name)
+		if strict {
+			return readSV1DRegularFile(path)
+		}
+		return os.ReadFile(path)
+	}
+	manifestRaw, err := readArtifact("manifest.json")
 	if err != nil {
 		return cdfActivationConfig{}, cdfActivationMetadata{}, fmt.Errorf("cdf activation: read manifest: %w", err)
 	}
 	var manifest cdfActivationManifest
-	if err := json.Unmarshal(manifestRaw, &manifest); err != nil {
+	if strict {
+		if err := decodeSV1DJSONWithRequiredFields(manifestRaw, &manifest, "schema_version", "config", "venue_ids", "build", "notes"); err != nil {
+			return cdfActivationConfig{}, cdfActivationMetadata{}, fmt.Errorf("cdf activation: decode manifest: %w", err)
+		}
+		var manifestFields map[string]json.RawMessage
+		if err := decodeSV1DJSONWithRequiredFields(manifestRaw, &manifestFields); err != nil {
+			return cdfActivationConfig{}, cdfActivationMetadata{}, fmt.Errorf("cdf activation: inspect manifest: %w", err)
+		}
+		if err := decodeSV1DJSONWithRequiredFields(manifestFields["build"], &manifest.Build, "revision", "time", "modified", "goos", "goarch", "goamd64"); err != nil {
+			return cdfActivationConfig{}, cdfActivationMetadata{}, fmt.Errorf("cdf activation: manifest build: %w", err)
+		}
+	} else if err := json.Unmarshal(manifestRaw, &manifest); err != nil {
 		return cdfActivationConfig{}, cdfActivationMetadata{}, fmt.Errorf("cdf activation: decode manifest: %w", err)
 	}
 	if len(manifest.Config) == 0 || string(manifest.Config) == "null" {
 		return cdfActivationConfig{}, cdfActivationMetadata{}, fmt.Errorf("cdf activation: manifest has no config")
 	}
-	var config cdfActivationConfig
-	if err := json.Unmarshal(manifest.Config, &config); err != nil {
+	config, err := decodeCDFActivationConfig(manifest.Config, strict)
+	if err != nil {
 		return cdfActivationConfig{}, cdfActivationMetadata{}, fmt.Errorf("cdf activation: decode config: %w", err)
 	}
-	runConfigRaw, err := os.ReadFile(filepath.Join(dir, "run-config.json"))
+	runConfigRaw, err := readArtifact("run-config.json")
 	if err != nil {
 		return cdfActivationConfig{}, cdfActivationMetadata{}, fmt.Errorf("cdf activation: read run config: %w", err)
+	}
+	if _, err := decodeCDFActivationConfig(runConfigRaw, strict); err != nil {
+		return cdfActivationConfig{}, cdfActivationMetadata{}, fmt.Errorf("cdf activation: decode copied run config: %w", err)
 	}
 	manifestCanonical, err := canonicalCDFActivationJSON(manifest.Config)
 	if err != nil {
@@ -925,17 +1047,26 @@ func loadCDFActivationIdentity(dir string) (cdfActivationConfig, cdfActivationMe
 	if manifestCanonical != runCanonical {
 		return cdfActivationConfig{}, cdfActivationMetadata{}, fmt.Errorf("cdf activation: manifest and copied run config differ")
 	}
-	metadataRaw, err := os.ReadFile(filepath.Join(dir, "run-metadata.json"))
+	metadataRaw, err := readArtifact("run-metadata.json")
 	if err != nil {
 		return cdfActivationConfig{}, cdfActivationMetadata{}, fmt.Errorf("cdf activation: read run metadata: %w", err)
 	}
 	var metadata cdfActivationMetadata
-	if err := json.Unmarshal(metadataRaw, &metadata); err != nil {
+	if strict {
+		if err := decodeSV1DJSONWithRequiredFields(metadataRaw, &metadata, cdfStrictActivationMetadataRequiredFields...); err != nil {
+			return cdfActivationConfig{}, cdfActivationMetadata{}, fmt.Errorf("cdf activation: decode run metadata: %w", err)
+		}
+	} else if err := json.Unmarshal(metadataRaw, &metadata); err != nil {
 		return cdfActivationConfig{}, cdfActivationMetadata{}, fmt.Errorf("cdf activation: decode run metadata: %w", err)
 	}
 	configDigest := sha256.Sum256(runConfigRaw)
 	if metadata.ConfigSHA256 != hex.EncodeToString(configDigest[:]) {
 		return cdfActivationConfig{}, cdfActivationMetadata{}, fmt.Errorf("cdf activation: metadata config hash mismatch")
+	}
+	if strict && (manifest.SchemaVersion != 2 || metadata.SchemaVersion != 2 || metadata.RunnerContract != "v2-r2-sv1d-activation-runner-v2" ||
+		metadata.ProbeID != "v2-r2-sv1d-activation-659" || metadata.EvidenceFormat != "evstream_v3" || metadata.EvidenceSchemaEpoch != 4 ||
+		metadata.GOMAXPROCS != 2 || metadata.GOMEMLIMIT != "4GiB" || metadata.Holdout) {
+		return cdfActivationConfig{}, cdfActivationMetadata{}, fmt.Errorf("cdf activation: strict run metadata contract is invalid")
 	}
 	if !isCDFHex(metadata.ConfigSHA256, sha256.Size) || !isCDFHex(metadata.BinarySHA256, sha256.Size) ||
 		!isCDFHex(manifest.Build.Revision, 20) || manifest.Build.Modified ||
@@ -951,6 +1082,49 @@ func loadCDFActivationIdentity(dir string) (cdfActivationConfig, cdfActivationMe
 	}
 	metadata.SourceModified = manifest.Build.Modified
 	return config, metadata, nil
+}
+
+func decodeCDFActivationConfig(raw []byte, strict bool) (cdfActivationConfig, error) {
+	if !strict {
+		var config cdfActivationConfig
+		if err := json.Unmarshal(raw, &config); err != nil {
+			return cdfActivationConfig{}, err
+		}
+		return config, nil
+	}
+	var fields map[string]json.RawMessage
+	if err := decodeSV1DJSONWithRequiredFields(raw, &fields, cdfStrictActivationConfigRequiredFields...); err != nil {
+		return cdfActivationConfig{}, err
+	}
+	for field := range fields {
+		if _, known := cdfKnownActivationConfigFields[field]; !known {
+			return cdfActivationConfig{}, fmt.Errorf("unknown simulator config field %q", field)
+		}
+	}
+	var config cdfActivationConfig
+	if err := json.Unmarshal(raw, &config); err != nil {
+		return cdfActivationConfig{}, err
+	}
+	suppliersRaw, present := fields["elastic_liquidity_suppliers"]
+	if !present || string(bytes.TrimSpace(suppliersRaw)) == "null" {
+		return config, nil
+	}
+	var supplierRows []json.RawMessage
+	if err := decodeSV1DJSONWithRequiredFields(suppliersRaw, &supplierRows); err != nil {
+		return cdfActivationConfig{}, fmt.Errorf("decode elastic supplier roster: %w", err)
+	}
+	for index, supplierRaw := range supplierRows {
+		var supplier CDFSupplierContract
+		if err := decodeSV1DJSONWithRequiredFields(supplierRaw, &supplier,
+			"role", "symbol", "base_asset", "quote_asset", "base_precision", "quote_precision",
+			"initial_base_balance", "initial_quote_balance", "interval", "max_observation_age", "reference_price",
+			"reference_half_life", "base_holding", "elasticity_per_percent", "max_position", "max_inventory",
+			"max_quote_qty", "minimum_executable_qty", "minimum_qualifying_qty", "tick_size",
+			"registered_minimum_executable_qty", "quote_on_one_sided_local_book", "max_loss_quote", "maker_fee_bps"); err != nil {
+			return cdfActivationConfig{}, fmt.Errorf("decode elastic supplier %d: %w", index, err)
+		}
+	}
+	return config, nil
 }
 
 func (p CDFExpectedProvenance) validate() error {
@@ -997,6 +1171,7 @@ type cdfRenderedEvidenceAttestation struct {
 
 type cdfRunStatus struct {
 	SchemaVersion          int      `json:"schema_version"`
+	Contract               string   `json:"contract"`
 	ExitStatus             int      `json:"exit_status"`
 	CompletionVerified     bool     `json:"completion_verified"`
 	SimulatedHorizon       string   `json:"simulated_horizon"`
@@ -1014,6 +1189,52 @@ type cdfRunStatus struct {
 	MarketDataReceiptsSHA  string   `json:"market_data_receipts_sha256,omitempty"`
 	MarketDataDecisionsSHA string   `json:"market_data_decisions_sha256,omitempty"`
 	CompletionSentinels    []string `json:"completion_sentinels"`
+}
+
+type cdfGreeksSidecar struct {
+	SchemaVersion              int               `json:"schema_version"`
+	InitialAccounts            []json.RawMessage `json:"initial_accounts"`
+	TerminalAccounts           []json.RawMessage `json:"terminal_accounts"`
+	InitialRisk                json.RawMessage   `json:"initial_risk"`
+	TerminalRisk               json.RawMessage   `json:"terminal_risk"`
+	RiskTimeline               json.RawMessage   `json:"risk_timeline"`
+	PreExpiryRisk              json.RawMessage   `json:"pre_expiry_risk"`
+	Microstructure             []json.RawMessage `json:"microstructure"`
+	Metaorders                 []json.RawMessage `json:"metaorders"`
+	CarryActivity              []json.RawMessage `json:"carry_activity"`
+	RouterReports              []json.RawMessage `json:"router_reports"`
+	VenueLedgers               []json.RawMessage `json:"venue_ledgers"`
+	RequestBudgets             []json.RawMessage `json:"request_budgets"`
+	Caveats                    []string          `json:"caveats"`
+	ReportStatus               json.RawMessage   `json:"report_status"`
+	TerminalValuationAvailable *bool             `json:"terminal_valuation_available"`
+}
+
+type cdfLatencySidecar struct {
+	Domain string          `json:"domain"`
+	Rows   []cdfLatencyRow `json:"rows"`
+}
+
+type cdfLatencyRow struct {
+	Link                    string  `json:"link"`
+	Channel                 string  `json:"channel"`
+	Scheduled               int64   `json:"scheduled"`
+	Delivered               int64   `json:"delivered"`
+	Undelivered             int64   `json:"undelivered"`
+	MeanDrawnNanoseconds    float64 `json:"mean_drawn_nanoseconds"`
+	MeanQueueNanoseconds    float64 `json:"mean_fifo_queue_nanoseconds"`
+	MeanDeliveryNanoseconds float64 `json:"mean_delivery_nanoseconds"`
+}
+
+type cdfCheckpointSidecar struct {
+	Domain              string `json:"domain"`
+	Ordering            string `json:"ordering"`
+	SimTime             int64  `json:"sim_time"`
+	EventCount          int64  `json:"event_count"`
+	ExecutionStreamHash string `json:"execution_stream_hash"`
+	Rolling             string `json:"rolling_hash"`
+	Representation      string `json:"representation"`
+	Unencodable         int64  `json:"unencodable_payloads"`
 }
 
 type cdfEvidenceManifestRecord struct {
@@ -1036,15 +1257,20 @@ type cdfEvidenceManifest struct {
 }
 
 func validateCDFCompletionArtifacts(dir string, metadata cdfActivationMetadata, expectedSchemaEpoch uint32) error {
-	raw, err := os.ReadFile(filepath.Join(dir, "run-status.json"))
+	raw, err := readSV1DRegularFile(filepath.Join(dir, "run-status.json"))
 	if err != nil {
 		return fmt.Errorf("cdf activation: read run status: %w", err)
 	}
 	var status cdfRunStatus
-	if err := json.Unmarshal(raw, &status); err != nil {
+	if err := decodeSV1DJSONWithRequiredFields(raw, &status,
+		"schema_version", "contract", "exit_status", "completion_verified", "simulated_horizon",
+		"simulation_start_nano", "simulation_end_nano", "run_metadata_sha256", "manifest_sha256",
+		"greeks_sha256", "latency_sha256", "checkpoints_sha256", "evidence_manifest_sha256",
+		"binary_evidence_attestation_sha256", "market_data_evidence_sha256", "market_data_schedules_sha256",
+		"market_data_receipts_sha256", "market_data_decisions_sha256", "completion_sentinels"); err != nil {
 		return fmt.Errorf("cdf activation: decode run status: %w", err)
 	}
-	if status.SchemaVersion != 1 || status.ExitStatus != 0 || !status.CompletionVerified || status.SimulatedHorizon != metadata.SimulatedHorizon ||
+	if status.SchemaVersion != 1 || status.Contract != "v2-r2-sv1d-arm-status-v2" || status.ExitStatus != 0 || !status.CompletionVerified || status.SimulatedHorizon != metadata.SimulatedHorizon ||
 		status.SimulationStartNano != metadata.SimulationStartNano || status.SimulationEndNano != metadata.SimulationEndNano {
 		return fmt.Errorf("cdf activation: run status does not attest a complete registered horizon")
 	}
@@ -1097,40 +1323,38 @@ func validateCDFCompletionArtifacts(dir string, metadata cdfActivationMetadata, 
 }
 
 func validateCDFCompletionSidecars(dir string, metadata cdfActivationMetadata, expectedSchemaEpoch uint32) error {
-	greeksRaw, err := os.ReadFile(filepath.Join(dir, "greeks.json"))
+	greeksRaw, err := readSV1DRegularFile(filepath.Join(dir, "greeks.json"))
 	if err != nil {
 		return fmt.Errorf("cdf activation: read greeks sidecar: %w", err)
 	}
-	var greeks map[string]json.RawMessage
-	if err := json.Unmarshal(greeksRaw, &greeks); err != nil || greeks == nil {
-		return fmt.Errorf("cdf activation: greeks sidecar is not a JSON object")
+	var greeks cdfGreeksSidecar
+	if err := decodeSV1DJSONWithRequiredFields(greeksRaw, &greeks,
+		"schema_version", "initial_accounts", "terminal_accounts", "initial_risk",
+		"terminal_risk", "risk_timeline", "microstructure"); err != nil {
+		return fmt.Errorf("cdf activation: decode greeks sidecar: %w", err)
 	}
-	if !cdfJSONNumberAtLeast(greeks["schema_version"], 1) ||
-		!cdfJSONArrayNonEmpty(greeks["initial_accounts"]) ||
-		!cdfJSONArrayNonEmpty(greeks["terminal_accounts"]) ||
-		!cdfJSONObject(greeks["initial_risk"]) || !cdfJSONObject(greeks["terminal_risk"]) ||
-		!cdfJSONObject(greeks["risk_timeline"]) || !cdfJSONArrayNonEmpty(greeks["microstructure"]) {
+	if greeks.SchemaVersion < 1 || len(greeks.InitialAccounts) == 0 || len(greeks.TerminalAccounts) == 0 ||
+		!cdfJSONObject(greeks.InitialRisk) || !cdfJSONObject(greeks.TerminalRisk) ||
+		!cdfJSONObject(greeks.RiskTimeline) || len(greeks.Microstructure) == 0 {
 		return fmt.Errorf("cdf activation: greeks sidecar is structurally incomplete")
 	}
 
-	latencyRaw, err := os.ReadFile(filepath.Join(dir, "latency.json"))
+	latencyRaw, err := readSV1DRegularFile(filepath.Join(dir, "latency.json"))
 	if err != nil {
 		return fmt.Errorf("cdf activation: read latency sidecar: %w", err)
 	}
-	var latency struct {
-		Domain string            `json:"domain"`
-		Rows   []json.RawMessage `json:"rows"`
-	}
-	if err := json.Unmarshal(latencyRaw, &latency); err != nil || latency.Domain != "courier_delivery" || len(latency.Rows) == 0 {
+	var latency cdfLatencySidecar
+	if err := decodeSV1DJSONWithRequiredFields(latencyRaw, &latency, "domain", "rows"); err != nil || latency.Domain != "courier_delivery" || len(latency.Rows) == 0 {
 		return fmt.Errorf("cdf activation: latency sidecar is structurally incomplete")
 	}
 
-	attestationRaw, err := os.ReadFile(filepath.Join(dir, "binary-evidence-attestation.json"))
+	attestationRaw, err := readSV1DRegularFile(filepath.Join(dir, "binary-evidence-attestation.json"))
 	if err != nil {
 		return fmt.Errorf("cdf activation: read binary evidence attestation: %w", err)
 	}
 	var attestation cdfBinaryEvidenceAttestation
-	if err := json.Unmarshal(attestationRaw, &attestation); err != nil {
+	if err := decodeSV1DJSONWithRequiredFields(attestationRaw, &attestation,
+		"domain", "ordering", "schema_epoch", "event_frames", "stream_frames", "execution_stream_hash", "evidence_only_in_stream"); err != nil {
 		return fmt.Errorf("cdf activation: decode binary evidence attestation: %w", err)
 	}
 	if attestation.Domain != "canonical_binary_execution_frames" || attestation.Ordering != "ordered_stream" ||
@@ -1141,31 +1365,23 @@ func validateCDFCompletionSidecars(dir string, metadata cdfActivationMetadata, e
 		return fmt.Errorf("cdf activation: binary evidence attestation is not a complete v2 successor attestation")
 	}
 
-	checkpointFile, err := os.Open(filepath.Join(dir, "checkpoints.jsonl"))
+	checkpointRaw, err := readSV1DRegularFile(filepath.Join(dir, "checkpoints.jsonl"))
 	if err != nil {
 		return fmt.Errorf("cdf activation: open checkpoint sidecar: %w", err)
 	}
-	defer checkpointFile.Close()
-	scanner := bufio.NewScanner(checkpointFile)
+	scanner := bufio.NewScanner(bytes.NewReader(checkpointRaw))
 	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
 	checkpointCount := 0
 	checkpointsByEventCount := make(map[uint64]string)
 	var previousSimTime, previousEventCount int64
 	for scanner.Scan() {
 		line := scanner.Bytes()
-		var checkpoint struct {
-			Domain              string `json:"domain"`
-			Ordering            string `json:"ordering"`
-			SimTime             int64  `json:"sim_time"`
-			EventCount          int64  `json:"event_count"`
-			ExecutionStreamHash string `json:"execution_stream_hash"`
-			Representation      string `json:"representation"`
-			Unencodable         int64  `json:"unencodable_payloads"`
-		}
-		if err := json.Unmarshal(line, &checkpoint); err != nil || checkpoint.Domain != "execution_observations" ||
+		var checkpoint cdfCheckpointSidecar
+		if err := decodeSV1DJSONWithRequiredFields(line, &checkpoint,
+			"domain", "ordering", "sim_time", "event_count", "execution_stream_hash", "rolling_hash", "representation"); err != nil || checkpoint.Domain != "execution_observations" ||
 			checkpoint.Ordering != "ordered_stream" || checkpoint.SimTime <= 0 || checkpoint.EventCount <= 0 ||
 			checkpoint.Representation != "evstream_v3" || checkpoint.Unencodable != 0 ||
-			!isCDFHex(checkpoint.ExecutionStreamHash, sha256.Size) ||
+			checkpoint.Rolling != checkpoint.ExecutionStreamHash || !isCDFHex(checkpoint.ExecutionStreamHash, sha256.Size) ||
 			(checkpointCount > 0 && (checkpoint.SimTime <= previousSimTime || checkpoint.EventCount <= previousEventCount)) {
 			return fmt.Errorf("cdf activation: checkpoint sidecar contains an invalid sequence")
 		}
@@ -1187,15 +1403,10 @@ func validateCDFCompletionSidecars(dir string, metadata cdfActivationMetadata, e
 		previousEventCount != int64(attestation.EventFrames) {
 		return fmt.Errorf("cdf activation: checkpoint sidecar does not attest the registered terminal horizon")
 	}
-	var terminalCheckpoint struct {
-		ExecutionStreamHash string `json:"execution_stream_hash"`
-	}
-	checkpointRaw, err := os.ReadFile(filepath.Join(dir, "checkpoints.jsonl"))
-	if err != nil {
-		return fmt.Errorf("cdf activation: read terminal checkpoint: %w", err)
-	}
+	var terminalCheckpoint cdfCheckpointSidecar
 	checkpointLines := bytes.Split(bytes.TrimSpace(checkpointRaw), []byte{'\n'})
-	if len(checkpointLines) == 0 || json.Unmarshal(checkpointLines[len(checkpointLines)-1], &terminalCheckpoint) != nil ||
+	if len(checkpointLines) == 0 || decodeSV1DJSONWithRequiredFields(checkpointLines[len(checkpointLines)-1], &terminalCheckpoint,
+		"domain", "ordering", "sim_time", "event_count", "execution_stream_hash", "rolling_hash", "representation") != nil ||
 		terminalCheckpoint.ExecutionStreamHash != attestation.ExecutionStreamHash {
 		return fmt.Errorf("cdf activation: terminal checkpoint is not bound to the binary attestation")
 	}
@@ -1203,12 +1414,13 @@ func validateCDFCompletionSidecars(dir string, metadata cdfActivationMetadata, e
 		return err
 	}
 
-	manifestRaw, err := os.ReadFile(filepath.Join(dir, "evidence-manifest.json"))
+	manifestRaw, err := readSV1DRegularFile(filepath.Join(dir, "evidence-manifest.json"))
 	if err != nil {
 		return fmt.Errorf("cdf activation: read evidence manifest sidecar: %w", err)
 	}
 	var evidenceManifest cdfEvidenceManifest
-	if err := json.Unmarshal(manifestRaw, &evidenceManifest); err != nil || evidenceManifest.SchemaVersion != 2 ||
+	if err := decodeSV1DJSONWithRequiredFields(manifestRaw, &evidenceManifest,
+		"schema_version", "contract", "cell", "log_mode", "evidence_format", "source_revision", "fixed_files", "raw_jsonl_files", "raw_jsonl_bytes", "raw_files"); err != nil || evidenceManifest.SchemaVersion != 2 ||
 		evidenceManifest.Contract != "v2-integrated-longrun-evidence-manifest-v2" ||
 		evidenceManifest.EvidenceFormat != "evstream_v3" || evidenceManifest.LogMode != metadata.LogMode ||
 		evidenceManifest.SourceRevision != metadata.GitRevision || len(evidenceManifest.FixedFiles) == 0 {
@@ -1225,15 +1437,14 @@ func validateCDFCompletionSidecars(dir string, metadata cdfActivationMetadata, e
 		}
 		fixed[record.Path] = record
 		path := filepath.Join(dir, filepath.FromSlash(record.Path))
-		info, err := os.Lstat(path)
-		if err != nil || !info.Mode().IsRegular() {
+		actual, actualBytes, err := hashRegularFile(path)
+		if err != nil {
 			return fmt.Errorf("cdf activation: evidence manifest fixed file %q is unavailable", record.Path)
 		}
-		if info.Size() != record.Bytes {
+		if actualBytes != record.Bytes {
 			return fmt.Errorf("cdf activation: evidence manifest byte count mismatch for %q", record.Path)
 		}
-		actual, err := sha256File(path)
-		if err != nil || actual != record.SHA256 {
+		if actual != record.SHA256 {
 			return fmt.Errorf("cdf activation: evidence manifest digest mismatch for %q", record.Path)
 		}
 	}
@@ -1277,9 +1488,14 @@ func validateCDFCompletionSidecars(dir string, metadata cdfActivationMetadata, e
 }
 
 func validateCDFCheckpointPrefixes(dir string, checkpoints map[uint64]string, attestation cdfBinaryEvidenceAttestation, expectedSchemaEpoch uint32) error {
-	file, err := os.Open(filepath.Join(dir, "events.evs"))
+	fileDescriptor, absolute, err := openSV1DNoSymlink(filepath.Join(dir, "events.evs"), false)
 	if err != nil {
 		return fmt.Errorf("cdf activation: open binary evidence for checkpoint validation: %w", err)
+	}
+	file := os.NewFile(uintptr(fileDescriptor), absolute)
+	if file == nil {
+		_ = syscall.Close(fileDescriptor)
+		return fmt.Errorf("cdf activation: wrap binary evidence for checkpoint validation")
 	}
 	defer file.Close()
 	reader, err := evstream.NewReader(file, evstream.ReaderOptions{VerifyHash: true})
@@ -1334,18 +1550,35 @@ func cdfJSONObject(raw json.RawMessage) bool {
 }
 
 func sha256File(path string) (string, error) {
-	file, err := os.Open(path)
+	digest, _, err := hashRegularFile(path)
+	return digest, err
+}
+
+func hashRegularFile(path string) (string, int64, error) {
+	fileDescriptor, absolute, err := openSV1DNoSymlink(path, false)
 	if err != nil {
-		return "", err
+		return "", 0, err
+	}
+	file := os.NewFile(uintptr(fileDescriptor), absolute)
+	if file == nil {
+		_ = syscall.Close(fileDescriptor)
+		return "", 0, fmt.Errorf("could not wrap file descriptor for %s", path)
 	}
 	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return "", 0, err
+	}
+	if !info.Mode().IsRegular() {
+		return "", 0, fmt.Errorf("path is not a regular file: %s", path)
+	}
 	hasher := sha256.New()
 	if _, err := io.Copy(hasher, file); err != nil {
-		return "", err
+		return "", 0, err
 	}
 	var digest [sha256.Size]byte
 	copy(digest[:], hasher.Sum(nil))
-	return hex.EncodeToString(digest[:]), nil
+	return hex.EncodeToString(digest[:]), info.Size(), nil
 }
 
 type cdfEvidenceFrameIdentity struct {
@@ -1604,12 +1837,13 @@ func loadCDFReceiptIndex(dir string) (*cdfReceiptIndex, *MarketDataReceiptAudit,
 	if err != nil {
 		return nil, nil, err
 	}
-	manifestRaw, err := os.ReadFile(filepath.Join(dir, "market-data-evidence-v2.json"))
+	manifestRaw, err := readSV1DRegularFile(filepath.Join(dir, "market-data-evidence-v2.json"))
 	if err != nil {
 		return nil, nil, err
 	}
 	var manifest marketDataEvidenceManifest
-	if err := json.Unmarshal(manifestRaw, &manifest); err != nil {
+	if err := decodeSV1DJSONWithRequiredFields(manifestRaw, &manifest,
+		"schema_version", "domain", "ordering", "terminal_at", "schedules", "receipts", "decisions", "links", "symbols"); err != nil {
 		return nil, nil, err
 	}
 	receiptsRaw, digestMatches, err := readEvidenceFile(dir, manifest.Receipts.File, marketDataReceiptRecordBytes, manifest.Receipts.Records, manifest.Receipts.Digest)

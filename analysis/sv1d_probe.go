@@ -161,7 +161,7 @@ func (r *Run) AuditSV1DProbeArm(options SV1DProbeArmAuditOptions) (SV1DProbeArmR
 	if evidenceDir == "" {
 		evidenceDir = r.Dir
 	}
-	_, metadata, err := loadCDFActivationIdentity(evidenceDir)
+	_, metadata, err := loadCDFActivationIdentity(evidenceDir, !options.Activation.AllowLegacyJSON)
 	if err != nil {
 		return result, err
 	}

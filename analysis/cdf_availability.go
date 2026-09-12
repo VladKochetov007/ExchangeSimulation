@@ -43,7 +43,7 @@ func (r *Run) AuditCDFBookAvailability(options CDFActivationOptions) (*CDFBookAv
 	if err != nil {
 		return nil, err
 	}
-	config, metadata, err := loadCDFActivationIdentity(evidenceDir)
+	config, metadata, err := loadCDFActivationIdentity(evidenceDir, !options.AllowLegacyJSON)
 	if err != nil {
 		return nil, err
 	}

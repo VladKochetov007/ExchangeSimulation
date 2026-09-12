@@ -369,7 +369,7 @@ func TestAuditCDFLiquidityActivationStrictProductionRenderer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	binaryHash, err := sha256File("/bin/true")
+	binaryHash, err := sha256File("/usr/bin/true")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -471,7 +471,7 @@ func TestValidateCDFCompletionSidecarsRejectsFixedFileSymlink(t *testing.T) {
 	if err := os.Symlink(target, original); err != nil {
 		t.Fatal(err)
 	}
-	if err := validateCDFCompletionSidecars(run.Dir, metadata, contract.BinarySchemaEpoch); err == nil || !strings.Contains(err.Error(), "evidence manifest fixed file") {
+	if err := validateCDFCompletionSidecars(run.Dir, metadata, contract.BinarySchemaEpoch); err == nil || !strings.Contains(err.Error(), "read greeks sidecar") {
 		t.Fatalf("fixed-file symlink was accepted: %v", err)
 	}
 }
@@ -785,13 +785,13 @@ func rewriteStrictCDFCompletionIdentity(t *testing.T, dir string, contract CDFAc
 	if err != nil {
 		t.Fatal(err)
 	}
-	binaryHash, err := sha256File("/bin/true")
+	binaryHash, err := sha256File("/usr/bin/true")
 	if err != nil {
 		t.Fatal(err)
 	}
 	manifest := map[string]any{
-		"schema_version": 2, "venue_ids": contract.VenueIDs,
-		"build":  map[string]any{"revision": strings.Repeat("a", 40), "modified": false, "goos": "linux", "goarch": "amd64", "goamd64": "v1"},
+		"schema_version": 2, "venue_ids": contract.VenueIDs, "notes": []string{},
+		"build":  map[string]any{"revision": strings.Repeat("a", 40), "time": "", "modified": false, "goos": "linux", "goarch": "amd64", "goamd64": "v1"},
 		"config": json.RawMessage(configRaw),
 	}
 	manifestRaw, err := json.Marshal(manifest)
@@ -807,7 +807,7 @@ func rewriteStrictCDFCompletionIdentity(t *testing.T, dir string, contract CDFAc
 	if err := json.Unmarshal(metadataRaw, &metadata); err != nil {
 		t.Fatal(err)
 	}
-	metadata.BinaryPath = "/bin/true"
+	metadata.BinaryPath = "/usr/bin/true"
 	configDigest := sha256.Sum256(configRaw)
 	metadata.ConfigSHA256 = hex.EncodeToString(configDigest[:])
 	metadata.BinarySHA256 = binaryHash
@@ -846,7 +846,7 @@ func rewriteStrictCDFCompletionIdentity(t *testing.T, dir string, contract CDFAc
 	if err := json.Unmarshal(attestationRaw, &attestation); err != nil {
 		t.Fatal(err)
 	}
-	writeCDFFixtureFile(t, filepath.Join(dir, "checkpoints.jsonl"), []byte(fmt.Sprintf("{\"domain\":\"execution_observations\",\"ordering\":\"ordered_stream\",\"sim_time\":%d,\"event_count\":%d,\"execution_stream_hash\":%q,\"representation\":\"evstream_v3\",\"unencodable_payloads\":0}\n", contract.SimulationEndNano, attestation.EventFrames, attestation.ExecutionStreamHash)))
+	writeCDFFixtureFile(t, filepath.Join(dir, "checkpoints.jsonl"), []byte(fmt.Sprintf("{\"domain\":\"execution_observations\",\"ordering\":\"ordered_stream\",\"sim_time\":%d,\"event_count\":%d,\"execution_stream_hash\":%q,\"rolling_hash\":%q,\"representation\":\"evstream_v3\",\"unencodable_payloads\":0}\n", contract.SimulationEndNano, attestation.EventFrames, attestation.ExecutionStreamHash, attestation.ExecutionStreamHash)))
 	fixedPaths := []string{"run-config.json", "run-metadata.json", "manifest.json", "greeks.json", "latency.json", "checkpoints.jsonl", "events.evs", "binary-evidence-attestation.json", "market-data-evidence-v2.json", "market-data-schedules-v2.bin", "market-data-receipts-v2.bin", "market-data-decisions-v2.bin"}
 	fixedFiles := make([]map[string]any, 0, len(fixedPaths))
 	for _, relative := range fixedPaths {
@@ -867,7 +867,7 @@ func rewriteStrictCDFCompletionIdentity(t *testing.T, dir string, contract CDFAc
 	}
 	writeCDFFixtureFile(t, filepath.Join(dir, "evidence-manifest.json"), append(evidenceManifestRaw, '\n'))
 	status := cdfRunStatus{
-		SchemaVersion: 1, ExitStatus: 0, CompletionVerified: true, CompletionSentinels: []string{"greeks.json", "latency.json"}, SimulatedHorizon: contract.Horizon,
+		SchemaVersion: 1, Contract: "v2-r2-sv1d-arm-status-v2", ExitStatus: 0, CompletionVerified: true, CompletionSentinels: []string{"greeks.json", "latency.json"}, SimulatedHorizon: contract.Horizon,
 		SimulationStartNano: contract.SimulationStartNano, SimulationEndNano: contract.SimulationEndNano,
 		RunMetadataSHA256:      mustCDFFileHash(t, filepath.Join(dir, "run-metadata.json")),
 		ManifestSHA256:         mustCDFFileHash(t, filepath.Join(dir, "manifest.json")),
@@ -938,6 +938,63 @@ func TestAuditCDFLiquidityActivationRejectsUnboundProvenance(t *testing.T) {
 	}
 	if _, err := run.AuditCDFLiquidityActivation(CDFActivationOptions{Contract: RegisteredSV1DActivationContract(), AllowLegacyJSON: true}); err == nil {
 		t.Fatal("byte-mutated run config retained a valid provenance binding")
+	}
+}
+
+func TestLoadCDFActivationIdentityStrictRejectsUnknownAndDuplicateKeys(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func([]byte) []byte
+		want   string
+	}{
+		{
+			name: "unknown manifest field",
+			mutate: func(raw []byte) []byte {
+				var fields map[string]json.RawMessage
+				if err := json.Unmarshal(raw, &fields); err != nil {
+					t.Fatalf("decode manifest fixture: %v", err)
+				}
+				fields["unexpected"] = json.RawMessage(`true`)
+				mutated, err := json.Marshal(fields)
+				if err != nil {
+					t.Fatalf("encode mutated manifest: %v", err)
+				}
+				return mutated
+			},
+			want: "decode manifest",
+		},
+		{
+			name: "duplicate manifest field",
+			mutate: func(raw []byte) []byte {
+				trimmed := bytes.TrimSpace(raw)
+				return append(append([]byte(nil), trimmed[:len(trimmed)-1]...), []byte(`,"schema_version":2}`)...)
+			},
+			want: "duplicate JSON object key",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			run := writeRegisteredCDFActivationFixture(t, cdfActivationFixtureOptions{})
+			contract := RegisteredSV1DActivationContract()
+			configRaw, err := os.ReadFile(filepath.Join(run.Dir, "run-config.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var config cdfActivationConfig
+			if err := json.Unmarshal(configRaw, &config); err != nil {
+				t.Fatal(err)
+			}
+			writeCDFActivationIdentity(t, run.Dir, config, configRaw, contract)
+			manifestPath := filepath.Join(run.Dir, "manifest.json")
+			manifestRaw, err := os.ReadFile(manifestPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			writeCDFFixtureFile(t, manifestPath, append(test.mutate(manifestRaw), '\n'))
+			if _, _, err := loadCDFActivationIdentity(run.Dir, true); err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("strict identity error = %v, want %q", err, test.want)
+			}
+		})
 	}
 }
 
@@ -1197,9 +1254,9 @@ func writeRegisteredCDFActivationFixture(t *testing.T, options cdfActivationFixt
 func writeCDFActivationIdentity(t *testing.T, dir string, config cdfActivationConfig, configRaw []byte, contract CDFActivationContract) {
 	t.Helper()
 	manifest := map[string]any{
-		"venue_ids": config.VenueIDs,
+		"schema_version": 2, "venue_ids": config.VenueIDs, "notes": []string{},
 		"build": map[string]any{
-			"revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "modified": false,
+			"revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "time": "", "modified": false,
 			"goos": "linux", "goarch": "amd64", "goamd64": "v1",
 		},
 		"config": json.RawMessage(configRaw),
@@ -1212,6 +1269,8 @@ func writeCDFActivationIdentity(t *testing.T, dir string, config cdfActivationCo
 	writeCDFFixtureFile(t, filepath.Join(dir, "run-config.json"), configRaw)
 	configDigest := sha256.Sum256(configRaw)
 	metadata := cdfActivationMetadata{
+		SchemaVersion: 2, RunnerContract: "v2-r2-sv1d-activation-runner-v2", ProbeID: "v2-r2-sv1d-activation-659",
+		Arm: "fixture", ExperimentID: config.ExperimentID, TreeRevision: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		Seed: config.Seed, SimulatedHorizon: contract.Horizon,
 		SimulationStartNano: contract.SimulationStartNano, SimulationEndNano: contract.SimulationEndNano,
 		ConfigSHA256: hex.EncodeToString(configDigest[:]),
@@ -1220,6 +1279,8 @@ func writeCDFActivationIdentity(t *testing.T, dir string, config cdfActivationCo
 		GitRevision:        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		ConfigExperimentID: config.ExperimentID, HypothesisID: config.HypothesisID,
 		LogMode: config.LogMode, EvidenceFormat: config.EvidenceFormat,
+		EvidenceSchemaEpoch: contract.BinarySchemaEpoch, GOMAXPROCS: 2, GOMEMLIMIT: "4GiB", Holdout: false,
+		Command: []string{"fixture"}, RawLogPolicy: "fixture",
 	}
 	metadataRaw, err := json.Marshal(metadata)
 	if err != nil {

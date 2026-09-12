@@ -1038,11 +1038,14 @@ func decodeSV1DJSONWithRequiredFields(raw []byte, target any, requiredFields ...
 	if err := rejectSV1DDuplicateJSONKeys(raw); err != nil {
 		return err
 	}
-	if err := requireSV1DJSONFields(raw, requiredFields...); err != nil {
-		return err
+	if len(requiredFields) > 0 {
+		if err := requireSV1DJSONFields(raw, requiredFields...); err != nil {
+			return err
+		}
 	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.UseNumber()
+	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(target); err != nil {
 		return err
 	}
