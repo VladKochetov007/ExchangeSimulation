@@ -1517,3 +1517,17 @@ holdout was run.
 When service/quota is available, retry the same complete exact-tree review.
 Acceptance remains required before the binary-capacity preflight and seed-659
 activation probe.
+
+## Append-only blocked-gate record — 2026-09-12
+
+The external Sol-xhigh review service failed before inference on three
+consecutive continuation turns, with HTTP 403 on WebSocket and HTTPS fallback
+attempts. The latest requested review targeted exact HEAD
+`1db902a3c2327da204f2e1b80ee271700ceffdf3` (tree
+`b019a8f68b60e56b65e9716b6d506b0bb69f249e`). No scientific ACCEPT or REJECT
+verdict was produced.
+
+The successor remains unpromoted and the objective is blocked only at this
+external-review boundary. No capacity, pinned build, activation, development,
+freeze, or holdout run occurred. Retry the complete exact-tree review when the
+independent service/quota is available.

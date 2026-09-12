@@ -1742,3 +1742,16 @@ This is the same external review-availability blocker, not acceptance or a
 candidate rejection. No capacity, pinned build, activation, development cell,
 freeze, or holdout `619/631/641` was run. Retry the complete exact-tree review
 when Sol-xhigh service/quota is available; keep the promotion gate closed.
+
+## Append-only blocked-gate record — 2026-09-12
+
+The same external blocker recurred on three consecutive continuation turns:
+each fresh Sol-xhigh/xhigh review launch failed before inference with HTTP 403
+over the available transports. The latest attempt targeted exact HEAD
+`1db902a3c2327da204f2e1b80ee271700ceffdf3` (tree
+`b019a8f68b60e56b65e9716b6d506b0bb69f249e`). No scientific verdict exists.
+
+The objective is left active but blocked at the independent-review boundary.
+No capacity, build, activation, development cell, freeze, or holdout action is
+authorized. Resume by retrying the complete exact-tree review after the
+Sol-xhigh backend/quota becomes available.

@@ -157,3 +157,12 @@ Two further fresh Sol-xhigh launch attempts against exact HEAD
 backend HTTP 403 over WebSocket and HTTPS fallback. No scientific verdict was
 produced. The promotion gate remains closed and no capacity, activation,
 development cell, freeze, or holdout was run.
+
+## Append-only blocked-gate record — 2026-09-12
+
+The same backend failure recurred on the next continuation turn: two fresh
+Sol-xhigh launches targeting exact HEAD
+`1db902a3c2327da204f2e1b80ee271700ceffdf3` failed before inference with HTTP
+403 over WebSocket and HTTPS fallback. No ACCEPT or REJECT verdict was
+produced. The successor remains unpromoted and no scientific execution was
+authorized.

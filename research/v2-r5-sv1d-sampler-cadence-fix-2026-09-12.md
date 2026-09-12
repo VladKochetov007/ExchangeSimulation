@@ -86,6 +86,15 @@ remains unpromoted; no capacity, activation, development, freeze, or holdout
 run occurred. Retry the same complete-tree review when the independent review
 service/quota is available.
 
+## Append-only blocked-gate record — 2026-09-12
+
+The same review-availability failure recurred on the next continuation turn:
+two fresh Sol-xhigh launches against exact HEAD
+`1db902a3c2327da204f2e1b80ee271700ceffdf3` failed before inference with HTTP
+403 over WebSocket and HTTPS fallback. No scientific verdict was produced.
+The candidate is left at the independent-review boundary until service/quota
+recovers.
+
 ## Append-only repeated review-availability stop — 2026-09-12
 
 The subsequent review was attempted twice against exact clean HEAD
