@@ -3865,9 +3865,7 @@ func (r *CDFActivationAudit) finalizeCDFActivation(
 	}
 	allSupplierConcentrationSatisfied := true
 	for _, supplier := range r.Suppliers {
-		if supplier.DepthObservationCount == 0 ||
-			supplier.BidDepthDominanceTimeFraction > contract.MaximumDepthDominanceTimeFraction ||
-			supplier.AskDepthDominanceTimeFraction > contract.MaximumDepthDominanceTimeFraction {
+		if !cdfSupplierConcentrationSatisfied(supplier, contract) {
 			allSupplierConcentrationSatisfied = false
 		}
 	}
@@ -3880,6 +3878,18 @@ func (r *CDFActivationAudit) finalizeCDFActivation(
 	r.AntiCheatingSatisfied = r.EvidenceValid && r.SupplierVolumeShare <= contract.MaximumSupplierVolumeShare &&
 		allVenueConcentrationSatisfied && allSupplierConcentrationSatisfied
 	r.Valid = r.EvidenceValid && r.ActivationSatisfied && r.AntiCheatingSatisfied
+}
+
+func cdfSupplierConcentrationSatisfied(supplier CDFSupplierActivationAudit, contract CDFActivationContract) bool {
+	if supplier.VenueVolumeDenominatorQty <= 0 || supplier.VolumeQty < 0 ||
+		supplier.VolumeQty > supplier.VenueVolumeDenominatorQty {
+		return false
+	}
+	venueVolumeShare := float64(supplier.VolumeQty) / float64(supplier.VenueVolumeDenominatorQty)
+	return supplier.DepthObservationCount > 0 &&
+		venueVolumeShare <= contract.MaximumSupplierVolumeShare &&
+		supplier.BidDepthDominanceTimeFraction <= contract.MaximumDepthDominanceTimeFraction &&
+		supplier.AskDepthDominanceTimeFraction <= contract.MaximumDepthDominanceTimeFraction
 }
 
 func measureCDFVenueConcentration(venueID string, observations []cdfDepthObservation, terminalAt int64, contract CDFActivationContract) CDFVenueConcentrationAudit {

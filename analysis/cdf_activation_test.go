@@ -3010,6 +3010,33 @@ func TestCDFVenueConcentrationSeparatesBookAvailabilityStates(t *testing.T) {
 	}
 }
 
+func TestCDFSupplierConcentrationEnforcesVenueLocalVolume(t *testing.T) {
+	contract := RegisteredSV1DActivationContract()
+	base := CDFSupplierActivationAudit{
+		VolumeQty:                     3,
+		VenueVolumeDenominatorQty:     4,
+		DepthObservationCount:         1,
+		BidDepthDominanceTimeFraction: 0,
+		AskDepthDominanceTimeFraction: 0,
+	}
+	if !cdfSupplierConcentrationSatisfied(base, contract) {
+		t.Fatal("supplier exactly at venue-local volume threshold was rejected")
+	}
+
+	justOver := base
+	justOver.VolumeQty = 4
+	if cdfSupplierConcentrationSatisfied(justOver, contract) {
+		t.Fatal("supplier above venue-local volume threshold was accepted")
+	}
+
+	localMonopoly := base
+	localMonopoly.VolumeQty = 76
+	localMonopoly.VenueVolumeDenominatorQty = 100
+	if cdfSupplierConcentrationSatisfied(localMonopoly, contract) {
+		t.Fatal("local supplier monopoly was hidden by aggregate-share-independent input")
+	}
+}
+
 func TestCDFVenueConcentrationClampsIntervalsAndPreservesInputOrder(t *testing.T) {
 	contract := RegisteredSV1DActivationContract()
 	observations := []cdfDepthObservation{
