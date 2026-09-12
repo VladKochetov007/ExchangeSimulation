@@ -21,6 +21,7 @@ capacity_hypothesis="V2-R2-SV1D-CAPACITY-ONLY"
 capacity_contract="v2-r2-sv1d-capacity-runner-v1"
 capacity_probe_id="v2-r2-sv1d-activation-659"
 capacity_lock_path=${SV1D_CAPACITY_LOCK_PATH:-"/home/vlad/v2-r2-sv1d-capacity-977.lock"}
+output_root=${SV1D_CAPACITY_OUTPUT_ROOT:-"/home/vlad/v2-r2-sv1d-capacity-977-v1"}
 
 fail() {
 	echo "SV1D capacity preflight: $*" >&2
@@ -215,22 +216,105 @@ run_capacity_arm() {
 # Internal arm invocation is deliberately after all helper definitions but
 # before normal argument parsing. The resource wrapper executes this exact
 # checked-in file so simulator and renderer remain within one sampled tree.
-# FD3 is a one-shot pipe capability supplied by sv1dresource; the outer
-# capacity runner's flock remains held by the waiting parent process.
+# FD3 remains the namespace lock, inherited through sv1dresource. The private
+# arm also rechecks the signed exact-tree review before it can create output;
+# the public resource adapter is not itself an authorization capability.
 if [[ "${1:-}" == "--internal-arm" ]]; then
 	shift
 	[[ "${SV1D_LOCK_HELD:-0}" == 1 ]] || exit 1
-	handoff_target=$(readlink "/proc/$$/fd/3" 2>/dev/null) || exit 3
-	[[ "$handoff_target" == pipe:* ]] || exit 3
+	[[ $# -eq 11 ]] || exit 2
+	[[ "$output_root" == /* && "$output_root" != "/" && "$(realpath -m -- "$output_root")" == "$output_root" ]] || exit 7
+	[[ -d "$root_dir/.git" ]] || exit 7
+	[[ -z "$(git -C "$root_dir" status --porcelain --untracked-files=all)" ]] || exit 7
+	current_source_revision=$(git -C "$root_dir" rev-parse HEAD 2>/dev/null) || exit 7
+	current_tree_revision=$(git -C "$root_dir" rev-parse HEAD^{tree} 2>/dev/null) || exit 7
+	arm=$1
+	config=$2
+	arm_dir=$3
+	rendered_dir=$4
+	simulator=$5
+	analyzer=$6
+	renderer=$7
+	source_revision=$8
+	experiment_id=$9
+	stdout_log=${10}
+	stderr_log=${11}
+	case "$arm" in
+		treatment|mode-off|no-roster)
+			expected_experiment_id="v2-r2-sv1d-capacity-977-$arm"
+			case "$arm" in
+				treatment) target_config=${SV1D_CAPACITY_INTERNAL_TREATMENT_CONFIG:-} ;;
+				mode-off) target_config=${SV1D_CAPACITY_INTERNAL_MODE_OFF_CONFIG:-} ;;
+				no-roster) target_config=${SV1D_CAPACITY_INTERNAL_NO_ROSTER_CONFIG:-} ;;
+			esac
+			case "$arm" in
+				treatment) expected_target_config_sha256=${SV1D_CAPACITY_INTERNAL_TREATMENT_CONFIG_SHA256:-} ;;
+				mode-off) expected_target_config_sha256=${SV1D_CAPACITY_INTERNAL_MODE_OFF_CONFIG_SHA256:-} ;;
+				no-roster) expected_target_config_sha256=${SV1D_CAPACITY_INTERNAL_NO_ROSTER_CONFIG_SHA256:-} ;;
+			esac
+			;;
+		*) exit 8 ;;
+	esac
+	[[ "$source_revision" =~ ^[0-9a-f]{40}$ && "$source_revision" == "$current_source_revision" ]] || exit 8
+	[[ "${SV1D_CAPACITY_INTERNAL_TREE_REVISION:-}" == "$current_tree_revision" ]] || exit 8
+	[[ "$experiment_id" == "$expected_experiment_id" ]] || exit 8
+	[[ "$config" == "$output_root/configs/capacity-$arm.json" ]] || exit 8
+	[[ "$arm_dir" == "$output_root/arms/$arm" ]] || exit 8
+	[[ "$rendered_dir" == "$output_root/rendered/$arm" ]] || exit 8
+	[[ "$stdout_log" == "$output_root/logs/$arm.simulator.stdout.log" ]] || exit 8
+	[[ "$stderr_log" == "$output_root/logs/$arm.simulator.stderr.log" ]] || exit 8
+	[[ ! -e "$arm_dir" && ! -L "$arm_dir" && ! -e "$rendered_dir" && ! -L "$rendered_dir" ]] || exit 8
+	[[ "$(readlink "/proc/$$/fd/3" 2>/dev/null)" == "$capacity_lock_path" ]] || exit 3
+	flock -n 3 || exit 4
 	resource_parent_exe=$(readlink "/proc/$PPID/exe" 2>/dev/null) || exit 4
 	resource_parent_name=${resource_parent_exe##*/}
 	[[ "$resource_parent_name" == sv1dresource || "$resource_parent_name" == sv1dresource-* ]] || exit 4
-	IFS= read -r resource_handoff <&3 || exit 5
-	[[ "$resource_handoff" == "v2-r2-sv1dresource-child-handoff-v1:$PPID" ]] || exit 5
-	if IFS= read -r unexpected_handoff <&3; then
-		exit 6
-	fi
-	[[ $# -eq 11 ]] || exit 2
+	[[ "${SV1D_CAPACITY_INTERNAL_RESOURCE_SHA256:-}" =~ ^[0-9a-f]{64}$ ]] || exit 10
+	[[ "$(hash_file "$resource_parent_exe")" == "$SV1D_CAPACITY_INTERNAL_RESOURCE_SHA256" ]] || exit 10
+	internal_review_attestation=${SV1D_CAPACITY_INTERNAL_REVIEW_ATTESTATION:-}
+	internal_review_report=${SV1D_CAPACITY_INTERNAL_REVIEW_REPORT:-}
+	internal_trusted_key=${SV1D_CAPACITY_INTERNAL_TRUSTED_KEY:-}
+	internal_review_plan=${SV1D_CAPACITY_INTERNAL_REVIEW_PLAN:-}
+	internal_parent_registration=${SV1D_CAPACITY_INTERNAL_PARENT_REGISTRATION:-}
+	internal_amendment=${SV1D_CAPACITY_INTERNAL_AMENDMENT:-}
+	for review_file in "$internal_review_attestation" "$internal_review_report" "$internal_trusted_key" "$internal_review_plan" "$internal_parent_registration" "$internal_amendment" "$target_config" "$config" "$simulator" "$analyzer" "$renderer" "$0"; do
+		[[ -n "$review_file" ]] || exit 9
+	done
+	for review_file in "$internal_review_attestation" "$internal_review_report" "$internal_trusted_key" "$internal_review_plan" "$internal_parent_registration" "$internal_amendment" "$target_config" "$config"; do
+		require_regular_file internal-review-input "$review_file"
+	done
+	for binary in "$simulator" "$analyzer" "$renderer" "$0"; do
+		[[ -f "$binary" && ! -L "$binary" && -x "$binary" ]] || exit 9
+		require_no_symlink_components "$binary" || exit 9
+	done
+	[[ "$(hash_file "$internal_review_attestation")" == "${SV1D_CAPACITY_INTERNAL_REVIEW_ATTESTATION_SHA256:-}" ]] || exit 9
+	[[ "$(hash_file "$internal_review_report")" == "${SV1D_CAPACITY_INTERNAL_REVIEW_REPORT_SHA256:-}" ]] || exit 9
+	[[ "$(hash_file "$internal_trusted_key")" == "${SV1D_CAPACITY_INTERNAL_TRUSTED_KEY_SHA256:-}" ]] || exit 9
+	[[ "$(hash_file "$internal_review_plan")" == "${SV1D_CAPACITY_INTERNAL_REVIEW_PLAN_SHA256:-}" ]] || exit 9
+	[[ "$(hash_file "$internal_parent_registration")" == "${SV1D_CAPACITY_INTERNAL_PARENT_REGISTRATION_SHA256:-}" ]] || exit 9
+	[[ "$(hash_file "$internal_amendment")" == "${SV1D_CAPACITY_INTERNAL_AMENDMENT_SHA256:-}" ]] || exit 9
+	[[ "$expected_target_config_sha256" =~ ^[0-9a-f]{64}$ ]] || exit 9
+	[[ "$(hash_file "$target_config")" == "$expected_target_config_sha256" ]] || exit 9
+	[[ "${SV1D_CAPACITY_INTERNAL_ANALYZER_SHA256:-}" =~ ^[0-9a-f]{64}$ ]] || exit 9
+	[[ "${SV1D_CAPACITY_INTERNAL_SIMULATOR_SHA256:-}" =~ ^[0-9a-f]{64}$ ]] || exit 9
+	[[ "${SV1D_CAPACITY_INTERNAL_RENDERER_SHA256:-}" =~ ^[0-9a-f]{64}$ ]] || exit 9
+	[[ "${SV1D_CAPACITY_INTERNAL_RUNNER_SHA256:-}" =~ ^[0-9a-f]{64}$ ]] || exit 9
+	[[ "$(hash_file "$simulator")" == "$SV1D_CAPACITY_INTERNAL_SIMULATOR_SHA256" ]] || exit 10
+	[[ "$(hash_file "$analyzer")" == "$SV1D_CAPACITY_INTERNAL_ANALYZER_SHA256" ]] || exit 10
+	[[ "$(hash_file "$renderer")" == "$SV1D_CAPACITY_INTERNAL_RENDERER_SHA256" ]] || exit 10
+	[[ "$(hash_file "$0")" == "${SV1D_CAPACITY_INTERNAL_RUNNER_SHA256:-}" ]] || exit 10
+	require_clean_pinned_binary multivenue "$simulator" "$source_revision"
+	require_clean_pinned_binary sv1dprobe "$analyzer" "$source_revision"
+	require_clean_pinned_binary evsrender "$renderer" "$source_revision"
+	"$analyzer" -mode verify-review \
+		-review-attestation "$internal_review_attestation" -review-report "$internal_review_report" -trusted-review-key "$internal_trusted_key" \
+		-source-revision "$source_revision" -tree-revision "$current_tree_revision" -plan-sha256 "$SV1D_CAPACITY_INTERNAL_REVIEW_PLAN_SHA256" \
+		-parent-registration-sha256 "$SV1D_CAPACITY_INTERNAL_PARENT_REGISTRATION_SHA256" -amendment-sha256 "$SV1D_CAPACITY_INTERNAL_AMENDMENT_SHA256" \
+		-treatment-config "${SV1D_CAPACITY_INTERNAL_TREATMENT_CONFIG:?}" -mode-off-config "${SV1D_CAPACITY_INTERNAL_MODE_OFF_CONFIG:?}" \
+		-no-roster-config "${SV1D_CAPACITY_INTERNAL_NO_ROSTER_CONFIG:?}" -binary-sha256 "$SV1D_CAPACITY_INTERNAL_SIMULATOR_SHA256" \
+		-analyzer-sha256 "$SV1D_CAPACITY_INTERNAL_ANALYZER_SHA256" -renderer-sha256 "$SV1D_CAPACITY_INTERNAL_RENDERER_SHA256" || exit 11
+	identity_filter='del(.seed,.experiment_id,.hypothesis_id,.status,.description)'
+	[[ "$(jq -S "$identity_filter" "$target_config")" == "$(jq -S "$identity_filter" "$config")" ]] || exit 12
 	source "$root_dir/scripts/v2-integrated-longrun-r2-contract.sh"
 	run_capacity_arm "$@"
 	exit $?
@@ -250,7 +334,6 @@ sv1dprobe_binary=${2:-"$root_dir/bin/sv1dprobe"}
 evsrender_binary=${3:-"$root_dir/bin/evsrender"}
 sv1dresource_binary=${4:-"$root_dir/bin/sv1dresource"}
 lock_binary=${5:-"$root_dir/bin/sv1dlock"}
-output_root=${SV1D_CAPACITY_OUTPUT_ROOT:-"/home/vlad/v2-r2-sv1d-capacity-977-v1"}
 capacity_attestation=${SV1D_CAPACITY_PREFLIGHT_ATTESTATION:-"/home/vlad/v2-r2-sv1d-capacity-977-v1.attestation.json"}
 review_attestation=${SV1D_REVIEW_ATTESTATION:-}
 review_report=${SV1D_REVIEW_REPORT:-}
@@ -392,6 +475,33 @@ review_plan_sha256=$(jq -er '.plan_sha256 | select(test("^[0-9a-f]{64}$"))' "$re
 	-binary-sha256 "$multivenue_sha256" -analyzer-sha256 "$sv1dprobe_sha256" -renderer-sha256 "$evsrender_sha256" ||
 	fail "external exact-tree review was not accepted"
 
+export SV1D_CAPACITY_OUTPUT_ROOT="$output_root"
+export SV1D_CAPACITY_LOCK_PATH="$capacity_lock_path"
+export SV1D_CAPACITY_INTERNAL_REVIEW_ATTESTATION="$staged_review_attestation"
+export SV1D_CAPACITY_INTERNAL_REVIEW_REPORT="$staged_review_report"
+export SV1D_CAPACITY_INTERNAL_TRUSTED_KEY="$staged_trusted_key"
+export SV1D_CAPACITY_INTERNAL_REVIEW_PLAN="$review_plan"
+export SV1D_CAPACITY_INTERNAL_PARENT_REGISTRATION="$staged_parent_registration"
+export SV1D_CAPACITY_INTERNAL_AMENDMENT="$staged_amendment"
+export SV1D_CAPACITY_INTERNAL_TREE_REVISION="$tree_revision"
+export SV1D_CAPACITY_INTERNAL_REVIEW_ATTESTATION_SHA256="$review_attestation_sha256"
+export SV1D_CAPACITY_INTERNAL_REVIEW_REPORT_SHA256="$review_report_sha256"
+export SV1D_CAPACITY_INTERNAL_TRUSTED_KEY_SHA256="$trusted_review_key_sha256"
+export SV1D_CAPACITY_INTERNAL_REVIEW_PLAN_SHA256="$review_plan_sha256"
+export SV1D_CAPACITY_INTERNAL_PARENT_REGISTRATION_SHA256="$parent_registration_sha256"
+export SV1D_CAPACITY_INTERNAL_AMENDMENT_SHA256="$amendment_sha256"
+export SV1D_CAPACITY_INTERNAL_TREATMENT_CONFIG="${staged_target_for[treatment]}"
+export SV1D_CAPACITY_INTERNAL_MODE_OFF_CONFIG="${staged_target_for[mode-off]}"
+export SV1D_CAPACITY_INTERNAL_NO_ROSTER_CONFIG="${staged_target_for[no-roster]}"
+export SV1D_CAPACITY_INTERNAL_TREATMENT_CONFIG_SHA256="$target_treatment_sha256"
+export SV1D_CAPACITY_INTERNAL_MODE_OFF_CONFIG_SHA256="$target_mode_off_sha256"
+export SV1D_CAPACITY_INTERNAL_NO_ROSTER_CONFIG_SHA256="$target_no_roster_sha256"
+export SV1D_CAPACITY_INTERNAL_SIMULATOR_SHA256="$multivenue_sha256"
+export SV1D_CAPACITY_INTERNAL_ANALYZER_SHA256="$sv1dprobe_sha256"
+export SV1D_CAPACITY_INTERNAL_RENDERER_SHA256="$evsrender_sha256"
+export SV1D_CAPACITY_INTERNAL_RUNNER_SHA256="$runner_sha256"
+export SV1D_CAPACITY_INTERNAL_RESOURCE_SHA256="$sv1dresource_sha256"
+
 output_parent=$(dirname -- "$output_root")
 mkdir -p "$output_root"
 require_no_symlink_components "$output_root" || fail "created capacity output root contains a symlink"
@@ -494,7 +604,7 @@ for arm in treatment mode-off no-roster; do
 	arm_result="$measurement_records_root/$arm-record.json"
 	set +e
 	GOMAXPROCS=2 GOMEMLIMIT=4GiB SV1D_CAPACITY_ROOT_DIR="$root_dir" SV1D_CAPACITY_SCRIPT_PATH="$retained_capacity_runner" "$staged_sv1dresource" -out "$measurement_path" -output-parent "$output_parent" -measurement-root "$output_root" \
-		-sample-interval 250ms -require-finite-cgroup -require-child-handoff -- \
+		-sample-interval 250ms -require-finite-cgroup -inherit-fd 3 -- \
 		"$retained_capacity_runner" --internal-arm "$arm" "${capacity_config_for[$arm]}" "$arm_dir" "$rendered_dir" "$staged_multivenue" "$staged_sv1dprobe" "$staged_evsrender" "$source_revision" \
 		"${capacity_experiment_for[$arm]}" "$stdout_log" "$stderr_log"
 	resource_status=$?

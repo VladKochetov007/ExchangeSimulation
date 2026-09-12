@@ -79,9 +79,18 @@ for runner in \
 done
 rg -n 'SV1D_LOCK_HELD.*== 1' "$root_dir/scripts/run-v2-r2-sv1d-capacity-preflight.sh" >/dev/null ||
 	fail "SV1D capacity runner does not guard its internal arm entrypoint"
-rg -n 'handoff_target.*pipe:|v2-r2-sv1dresource-child-handoff-v1|resource_parent_name.*sv1dresource' \
+rg -n 'resource_parent_name.*sv1dresource' \
 	"$root_dir/scripts/run-v2-r2-sv1d-capacity-preflight.sh" >/dev/null ||
-	fail "SV1D capacity runner does not require the resource-wrapper handoff"
+	fail "SV1D capacity runner does not bind internal arms to the resource wrapper"
+rg -n -- '-inherit-fd 3' "$root_dir/scripts/run-v2-r2-sv1d-capacity-preflight.sh" >/dev/null ||
+	fail "SV1D capacity runner does not forward the namespace lock descriptor"
+rg -n 'SV1D_CAPACITY_INTERNAL_REVIEW_ATTESTATION|SV1D_CAPACITY_INTERNAL_RESOURCE_SHA256|verify-review|expected_target_config_sha256' \
+	"$root_dir/scripts/run-v2-r2-sv1d-capacity-preflight.sh" >/dev/null ||
+	fail "SV1D capacity runner does not revalidate its signed review identity"
+if rg -n 'require-child-handoff|v2-r2-sv1dresource-child-handoff-v1|handoff_target.*pipe:' \
+	"$root_dir/analysis" "$root_dir/cmd/sv1dresource" "$root_dir/scripts/run-v2-r2-sv1d-capacity-preflight.sh" >/dev/null; then
+	fail "obsolete forgeable SV1D handoff token remains in the capacity path"
+fi
 
 forged_arm_dir="$tmp_root/forged-internal-arm"
 forged_lock_path="$tmp_root/forged-capacity.lock"
@@ -99,6 +108,33 @@ forged_lock_path="$tmp_root/forged-capacity.lock"
 	set -e
 	[[ "$forged_status" -ne 0 && ! -e "$forged_arm_dir" ]]
 ) || fail "direct forged lock-marker invocation reached the internal arm"
+
+public_wrapper_binary="$tmp_root/sv1dresource"
+(cd "$root_dir" && GOMAXPROCS=2 GOMEMLIMIT=4GiB go build -trimpath -o "$public_wrapper_binary" ./cmd/sv1dresource) ||
+	fail "could not build the public resource adapter for the authorization regression"
+public_output_root="$tmp_root/public-wrapper-output"
+public_config="$public_output_root/configs/capacity-treatment.json"
+public_arm_dir="$public_output_root/arms/treatment"
+mkdir -p "$(dirname -- "$public_config")" "$public_output_root/rendered" "$public_output_root/logs"
+cp -- "$root_dir/research/configs/v2-r2-sv1d-activation/activation-659-treatment.json" "$public_config"
+public_measurement_root="$tmp_root/public-wrapper-measurement-root"
+mkdir -p "$public_measurement_root"
+(
+	exec 3<>"$forged_lock_path"
+	flock -n 3
+	set +e
+	SV1D_LOCK_HELD=1 SV1D_CAPACITY_LOCK_PATH="$forged_lock_path" SV1D_CAPACITY_ROOT_DIR="$root_dir" \
+		SV1D_CAPACITY_OUTPUT_ROOT="$public_output_root" "$public_wrapper_binary" \
+		-out "$tmp_root/public-wrapper-measurement.json" -output-parent "$tmp_root" -measurement-root "$public_measurement_root" \
+		-sample-interval 10ms -require-finite-cgroup=false -inherit-fd 3 -- \
+		bash "$root_dir/scripts/run-v2-r2-sv1d-capacity-preflight.sh" --internal-arm treatment \
+		"$public_config" "$public_arm_dir" "$public_output_root/rendered/treatment" /bin/true /bin/true /bin/true \
+		0123456789abcdef0123456789abcdef01234567 forged-public \
+		"$public_output_root/logs/forged.stdout" "$public_output_root/logs/forged.stderr"
+	public_wrapper_status=$?
+	set -e
+	[[ "$public_wrapper_status" -ne 0 && ! -e "$public_arm_dir" ]]
+) || fail "public sv1dresource wrapper could mint an unauthorized internal arm"
 
 expected_calendar_timeline=$(cat <<'EOF'
 [

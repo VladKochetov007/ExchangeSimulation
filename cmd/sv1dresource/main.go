@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -24,13 +25,14 @@ func main() {
 }
 
 func run() error {
+	var inheritedFileDescriptors fileDescriptorList
 	inspectFilesystem := flag.String("inspect-filesystem", "", "print the filesystem identity for PATH and exit")
 	out := flag.String("out", "", "new resource-measurement JSON path")
 	outputParent := flag.String("output-parent", "", "filesystem path whose free space is measured")
 	measurementRoot := flag.String("measurement-root", "", "fresh output tree measured for footprint")
 	interval := flag.Duration("sample-interval", 250*time.Millisecond, "resource sampling interval")
 	requireFiniteCgroup := flag.Bool("require-finite-cgroup", true, "reject an unbounded cgroup memory limit")
-	requireChildHandoff := flag.Bool("require-child-handoff", false, "pass a one-shot parent handoff on child file descriptor 3")
+	flag.Var(&inheritedFileDescriptors, "inherit-fd", "inherit this parent file descriptor as a child descriptor, in declaration order")
 	flag.Parse()
 	if *inspectFilesystem != "" {
 		identity, err := analysis.InspectSV1DFilesystem(*inspectFilesystem)
@@ -52,7 +54,7 @@ func run() error {
 		MeasurementRoot:          *measurementRoot,
 		SampleInterval:           *interval,
 		RequireFiniteCgroupLimit: *requireFiniteCgroup,
-		RequireChildHandoff:      *requireChildHandoff,
+		InheritedFileDescriptors: inheritedFileDescriptors,
 	})
 	if err := publishMeasurement(*out, measurement); err != nil {
 		if measurementErr != nil {
@@ -71,6 +73,28 @@ func run() error {
 	if !measurement.Complete {
 		return fmt.Errorf("measured command was incomplete: exit status %d", measurement.ExitStatus)
 	}
+	return nil
+}
+
+type fileDescriptorList []int
+
+func (descriptors *fileDescriptorList) String() string {
+	if descriptors == nil || len(*descriptors) == 0 {
+		return ""
+	}
+	values := make([]string, len(*descriptors))
+	for index, descriptor := range *descriptors {
+		values[index] = strconv.Itoa(descriptor)
+	}
+	return strings.Join(values, ",")
+}
+
+func (descriptors *fileDescriptorList) Set(raw string) error {
+	descriptor, err := strconv.Atoi(raw)
+	if err != nil || descriptor < 0 {
+		return fmt.Errorf("invalid inherited file descriptor %q", raw)
+	}
+	*descriptors = append(*descriptors, descriptor)
 	return nil
 }
 

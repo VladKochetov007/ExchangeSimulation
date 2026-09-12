@@ -197,8 +197,9 @@ func (d *cdfDecisionTestDictionary) Lookup(reference uint32) (string, bool) {
 	return d.dictionary.Value(reference)
 }
 
-func cdfDecisionQuotePriceOffset(payload []byte) int {
+func cdfDecisionOptionalNumericOffsets(payload []byte) map[string]int {
 	cursor := evstream.NewCursor(payload)
+	offsets := make(map[string]int, 11)
 	cursor.Presence(cdfDecisionOptionalFields)
 	for index := 0; index < 10; index++ {
 		cursor.Uint32()
@@ -214,7 +215,35 @@ func cdfDecisionQuotePriceOffset(payload []byte) int {
 	for index := 0; index < 13; index++ {
 		cursor.Int64()
 	}
-	return cursor.Offset()
+	offsets["QuotePrice"] = cursor.Offset()
+	cursor.Int64()
+	offsets["QuoteQty"] = cursor.Offset()
+	cursor.Int64()
+	offsets["MinimumQualifyingQty"] = cursor.Offset()
+	cursor.Int64()
+	offsets["RegisteredMinimumExecutableQty"] = cursor.Offset()
+	cursor.Int64()
+	offsets["QuoteOrderID"] = cursor.Offset()
+	cursor.Uint64()
+	offsets["QuoteRequestID"] = cursor.Offset()
+	cursor.Uint64()
+	offsets["CancelRequestID"] = cursor.Offset()
+	cursor.Uint64()
+	offsets["QuoteSubmittedAt"] = cursor.Offset()
+	cursor.Int64()
+	offsets["QuoteCashAvailable"] = cursor.Offset()
+	cursor.Int64()
+	cursor.Int64()
+	offsets["QuoteCashRequired"] = cursor.Offset()
+	cursor.Int64()
+	for index := 0; index < 6; index++ {
+		cursor.Int64()
+	}
+	for index := 0; index < 3; index++ {
+		cursor.Bool()
+	}
+	offsets["ReplacesOrderID"] = cursor.Offset()
+	return offsets
 }
 
 func TestCDFDecisionV4RejectsContradictoryOptionalNumericPresence(t *testing.T) {
@@ -222,31 +251,66 @@ func TestCDFDecisionV4RejectsContradictoryOptionalNumericPresence(t *testing.T) 
 		Role: "cdf_elastic_supplier_1", ClientID: 7, Symbol: "CDF/USD",
 		Action: "withdraw", Reason: "risk_limit",
 	}
-	for _, test := range []struct {
-		name    string
-		encoded int64
-		mutated int64
-	}{
-		{name: "absent slot is nonzero", encoded: 0, mutated: 1},
-		{name: "present slot is zero", encoded: 1, mutated: 0},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			interner := &cdfDecisionTestDictionary{dictionary: evstream.NewDictionary()}
-			decision := base
-			decision.QuotePrice = test.encoded
-			payload, err := decision.AppendPayloadInterning(nil, interner)
-			if err != nil {
-				t.Fatal(err)
-			}
-			quotePriceOffset := cdfDecisionQuotePriceOffset(payload)
-			if quotePriceOffset+8 > len(payload) {
-				t.Fatalf("quote price offset %d exceeds payload length %d", quotePriceOffset, len(payload))
-			}
-			binary.LittleEndian.PutUint64(payload[quotePriceOffset:], uint64(test.mutated))
-			var decoded ElasticLiquiditySupplierDecision
-			if err := decodeElasticLiquiditySupplierDecisionVersioned(payload, interner, &decoded, 4); !errors.Is(err, evstream.ErrCorrupt) {
-				t.Fatalf("contradictory optional numeric presence error = %v, want ErrCorrupt", err)
-			}
-		})
+	optionalFields := []string{
+		"QuotePrice", "QuoteQty", "MinimumQualifyingQty", "RegisteredMinimumExecutableQty",
+		"QuoteOrderID", "QuoteRequestID", "CancelRequestID", "QuoteSubmittedAt",
+		"QuoteCashAvailable", "QuoteCashRequired", "ReplacesOrderID",
+	}
+	for _, fieldName := range optionalFields {
+		for _, test := range []struct {
+			name    string
+			encoded int64
+			mutated int64
+		}{
+			{name: "absent slot is nonzero", encoded: 0, mutated: 1},
+			{name: "present slot is zero", encoded: 1, mutated: 0},
+		} {
+			t.Run(fieldName+"/"+test.name, func(t *testing.T) {
+				interner := &cdfDecisionTestDictionary{dictionary: evstream.NewDictionary()}
+				decision := base
+				setCDFDecisionOptionalNumeric(&decision, fieldName, test.encoded)
+				payload, err := decision.AppendPayloadInterning(nil, interner)
+				if err != nil {
+					t.Fatal(err)
+				}
+				numericOffsets := cdfDecisionOptionalNumericOffsets(payload)
+				fieldOffset := numericOffsets[fieldName]
+				if fieldOffset+8 > len(payload) {
+					t.Fatalf("%s offset %d exceeds payload length %d", fieldName, fieldOffset, len(payload))
+				}
+				binary.LittleEndian.PutUint64(payload[fieldOffset:], uint64(test.mutated))
+				var decoded ElasticLiquiditySupplierDecision
+				if err := decodeElasticLiquiditySupplierDecisionVersioned(payload, interner, &decoded, 4); !errors.Is(err, evstream.ErrCorrupt) {
+					t.Fatalf("contradictory optional numeric presence error = %v, want ErrCorrupt", err)
+				}
+			})
+		}
+	}
+}
+
+func setCDFDecisionOptionalNumeric(decision *ElasticLiquiditySupplierDecision, fieldName string, value int64) {
+	switch fieldName {
+	case "QuotePrice":
+		decision.QuotePrice = value
+	case "QuoteQty":
+		decision.QuoteQty = value
+	case "MinimumQualifyingQty":
+		decision.MinimumQualifyingQty = value
+	case "RegisteredMinimumExecutableQty":
+		decision.RegisteredMinimumExecutableQty = value
+	case "QuoteOrderID":
+		decision.QuoteOrderID = uint64(value)
+	case "QuoteRequestID":
+		decision.QuoteRequestID = uint64(value)
+	case "CancelRequestID":
+		decision.CancelRequestID = uint64(value)
+	case "QuoteSubmittedAt":
+		decision.QuoteSubmittedAt = value
+	case "QuoteCashAvailable":
+		decision.QuoteCashAvailable = value
+	case "QuoteCashRequired":
+		decision.QuoteCashRequired = value
+	case "ReplacesOrderID":
+		decision.ReplacesOrderID = uint64(value)
 	}
 }

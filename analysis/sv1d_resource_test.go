@@ -62,13 +62,22 @@ func TestMeasureSV1DCommandRecordsFailedChildWithoutCertifyingIt(t *testing.T) {
 	}
 }
 
-func TestMeasureSV1DCommandProvidesParentBoundChildHandoff(t *testing.T) {
+func TestMeasureSV1DCommandForwardsInheritedFileDescriptor(t *testing.T) {
 	root := t.TempDir()
-	handoffPath := filepath.Join(root, "handoff.txt")
+	lockPath := filepath.Join(root, "namespace.lock")
+	lockFile, err := os.OpenFile(lockPath, os.O_RDWR|os.O_CREATE, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lockFile.Close()
+	descriptorPath := filepath.Join(root, "descriptor.txt")
 	measurement, err := MeasureSV1DCommand(context.Background(), SV1DResourceOptions{
-		Command:      []string{"/bin/sh", "-c", "IFS= read -r handoff <&3; printf '%s' \"$handoff\" > \"$1\"; sleep 0.03", "sh", handoffPath},
-		OutputParent: root, MeasurementRoot: root, SampleInterval: 10 * time.Millisecond,
-		RequireFiniteCgroupLimit: false, RequireChildHandoff: true,
+		Command:                  []string{"/bin/sh", "-c", "readlink /proc/$$/fd/3 > \"$1\"; sleep 0.03", "sh", descriptorPath},
+		OutputParent:             root,
+		MeasurementRoot:          root,
+		SampleInterval:           10 * time.Millisecond,
+		RequireFiniteCgroupLimit: false,
+		InheritedFileDescriptors: []int{int(lockFile.Fd())},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -76,12 +85,12 @@ func TestMeasureSV1DCommandProvidesParentBoundChildHandoff(t *testing.T) {
 	if !measurement.Complete || measurement.ExitStatus != 0 {
 		t.Fatalf("handoff command completion = %t/%d: %+v", measurement.Complete, measurement.ExitStatus, measurement)
 	}
-	handoff, err := os.ReadFile(handoffPath)
+	descriptorTarget, err := os.ReadFile(descriptorPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(string(handoff), sv1DResourceChildHandoffPrefix+":") {
-		t.Fatalf("child handoff = %q", handoff)
+	if strings.TrimSpace(string(descriptorTarget)) != lockPath {
+		t.Fatalf("inherited descriptor target = %q, want %q", descriptorTarget, lockPath)
 	}
 }
 
