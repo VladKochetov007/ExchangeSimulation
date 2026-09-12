@@ -166,3 +166,23 @@ Sol-xhigh launches targeting exact HEAD
 403 over WebSocket and HTTPS fallback. No ACCEPT or REJECT verdict was
 produced. The successor remains unpromoted and no scientific execution was
 authorized.
+
+## Append-only launch-bundle rejection and correction — 2026-09-12
+
+The fresh review of exact `023dfc3` returned `ACCEPT` for the narrow next
+promotion step. During independent production of the required signed bundle,
+reviewer `Zeno` (`01a097fc-42fc-7590-87cd-ee3542207418`) found that the SV1D
+capacity and activation runners, plus the adjacent audit adapter, parsed Go
+binary metadata using an obsolete `awk '$1 == "go"'` row. Go 1.27 emits
+`binary: go1.27.0` on the first line, so valid pinned binaries failed the
+strict toolchain check. The provisional bundle was deleted and no signed
+ACCEPT artifact was retained.
+
+This is a reachable launch/provenance defect with no historical activation;
+no capacity, activation, development, freeze, or holdout ran. Commit
+`527d55a` changes all three paths to parse the first metadata line and adds a
+contract regression. Clean `make test`, vet, targeted race, fresh-process
+determinism/evidence-neutrality, shell syntax, and diff checks pass. The
+corrected candidate now requires one fresh exact-tree Sol-xhigh review before
+rebuilding tools and running capacity. Full details are in
+`research/v2-r5-go-1.27-launch-parser-fix-2026-09-12.md`.

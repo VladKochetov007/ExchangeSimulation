@@ -1755,3 +1755,27 @@ The objective is left active but blocked at the independent-review boundary.
 No capacity, build, activation, development cell, freeze, or holdout action is
 authorized. Resume by retrying the complete exact-tree review after the
 Sol-xhigh backend/quota becomes available.
+
+## Append-only launch-provenance correction — 2026-09-12
+
+The fresh exact-tree review eventually accepted candidate `023dfc3`, but its
+independent signed-bundle revalidation found a real launch-gate defect before
+any capacity or scientific execution. Go 1.27 emits the toolchain version on
+the first `go version -m` line (`binary: go1.27.0`), while the SV1D capacity,
+activation, and audit adapters searched for an obsolete `go` metadata row.
+Valid pinned binaries were therefore rejected. The finding is reachable but
+has no historical activation: no successor capacity arm, activation probe,
+development cell, freeze, or holdout ran.
+
+The minimal correction is pushed as `527d55a` and changes all three adapters
+to parse the first metadata line. The R2 contract test covers the first-line
+form and rejects the obsolete parser. Clean bounded `make test`, `go vet`, the
+targeted race matrix, fresh-process determinism/evidence-neutrality checks,
+shell syntax, and diff checks pass at that commit. Full details are in
+`research/v2-r5-go-1.27-launch-parser-fix-2026-09-12.md`.
+
+The pre-correction pinned tools and provisional signed bundle are not accepted
+for launch. Rebuild the tools at `527d55a`, obtain one fresh exact-tree review
+and a valid bundle bound to those tools, then run only the outcome-ineligible
+binary capacity preflight. No activation, development cell, freeze, or
+holdout `619/631/641` is authorized.

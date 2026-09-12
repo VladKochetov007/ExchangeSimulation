@@ -1531,3 +1531,22 @@ The successor remains unpromoted and the objective is blocked only at this
 external-review boundary. No capacity, pinned build, activation, development,
 freeze, or holdout run occurred. Retry the complete exact-tree review when the
 independent service/quota is available.
+
+## Append-only Go 1.27 launch-parser finding and correction — 2026-09-12
+
+After the exact `023dfc3` candidate received a textual Sol-xhigh ACCEPT, the
+independent signed-review-bundle step found a concrete promotion defect. Go
+1.27 reports its version on the first `go version -m` line, but the SV1D
+capacity runner, activation runner, and audit adapter expected a nonexistent
+`go` row. The reviewer reproduced empty version extraction against valid
+Go 1.27/linux/amd64/v1/trimpath/CGO-disabled binaries and correctly refused to
+issue a signed ACCEPT bundle.
+
+This is a reachable launch/provenance bug with no historical activation. No
+capacity, activation, development, freeze, or holdout action used this
+successor path; historical R2 and prior retained evidence remain unchanged.
+Commit `527d55a` fixes the three parsers with the Go 1.27 first-line form and
+adds contract coverage. Clean full tests, vet, targeted race, fresh-process
+checks, shell syntax, and diff hygiene pass. The pre-correction bundle and
+tools are invalidated; the next gate is a fresh exact-tree review of `527d55a`
+followed by corrected pinned builds and capacity only.
