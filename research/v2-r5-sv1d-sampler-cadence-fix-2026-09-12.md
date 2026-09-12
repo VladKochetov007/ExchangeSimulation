@@ -75,3 +75,13 @@ hardening, binary evidence, strict scoring/provenance, resource manifests,
 locking, and the corrected sampler. Only acceptance can authorize the binary
 capacity preflight and subsequent seed-659 activation probe. `dev-607`,
 `dev-613`, `dev-617`, freeze, and holdouts remain unauthorized.
+
+## Append-only review-availability stop — 2026-09-12
+
+The follow-up review was attempted twice against the documentation-complete
+exact tree `82f452028740d535253ce2d822be750250466ff2` (tree
+`ebd2e711618eb421ec8cb66c1828ed779f6388cd`) and both Sol-xhigh launches failed
+before inference with backend HTTP 403. No verdict is recorded. The candidate
+remains unpromoted; no capacity, activation, development, freeze, or holdout
+run occurred. Retry the same complete-tree review when the independent review
+service/quota is available.

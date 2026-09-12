@@ -139,3 +139,13 @@ cell, freeze, or holdout `619/631/641` was consumed. The promotion gate remains
 closed pending one fresh exact-tree Sol-xhigh review of the complete corrected
 candidate. Full remediation details are recorded in
 `research/v2-r5-sv1d-sampler-cadence-fix-2026-09-12.md`.
+
+## Append-only review-availability stop — 2026-09-12
+
+Two fresh Sol-xhigh launch attempts for exact HEAD
+`82f452028740d535253ce2d822be750250466ff2` failed before inference with
+backend HTTP 403. The independent reviewer returned no scientific verdict,
+correctly declining to fabricate ACCEPT or REJECT. The candidate remains at
+the independent-review boundary; no capacity, activation, development cell,
+freeze, or holdout was run. Retry the complete exact-tree review when the
+Sol-xhigh service/quota is available.

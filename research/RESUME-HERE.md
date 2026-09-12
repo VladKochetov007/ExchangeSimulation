@@ -1713,3 +1713,18 @@ complete candidate. Acceptance is required before binary capacity and the
 seed-659 activation probe; all development cells and holdouts remain
 unauthorized. Full details are in
 `research/v2-r5-sv1d-sampler-cadence-fix-2026-09-12.md`.
+
+## Append-only review-availability stop — 2026-09-12
+
+The fresh Sol-xhigh promotion review was attempted twice against exact clean
+HEAD `82f452028740d535253ce2d822be750250466ff2` (tree
+`ebd2e711618eb421ec8cb66c1828ed779f6388cd`) and both launches failed before
+inference with backend HTTP 403. No ACCEPT or REJECT verdict is recorded; the
+reviewer explicitly declined to fabricate one. The branch remains clean and
+synchronized with origin.
+
+This is an external review-availability stop, not scientific acceptance. No
+capacity measurement, pinned build, activation probe, development cell,
+freeze, or holdout `619/631/641` was run. When Sol-xhigh service/quota is
+available, retry the same complete exact-tree review first; only an explicit
+acceptance can authorize the binary-capacity preflight and seed-659 probe.

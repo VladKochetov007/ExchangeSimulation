@@ -1489,3 +1489,17 @@ complete candidate. Until acceptance, capacity and seed-659 activation remain
 unauthorized, as do `dev-607`, `dev-613`, `dev-617`, freeze, and all holdouts.
 The detailed remediation record is
 `research/v2-r5-sv1d-sampler-cadence-fix-2026-09-12.md`.
+
+## Append-only review-availability stop — 2026-09-12
+
+The fresh Sol-xhigh promotion review was attempted twice against exact clean
+HEAD `82f452028740d535253ce2d822be750250466ff2` (tree
+`ebd2e711618eb421ec8cb66c1828ed779f6388cd`) and both launches failed before
+inference with backend HTTP 403. No verdict is recorded because the reviewer
+correctly declined to claim an ACCEPT or REJECT without performing the audit.
+
+The candidate therefore remains unpromoted at the independent-review gate.
+No capacity measurement, pinned Go 1.27 build, activation probe, development
+cell, freeze, or holdout `619/631/641` was run. Retry the same complete
+exact-tree review when Sol-xhigh service/quota is available; acceptance is
+still required before the binary-capacity preflight and seed-659 probe.
