@@ -107,5 +107,5 @@ creating an arm directory. The latest performance-feed fetch from
 `b1847ac`; no performance implementation was imported.
 
 The promotion gate remains closed. One fresh exact-tree Sol-xhigh review of
-`86854e3` is required before binary capacity, pinned Go 1.27 builds, the
+the current clean tree (including code checkpoint `86854e3`) is required before binary capacity, pinned Go 1.27 builds, the
 seed-659 activation probe, `dev-607`, freeze, or holdout `619/631/641`.

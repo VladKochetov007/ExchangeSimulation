@@ -1413,8 +1413,8 @@ commits; no performance code was imported. A latent `RangeSelected` sequence
 continuity issue remains deferred with indexed analytics and does not block
 the current evstream path.
 
-Promotion remains closed pending one fresh exact-tree Sol-xhigh review of
-`86854e3`. Until acceptance, do not run binary capacity, pinned Go 1.27
+Promotion remains closed pending one fresh exact-tree Sol-xhigh review of the
+current clean tree (including code checkpoint `86854e3`). Until acceptance, do not run binary capacity, pinned Go 1.27
 binaries, seed-659 activation, `dev-607`, any development cell, freeze, or
 holdout `619/631/641`.
 
