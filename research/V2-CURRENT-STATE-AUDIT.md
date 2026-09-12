@@ -1383,6 +1383,41 @@ Sol-xhigh review. Acceptance may authorize the measured binary-capacity
 preflight and pinned build, followed by the development-only seed-659 probe;
 holdouts `619/631/641` remain unauthorized.
 
+## Append-only exact-tree audit update: public-wrapper authorization finding closed (`86854e3`) — 2026-09-12
+
+The fresh Sol-xhigh audit of `0c19cdf` found a real but not historically
+activated defect in the binary-capacity control plane. The former pipe token
+was forgeable by a caller of the public `sv1dresource` adapter when combined
+with the environment marker and a caller-opened descriptor, allowing internal
+arm setup before a later sentinel failure. This did not affect R2 or any
+successor trajectory because the capacity and scientific execution gates had
+not run.
+
+The scientific branch corrected this without changing R2 calendar semantics,
+SV1D economics, configs, evidence encoding, or historical artifacts. The
+private arm now receives the held namespace lock as FD3 and independently
+verifies the signed exact-tree review, canonical plan, review documents,
+target config identity, pinned simulator/analyzer/renderer/runner identities,
+and the actual resource-parent binary before it can create output. The
+follow-up contract invokes an actual public wrapper with a valid lock and
+current source/tree identities; it reaches the missing review identity check
+and creates no arm directory. All eleven CDF v4 optional numeric fields have
+both wire-level contradiction directions covered.
+
+Exact remediation commits: `49dbcd4` (implementation and schema coverage),
+`b33f089` (public-wrapper regression), and `86854e3` (review-gate reachability
+inputs). Focused Go suites including the full `simulations/multivenue` package,
+shell syntax, `git diff --check`, and the clean integrated-long-run contract
+passed. The performance branch was fetched through `b1847ac` with no new
+commits; no performance code was imported. A latent `RangeSelected` sequence
+continuity issue remains deferred with indexed analytics and does not block
+the current evstream path.
+
+Promotion remains closed pending one fresh exact-tree Sol-xhigh review of
+`86854e3`. Until acceptance, do not run binary capacity, pinned Go 1.27
+binaries, seed-659 activation, `dev-607`, any development cell, freeze, or
+holdout `619/631/641`.
+
 ## Append-only exact-tree review closure: `11da855` — 2026-09-12
 
 The independent Sol-xhigh review of exact tree `81a6665` was a `REJECT` for

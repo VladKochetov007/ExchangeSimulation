@@ -1638,3 +1638,38 @@ independent Sol-xhigh review of exact `11da855`. Only acceptance permits the
 measured binary-capacity preflight, pinned Go 1.27 build, and development-only
 seed-659 activation probe. Do not launch `dev-607` or touch holdouts
 `619/631/641` before those steps and explicit freeze authorization.
+
+## Append-only quota-stop checkpoint: reviewed-arm authorization remediation (`86854e3`) — 2026-09-12
+
+The exact scientific HEAD is clean, pushed, and pinned at `86854e3` with tree
+`1e3cb97daadc770a32785978bb3fe1117fff8a8d`. A fresh Sol-xhigh review of the
+prior candidate `0c19cdf` rejected the old public-wrapper/pipe-token arm
+handoff: an arbitrary caller could reach the private capacity arm using a
+caller-opened lock descriptor and environment marker. No scientific run had
+used that path, so there is no historical impact.
+
+The remediation is complete in `49dbcd4`, with wrapper attack coverage in
+`b33f089` and `86854e3`. FD3 now remains the namespace lock through
+`sv1dresource`; the internal arm revalidates the clean exact tree, signed
+review and plan, review documents, target config identity, pinned
+simulator/analyzer/renderer/runner identities, and the actual resource-parent
+binary before any arm directory is created. The CDF v4 contradiction test now
+covers every optional numeric field in both directions. Bounded focused Go
+tests, the complete `simulations/multivenue` package, shell syntax, diff
+hygiene, and the clean integrated-long-run contract passed. The public-wrapper
+regression reaches the missing signed-review identity gate and creates no arm.
+
+The performance feed was fetched through `b1847ac` and has no newer commit;
+the VNext binary prototype remains deferred. No capacity measurement, pinned
+campaign build, seed-659 activation, `dev-607`, `dev-613`, `dev-617`, parity
+control, freeze, or holdout `619/631/641` has run. Disk is about 31 GiB free,
+RAM about 26 GiB available, and swap is absent.
+
+This is a deliberate quota stop at the next promotion boundary. Next session:
+verify the clean tree and feed delta, run the remaining final-tree vet/race/
+fresh-process/evidence-contract checks, obtain one fresh exact-tree Sol-xhigh
+review, and only on acceptance run the registered binary-capacity preflight,
+then pinned Go 1.27 builds and the development-only seed-659 activation probe.
+Do not launch `dev-607` or inspect holdouts before those gates and explicit
+freeze authorization. Preserve all prior review rejections and historical
+artifacts.

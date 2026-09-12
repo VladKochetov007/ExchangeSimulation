@@ -63,3 +63,49 @@ hardening, binary evidence and rendering, strict scoring/provenance, resource
 manifests, and both lock entrypoints. Until that review accepts, do not run
 binary capacity, build campaign binaries, run the seed-659 activation probe,
 or launch `dev-607`.
+
+## Append-only follow-up review rejection and remediation — 2026-09-12
+
+The fresh Sol-xhigh review of exact tree
+`0c19cdf1882ee6558283bb91883cb82645d8776a` was independently rejected.
+Reviewer agent `01a09611-4490-7c00-85a2-8422040b19e5` confirmed that the
+previous pipe-token change still allowed the public `sv1dresource` adapter to
+invoke the private arm: a caller could supply the environment marker and a
+caller-opened lock descriptor, while the internal entrypoint trusted only the
+marker, descriptor path, and wrapper executable name. The reviewer reproduced
+entry into arm setup with harmless binaries.
+
+This is a reachable authorization/instrumentation defect in the capacity
+preflight, but it has no historical scientific impact: no capacity arm,
+activation probe, development cell, freeze, or holdout has run under the
+binary successor contract. The reviewer found the CDF v4 optional numeric
+fields semantically correct at this tree; the earlier focused regression was
+strengthened to cover all eleven fields in both contradiction directions. The
+review also identified a latent sequence-continuity issue in the unused
+indexed selective reader; it is deferred and blocks promotion of that reader,
+not the current scientific evidence path.
+
+The correction is committed and pushed as `49dbcd4`, with the public-wrapper
+attack regression completed in `b33f089` and `86854e3`. The private arm now:
+
+- inherits the already-held namespace lock as FD3 through the resource adapter
+  and rechecks its exact path and nonblocking flock;
+- requires the current clean source/tree identities and exact arm paths;
+- rechecks the signed ACCEPT review with the pinned `sv1dprobe` binary and
+  hashes the review inputs, target config, simulator, analyzer, renderer,
+  runner, and actual parent resource binary;
+- compares the arm config against the corresponding immutable target config
+  before creating the arm directory.
+
+Verification after remediation: the bounded focused suites for `evstream`,
+`types`, `exchange`, `analysis`, `cmd/sv1dresource`, and
+`simulations/multivenue` passed; shell syntax and `git diff --check` passed;
+the clean integrated-long-run contract passed; and the actual public-wrapper
+regression reached the missing signed-review identity check (status 9) without
+creating an arm directory. The latest performance-feed fetch from
+`origin/autoresearch/v2-performance-research` found no commit after reviewed
+`b1847ac`; no performance implementation was imported.
+
+The promotion gate remains closed. One fresh exact-tree Sol-xhigh review of
+`86854e3` is required before binary capacity, pinned Go 1.27 builds, the
+seed-659 activation probe, `dev-607`, freeze, or holdout `619/631/641`.
