@@ -216,14 +216,15 @@ run_capacity_arm() {
 # checked-in file so simulator and renderer remain within one sampled tree.
 if [[ "${1:-}" == "--internal-arm" ]]; then
 	shift
+	[[ "${SV1D_LOCK_HELD:-0}" == 1 ]] || exit 1
 	[[ $# -eq 11 ]] || exit 2
 	source "$root_dir/scripts/v2-integrated-longrun-r2-contract.sh"
 	run_capacity_arm "$@"
 	exit $?
 fi
 
-if [[ $# -gt 4 ]]; then
-	echo "usage: $0 [multivenue-binary] [sv1dprobe-binary] [evsrender-binary] [sv1dresource-binary]" >&2
+if [[ $# -gt 5 ]]; then
+	echo "usage: $0 [multivenue-binary] [sv1dprobe-binary] [evsrender-binary] [sv1dresource-binary] [sv1dlock-binary]" >&2
 	exit 2
 fi
 
@@ -235,6 +236,7 @@ multivenue_binary=${1:-"$root_dir/bin/multivenue"}
 sv1dprobe_binary=${2:-"$root_dir/bin/sv1dprobe"}
 evsrender_binary=${3:-"$root_dir/bin/evsrender"}
 sv1dresource_binary=${4:-"$root_dir/bin/sv1dresource"}
+lock_binary=${5:-"$root_dir/bin/sv1dlock"}
 output_root=${SV1D_CAPACITY_OUTPUT_ROOT:-"/home/vlad/v2-r2-sv1d-capacity-977-v1"}
 capacity_attestation=${SV1D_CAPACITY_PREFLIGHT_ATTESTATION:-"/home/vlad/v2-r2-sv1d-capacity-977-v1.attestation.json"}
 review_attestation=${SV1D_REVIEW_ATTESTATION:-}
@@ -246,6 +248,7 @@ multivenue_binary=$(normalize_input_path "$multivenue_binary") || fail "could no
 sv1dprobe_binary=$(normalize_input_path "$sv1dprobe_binary") || fail "could not normalize sv1dprobe binary"
 evsrender_binary=$(normalize_input_path "$evsrender_binary") || fail "could not normalize evsrender binary"
 sv1dresource_binary=$(normalize_input_path "$sv1dresource_binary") || fail "could not normalize sv1dresource binary"
+lock_binary=$(normalize_input_path "$lock_binary") || fail "could not normalize sv1dlock binary"
 review_attestation=$(normalize_input_path "$review_attestation") || fail "could not normalize review attestation"
 review_report=$(normalize_input_path "$review_report") || fail "could not normalize review report"
 trusted_review_key=$(normalize_input_path "$trusted_review_key") || fail "could not normalize trusted review key"
@@ -270,14 +273,23 @@ require_binary multivenue "$multivenue_binary"
 require_binary sv1dprobe "$sv1dprobe_binary"
 require_binary evsrender "$evsrender_binary"
 require_binary sv1dresource "$sv1dresource_binary"
+require_binary sv1dlock "$lock_binary"
 multivenue_binary=$(realpath -e -- "$multivenue_binary")
 sv1dprobe_binary=$(realpath -e -- "$sv1dprobe_binary")
 evsrender_binary=$(realpath -e -- "$evsrender_binary")
 sv1dresource_binary=$(realpath -e -- "$sv1dresource_binary")
+lock_binary=$(realpath -e -- "$lock_binary")
 require_clean_pinned_binary multivenue "$multivenue_binary" "$source_revision"
 require_clean_pinned_binary sv1dprobe "$sv1dprobe_binary" "$source_revision"
 require_clean_pinned_binary evsrender "$evsrender_binary" "$source_revision"
 require_clean_pinned_binary sv1dresource "$sv1dresource_binary" "$source_revision"
+require_clean_pinned_binary sv1dlock "$lock_binary" "$source_revision"
+
+if [[ "${SV1D_LOCK_HELD:-0}" != 1 ]]; then
+	exec "$lock_binary" -path "$capacity_lock_path" -- env SV1D_LOCK_HELD=1 SV1D_LOCK_FD=3 "$0" "$@"
+fi
+[[ "$(readlink "/proc/$$/fd/3" 2>/dev/null)" == "$capacity_lock_path" ]] || fail "capacity lock was not opened by the trusted lock adapter"
+flock -n 3 || fail "another capacity preflight holds the namespace lock"
 
 [[ "$output_root" == /* && "$output_root" != "/" && "$(realpath -m -- "$output_root")" == "$output_root" ]] || fail "capacity output root must be clean absolute path"
 [[ "$capacity_attestation" == /* && "$capacity_attestation" != "/" && "$(realpath -m -- "$capacity_attestation")" == "$capacity_attestation" ]] || fail "capacity attestation path must be clean absolute path"
@@ -303,10 +315,12 @@ staged_multivenue="$staging_root/tools/multivenue-$(hash_file "$multivenue_binar
 staged_sv1dprobe="$staging_root/tools/sv1dprobe-$(hash_file "$sv1dprobe_binary")"
 staged_evsrender="$staging_root/tools/evsrender-$(hash_file "$evsrender_binary")"
 staged_sv1dresource="$staging_root/tools/sv1dresource-$(hash_file "$sv1dresource_binary")"
+staged_sv1dlock="$staging_root/tools/sv1dlock-$(hash_file "$lock_binary")"
 copy_immutable_binary multivenue "$multivenue_binary" "$staged_multivenue"
 copy_immutable_binary sv1dprobe "$sv1dprobe_binary" "$staged_sv1dprobe"
 copy_immutable_binary evsrender "$evsrender_binary" "$staged_evsrender"
 copy_immutable_binary sv1dresource "$sv1dresource_binary" "$staged_sv1dresource"
+copy_immutable_binary sv1dlock "$lock_binary" "$staged_sv1dlock"
 
 staged_review_attestation="$staging_root/review/attestation.json"
 staged_review_report="$staging_root/review/report.md"
@@ -343,6 +357,7 @@ multivenue_sha256=$(hash_file "$staged_multivenue")
 sv1dprobe_sha256=$(hash_file "$staged_sv1dprobe")
 evsrender_sha256=$(hash_file "$staged_evsrender")
 sv1dresource_sha256=$(hash_file "$staged_sv1dresource")
+lock_binary_sha256=$(hash_file "$staged_sv1dlock")
 parent_registration_sha256=$(hash_file "$staged_parent_registration")
 amendment_sha256=$(hash_file "$staged_amendment")
 policy_sha256=$(hash_file "$policy_path")
@@ -377,6 +392,7 @@ copy_immutable_file retained-multivenue "$staged_multivenue" "$output_root/tools
 copy_immutable_file retained-sv1dprobe "$staged_sv1dprobe" "$output_root/tools/sv1dprobe-$sv1dprobe_sha256"
 copy_immutable_file retained-evsrender "$staged_evsrender" "$output_root/tools/evsrender-$evsrender_sha256"
 copy_immutable_file retained-sv1dresource "$staged_sv1dresource" "$output_root/tools/sv1dresource-$sv1dresource_sha256"
+copy_immutable_file retained-sv1dlock "$staged_sv1dlock" "$output_root/tools/sv1dlock-$(hash_file "$lock_binary")"
 retained_capacity_runner="$output_root/tools/capacity-runner-$runner_sha256.sh"
 copy_immutable_file retained-capacity-runner "$staged_capacity_script" "$retained_capacity_runner"
 chmod 0555 -- "$output_root"/tools/*
@@ -446,12 +462,14 @@ jq -S -n \
 	--arg probe_id "$capacity_probe_id" --arg plan_sha256 "$review_plan_sha256" --arg review_attestation_sha256 "$review_attestation_sha256" \
 	--arg review_report_sha256 "$review_report_sha256" --arg trusted_review_key_sha256 "$trusted_review_key_sha256" \
 	--arg runner_sha256 "$runner_sha256" --arg measurer_sha256 "$sv1dresource_sha256" \
+	--arg lock_binary_sha256 "$lock_binary_sha256" \
 	--arg resource_policy_sha256 "$policy_sha256" --arg evidence_format "evstream_v3" --arg log_mode "full" \
 	--arg output_root "$output_root" --arg output_parent "$output_parent" \
 	'{schema_version: 1, contract: $contract, scientific_result_eligible: false, capacity_seed: 977, horizon: "5m",
 	 source_revision: $source_revision, tree_revision: $tree_revision, probe_id: $probe_id, plan_sha256: $plan_sha256,
 	 review_attestation_sha256: $review_attestation_sha256, review_report_sha256: $review_report_sha256, trusted_review_key_sha256: $trusted_review_key_sha256,
 	 runner_sha256: $runner_sha256, measurer_sha256: $measurer_sha256, resource_policy_sha256: $resource_policy_sha256,
+	 lock_binary_sha256: $lock_binary_sha256,
 	 evidence_format: $evidence_format, log_mode: $log_mode, output_root: $output_root, output_parent: $output_parent,
 	 arms: ["treatment", "mode-off", "no-roster"], holdouts_consumed: [], outcome_metrics_recorded: false}' \
 	>"$output_root/capacity-run-metadata.json.tmp-$$"

@@ -297,6 +297,7 @@ type sv1dActivationRunMetadata struct {
 	ArmResultRoot             string   `json:"arm_result_root"`
 	ActivationRunnerSHA256    string   `json:"activation_runner_sha256"`
 	CapacityRunnerSHA256      string   `json:"capacity_runner_sha256"`
+	LockBinarySHA256          string   `json:"lock_binary_sha256,omitempty"`
 	SimulatorSHA256           string   `json:"simulator_sha256"`
 	AnalyzerSHA256            string   `json:"analyzer_sha256"`
 	RendererSHA256            string   `json:"renderer_sha256"`
@@ -454,6 +455,9 @@ func validateSV1DActivationMetadata(metadataPath string, expected CDFExpectedPro
 	metadata, raw, err := readSV1DActivationMetadata(metadataPath)
 	if err != nil {
 		return err
+	}
+	if metadata.LockBinarySHA256 != "" && !isSV1DHexDigest(metadata.LockBinarySHA256) {
+		return fmt.Errorf("SV1D activation metadata has an invalid lock binary digest")
 	}
 	if sha256DigestHex(raw) != expected.ActivationMetadataSHA256 {
 		return fmt.Errorf("SV1D activation metadata digest does not match the externally expected launch record")

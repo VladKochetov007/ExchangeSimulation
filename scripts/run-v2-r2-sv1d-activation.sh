@@ -8,8 +8,8 @@
 # capacity preflight have been supplied explicitly.
 set -euo pipefail
 
-if [[ $# -gt 3 ]]; then
-	echo "usage: $0 [multivenue-binary] [sv1dprobe-binary] [evsrender-binary]" >&2
+if [[ $# -gt 4 ]]; then
+	echo "usage: $0 [multivenue-binary] [sv1dprobe-binary] [evsrender-binary] [sv1dlock-binary]" >&2
 	exit 2
 fi
 
@@ -18,6 +18,7 @@ config_dir="$root_dir/research/configs/v2-r2-sv1d-activation"
 multivenue_binary=${1:-"$root_dir/bin/multivenue"}
 sv1dprobe_binary=${2:-"$root_dir/bin/sv1dprobe"}
 evsrender_binary=${3:-"$root_dir/bin/evsrender"}
+lock_binary=${4:-"$root_dir/bin/sv1dlock"}
 output_root=${SV1D_OUTPUT_ROOT:-"/home/vlad/v2-r2-sv1d-activation-659-v1"}
 review_attestation=${SV1D_REVIEW_ATTESTATION:-}
 review_report=${SV1D_REVIEW_REPORT:-}
@@ -298,17 +299,23 @@ write_resource_manifest() {
 	local manifest_tmp="$manifest_path.tmp-$$"
 	local rows='[]' resource_path record digest bytes relative_path
 	local resource_paths=()
-	local arm stage
+	local expected_stage index arm stage
 	for arm in treatment mode-off no-roster; do
 		for stage in simulator renderer audit; do
 			resource_paths+=("$output_root/logs/$arm.$stage.resource.json")
 		done
 	done
 	resource_paths+=("$output_root/logs/score.resource.json")
-	for resource_path in "${resource_paths[@]}"; do
+	local -a expected_stages=(simulator renderer audit simulator renderer audit simulator renderer audit score)
+	for index in "${!resource_paths[@]}"; do
+		resource_path=${resource_paths[$index]}
 		require_regular_file activation-resource-stage "$resource_path"
+		relative_path=${resource_path#"$output_root"/}
+		expected_stage=${expected_stages[$index]}
 		record=$(jq -e --argjson limit "$capacity_memory_limit_bytes" --argjson minimum_memory "$required_available_memory_bytes" --argjson minimum_free "$required_free_bytes" \
+			--arg expected_path "$relative_path" --arg expected_stage "$expected_stage" \
 			'type == "object" and .schema_version == 1 and .contract == "v2-r2-sv1d-activation-resource-stage-v1" and
+			 .stage == $expected_stage and .path == $expected_path and
 			 .exit_status == 0 and .monitor_status == 0 and .sample_count > 0 and
 			 .peak_cgroup_memory_bytes <= $limit and .cgroup_memory_limit_bytes == $limit and
 			 .minimum_host_available_bytes >= $minimum_memory and .minimum_filesystem_available_bytes >= $minimum_free and
@@ -316,7 +323,6 @@ write_resource_manifest() {
 			"$resource_path") || fail "activation resource stage is incomplete or exceeded its measured envelope: $resource_path"
 		digest=$(hash_file "$resource_path")
 		bytes=$(stat -c '%s' -- "$resource_path")
-		relative_path=${resource_path#"$output_root"/}
 		rows=$(jq -S -c --arg path "$relative_path" --arg sha256 "$digest" --argjson bytes "$bytes" --argjson record "$record" --argjson rows "$rows" '$rows + [{path: $path, sha256: $sha256, bytes: $bytes, record: $record}]') || return 1
 	done
 	local activation_metadata_sha256 score_sha256 corpus_manifest_sha256 resource_policy_sha256
@@ -343,6 +349,7 @@ write_resource_manifest() {
 multivenue_binary=$(normalize_input_path "$multivenue_binary") || fail "could not normalize multivenue binary"
 sv1dprobe_binary=$(normalize_input_path "$sv1dprobe_binary") || fail "could not normalize sv1dprobe binary"
 evsrender_binary=$(normalize_input_path "$evsrender_binary") || fail "could not normalize evsrender binary"
+lock_binary=$(normalize_input_path "$lock_binary") || fail "could not normalize sv1dlock binary"
 review_attestation=$(normalize_input_path "$review_attestation") || fail "could not normalize review attestation"
 review_report=$(normalize_input_path "$review_report") || fail "could not normalize review report"
 trusted_review_key=$(normalize_input_path "$trusted_review_key") || fail "could not normalize trusted review key"
@@ -366,12 +373,21 @@ tree_revision=$(git -C "$root_dir" rev-parse HEAD^{tree})
 require_binary multivenue "$multivenue_binary"
 require_binary sv1dprobe "$sv1dprobe_binary"
 require_binary evsrender "$evsrender_binary"
+require_binary sv1dlock "$lock_binary"
 multivenue_binary=$(realpath -e -- "$multivenue_binary")
 sv1dprobe_binary=$(realpath -e -- "$sv1dprobe_binary")
 evsrender_binary=$(realpath -e -- "$evsrender_binary")
+lock_binary=$(realpath -e -- "$lock_binary")
 require_clean_pinned_binary multivenue "$multivenue_binary" "$source_revision"
 require_clean_pinned_binary sv1dprobe "$sv1dprobe_binary" "$source_revision"
 require_clean_pinned_binary evsrender "$evsrender_binary" "$source_revision"
+require_clean_pinned_binary sv1dlock "$lock_binary" "$source_revision"
+
+if [[ "${SV1D_LOCK_HELD:-0}" != 1 ]]; then
+	exec "$lock_binary" -path "$lock_path" -- env SV1D_LOCK_HELD=1 SV1D_LOCK_FD=3 "$0" "$@"
+fi
+[[ "$(readlink "/proc/$$/fd/3" 2>/dev/null)" == "$lock_path" ]] || fail "SV1D lock was not opened by the trusted lock adapter"
+flock -n 3 || fail "another SV1D activation run holds the namespace lock"
 
 require_regular_file sv1d-review-attestation "$review_attestation"
 require_regular_file sv1d-review-report "$review_report"
@@ -531,6 +547,8 @@ mkdir -p "$output_root/provenance" "$output_root/provenance/arm-results" "$outpu
 copy_immutable_file retained-multivenue "$multivenue_binary" "$output_root/tools/multivenue-$multivenue_sha256"
 copy_immutable_file retained-sv1dprobe "$sv1dprobe_binary" "$output_root/tools/sv1dprobe-$sv1dprobe_sha256"
 copy_immutable_file retained-evsrender "$evsrender_binary" "$output_root/tools/evsrender-$evsrender_sha256"
+lock_binary_sha256=$(hash_file "$lock_binary")
+copy_immutable_file retained-sv1dlock "$lock_binary" "$output_root/tools/sv1dlock-$lock_binary_sha256"
 copy_immutable_file retained-review-attestation "$staged_review_attestation" "$output_root/provenance/review-attestation.json"
 copy_immutable_file retained-review-report "$staged_review_report" "$output_root/provenance/review-report.md"
 copy_immutable_file retained-trusted-review-key "$staged_trusted_review_key" "$output_root/provenance/trusted-review-key.raw"
@@ -567,7 +585,8 @@ jq -S -n \
 		--arg capacity_attestation_sha256 "$capacity_attestation_sha256" --arg capacity_records_sha256 "$capacity_records_sha256" \
 		--arg trusted_review_key_sha256 "$trusted_review_key_sha256" \
 	--arg capacity_root "$capacity_root" --arg capacity_records_root "$capacity_records_root" --arg arm_result_root "$output_root/provenance/arm-results" --arg activation_runner_sha256 "$activation_runner_sha256" --arg capacity_runner_sha256 "$capacity_runner_sha256" \
-	--arg simulator_sha256 "$multivenue_sha256" --arg analyzer_sha256 "$sv1dprobe_sha256" --arg renderer_sha256 "$evsrender_sha256" \
+		--arg simulator_sha256 "$multivenue_sha256" --arg analyzer_sha256 "$sv1dprobe_sha256" --arg renderer_sha256 "$evsrender_sha256" \
+		--arg lock_binary_sha256 "$lock_binary_sha256" \
 	--arg output_root "$output_root" --arg output_parent "$capacity_output_parent" \
 	'{schema_version: 2, contract: $contract, development_only: true, scientific_result_eligible: false,
 	 source_revision: $source_revision, tree_revision: $tree_revision, probe_id: $probe_id, plan_sha256: $plan_sha256,
@@ -576,6 +595,7 @@ jq -S -n \
 		 trusted_review_key_sha256: $trusted_review_key_sha256,
 	 capacity_root: $capacity_root, capacity_records_root: $capacity_records_root, arm_result_root: $arm_result_root, activation_runner_sha256: $activation_runner_sha256, capacity_runner_sha256: $capacity_runner_sha256,
 	 simulator_sha256: $simulator_sha256, analyzer_sha256: $analyzer_sha256, renderer_sha256: $renderer_sha256,
+	 lock_binary_sha256: $lock_binary_sha256,
 	 evidence_format: "evstream_v3", evidence_schema_epoch: 4, log_mode: "full", gomaxprocs: 2, gomemlimit: "4GiB",
 	 output_root: $output_root, output_parent: $output_parent, arms: ["treatment", "mode-off", "no-roster"], holdouts_consumed: []}' \
 	>"$activation_metadata.tmp-$$"
@@ -798,11 +818,16 @@ if [[ "$score_status" -eq 0 && "$arm_failure" -eq 0 ]]; then
 	jq -e --argjson limit "$capacity_memory_limit_bytes" --argjson minimum_memory "$required_available_memory_bytes" --argjson minimum_free "$required_free_bytes" \
 		'type == "object" and .schema_version == 1 and .contract == "v2-r2-sv1d-activation-resource-manifest-v1" and
 		 .scope == "sv1d_activation" and (.stages | length == 10) and
+		 (.stages | map(.path)) == ["logs/treatment.simulator.resource.json", "logs/treatment.renderer.resource.json", "logs/treatment.audit.resource.json",
+			"logs/mode-off.simulator.resource.json", "logs/mode-off.renderer.resource.json", "logs/mode-off.audit.resource.json",
+			"logs/no-roster.simulator.resource.json", "logs/no-roster.renderer.resource.json", "logs/no-roster.audit.resource.json", "logs/score.resource.json"] and
+		 (.stages | map(.record.stage)) == ["simulator", "renderer", "audit", "simulator", "renderer", "audit", "simulator", "renderer", "audit", "score"] and
+		 ((.stages | map(.path) | unique | length) == 10) and
 		 all(.stages[]; .bytes > 0 and (.sha256 | test("^[0-9a-f]{64}$")) and
-			 .record.exit_status == 0 and .record.monitor_status == 0 and
-			 .record.peak_cgroup_memory_bytes <= $limit and .record.cgroup_memory_limit_bytes == $limit and
-			 .record.minimum_host_available_bytes >= $minimum_memory and .record.minimum_filesystem_available_bytes >= $minimum_free and
-			 .record.maximum_swap_bytes == 0 and .record.oom_events_delta == 0 and .record.oom_kill_events_delta == 0)' \
+		 .record.exit_status == 0 and .record.monitor_status == 0 and
+		 .record.peak_cgroup_memory_bytes <= $limit and .record.cgroup_memory_limit_bytes == $limit and
+		 .record.minimum_host_available_bytes >= $minimum_memory and .record.minimum_filesystem_available_bytes >= $minimum_free and
+		 .record.maximum_swap_bytes == 0 and .record.oom_events_delta == 0 and .record.oom_kill_events_delta == 0)' \
 		"$output_root/provenance/resource-usage-manifest.json" >/dev/null || fail "activation resource manifest is malformed or exceeds its measured envelope"
 fi
 if [[ "$score_status" -ne 0 || "$arm_failure" -ne 0 ]]; then

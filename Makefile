@@ -15,10 +15,11 @@ GOMOD=$(GOCMD) mod
 BIN_DIR=bin
 
 # Binary names and paths
-BINARIES=multisim sim latency_arb simplesim microstructure_v1 liquidity_report abcusd randomwalk
+BINARIES=multisim sim latency_arb simplesim microstructure_v1 liquidity_report abcusd randomwalk sv1dlock
 MULTISIM_BINARY=$(BIN_DIR)/multisim
 ABCUSD_BINARY=$(BIN_DIR)/abcusd
 RANDOMWALK_BINARY=$(BIN_DIR)/randomwalk
+SV1DLOCK_BINARY=$(BIN_DIR)/sv1dlock
 SIM_BINARY=$(BIN_DIR)/sim
 LATENCY_ARB_BINARY=$(BIN_DIR)/latency_arb
 SIMPLESIM_BINARY=$(BIN_DIR)/simplesim
@@ -44,7 +45,7 @@ help:
 ##@ Building
 
 ## build: Build all binaries
-build: $(MULTISIM_BINARY) $(SIM_BINARY) $(LATENCY_ARB_BINARY) $(SIMPLESIM_BINARY) $(MICROSTRUCTURE_V1_BINARY) $(LIQUIDITY_REPORT_BINARY) $(ABCUSD_BINARY) $(RANDOMWALK_BINARY)
+build: $(MULTISIM_BINARY) $(SIM_BINARY) $(LATENCY_ARB_BINARY) $(SIMPLESIM_BINARY) $(MICROSTRUCTURE_V1_BINARY) $(LIQUIDITY_REPORT_BINARY) $(ABCUSD_BINARY) $(RANDOMWALK_BINARY) $(SV1DLOCK_BINARY)
 	@echo "✓ All binaries built successfully"
 
 $(BIN_DIR):
@@ -81,6 +82,10 @@ $(ABCUSD_BINARY): $(BIN_DIR)
 $(RANDOMWALK_BINARY): $(BIN_DIR)
 	@echo "Building randomwalk..."
 	@$(GOBUILD) -o $(RANDOMWALK_BINARY) ./cmd/randomwalk
+
+$(SV1DLOCK_BINARY): $(BIN_DIR)
+	@echo "Building sv1dlock..."
+	@$(GOBUILD) -o $(SV1DLOCK_BINARY) ./cmd/sv1dlock
 
 ## rebuild: Clean and rebuild all binaries
 rebuild: clean build
