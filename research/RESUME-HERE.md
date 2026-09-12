@@ -1673,3 +1673,12 @@ then pinned Go 1.27 builds and the development-only seed-659 activation probe.
 Do not launch `dev-607` or inspect holdouts before those gates and explicit
 freeze authorization. Preserve all prior review rejections and historical
 artifacts.
+
+## Append-only current-tree pointer after authorization remediation — 2026-09-12
+
+The code-bearing remediation remains `49dbcd4`, with regression commits
+`b33f089` and `86854e3`; the current clean branch also contains only the
+append-only state records that followed them. The next exact-tree review must
+resolve `git rev-parse HEAD` at launch and include every current documentation
+record. The authorization gate remains closed: no capacity, activation,
+development cell, freeze, or holdout has run.

@@ -1445,3 +1445,13 @@ calendar/lifecycle, correctness hardening, binary evidence/rendering,
 provenance/scoring, resource manifests, and both lock entrypoints. Acceptance
 is required before capacity, pinned binaries, seed-659 activation, or `dev-607`;
 holdouts `619/631/641` remain unauthorized.
+
+## Append-only current-tree pointer after authorization remediation — 2026-09-12
+
+The historical review-closure records above remain unchanged. The current
+clean branch contains the authorization remediation and its public-wrapper
+regressions (`49dbcd4`, `b33f089`, `86854e3`) plus later documentation-only
+records. Resolve the exact current `HEAD` and tree at the next review launch;
+the required review scope is the complete current tree, not a stale historical
+hash. Promotion remains closed pending that review. No capacity, activation,
+development cell, freeze, or holdout `619/631/641` has run.
