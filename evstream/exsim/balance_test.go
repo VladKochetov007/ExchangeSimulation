@@ -102,7 +102,7 @@ func TestJSONToBinaryToJSONIsLossless(t *testing.T) {
 	source := []etypes.BalanceChangeEvent{
 		{Timestamp: 1, ClientID: 2, Symbol: "ABC/USD", Reason: "fill",
 			Changes: []etypes.BalanceDelta{{Asset: "USD", Wallet: "perp", OldBalance: 1, NewBalance: 2, Delta: 1}}},
-		{Timestamp: 0, ClientID: 0, Symbol: "", Reason: "", Changes: nil},
+		{Timestamp: 0, ClientID: 0, Symbol: "ABC/USD", Reason: "empty_changes", Changes: nil},
 		{Timestamp: -1, ClientID: math.MaxUint32, Symbol: "ABC-PERP", PositionSide: "BOTH",
 			Reason: "funding", Changes: []etypes.BalanceDelta{}},
 		{Timestamp: math.MaxInt64, ClientID: 7, Symbol: "ABC-FUT-1735696801",
@@ -143,8 +143,8 @@ func TestJSONToBinaryToJSONIsLossless(t *testing.T) {
 // break naive encoders and the integer extremes that break naive layouts.
 func TestRoundTripRandomised(t *testing.T) {
 	random := rand.New(rand.NewSource(20260902))
-	symbols := []string{"", "ABC/USD", "ABC-PERP", `has"quote`, "<tag>&", "é", "🙂", "ctl\x01"}
-	assets := []string{"USD", "ABC", "CDF", ""}
+	symbols := []string{"ABC/USD", "ABC-PERP", `has"quote`, "<tag>&", "é", "🙂", "ctl\x01"}
+	assets := []string{"USD", "ABC", "CDF"}
 	ints := []int64{0, 1, -1, 987654321, math.MaxInt64, math.MinInt64}
 
 	source := make([]etypes.BalanceChangeEvent, 0, 400)
@@ -277,7 +277,7 @@ func (t *testInterner) Intern(s string) (uint32, error) {
 	if id, ok := t.dict.Lookup(s); ok {
 		return id, nil
 	}
-	return t.dict.Assign(s), nil
+	return t.dict.Assign(s)
 }
 
 func (t *testInterner) Lookup(id uint32) (string, bool) { return t.dict.Value(id) }
@@ -291,7 +291,7 @@ func TestBookDeltaRoundTrip(t *testing.T) {
 		{Timestamp: 1, Symbol: "ABC/USD", Side: 0, Price: 100, VisibleQty: 1, HiddenQty: 2, TotalQty: 3},
 		{Timestamp: -1, Symbol: "ABC-PERP", Side: 1,
 			Price: math.MaxInt64, VisibleQty: math.MinInt64, HiddenQty: 0, TotalQty: -1},
-		{Timestamp: math.MaxInt64, Symbol: "", Side: 255},
+		{Timestamp: math.MaxInt64, Symbol: "EMPTY/USD", Side: 255},
 	}
 
 	var buf bytes.Buffer

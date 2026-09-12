@@ -213,6 +213,38 @@ type Index struct {
 	Blocks []BlockDescriptor
 }
 
+// IndexReadLimits bounds allocations made while loading an untrusted index.
+// The limits apply to the descriptor body, not to the stream it indexes, and
+// are separate from block payload limits because an index is a different input
+// file with a different failure mode.
+type IndexReadLimits struct {
+	MaxDescriptors uint64
+	MaxBytes       uint64
+}
+
+const (
+	// DefaultMaxIndexDescriptors leaves ample room for the registered runs
+	// while preventing a corrupt four-byte count from becoming a large slice.
+	DefaultMaxIndexDescriptors uint64 = 1 << 20
+	// DefaultMaxIndexBytes bounds the descriptor body before either the byte
+	// buffer or descriptor slice is allocated.
+	DefaultMaxIndexBytes uint64 = 64 << 20
+)
+
+func normalizeIndexReadLimits(limits IndexReadLimits) (IndexReadLimits, error) {
+	if limits.MaxDescriptors == 0 {
+		limits.MaxDescriptors = DefaultMaxIndexDescriptors
+	}
+	if limits.MaxBytes == 0 {
+		limits.MaxBytes = DefaultMaxIndexBytes
+	}
+	maxInt := uint64(^uint(0) >> 1)
+	if limits.MaxDescriptors > maxInt || limits.MaxBytes > maxInt {
+		return IndexReadLimits{}, fmt.Errorf("%w: index read limit exceeds platform int", ErrCorrupt)
+	}
+	return limits, nil
+}
+
 // WriteTo persists the index. It is written as a sidecar rather than a footer
 // so that a stream truncated by a crash keeps a usable index for the blocks
 // that did land, and so an index can be rebuilt and replaced without rewriting
@@ -228,8 +260,19 @@ func (ix *Index) WriteTo(w io.Writer) (int64, error) {
 	return int64(n), err
 }
 
-// ReadIndex loads a persisted index.
+// ReadIndex loads a persisted index using the package allocation limits.
 func ReadIndex(r io.Reader) (*Index, error) {
+	return ReadIndexWithLimits(r, IndexReadLimits{})
+}
+
+// ReadIndexWithLimits loads a persisted index with explicit allocation bounds.
+// Count and byte arithmetic are checked before any body or descriptor slice is
+// allocated, so a corrupt header cannot turn into an OOM request.
+func ReadIndexWithLimits(r io.Reader, limits IndexReadLimits) (*Index, error) {
+	limits, err := normalizeIndexReadLimits(limits)
+	if err != nil {
+		return nil, err
+	}
 	var header [8]byte
 	if _, err := io.ReadFull(r, header[:]); err != nil {
 		return nil, ErrShortBuffer
@@ -238,11 +281,19 @@ func ReadIndex(r io.Reader) (*Index, error) {
 		return nil, ErrBadMagic
 	}
 	count := binary.LittleEndian.Uint32(header[4:8])
-	body := make([]byte, int(count)*BlockDescriptorSize)
+	countValue := uint64(count)
+	if countValue > limits.MaxDescriptors {
+		return nil, fmt.Errorf("%w: index descriptor count %d exceeds limit %d", ErrCorrupt, count, limits.MaxDescriptors)
+	}
+	if countValue > limits.MaxBytes/uint64(BlockDescriptorSize) {
+		return nil, fmt.Errorf("%w: index descriptor body exceeds byte limit %d", ErrCorrupt, limits.MaxBytes)
+	}
+	bodyBytes := countValue * uint64(BlockDescriptorSize)
+	body := make([]byte, int(bodyBytes))
 	if _, err := io.ReadFull(r, body); err != nil {
 		return nil, ErrShortBuffer
 	}
-	index := &Index{Blocks: make([]BlockDescriptor, count)}
+	index := &Index{Blocks: make([]BlockDescriptor, int(countValue))}
 	for i := range index.Blocks {
 		block, err := ParseDescriptor(body[i*BlockDescriptorSize:])
 		if err != nil {

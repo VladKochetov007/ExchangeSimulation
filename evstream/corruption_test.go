@@ -119,6 +119,14 @@ func TestWriterRejectsAppendAfterClose(t *testing.T) {
 	}
 }
 
+func TestWriterRejectsEmptyDictionaryValue(t *testing.T) {
+	var output bytes.Buffer
+	writer := evstream.NewWriter(&output, evstream.WriterOptions{})
+	if _, err := writer.Intern(""); !errors.Is(err, evstream.ErrEmptyDictionaryValue) {
+		t.Fatalf("empty dictionary value error = %v, want ErrEmptyDictionaryValue", err)
+	}
+}
+
 func TestWriterRejectsClientIDThatCannotBeEncoded(t *testing.T) {
 	var output bytes.Buffer
 	writer := evstream.NewWriter(&output, evstream.WriterOptions{})
@@ -201,6 +209,27 @@ func TestIndexedReaderRejectsOversizedDescriptorBeforeReading(t *testing.T) {
 	}
 }
 
+func TestReadIndexRejectsOversizedDescriptorCountBeforeAllocation(t *testing.T) {
+	header := make([]byte, 8)
+	binary.LittleEndian.PutUint32(header[0:4], evstream.IndexMagic)
+	binary.LittleEndian.PutUint32(header[4:8], ^uint32(0))
+	if _, err := evstream.ReadIndex(bytes.NewReader(header)); !errors.Is(err, evstream.ErrCorrupt) {
+		t.Fatalf("oversized index descriptor count error = %v, want ErrCorrupt", err)
+	}
+}
+
+func TestReadIndexRejectsDescriptorBodyByteLimitBeforeAllocation(t *testing.T) {
+	header := make([]byte, 8)
+	binary.LittleEndian.PutUint32(header[0:4], evstream.IndexMagic)
+	binary.LittleEndian.PutUint32(header[4:8], 2)
+	if _, err := evstream.ReadIndexWithLimits(bytes.NewReader(header), evstream.IndexReadLimits{
+		MaxDescriptors: 2,
+		MaxBytes:       evstream.BlockDescriptorSize,
+	}); !errors.Is(err, evstream.ErrCorrupt) {
+		t.Fatalf("index byte-limit error = %v, want ErrCorrupt", err)
+	}
+}
+
 func TestReaderRejectsDuplicateDictionaryValue(t *testing.T) {
 	stream := writeDictionaryProbeStream(t)
 	blockOffset := evstream.StreamHeaderSize
@@ -247,6 +276,43 @@ func TestReaderRejectsDuplicateDictionaryValue(t *testing.T) {
 	copy(stream[trailerOffset+12:trailerOffset+12+sha256.Size], digest[:])
 	if _, err := readProbeStream(stream, false); !errors.Is(err, evstream.ErrCorrupt) {
 		t.Fatalf("duplicate dictionary value error = %v, want ErrCorrupt", err)
+	}
+}
+
+func TestReaderRejectsEmptyDictionaryDefinition(t *testing.T) {
+	stream := writeDictionaryProbeStream(t)
+	blockOffset := evstream.StreamHeaderSize
+	oldStoredLength := int(binary.LittleEndian.Uint32(stream[blockOffset+8 : blockOffset+12]))
+	blockStart := blockOffset + evstream.BlockHeaderSize
+	frames := stream[blockStart : blockStart+oldStoredLength]
+	first, err := evstream.ParseFrameHeader(frames)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const dictionaryPayloadWithoutValue = 8
+	newFirstLength := evstream.FrameHeaderSize + dictionaryPayloadWithoutValue
+	if int(first.Length) != newFirstLength+2 {
+		t.Fatalf("first dictionary frame length = %d, want %d", first.Length, newFirstLength+2)
+	}
+	newFrames := make([]byte, 0, len(frames)-2)
+	newFrames = append(newFrames, frames[:newFirstLength]...)
+	binary.LittleEndian.PutUint32(newFrames[0:4], uint32(newFirstLength))
+	binary.LittleEndian.PutUint32(newFrames[evstream.FrameHeaderSize+4:evstream.FrameHeaderSize+8], 0)
+	newFrames = append(newFrames, frames[first.Length:]...)
+
+	oldTrailerOffset := blockStart + oldStoredLength
+	newTrailerOffset := blockStart + len(newFrames)
+	corrupt := make([]byte, len(stream)-2)
+	copy(corrupt[:blockOffset+evstream.BlockHeaderSize], stream[:blockOffset+evstream.BlockHeaderSize])
+	copy(corrupt[blockStart:], newFrames)
+	copy(corrupt[newTrailerOffset:], stream[oldTrailerOffset:])
+	binary.LittleEndian.PutUint32(corrupt[blockOffset+4:blockOffset+8], uint32(len(newFrames)))
+	binary.LittleEndian.PutUint32(corrupt[blockOffset+8:blockOffset+12], uint32(len(newFrames)))
+	binary.LittleEndian.PutUint32(corrupt[blockOffset+16:blockOffset+20], crc32.Checksum(newFrames, crc32.MakeTable(crc32.Castagnoli)))
+	digest := sha256.Sum256(newFrames)
+	copy(corrupt[newTrailerOffset+12:newTrailerOffset+12+sha256.Size], digest[:])
+	if _, err := readProbeStream(corrupt, false); !errors.Is(err, evstream.ErrCorrupt) {
+		t.Fatalf("empty dictionary definition error = %v, want ErrCorrupt", err)
 	}
 }
 

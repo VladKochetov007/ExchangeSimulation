@@ -2,7 +2,11 @@ package multivenue
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/binary"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"testing"
 
 	"exchange_sim/evstream"
@@ -82,5 +86,101 @@ func TestCDFBinarySchemasRoundTripThroughRenderer(t *testing.T) {
 		if !bytes.Equal(rendered[index].Data.Payload, wantPayload) {
 			t.Fatalf("rendered CDF payload %d = %s, want %s", index, rendered[index].Data.Payload, wantPayload)
 		}
+	}
+}
+
+func TestCDFDecisionAbsentSideUsesReservedZeroReference(t *testing.T) {
+	var output bytes.Buffer
+	sink := &binaryEvidence{writer: evstream.NewWriter(&output, evstream.WriterOptions{SchemaEpoch: binaryEvidenceSchemaEpoch})}
+	decision := ElasticLiquiditySupplierDecision{
+		Role: "cdf_elastic_supplier_1", ClientID: 7, Symbol: "CDF/USD",
+		ObservationFingerprint: "fingerprint", ObservationDigest: "digest",
+		LocalBookMode: "one_sided", QuotePriceSource: "none", RiskMarkSource: "none",
+		Action: "withdraw", Reason: "risk_limit",
+	}
+	if err := sink.record(100, decision.ClientID, "elastic_liquidity_supplier_decision", "north", decision, "general.jsonl", 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := sink.finish(); err != nil {
+		t.Fatal(err)
+	}
+
+	reader, err := evstream.NewReader(bytes.NewReader(output.Bytes()), evstream.ReaderOptions{VerifyHash: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rendered ElasticLiquiditySupplierDecision
+	if err := reader.Range(func(frame evstream.Frame) error {
+		if frame.Header.SchemaID != SchemaElasticLiquiditySupplierDecision {
+			return nil
+		}
+		payload, handled, err := renderCDFPayloadJSONVersioned(frame.Header.SchemaID, frame.Header.SchemaVersion, frame.Payload[16+sha256.Size:], reader)
+		if err != nil || !handled {
+			return fmt.Errorf("render absent-side decision: handled=%t: %w", handled, err)
+		}
+		if err := json.Unmarshal(payload, &rendered); err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if rendered.Side != "" {
+		t.Fatalf("absent side rendered as %q", rendered.Side)
+	}
+	if _, ok := reader.Lookup(0); ok {
+		t.Fatal("reserved dictionary id zero resolved as a value")
+	}
+	for ref := uint32(1); ref < 32; ref++ {
+		if value, ok := reader.Lookup(ref); ok && value == "" {
+			t.Fatalf("dictionary reference %d contains an empty value", ref)
+		}
+	}
+}
+
+type permissiveCDFResolver struct {
+	delegate evstream.Resolver
+}
+
+func (r permissiveCDFResolver) Lookup(ref uint32) (string, bool) {
+	if ref == 0 {
+		return "", true
+	}
+	return r.delegate.Lookup(ref)
+}
+
+func TestCDFDecisionRequiredReferenceRejectsZero(t *testing.T) {
+	var output bytes.Buffer
+	sink := &binaryEvidence{writer: evstream.NewWriter(&output, evstream.WriterOptions{SchemaEpoch: binaryEvidenceSchemaEpoch})}
+	decision := ElasticLiquiditySupplierDecision{
+		Role: "cdf_elastic_supplier_1", ClientID: 7, Symbol: "CDF/USD",
+		Action: "withdraw", Reason: "risk_limit",
+	}
+	if err := sink.record(100, decision.ClientID, "elastic_liquidity_supplier_decision", "north", decision, "general.jsonl", 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := sink.finish(); err != nil {
+		t.Fatal(err)
+	}
+	reader, err := evstream.NewReader(bytes.NewReader(output.Bytes()), evstream.ReaderOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload []byte
+	if err := reader.Range(func(frame evstream.Frame) error {
+		if frame.Header.SchemaID == SchemaElasticLiquiditySupplierDecision {
+			payload = append(payload, frame.Payload[16+sha256.Size:]...)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload) < evstream.PresenceBits(cdfDecisionOptionalFields)+4 {
+		t.Fatalf("decision payload length = %d, too short for role reference", len(payload))
+	}
+	binary.LittleEndian.PutUint32(payload[evstream.PresenceBits(cdfDecisionOptionalFields):], 0)
+	var decoded ElasticLiquiditySupplierDecision
+	if err := decodeElasticLiquiditySupplierDecisionVersioned(payload, permissiveCDFResolver{delegate: reader}, &decoded, 4); !errors.Is(err, evstream.ErrCorrupt) {
+		t.Fatalf("zero required CDF reference error = %v, want ErrCorrupt", err)
 	}
 }

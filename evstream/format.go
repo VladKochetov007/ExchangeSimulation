@@ -142,6 +142,11 @@ var (
 	// ErrClientIDOverflow means the caller supplied an account ID that cannot
 	// be represented without loss in the canonical frame header.
 	ErrClientIDOverflow = errors.New("evstream: client ID exceeds encoded range")
+	// ErrEmptyDictionaryValue means a caller tried to intern an empty string.
+	// Empty strings are represented by optional-field presence bits, while id 0
+	// remains reserved for absence; allowing an empty dictionary entry would
+	// make malformed required references indistinguishable from valid data.
+	ErrEmptyDictionaryValue = errors.New("evstream: empty dictionary value")
 )
 
 // FrameHeader is the fixed prefix every frame carries.
@@ -215,6 +220,20 @@ type Interner interface {
 // without a live stream.
 type Resolver interface {
 	Lookup(uint32) (string, bool)
+}
+
+// ResolveRequired resolves a required dictionary reference. Reference zero is
+// reserved for optional absence and an empty resolved value is never a valid
+// required field, even when the supplied resolver is not a Dictionary.
+func ResolveRequired(resolve Resolver, ref uint32) (string, error) {
+	if ref == 0 {
+		return "", ErrCorrupt
+	}
+	value, ok := resolve.Lookup(ref)
+	if !ok || value == "" {
+		return "", ErrCorrupt
+	}
+	return value, nil
 }
 
 // InterningAppender is a payload that resolves its own strings while encoding.

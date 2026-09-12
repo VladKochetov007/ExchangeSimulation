@@ -192,16 +192,16 @@ func DecodeBalanceChange(frame evstream.Frame, resolve Resolver, into *BalanceCh
 
 	into.Timestamp = frame.Header.SimTS
 	into.ClientID = frame.Header.ClientID
-	var ok bool
-	if into.Symbol, ok = resolve.Lookup(symbolRef); !ok {
-		return evstream.ErrCorrupt
+	var err error
+	if into.Symbol, err = evstream.ResolveRequired(resolve, symbolRef); err != nil {
+		return err
 	}
-	if into.Reason, ok = resolve.Lookup(reasonRef); !ok {
-		return evstream.ErrCorrupt
+	if into.Reason, err = evstream.ResolveRequired(resolve, reasonRef); err != nil {
+		return err
 	}
 	if into.HasSide {
-		if into.PositionSide, ok = resolve.Lookup(sideRef); !ok {
-			return evstream.ErrCorrupt
+		if into.PositionSide, err = evstream.ResolveRequired(resolve, sideRef); err != nil {
+			return err
 		}
 	} else {
 		into.PositionSide = ""
@@ -227,11 +227,11 @@ func DecodeBalanceChange(frame evstream.Frame, resolve Resolver, into *BalanceCh
 		if err := cursor.Err(); err != nil {
 			return err
 		}
-		if into.Changes[i].Asset, ok = resolve.Lookup(assetRef); !ok {
-			return evstream.ErrCorrupt
+		if into.Changes[i].Asset, err = evstream.ResolveRequired(resolve, assetRef); err != nil {
+			return err
 		}
-		if into.Changes[i].Wallet, ok = resolve.Lookup(walletRef); !ok {
-			return evstream.ErrCorrupt
+		if into.Changes[i].Wallet, err = evstream.ResolveRequired(resolve, walletRef); err != nil {
+			return err
 		}
 	}
 	if err := cursor.Err(); err != nil {

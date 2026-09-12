@@ -64,9 +64,9 @@ func DecodeBookDelta(frame evstream.Frame, resolve Resolver, into *BookDelta) er
 	}
 	into.Side = side
 	into.Timestamp = frame.Header.SimTS
-	var ok bool
-	if into.Symbol, ok = resolve.Lookup(symbolRef); !ok {
-		return evstream.ErrCorrupt
+	var err error
+	if into.Symbol, err = evstream.ResolveRequired(resolve, symbolRef); err != nil {
+		return err
 	}
 	if cursor.Remaining() != 0 {
 		return evstream.ErrCorrupt

@@ -18,19 +18,25 @@ const (
 )
 
 const (
-	cdfDecisionOptionalFields   = 12
-	cdfDecisionSideBit          = 0
-	cdfDecisionQuotePriceBit    = 1
-	cdfDecisionQuoteQtyBit      = 2
-	cdfDecisionMinimumQtyBit    = 3
-	cdfDecisionRegisteredQtyBit = 4
-	cdfDecisionQuoteOrderBit    = 5
-	cdfDecisionQuoteRequestBit  = 6
-	cdfDecisionCancelRequestBit = 7
-	cdfDecisionSubmittedAtBit   = 8
-	cdfDecisionCashAvailableBit = 9
-	cdfDecisionCashRequiredBit  = 10
-	cdfDecisionReplacesOrderBit = 11
+	cdfDecisionLegacyOptionalFields      = 12
+	cdfDecisionOptionalFields            = 17
+	cdfDecisionSideBit                   = 0
+	cdfDecisionQuotePriceBit             = 1
+	cdfDecisionQuoteQtyBit               = 2
+	cdfDecisionMinimumQtyBit             = 3
+	cdfDecisionRegisteredQtyBit          = 4
+	cdfDecisionQuoteOrderBit             = 5
+	cdfDecisionQuoteRequestBit           = 6
+	cdfDecisionCancelRequestBit          = 7
+	cdfDecisionSubmittedAtBit            = 8
+	cdfDecisionCashAvailableBit          = 9
+	cdfDecisionCashRequiredBit           = 10
+	cdfDecisionReplacesOrderBit          = 11
+	cdfDecisionObservationFingerprintBit = 12
+	cdfDecisionObservationDigestBit      = 13
+	cdfDecisionLocalBookModeBit          = 14
+	cdfDecisionQuotePriceSourceBit       = 15
+	cdfDecisionRiskMarkSourceBit         = 16
 )
 
 // The CDF decision wire layout is intentionally explicit. Strings are
@@ -41,7 +47,7 @@ func (d ElasticLiquiditySupplierDecision) SchemaID() uint16 {
 	return SchemaElasticLiquiditySupplierDecision
 }
 
-func (d ElasticLiquiditySupplierDecision) SchemaVersion() uint16 { return 3 }
+func (d ElasticLiquiditySupplierDecision) SchemaVersion() uint16 { return 4 }
 
 func (d ElasticLiquiditySupplierDecision) AppendPayloadInterning(dst []byte, in evstream.Interner) ([]byte, error) {
 	start := len(dst)
@@ -82,18 +88,40 @@ func (d ElasticLiquiditySupplierDecision) AppendPayloadInterning(dst []byte, in 
 	if d.ReplacesOrderID != 0 {
 		evstream.SetPresence(dst[start:], cdfDecisionReplacesOrderBit)
 	}
+	if d.ObservationFingerprint != "" {
+		evstream.SetPresence(dst[start:], cdfDecisionObservationFingerprintBit)
+	}
+	if d.ObservationDigest != "" {
+		evstream.SetPresence(dst[start:], cdfDecisionObservationDigestBit)
+	}
+	if d.LocalBookMode != "" {
+		evstream.SetPresence(dst[start:], cdfDecisionLocalBookModeBit)
+	}
+	if d.QuotePriceSource != "" {
+		evstream.SetPresence(dst[start:], cdfDecisionQuotePriceSourceBit)
+	}
+	if d.RiskMarkSource != "" {
+		evstream.SetPresence(dst[start:], cdfDecisionRiskMarkSourceBit)
+	}
 
 	stringValues := [...]string{
 		d.Role, d.Symbol, d.ObservationFingerprint, d.ObservationDigest,
 		d.LocalBookMode, d.QuotePriceSource, d.RiskMarkSource, d.Action, d.Reason, d.Side,
 	}
-	var stringRefs [len(stringValues)]uint32
+	optionalStringBits := [...]int{
+		-1, -1, cdfDecisionObservationFingerprintBit, cdfDecisionObservationDigestBit,
+		cdfDecisionLocalBookModeBit, cdfDecisionQuotePriceSourceBit, cdfDecisionRiskMarkSourceBit,
+		-1, -1, cdfDecisionSideBit,
+	}
 	for index, value := range stringValues {
+		if optionalStringBits[index] >= 0 && value == "" {
+			dst = evstream.AppendUint32(dst, 0)
+			continue
+		}
 		ref, err := in.Intern(value)
 		if err != nil {
 			return nil, err
 		}
-		stringRefs[index] = ref
 		dst = evstream.AppendUint32(dst, ref)
 	}
 
@@ -147,8 +175,15 @@ func decodeElasticLiquiditySupplierDecision(payload []byte, resolve evstream.Res
 }
 
 func decodeElasticLiquiditySupplierDecisionVersioned(payload []byte, resolve evstream.Resolver, into *ElasticLiquiditySupplierDecision, schemaVersion uint16) error {
+	if schemaVersion < 1 || schemaVersion > 4 {
+		return fmt.Errorf("%w: unsupported CDF decision schema version %d", evstream.ErrCorrupt, schemaVersion)
+	}
 	cursor := evstream.NewCursor(payload)
-	presence := cursor.Presence(cdfDecisionOptionalFields)
+	optionalFields := cdfDecisionLegacyOptionalFields
+	if schemaVersion >= 4 {
+		optionalFields = cdfDecisionOptionalFields
+	}
+	presence := cursor.Presence(optionalFields)
 	var stringRefs [10]uint32
 	for index := range stringRefs {
 		stringRefs[index] = cursor.Uint32()
@@ -203,22 +238,65 @@ func decodeElasticLiquiditySupplierDecisionVersioned(payload []byte, resolve evs
 	if err := cursor.Err(); err != nil {
 		return err
 	}
-	if cdfPresenceHasUnknownBits(presence, cdfDecisionOptionalFields) {
+	if cdfPresenceHasUnknownBits(presence, optionalFields) {
 		return fmt.Errorf("%w: unknown CDF decision presence bit", evstream.ErrCorrupt)
 	}
-	values := [...]*string{
-		&into.Role, &into.Symbol, &into.ObservationFingerprint, &into.ObservationDigest,
-		&into.LocalBookMode, &into.QuotePriceSource, &into.RiskMarkSource, &into.Action, &into.Reason, &into.Side,
-	}
-	for index, target := range values {
-		value, ok := resolve.Lookup(stringRefs[index])
-		if !ok {
-			return evstream.ErrCorrupt
+	if schemaVersion < 4 {
+		legacyValues := [...]*string{
+			&into.Role, &into.Symbol, &into.ObservationFingerprint, &into.ObservationDigest,
+			&into.LocalBookMode, &into.QuotePriceSource, &into.RiskMarkSource, &into.Action, &into.Reason,
 		}
-		*target = value
-	}
-	if !presence.Has(cdfDecisionSideBit) {
-		into.Side = ""
+		for index, target := range legacyValues {
+			value, err := evstream.ResolveRequired(resolve, stringRefs[index])
+			if err != nil {
+				return err
+			}
+			*target = value
+		}
+		if presence.Has(cdfDecisionSideBit) {
+			value, err := evstream.ResolveRequired(resolve, stringRefs[9])
+			if err != nil {
+				return err
+			}
+			into.Side = value
+		} else {
+			if stringRefs[9] != 0 {
+				return fmt.Errorf("%w: absent CDF decision side has a nonzero reference", evstream.ErrCorrupt)
+			}
+			into.Side = ""
+		}
+	} else {
+		var err error
+		if into.Role, err = evstream.ResolveRequired(resolve, stringRefs[0]); err != nil {
+			return err
+		}
+		if into.Symbol, err = evstream.ResolveRequired(resolve, stringRefs[1]); err != nil {
+			return err
+		}
+		if into.ObservationFingerprint, err = resolveOptionalCDFString(resolve, presence, cdfDecisionObservationFingerprintBit, stringRefs[2]); err != nil {
+			return err
+		}
+		if into.ObservationDigest, err = resolveOptionalCDFString(resolve, presence, cdfDecisionObservationDigestBit, stringRefs[3]); err != nil {
+			return err
+		}
+		if into.LocalBookMode, err = resolveOptionalCDFString(resolve, presence, cdfDecisionLocalBookModeBit, stringRefs[4]); err != nil {
+			return err
+		}
+		if into.QuotePriceSource, err = resolveOptionalCDFString(resolve, presence, cdfDecisionQuotePriceSourceBit, stringRefs[5]); err != nil {
+			return err
+		}
+		if into.RiskMarkSource, err = resolveOptionalCDFString(resolve, presence, cdfDecisionRiskMarkSourceBit, stringRefs[6]); err != nil {
+			return err
+		}
+		if into.Action, err = evstream.ResolveRequired(resolve, stringRefs[7]); err != nil {
+			return err
+		}
+		if into.Reason, err = evstream.ResolveRequired(resolve, stringRefs[8]); err != nil {
+			return err
+		}
+		if into.Side, err = resolveOptionalCDFString(resolve, presence, cdfDecisionSideBit, stringRefs[9]); err != nil {
+			return err
+		}
 	}
 	if !presence.Has(cdfDecisionQuotePriceBit) {
 		into.QuotePrice = 0
@@ -254,6 +332,16 @@ func decodeElasticLiquiditySupplierDecisionVersioned(payload []byte, resolve evs
 		into.ReplacesOrderID = 0
 	}
 	return finishCDFSchemaCursor(cursor)
+}
+
+func resolveOptionalCDFString(resolve evstream.Resolver, presence evstream.PresenceSet, bit int, ref uint32) (string, error) {
+	if !presence.Has(bit) {
+		if ref != 0 {
+			return "", fmt.Errorf("%w: absent CDF string field has a nonzero reference", evstream.ErrCorrupt)
+		}
+		return "", nil
+	}
+	return evstream.ResolveRequired(resolve, ref)
 }
 
 func (f ElasticLiquiditySupplierFill) SchemaID() uint16 { return SchemaElasticLiquiditySupplierFill }
@@ -301,9 +389,9 @@ func decodeElasticLiquiditySupplierFill(payload []byte, resolve evstream.Resolve
 	}
 	values := [...]*string{&into.Role, &into.Symbol, &into.Side, &into.FeeAsset}
 	for index, target := range values {
-		value, ok := resolve.Lookup(stringRefs[index])
-		if !ok {
-			return evstream.ErrCorrupt
+		value, err := evstream.ResolveRequired(resolve, stringRefs[index])
+		if err != nil {
+			return err
 		}
 		*target = value
 	}
@@ -313,7 +401,7 @@ func decodeElasticLiquiditySupplierFill(payload []byte, resolve evstream.Resolve
 func renderCDFPayloadJSONVersioned(schemaID, schemaVersion uint16, payload []byte, resolve evstream.Resolver) ([]byte, bool, error) {
 	switch schemaID {
 	case SchemaElasticLiquiditySupplierDecision:
-		if schemaVersion != 1 && schemaVersion != 2 && schemaVersion != 3 {
+		if schemaVersion != 1 && schemaVersion != 2 && schemaVersion != 3 && schemaVersion != 4 {
 			return nil, true, fmt.Errorf("%w: unsupported CDF decision schema version %d", evstream.ErrCorrupt, schemaVersion)
 		}
 		var value ElasticLiquiditySupplierDecision

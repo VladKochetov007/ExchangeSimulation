@@ -27,17 +27,22 @@ func (d *Dictionary) Lookup(s string) (uint32, bool) {
 	return id, ok
 }
 
-// Assign gives s its existing id or the next id. The caller is responsible for
-// emitting a dictionary frame when a new id is returned, so that a reader
-// learns the mapping from the stream itself.
-func (d *Dictionary) Assign(s string) uint32 {
+// Assign gives s its existing id or the next id. Empty strings are not
+// dictionary values: callers represent optional absence with reference zero
+// and a presence bit. The caller is responsible for emitting a dictionary
+// frame when a new id is returned, so that a reader learns the mapping from the
+// stream itself.
+func (d *Dictionary) Assign(s string) (uint32, error) {
+	if s == "" {
+		return 0, ErrEmptyDictionaryValue
+	}
 	if id, ok := d.ids[s]; ok {
-		return id
+		return id, nil
 	}
 	id := uint32(len(d.values))
 	d.ids[s] = id
 	d.values = append(d.values, s)
-	return id
+	return id, nil
 }
 
 // Define records a mapping learned while reading. Out-of-order or duplicate
@@ -45,7 +50,7 @@ func (d *Dictionary) Assign(s string) uint32 {
 // accepting it would let two events that reference the same id mean different
 // things.
 func (d *Dictionary) Define(id uint32, value string) error {
-	if id != uint32(len(d.values)) {
+	if id == 0 || value == "" || id != uint32(len(d.values)) {
 		return ErrCorrupt
 	}
 	if _, exists := d.ids[value]; exists {
@@ -60,7 +65,7 @@ func (d *Dictionary) Define(id uint32, value string) error {
 // defined, which a reader should treat as corruption rather than as an empty
 // string.
 func (d *Dictionary) Value(id uint32) (string, bool) {
-	if id >= uint32(len(d.values)) {
+	if id == 0 || id >= uint32(len(d.values)) {
 		return "", false
 	}
 	return d.values[id], true

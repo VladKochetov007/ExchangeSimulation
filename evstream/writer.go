@@ -124,10 +124,16 @@ func (w *Writer) Intern(s string) (uint32, error) {
 	if w.err != nil {
 		return 0, w.err
 	}
+	if s == "" {
+		return 0, ErrEmptyDictionaryValue
+	}
 	if id, ok := w.dict.Lookup(s); ok {
 		return id, nil
 	}
-	id := w.dict.Assign(s)
+	id, err := w.dict.Assign(s)
+	if err != nil {
+		return 0, err
+	}
 	payload := w.scratch[:0]
 	payload = AppendUint32(payload, id)
 	payload = AppendString(payload, s)

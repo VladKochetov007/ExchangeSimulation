@@ -77,7 +77,7 @@ func requireJSONPreserved(t *testing.T, original, decoded any) {
 
 func TestFillEvidenceRoundTrip(t *testing.T) {
 	cases := []fillEvidence{
-		{},
+		{FeeAsset: "USD", PositionSide: "BOTH", Role: "maker", Side: "BUY", Symbol: "ABC/USD"},
 		{FeeAmount: 1, FeeAsset: "USD", FilledQty: 2, IsFull: true, NewEntryPrice: 3,
 			NewSize: 4, OrderID: 5, PositionSide: "BOTH", Price: 6, Qty: 7,
 			RealizedPnL: -8, RemainingQty: 9, Role: "taker", Side: "BUY",
@@ -85,7 +85,8 @@ func TestFillEvidenceRoundTrip(t *testing.T) {
 		{FeeAmount: math.MinInt64, FilledQty: math.MaxInt64, NewEntryPrice: math.MinInt64,
 			NewSize: math.MaxInt64, OrderID: math.MaxUint64, Price: math.MaxInt64,
 			Qty: math.MinInt64, RealizedPnL: math.MaxInt64, RemainingQty: math.MinInt64,
-			TradeID: math.MaxUint64, IsFull: false},
+			TradeID: math.MaxUint64, IsFull: false, FeeAsset: "USD", PositionSide: "BOTH",
+			Role: "maker", Side: "SELL", Symbol: "ABC/USD"},
 	}
 	for _, original := range cases {
 		frame, reader := roundTripFrame(t, original)
@@ -99,7 +100,7 @@ func TestFillEvidenceRoundTrip(t *testing.T) {
 
 func TestBookDeltaEvidenceRoundTrip(t *testing.T) {
 	for _, original := range []bookDeltaEvidence{
-		{},
+		{Side: "BUY"},
 		{HiddenQty: 1, Price: 2, Side: "BUY", TotalQty: 3, VisibleQty: 4},
 		{HiddenQty: math.MinInt64, Price: math.MaxInt64, Side: "SELL",
 			TotalQty: math.MinInt64, VisibleQty: math.MaxInt64},
@@ -257,7 +258,7 @@ func TestVenueBalanceRoundTrip(t *testing.T) {
 
 func TestBalanceChangeRoundTrip(t *testing.T) {
 	for _, original := range []etypes.BalanceChangeEvent{
-		{},
+		{Reason: "initial"},
 		{Timestamp: 1, ClientID: 2, Symbol: "ABC/USD", Reason: "fill", Changes: nil},
 		{Timestamp: 1, ClientID: 2, Symbol: "ABC/USD", Reason: "fill",
 			Changes: []etypes.BalanceDelta{}},
@@ -359,7 +360,7 @@ func TestSchemaIDsAreDistinct(t *testing.T) {
 
 func TestSchemaRoundTripRandomised(t *testing.T) {
 	random := rand.New(rand.NewSource(20260905))
-	assets := []string{"USD", "ABC", "CDF", ""}
+	assets := []string{"USD", "ABC", "CDF"}
 	ints := []int64{0, 1, -1, 987654321, math.MaxInt64, math.MinInt64}
 	pick := func() int64 { return ints[random.Intn(len(ints))] }
 

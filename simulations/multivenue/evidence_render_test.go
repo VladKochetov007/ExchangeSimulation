@@ -501,7 +501,7 @@ func TestBinaryEvidenceDifferentiallyPreservesScientificJSONPayloads(t *testing.
 		payload any
 	}{
 		{name: "opaque", simTime: 1, client: 7, payload: map[string]any{"z": 3, "a": "one"}},
-		{name: "balance", simTime: 2, client: 8, payload: etypes.BalanceChangeEvent{Timestamp: 2, ClientID: 8, Reason: "fill", Changes: []etypes.BalanceDelta{{Asset: "USD", Wallet: "spot", Delta: 4}}}},
+		{name: "balance", simTime: 2, client: 8, payload: etypes.BalanceChangeEvent{Timestamp: 2, ClientID: 8, Symbol: "ABC/USD", Reason: "fill", Changes: []etypes.BalanceDelta{{Asset: "USD", Wallet: "spot", Delta: 4}}}},
 		{name: "fee", simTime: 3, client: 0, payload: etypes.FeeRevenueEvent{Timestamp: 3, Symbol: "ABC/USD", TradeID: 9, TakerFee: 2, MakerFee: 1, Asset: "USD"}},
 		{name: "trade", simTime: 4, client: 0, payload: etypes.Trade{TradeID: 10, Price: 101, Qty: 2, Side: etypes.Buy, TakerOrderID: 11, MakerOrderID: 12}},
 		{name: "venue_balance", simTime: 5, client: 0, payload: exchange.VenueBalanceEvent{Timestamp: 5, Sequence: 13, TradeID: 14, Bucket: exchange.VenueFeeRevenue, Asset: "USD", Reason: "fee", Symbol: "ABC/USD", OldBalance: 1, NewBalance: 3, Delta: 2}},
@@ -608,6 +608,60 @@ func writeMinimalBinaryRenderInput(t *testing.T, inputDir, venue string) {
 		t.Fatal(err)
 	}
 	writeRenderMetadata(t, inputDir, sink, "none")
+}
+
+func TestValidateRenderRecordsRejectsDuplicateVenueSequences(t *testing.T) {
+	t.Run("same route", func(t *testing.T) {
+		routes := make(map[renderRouteKey][]renderRecord)
+		key := renderRouteKey{venue: "north", route: "general.jsonl"}
+		for range 2 {
+			if err := addRenderRecord(routes, key, renderRecord{sequence: 1}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := validateRenderRecords(routes); err == nil {
+			t.Fatal("same-route duplicate sequence was accepted")
+		}
+	})
+
+	t.Run("cross route", func(t *testing.T) {
+		routes := make(map[renderRouteKey][]renderRecord)
+		for _, key := range []renderRouteKey{
+			{venue: "north", route: "general.jsonl"},
+			{venue: "north", route: "orders.jsonl"},
+		} {
+			if err := addRenderRecord(routes, key, renderRecord{sequence: 1}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := validateRenderRecords(routes); err == nil {
+			t.Fatal("cross-route duplicate sequence was accepted")
+		}
+	})
+	t.Run("forged maximum sequence terminates", func(t *testing.T) {
+		routes := map[renderRouteKey][]renderRecord{
+			{venue: "north", route: "general.jsonl"}: {{sequence: ^uint64(0)}},
+		}
+		if err := validateRenderRecords(routes); err == nil {
+			t.Fatal("forged maximum sequence was accepted")
+		}
+	})
+}
+
+func BenchmarkRenderRecordIngestionLinear(b *testing.B) {
+	routes := make(map[renderRouteKey][]renderRecord, 1)
+	key := renderRouteKey{venue: "north", route: "general.jsonl"}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for sequence := 1; sequence <= b.N; sequence++ {
+		if err := addRenderRecord(routes, key, renderRecord{sequence: uint64(sequence)}); err != nil {
+			b.Fatal(err)
+		}
+	}
+	b.StopTimer()
+	if err := validateRenderRecords(routes); err != nil {
+		b.Fatal(err)
+	}
 }
 
 func writeRenderMetadata(t *testing.T, inputDir string, sink *binaryEvidence, logMode string, sidecarRecords ...[]byte) {

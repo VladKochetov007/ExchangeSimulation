@@ -426,11 +426,8 @@ func addRenderRecord(routes map[renderRouteKey][]renderRecord, key renderRouteKe
 	if record.sequence == 0 {
 		return fmt.Errorf("multivenue: incomplete rendered evidence record")
 	}
-	for _, existing := range routes[key] {
-		if existing.sequence == record.sequence {
-			return fmt.Errorf("multivenue: duplicate venue sequence %s/%s#%d", key.venue, key.route, record.sequence)
-		}
-	}
+	// Duplicate and gap checks are deferred to validateRenderRecords, which
+	// owns the cross-route venue sequence invariant and performs one linear pass.
 	routes[key] = append(routes[key], record)
 	return nil
 }
@@ -457,13 +454,9 @@ func validateRenderRecords(routes map[renderRouteKey][]renderRecord) error {
 		}
 	}
 	for venue, seen := range byVenue {
-		var highest uint64
-		for sequence := range seen {
-			if sequence > highest {
-				highest = sequence
-			}
-		}
-		for sequence := uint64(1); sequence <= highest; sequence++ {
+		// Checking only the number of records avoids iterating up to a forged
+		// MaxUint64 sequence, which would otherwise wrap and loop forever.
+		for sequence := uint64(1); sequence <= uint64(len(seen)); sequence++ {
 			if _, ok := seen[sequence]; !ok {
 				return fmt.Errorf("multivenue: missing venue sequence %s#%d", venue, sequence)
 			}

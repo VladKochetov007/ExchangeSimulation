@@ -28,13 +28,15 @@ const (
 // --- BalanceChangeEvent ---
 
 const (
-	balanceChangeOptionalFields = 2
-	balanceChangeSideBit        = 0
-	balanceChangeChangesBit     = 1
+	balanceChangeLegacyOptionalFields = 2
+	balanceChangeOptionalFields       = 3
+	balanceChangeSideBit              = 0
+	balanceChangeChangesBit           = 1
+	balanceChangeSymbolBit            = 2
 )
 
 func (e BalanceChangeEvent) SchemaID() uint16      { return SchemaBalanceChange }
-func (e BalanceChangeEvent) SchemaVersion() uint16 { return 1 }
+func (e BalanceChangeEvent) SchemaVersion() uint16 { return 2 }
 
 // AppendPayloadInterning writes the canonical payload.
 //
@@ -50,12 +52,17 @@ func (e BalanceChangeEvent) AppendPayloadInterning(dst []byte, in evstream.Inter
 	if e.Changes != nil {
 		evstream.SetPresence(dst[start:], balanceChangeChangesBit)
 	}
+	if e.Symbol != "" {
+		evstream.SetPresence(dst[start:], balanceChangeSymbolBit)
+	}
 
 	dst = evstream.AppendInt64(dst, e.Timestamp)
 	dst = evstream.AppendUint64(dst, e.ClientID)
 
 	var err error
-	if dst, err = appendRef(dst, in, e.Symbol); err != nil {
+	if e.Symbol == "" {
+		dst = evstream.AppendUint32(dst, 0)
+	} else if dst, err = appendRef(dst, in, e.Symbol); err != nil {
 		return nil, err
 	}
 	if dst, err = appendRef(dst, in, e.Reason); err != nil {
@@ -84,10 +91,27 @@ func (e BalanceChangeEvent) AppendPayloadInterning(dst []byte, in evstream.Inter
 	return dst, nil
 }
 
-// DecodeBalanceChange reads the payload back, reusing the caller's slice.
+// DecodeBalanceChange reads the current payload back, reusing the caller's
+// slice.
 func DecodeBalanceChange(payload []byte, resolve evstream.Resolver, into *BalanceChangeEvent) error {
+	return DecodeBalanceChangeVersioned(payload, resolve, 2, into)
+}
+
+// DecodeBalanceChangeVersioned retains the v1 required-symbol layout while v2
+// makes the symbol explicitly optional for global balance movements. The
+// reference remains physically present in both versions so the extension is
+// easy to inspect and a missing symbol is represented only by presence plus
+// reserved reference zero.
+func DecodeBalanceChangeVersioned(payload []byte, resolve evstream.Resolver, version uint16, into *BalanceChangeEvent) error {
+	if version != 1 && version != 2 {
+		return evstream.ErrCorrupt
+	}
+	optionalFields := balanceChangeLegacyOptionalFields
+	if version >= 2 {
+		optionalFields = balanceChangeOptionalFields
+	}
 	cursor := evstream.NewCursor(payload)
-	presence := cursor.Presence(balanceChangeOptionalFields)
+	presence := cursor.Presence(optionalFields)
 	into.Timestamp = cursor.Int64()
 	into.ClientID = cursor.Uint64()
 	symbolRef, reasonRef := cursor.Uint32(), cursor.Uint32()
@@ -106,8 +130,15 @@ func DecodeBalanceChange(payload []byte, resolve evstream.Resolver, into *Balanc
 	}
 
 	var err error
-	if into.Symbol, err = resolveRef(resolve, symbolRef); err != nil {
-		return err
+	if version == 1 || presence.Has(balanceChangeSymbolBit) {
+		if into.Symbol, err = resolveRef(resolve, symbolRef); err != nil {
+			return err
+		}
+	} else {
+		if symbolRef != 0 {
+			return evstream.ErrCorrupt
+		}
+		into.Symbol = ""
 	}
 	if into.Reason, err = resolveRef(resolve, reasonRef); err != nil {
 		return err
@@ -227,11 +258,7 @@ func appendRef(dst []byte, in evstream.Interner, value string) ([]byte, error) {
 // resolveRef turns a dictionary id back into its string, treating an id the
 // stream never defined as corruption rather than as an empty string.
 func resolveRef(resolve evstream.Resolver, ref uint32) (string, error) {
-	value, ok := resolve.Lookup(ref)
-	if !ok {
-		return "", evstream.ErrCorrupt
-	}
-	return value, nil
+	return evstream.ResolveRequired(resolve, ref)
 }
 
 // finish checks a decode consumed exactly its payload. Trailing bytes mean the

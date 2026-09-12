@@ -79,9 +79,9 @@ func DecodeFillEvidence(payload []byte, resolve evstream.Resolver, into *fillEvi
 	}
 	targets := [...]*string{&into.FeeAsset, &into.PositionSide, &into.Role, &into.Side, &into.Symbol}
 	for i, target := range targets {
-		value, ok := resolve.Lookup(refs[i])
-		if !ok {
-			return evstream.ErrCorrupt
+		value, err := evstream.ResolveRequired(resolve, refs[i])
+		if err != nil {
+			return err
 		}
 		*target = value
 	}
@@ -116,9 +116,9 @@ func DecodeBookDelta(payload []byte, resolve evstream.Resolver, into *bookDeltaE
 	if err := cursor.Err(); err != nil {
 		return err
 	}
-	value, ok := resolve.Lookup(ref)
-	if !ok {
-		return evstream.ErrCorrupt
+	value, err := evstream.ResolveRequired(resolve, ref)
+	if err != nil {
+		return err
 	}
 	into.Side = value
 	return finishCursor(cursor)
@@ -340,21 +340,21 @@ func DecodeVenueBalanceVersioned(payload []byte, resolve evstream.Resolver, vers
 	if err := cursor.Err(); err != nil {
 		return err
 	}
-	bucket, ok := resolve.Lookup(bucketRef)
-	if !ok {
-		return evstream.ErrCorrupt
+	bucket, err := evstream.ResolveRequired(resolve, bucketRef)
+	if err != nil {
+		return err
 	}
 	into.Bucket = VenueBucket(bucket)
-	if into.Asset, ok = resolve.Lookup(assetRef); !ok {
-		return evstream.ErrCorrupt
+	if into.Asset, err = evstream.ResolveRequired(resolve, assetRef); err != nil {
+		return err
 	}
-	if into.Reason, ok = resolve.Lookup(reasonRef); !ok {
-		return evstream.ErrCorrupt
+	if into.Reason, err = evstream.ResolveRequired(resolve, reasonRef); err != nil {
+		return err
 	}
 	into.Symbol = ""
 	if hasSymbol {
-		if into.Symbol, ok = resolve.Lookup(symbolRef); !ok {
-			return evstream.ErrCorrupt
+		if into.Symbol, err = evstream.ResolveRequired(resolve, symbolRef); err != nil {
+			return err
 		}
 	}
 	return finishCursor(cursor)
@@ -461,9 +461,9 @@ func RenderPayloadJSONVersioned(schemaID, schemaVersion uint16, payload []byte, 
 		if err := cursor.Err(); err != nil {
 			return nil, err
 		}
-		symbol, ok := resolve.Lookup(symbolRef)
-		if !ok {
-			return nil, evstream.ErrCorrupt
+		symbol, err := evstream.ResolveRequired(resolve, symbolRef)
+		if err != nil {
+			return nil, err
 		}
 		inner, err := RenderPayloadJSONVersioned(innerID, innerVersion, payload[cursor.Offset():], resolve)
 		if err != nil {
@@ -528,11 +528,11 @@ func RenderPayloadJSONVersioned(schemaID, schemaVersion uint16, payload []byte, 
 		}
 		return json.Marshal(value)
 	case etypes.SchemaBalanceChange:
-		if schemaVersion != 1 {
+		if schemaVersion != 1 && schemaVersion != 2 {
 			return nil, unsupportedSchemaVersion(schemaID, schemaVersion)
 		}
 		var value etypes.BalanceChangeEvent
-		if err := etypes.DecodeBalanceChange(payload, resolve, &value); err != nil {
+		if err := etypes.DecodeBalanceChangeVersioned(payload, resolve, schemaVersion, &value); err != nil {
 			return nil, err
 		}
 		return json.Marshal(value)
@@ -564,6 +564,9 @@ func currentSchemaVersion(schemaID uint16) uint16 {
 		return 3
 	}
 	if schemaID == SchemaVenueBalance {
+		return 2
+	}
+	if schemaID == etypes.SchemaBalanceChange {
 		return 2
 	}
 	return 1
