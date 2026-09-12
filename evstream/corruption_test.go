@@ -2,8 +2,10 @@ package evstream_test
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/binary"
 	"errors"
+	"hash/crc32"
 	"testing"
 
 	"exchange_sim/evstream"
@@ -197,6 +199,79 @@ func TestIndexedReaderRejectsOversizedDescriptorBeforeReading(t *testing.T) {
 	if !errors.Is(err, evstream.ErrCorrupt) {
 		t.Fatalf("oversized descriptor error = %v, want ErrCorrupt", err)
 	}
+}
+
+func TestReaderRejectsDuplicateDictionaryValue(t *testing.T) {
+	stream := writeDictionaryProbeStream(t)
+	blockOffset := evstream.StreamHeaderSize
+	storedLength := int(binary.LittleEndian.Uint32(stream[blockOffset+8 : blockOffset+12]))
+	blockStart := blockOffset + evstream.BlockHeaderSize
+	blockEnd := blockStart + storedLength
+	frames := stream[blockStart:blockEnd]
+	var firstValue []byte
+	var dictionaryCount int
+	for offset := 0; offset < len(frames); {
+		header, err := evstream.ParseFrameHeader(frames[offset:])
+		if err != nil {
+			t.Fatalf("parse frame at %d: %v", offset, err)
+		}
+		frameLength := int(header.Length)
+		if frameLength > len(frames)-offset {
+			t.Fatalf("frame at %d overruns probe block", offset)
+		}
+		if header.SchemaID == evstream.SchemaDictionary {
+			dictionaryCount++
+			valueLength := int(binary.LittleEndian.Uint32(frames[offset+evstream.FrameHeaderSize+4 : offset+evstream.FrameHeaderSize+8]))
+			valueStart := offset + evstream.FrameHeaderSize + 8
+			valueEnd := valueStart + valueLength
+			if valueEnd > offset+frameLength {
+				t.Fatalf("dictionary value at %d overruns frame", offset)
+			}
+			if dictionaryCount == 1 {
+				firstValue = append([]byte(nil), frames[valueStart:valueEnd]...)
+			} else if dictionaryCount == 2 {
+				if len(firstValue) != valueLength {
+					t.Fatalf("probe dictionary values have different lengths: %d and %d", len(firstValue), valueLength)
+				}
+				copy(frames[valueStart:valueEnd], firstValue)
+			}
+		}
+		offset += frameLength
+	}
+	if dictionaryCount != 2 {
+		t.Fatalf("dictionary frame count = %d, want 2", dictionaryCount)
+	}
+	binary.LittleEndian.PutUint32(stream[blockOffset+16:blockOffset+20], crc32.Checksum(frames, crc32.MakeTable(crc32.Castagnoli)))
+	digest := sha256.Sum256(frames)
+	trailerOffset := blockEnd
+	copy(stream[trailerOffset+12:trailerOffset+12+sha256.Size], digest[:])
+	if _, err := readProbeStream(stream, false); !errors.Is(err, evstream.ErrCorrupt) {
+		t.Fatalf("duplicate dictionary value error = %v, want ErrCorrupt", err)
+	}
+}
+
+func writeDictionaryProbeStream(t *testing.T) []byte {
+	t.Helper()
+	var output bytes.Buffer
+	writer := evstream.NewWriter(&output, evstream.WriterOptions{BlockBytes: 1024})
+	first, err := writer.Intern("aa")
+	if err != nil {
+		t.Fatalf("intern first value: %v", err)
+	}
+	second, err := writer.Intern("bb")
+	if err != nil {
+		t.Fatalf("intern second value: %v", err)
+	}
+	if first != 1 || second != 2 {
+		t.Fatalf("dictionary ids = %d, %d, want 1, 2", first, second)
+	}
+	if err := writer.Append(1, 1, second, corruptionProbe{value: 7}); err != nil {
+		t.Fatalf("append probe: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close probe: %v", err)
+	}
+	return output.Bytes()
 }
 
 func readReaderFrames(reader *evstream.Reader) (uint64, error) {

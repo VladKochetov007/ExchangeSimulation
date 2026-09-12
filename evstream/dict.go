@@ -27,10 +27,13 @@ func (d *Dictionary) Lookup(s string) (uint32, bool) {
 	return id, ok
 }
 
-// Assign gives s the next id. The caller is responsible for emitting the
-// corresponding dictionary frame, so that a reader learns the mapping from the
-// stream itself.
+// Assign gives s its existing id or the next id. The caller is responsible for
+// emitting a dictionary frame when a new id is returned, so that a reader
+// learns the mapping from the stream itself.
 func (d *Dictionary) Assign(s string) uint32 {
+	if id, ok := d.ids[s]; ok {
+		return id
+	}
 	id := uint32(len(d.values))
 	d.ids[s] = id
 	d.values = append(d.values, s)
@@ -43,6 +46,9 @@ func (d *Dictionary) Assign(s string) uint32 {
 // things.
 func (d *Dictionary) Define(id uint32, value string) error {
 	if id != uint32(len(d.values)) {
+		return ErrCorrupt
+	}
+	if _, exists := d.ids[value]; exists {
 		return ErrCorrupt
 	}
 	d.ids[value] = id

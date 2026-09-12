@@ -387,7 +387,6 @@ if [[ "${SV1D_LOCK_HELD:-0}" != 1 ]]; then
 	exec "$lock_binary" -path "$lock_path" -- env SV1D_LOCK_HELD=1 SV1D_LOCK_FD=3 "$0" "$@"
 fi
 [[ "$(readlink "/proc/$$/fd/3" 2>/dev/null)" == "$lock_path" ]] || fail "SV1D lock was not opened by the trusted lock adapter"
-flock -n 3 || fail "another SV1D activation run holds the namespace lock"
 
 require_regular_file sv1d-review-attestation "$review_attestation"
 require_regular_file sv1d-review-report "$review_report"
@@ -522,9 +521,6 @@ source "$root_dir/scripts/v2-integrated-longrun-r2-contract.sh"
 [[ "$output_root" == /* && "$output_root" != "/" && "$(realpath -m -- "$output_root")" == "$output_root" ]] || fail "SV1D output root must be a clean absolute path"
 require_no_symlink_components "$output_root" || fail "SV1D output root contains a symlink"
 [[ ! -e "$output_root" && ! -L "$output_root" ]] || fail "refusing to overwrite SV1D evidence root: $output_root"
-[[ ! -L "$lock_path" ]] || fail "SV1D namespace lock is symlinked"
-exec {lock_fd}>"$lock_path" || fail "cannot open SV1D namespace lock"
-flock -n "$lock_fd" || fail "another SV1D activation run holds the namespace lock"
 
 required_free_bytes=$(jq -er '.required_free_bytes' "$capacity_attestation") || fail "capacity attestation has no required free-space floor"
 required_available_memory_bytes=$(jq -er '.required_available_memory_bytes' "$capacity_attestation") || fail "capacity attestation has no required memory floor"

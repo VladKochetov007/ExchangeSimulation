@@ -64,6 +64,18 @@ v2_r2_acquire_namespace_lock || fail "could not acquire the R2 namespace lock fo
 expect_failure env -u V2_R2_NAMESPACE_LOCK_FD V2_R2_NAMESPACE_LOCK_HELD=true bash -c \
 	"source '$root_dir/scripts/v2-integrated-longrun-r2-contract.sh'; v2_r2_acquire_namespace_lock"
 
+if rg -n 'exec \{(lock_fd|capacity_lock_fd)\}>' \
+	"$root_dir/scripts/run-v2-r2-sv1d-activation.sh" \
+	"$root_dir/scripts/run-v2-r2-sv1d-capacity-preflight.sh" >/dev/null; then
+	fail "SV1D runners reopen and truncate the descriptor-bound namespace lock"
+fi
+for runner in \
+	"$root_dir/scripts/run-v2-r2-sv1d-activation.sh" \
+	"$root_dir/scripts/run-v2-r2-sv1d-capacity-preflight.sh"; do
+	rg -n 'readlink "/proc/\$\$/fd/3"' "$runner" >/dev/null ||
+		fail "SV1D runner does not validate inherited lock descriptor: $runner"
+done
+
 expected_calendar_timeline=$(cat <<'EOF'
 [
   {"expiry_nano":1735696800000000000,"future_first_listed_at_nano":1735689601000000000,"option_first_listed_at_nano":1735689601000000000,"future_contract_count":1,"option_contract_count":10},

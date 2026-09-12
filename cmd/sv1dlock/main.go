@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"syscall"
@@ -11,40 +12,49 @@ import (
 )
 
 func main() {
-	lockPath := flag.String("path", "", "absolute namespace lock path")
-	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "usage: %s -path LOCK -- COMMAND [ARG...]\n", os.Args[0])
-		flag.PrintDefaults()
+	os.Exit(run(os.Args[1:], os.Stdin, os.Stdout, os.Stderr))
+}
+
+func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	flags := flag.NewFlagSet("sv1dlock", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	lockPath := flags.String("path", "", "absolute namespace lock path")
+	flags.Usage = func() {
+		fmt.Fprintf(stderr, "usage: sv1dlock -path LOCK -- COMMAND [ARG...]\n")
+		flags.PrintDefaults()
 	}
-	flag.Parse()
-	commandArgs := flag.Args()
+	if err := flags.Parse(args); err != nil {
+		return 2
+	}
+	commandArgs := flags.Args()
 	if *lockPath == "" || len(commandArgs) == 0 {
-		flag.Usage()
-		os.Exit(2)
+		flags.Usage()
+		return 2
 	}
 	lock, err := sv1dlock.Acquire(*lockPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "%v\n", err)
-		os.Exit(1)
+		fmt.Fprintf(stderr, "%v\n", err)
+		return 1
 	}
 	defer lock.Close()
 	command := exec.Command(commandArgs[0], commandArgs[1:]...)
-	command.Stdin = os.Stdin
-	command.Stdout = os.Stdout
-	command.Stderr = os.Stderr
+	command.Stdin = stdin
+	command.Stdout = stdout
+	command.Stderr = stderr
 	command.ExtraFiles = []*os.File{lock.File()}
 	if err := command.Run(); err != nil {
 		if exitError, ok := err.(*exec.ExitError); ok {
 			if waitStatus, ok := exitError.Sys().(syscall.WaitStatus); ok {
 				if waitStatus.Exited() {
-					os.Exit(waitStatus.ExitStatus())
+					return waitStatus.ExitStatus()
 				}
 				if waitStatus.Signaled() {
-					os.Exit(128 + int(waitStatus.Signal()))
+					return 128 + int(waitStatus.Signal())
 				}
 			}
 		}
-		fmt.Fprintf(os.Stderr, "run locked command: %v\n", err)
-		os.Exit(1)
+		fmt.Fprintf(stderr, "run locked command: %v\n", err)
+		return 1
 	}
+	return 0
 }

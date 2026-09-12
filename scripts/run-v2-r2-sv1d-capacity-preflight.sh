@@ -289,7 +289,6 @@ if [[ "${SV1D_LOCK_HELD:-0}" != 1 ]]; then
 	exec "$lock_binary" -path "$capacity_lock_path" -- env SV1D_LOCK_HELD=1 SV1D_LOCK_FD=3 "$0" "$@"
 fi
 [[ "$(readlink "/proc/$$/fd/3" 2>/dev/null)" == "$capacity_lock_path" ]] || fail "capacity lock was not opened by the trusted lock adapter"
-flock -n 3 || fail "another capacity preflight holds the namespace lock"
 
 [[ "$output_root" == /* && "$output_root" != "/" && "$(realpath -m -- "$output_root")" == "$output_root" ]] || fail "capacity output root must be clean absolute path"
 [[ "$capacity_attestation" == /* && "$capacity_attestation" != "/" && "$(realpath -m -- "$capacity_attestation")" == "$capacity_attestation" ]] || fail "capacity attestation path must be clean absolute path"
@@ -298,9 +297,6 @@ require_no_symlink_components "$output_root" || fail "capacity output root conta
 require_no_symlink_components "$(dirname -- "$capacity_attestation")" || fail "capacity attestation parent contains a symlink"
 [[ ! -e "$output_root" && ! -L "$output_root" ]] || fail "refusing to overwrite capacity output root: $output_root"
 [[ ! -e "$capacity_attestation" && ! -L "$capacity_attestation" ]] || fail "refusing to overwrite capacity attestation: $capacity_attestation"
-[[ ! -L "$capacity_lock_path" ]] || fail "capacity lock path is symlinked"
-exec {capacity_lock_fd}>"$capacity_lock_path" || fail "cannot open capacity namespace lock"
-flock -n "$capacity_lock_fd" || fail "another capacity preflight holds the namespace lock"
 
 staging_root=$(mktemp -d)
 [[ -d "$staging_root" && ! -L "$staging_root" ]] || fail "invalid staging directory"
