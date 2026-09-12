@@ -127,6 +127,7 @@ current_tree_revision=$(git -C "$root_dir" rev-parse HEAD^{tree})
 	set +e
 	SV1D_LOCK_HELD=1 SV1D_CAPACITY_LOCK_PATH="$forged_lock_path" SV1D_CAPACITY_ROOT_DIR="$root_dir" \
 		SV1D_CAPACITY_INTERNAL_TREE_REVISION="$current_tree_revision" \
+		SV1D_CAPACITY_INTERNAL_RESOURCE_SHA256="$(sha256sum -- "$public_wrapper_binary" | awk '{print $1}')" \
 		SV1D_CAPACITY_OUTPUT_ROOT="$public_output_root" "$public_wrapper_binary" \
 		-out "$tmp_root/public-wrapper-measurement.json" -output-parent "$tmp_root" -measurement-root "$public_measurement_root" \
 		-sample-interval 10ms -require-finite-cgroup=false -inherit-fd 3 -- \
