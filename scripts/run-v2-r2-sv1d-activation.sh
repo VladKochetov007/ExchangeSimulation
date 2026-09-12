@@ -128,6 +128,13 @@ activation_cgroup_path=""
 activation_baseline_oom_events=""
 activation_baseline_oom_kill_events=""
 resource_violation_reason=""
+stage_resource_path=""
+stage_name=""
+stage_samples=0
+stage_peak_cgroup_memory_bytes=0
+stage_min_host_available_bytes=0
+stage_min_filesystem_available_bytes=0
+stage_max_swap_bytes=0
 
 read_cgroup_event() {
 	local event_name=$1
@@ -167,6 +174,10 @@ active_resource_check() {
 		resource_violation_reason="activation cgroup memory exceeded measured limit"
 		return 1
 	fi
+	stage_samples=$((stage_samples + 1))
+	if (( current_memory > stage_peak_cgroup_memory_bytes )); then
+		stage_peak_cgroup_memory_bytes=$current_memory
+	fi
 	swap_current=$(<"$activation_cgroup_path/memory.swap.current") || {
 		resource_violation_reason="could not read activation cgroup swap usage"
 		return 1
@@ -174,6 +185,9 @@ active_resource_check() {
 	if [[ "$swap_current" != 0 ]]; then
 		resource_violation_reason="activation cgroup swap usage became non-zero"
 		return 1
+	fi
+	if (( swap_current > stage_max_swap_bytes )); then
+		stage_max_swap_bytes=$swap_current
 	fi
 	host_available_kb=$(awk '$1 == "MemAvailable:" {print $2; exit}' /proc/meminfo) || {
 		resource_violation_reason="could not read host available memory"
@@ -183,6 +197,9 @@ active_resource_check() {
 		resource_violation_reason="host available memory fell below measured floor"
 		return 1
 	fi
+	if (( stage_min_host_available_bytes == 0 || host_available_kb * 1024 < stage_min_host_available_bytes )); then
+		stage_min_host_available_bytes=$((host_available_kb * 1024))
+	fi
 	available_kb=$(df -Pk -- "$capacity_output_parent" | awk 'NR == 2 {print $4}') || {
 		resource_violation_reason="could not read activation filesystem free space"
 		return 1
@@ -190,6 +207,9 @@ active_resource_check() {
 	if [[ ! "$available_kb" =~ ^[0-9]+$ ]] || (( available_kb * 1024 < required_free_bytes )); then
 		resource_violation_reason="activation filesystem free space fell below measured floor"
 		return 1
+	fi
+	if (( stage_min_filesystem_available_bytes == 0 || available_kb * 1024 < stage_min_filesystem_available_bytes )); then
+		stage_min_filesystem_available_bytes=$((available_kb * 1024))
 	fi
 	oom_events=$(read_cgroup_event oom)
 	oom_kill_events=$(read_cgroup_event oom_kill)
@@ -201,19 +221,58 @@ active_resource_check() {
 	return 0
 }
 
+write_resource_record() {
+	local path=$1 stage=$2 exit_status=$3 monitor_status=$4 reason=$5
+	local oom_events oom_kill_events record_tmp
+	[[ -n "$path" && ! -e "$path" && ! -L "$path" ]] || return 1
+	oom_events=$(read_cgroup_event oom) || return 1
+	oom_kill_events=$(read_cgroup_event oom_kill) || return 1
+	[[ "$oom_events" =~ ^[0-9]+$ && "$oom_kill_events" =~ ^[0-9]+$ ]] || return 1
+	record_tmp="$path.tmp-$$"
+	jq -S -n \
+		--arg stage "$stage" --arg path "${path#"$output_root"/}" --arg reason "$reason" \
+		--argjson exit_status "$exit_status" --argjson monitor_status "$monitor_status" \
+		--argjson sample_count "$stage_samples" --argjson peak_cgroup_memory_bytes "$stage_peak_cgroup_memory_bytes" \
+		--argjson cgroup_memory_limit_bytes "$capacity_memory_limit_bytes" \
+		--argjson minimum_host_available_bytes "$stage_min_host_available_bytes" \
+		--argjson minimum_filesystem_available_bytes "$stage_min_filesystem_available_bytes" \
+		--argjson maximum_swap_bytes "$stage_max_swap_bytes" \
+		--argjson oom_events_delta "$((oom_events - activation_baseline_oom_events))" \
+		--argjson oom_kill_events_delta "$((oom_kill_events - activation_baseline_oom_kill_events))" \
+		'{schema_version: 1, contract: "v2-r2-sv1d-activation-resource-stage-v1", stage: $stage, path: $path,
+			exit_status: $exit_status, monitor_status: $monitor_status, reason: $reason,
+			sample_count: $sample_count, peak_cgroup_memory_bytes: $peak_cgroup_memory_bytes,
+			cgroup_memory_limit_bytes: $cgroup_memory_limit_bytes,
+			minimum_host_available_bytes: $minimum_host_available_bytes,
+			minimum_filesystem_available_bytes: $minimum_filesystem_available_bytes,
+			maximum_swap_bytes: $maximum_swap_bytes, oom_events_delta: $oom_events_delta,
+			oom_kill_events_delta: $oom_kill_events_delta}' \
+		>"$record_tmp" || return 1
+	mv -- "$record_tmp" "$path"
+}
+
 run_monitored_command() {
-	local stdout_path=$1 stderr_path=$2
-	shift 2
-	local child_pid child_status
+	local stdout_path=$1 stderr_path=$2 resource_path=$3 command_stage=$4
+	shift 4
+	local child_pid child_status monitor_status reason
+	stage_resource_path=$resource_path
+	stage_name=$command_stage
+	stage_samples=0
+	stage_peak_cgroup_memory_bytes=0
+	stage_min_host_available_bytes=0
+	stage_min_filesystem_available_bytes=0
+	stage_max_swap_bytes=0
 	setsid -- "$@" >"$stdout_path" 2>"$stderr_path" &
 	child_pid=$!
 	while kill -0 "$child_pid" 2>/dev/null; do
 		if ! active_resource_check; then
+			reason=$resource_violation_reason
 			printf 'activation resource monitor terminated process: %s\n' "$resource_violation_reason" >>"$stderr_path" || true
 			kill -TERM -- "-$child_pid" 2>/dev/null || kill -TERM "$child_pid" 2>/dev/null || true
 			sleep 0.25
 			kill -KILL -- "-$child_pid" 2>/dev/null || kill -KILL "$child_pid" 2>/dev/null || true
 			wait "$child_pid" 2>/dev/null || true
+			write_resource_record "$stage_resource_path" "$stage_name" 125 125 "$reason" || true
 			return 125
 		fi
 		sleep 0.25
@@ -224,10 +283,61 @@ run_monitored_command() {
 		child_status=$?
 	fi
 	if ! active_resource_check; then
+		reason=$resource_violation_reason
 		printf 'activation resource monitor rejected completed process: %s\n' "$resource_violation_reason" >>"$stderr_path" || true
+		write_resource_record "$stage_resource_path" "$stage_name" "$child_status" 125 "$reason" || true
 		return 125
 	fi
+	monitor_status=0
+	write_resource_record "$stage_resource_path" "$stage_name" "$child_status" "$monitor_status" "" || return 125
 	return "$child_status"
+}
+
+write_resource_manifest() {
+	local manifest_path="$output_root/provenance/resource-usage-manifest.json"
+	local manifest_tmp="$manifest_path.tmp-$$"
+	local rows='[]' resource_path record digest bytes relative_path
+	local resource_paths=()
+	local arm stage
+	for arm in treatment mode-off no-roster; do
+		for stage in simulator renderer audit; do
+			resource_paths+=("$output_root/logs/$arm.$stage.resource.json")
+		done
+	done
+	resource_paths+=("$output_root/logs/score.resource.json")
+	for resource_path in "${resource_paths[@]}"; do
+		require_regular_file activation-resource-stage "$resource_path"
+		record=$(jq -e --argjson limit "$capacity_memory_limit_bytes" --argjson minimum_memory "$required_available_memory_bytes" --argjson minimum_free "$required_free_bytes" \
+			'type == "object" and .schema_version == 1 and .contract == "v2-r2-sv1d-activation-resource-stage-v1" and
+			 .exit_status == 0 and .monitor_status == 0 and .sample_count > 0 and
+			 .peak_cgroup_memory_bytes <= $limit and .cgroup_memory_limit_bytes == $limit and
+			 .minimum_host_available_bytes >= $minimum_memory and .minimum_filesystem_available_bytes >= $minimum_free and
+			 .maximum_swap_bytes == 0 and .oom_events_delta == 0 and .oom_kill_events_delta == 0' \
+			"$resource_path") || fail "activation resource stage is incomplete or exceeded its measured envelope: $resource_path"
+		digest=$(hash_file "$resource_path")
+		bytes=$(stat -c '%s' -- "$resource_path")
+		relative_path=${resource_path#"$output_root"/}
+		rows=$(jq -S -c --arg path "$relative_path" --arg sha256 "$digest" --argjson bytes "$bytes" --argjson record "$record" --argjson rows "$rows" '$rows + [{path: $path, sha256: $sha256, bytes: $bytes, record: $record}]') || return 1
+	done
+	local activation_metadata_sha256 score_sha256 corpus_manifest_sha256 resource_policy_sha256
+	activation_metadata_sha256=$(hash_file "$activation_metadata")
+	score_sha256=$(hash_file "$score_path")
+	corpus_manifest_sha256=$(hash_file "$corpus_manifest_path")
+	resource_policy_sha256=$(hash_file "$capacity_policy_path")
+	[[ ! -e "$manifest_path" && ! -L "$manifest_path" ]] || fail "refusing to overwrite activation resource manifest"
+	jq -S -n \
+		--arg activation_metadata_sha256 "$activation_metadata_sha256" --arg score_sha256 "$score_sha256" \
+		--arg corpus_manifest_sha256 "$corpus_manifest_sha256" --arg resource_policy_sha256 "$resource_policy_sha256" \
+		--argjson cgroup_memory_limit_bytes "$capacity_memory_limit_bytes" \
+		--argjson required_available_memory_bytes "$required_available_memory_bytes" --argjson required_free_bytes "$required_free_bytes" \
+		--argjson stages "$rows" \
+		'{schema_version: 1, contract: "v2-r2-sv1d-activation-resource-manifest-v1", scope: "sv1d_activation",
+			activation_metadata_sha256: $activation_metadata_sha256, score_sha256: $score_sha256,
+			score_corpus_manifest_sha256: $corpus_manifest_sha256, resource_policy_sha256: $resource_policy_sha256,
+			cgroup_memory_limit_bytes: $cgroup_memory_limit_bytes, required_available_memory_bytes: $required_available_memory_bytes,
+			required_free_bytes: $required_free_bytes, stages: $stages}' \
+		>"$manifest_tmp" || return 1
+	mv -- "$manifest_tmp" "$manifest_path"
 }
 
 multivenue_binary=$(normalize_input_path "$multivenue_binary") || fail "could not normalize multivenue binary"
@@ -536,7 +646,7 @@ run_arm() {
 	run_metadata_sha256_before=$(hash_file "$arm_dir/run-metadata.json")
 
 	set +e
-	run_monitored_command "$stdout_log" "$stderr_log" env GOMAXPROCS=2 GOMEMLIMIT=4GiB "$multivenue_binary" -config "$arm_dir/run-config.json" -duration "$probe_horizon" \
+	run_monitored_command "$stdout_log" "$stderr_log" "$output_root/logs/$arm.simulator.resource.json" "$arm/simulator" env GOMAXPROCS=2 GOMEMLIMIT=4GiB "$multivenue_binary" -config "$arm_dir/run-config.json" -duration "$probe_horizon" \
 		-logdir "$arm_dir" -log-mode full -evidence-format evstream_v3
 	status=$?
 	set -e
@@ -597,7 +707,7 @@ run_arm() {
 	mv -- "$status_tmp" "$arm_dir/run-status.json"
 
 	set +e
-	run_monitored_command "$arm_dir/renderer-report.json" "$renderer_stderr_log" "$evsrender_binary" -dir "$arm_dir" -out "$rendered_dir"
+	run_monitored_command "$arm_dir/renderer-report.json" "$renderer_stderr_log" "$output_root/logs/$arm.renderer.resource.json" "$arm/renderer" "$evsrender_binary" -dir "$arm_dir" -out "$rendered_dir"
 	renderer_status=$?
 	set -e
 	if [[ "$renderer_status" -ne 0 ]]; then
@@ -614,7 +724,7 @@ run_arm() {
 	fi
 
 	set +e
-	"$sv1dprobe_binary" -mode audit -out "$result_path" -plan "$plan_path" -arm "$arm" \
+	run_monitored_command "$output_root/logs/$arm.audit.stdout.log" "$output_root/logs/$arm.audit.stderr.log" "$output_root/logs/$arm.audit.resource.json" "$arm/audit" "$sv1dprobe_binary" -mode audit -out "$result_path" -plan "$plan_path" -arm "$arm" \
 		-run-dir "$arm_dir" -rendered-dir "$rendered_dir" -source-revision "$source_revision" \
 		-tree-revision "$tree_revision" -plan-sha256 "$review_plan_sha256" \
 		-parent-registration-sha256 "$parent_registration_sha256" -amendment-sha256 "$amendment_sha256" \
@@ -657,8 +767,9 @@ done
 
 score_path="$output_root/score.json"
 corpus_manifest_path="$output_root/provenance/score-corpus-manifest.json"
+score_resource_path="$output_root/logs/score.resource.json"
 set +e
-"$sv1dprobe_binary" -mode score -out "$score_path" -corpus-manifest "$corpus_manifest_path" -plan "$plan_path" \
+run_monitored_command "$output_root/logs/score.stdout.log" "$output_root/logs/score.stderr.log" "$score_resource_path" "score" "$sv1dprobe_binary" -mode score -out "$score_path" -corpus-manifest "$corpus_manifest_path" -plan "$plan_path" \
 	-treatment-result "${retained_result_for[treatment]}" \
 	-mode-off-result "${retained_result_for[mode-off]}" \
 	-no-roster-result "${retained_result_for[no-roster]}" \
@@ -681,6 +792,19 @@ jq -e 'type == "object" and .contract == "v2-r2-sv1d-score-v1" and .probe_id == 
 [[ -s "$corpus_manifest_path" && ! -L "$corpus_manifest_path" ]] || fail "could not publish strict score corpus manifest"
 jq -e 'type == "object" and .schema_version == 1 and .contract == "v2-r2-sv1d-score-corpus-manifest-v1" and .probe_id == "v2-r2-sv1d-activation-659" and (.arm_corpus | length == 3)' \
 	"$corpus_manifest_path" >/dev/null || fail "strict score corpus manifest is malformed"
+if [[ "$score_status" -eq 0 && "$arm_failure" -eq 0 ]]; then
+	write_resource_manifest
+	require_regular_file activation-resource-manifest "$output_root/provenance/resource-usage-manifest.json"
+	jq -e --argjson limit "$capacity_memory_limit_bytes" --argjson minimum_memory "$required_available_memory_bytes" --argjson minimum_free "$required_free_bytes" \
+		'type == "object" and .schema_version == 1 and .contract == "v2-r2-sv1d-activation-resource-manifest-v1" and
+		 .scope == "sv1d_activation" and (.stages | length == 10) and
+		 all(.stages[]; .bytes > 0 and (.sha256 | test("^[0-9a-f]{64}$")) and
+			 .record.exit_status == 0 and .record.monitor_status == 0 and
+			 .record.peak_cgroup_memory_bytes <= $limit and .record.cgroup_memory_limit_bytes == $limit and
+			 .record.minimum_host_available_bytes >= $minimum_memory and .record.minimum_filesystem_available_bytes >= $minimum_free and
+			 .record.maximum_swap_bytes == 0 and .record.oom_events_delta == 0 and .record.oom_kill_events_delta == 0)' \
+		"$output_root/provenance/resource-usage-manifest.json" >/dev/null || fail "activation resource manifest is malformed or exceeds its measured envelope"
+fi
 if [[ "$score_status" -ne 0 || "$arm_failure" -ne 0 ]]; then
 	echo "SV1D activation probe retained evidence but did not certify an executable tri-arm result" >&2
 	exit 1
