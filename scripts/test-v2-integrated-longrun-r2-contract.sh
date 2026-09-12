@@ -119,18 +119,21 @@ mkdir -p "$(dirname -- "$public_config")" "$public_output_root/rendered" "$publi
 cp -- "$root_dir/research/configs/v2-r2-sv1d-activation/activation-659-treatment.json" "$public_config"
 public_measurement_root="$tmp_root/public-wrapper-measurement-root"
 mkdir -p "$public_measurement_root"
+current_source_revision=$(git -C "$root_dir" rev-parse HEAD)
+current_tree_revision=$(git -C "$root_dir" rev-parse HEAD^{tree})
 (
 	exec 3<>"$forged_lock_path"
 	flock -n 3
 	set +e
 	SV1D_LOCK_HELD=1 SV1D_CAPACITY_LOCK_PATH="$forged_lock_path" SV1D_CAPACITY_ROOT_DIR="$root_dir" \
+		SV1D_CAPACITY_INTERNAL_TREE_REVISION="$current_tree_revision" \
 		SV1D_CAPACITY_OUTPUT_ROOT="$public_output_root" "$public_wrapper_binary" \
 		-out "$tmp_root/public-wrapper-measurement.json" -output-parent "$tmp_root" -measurement-root "$public_measurement_root" \
 		-sample-interval 10ms -require-finite-cgroup=false -inherit-fd 3 -- \
 		bash "$root_dir/scripts/run-v2-r2-sv1d-capacity-preflight.sh" --internal-arm treatment \
 		"$public_config" "$public_arm_dir" "$public_output_root/rendered/treatment" /bin/true /bin/true /bin/true \
-		0123456789abcdef0123456789abcdef01234567 forged-public \
-		"$public_output_root/logs/forged.stdout" "$public_output_root/logs/forged.stderr"
+		"$current_source_revision" "v2-r2-sv1d-capacity-977-treatment" \
+		"$public_output_root/logs/treatment.simulator.stdout.log" "$public_output_root/logs/treatment.simulator.stderr.log"
 	public_wrapper_status=$?
 	set -e
 	[[ "$public_wrapper_status" -ne 0 && ! -e "$public_arm_dir" ]]
