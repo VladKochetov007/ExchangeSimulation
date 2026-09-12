@@ -387,6 +387,7 @@ if [[ "${SV1D_LOCK_HELD:-0}" != 1 ]]; then
 	exec "$lock_binary" -path "$lock_path" -- env SV1D_LOCK_HELD=1 SV1D_LOCK_FD=3 "$0" "$@"
 fi
 [[ "$(readlink "/proc/$$/fd/3" 2>/dev/null)" == "$lock_path" ]] || fail "SV1D lock was not opened by the trusted lock adapter"
+flock -n 3 || fail "SV1D lock descriptor is not exclusively held"
 
 require_regular_file sv1d-review-attestation "$review_attestation"
 require_regular_file sv1d-review-report "$review_report"

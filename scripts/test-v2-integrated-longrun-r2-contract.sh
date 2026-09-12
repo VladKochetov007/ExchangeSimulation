@@ -74,6 +74,8 @@ for runner in \
 	"$root_dir/scripts/run-v2-r2-sv1d-capacity-preflight.sh"; do
 	rg -n 'readlink "/proc/\$\$/fd/3"' "$runner" >/dev/null ||
 		fail "SV1D runner does not validate inherited lock descriptor: $runner"
+	rg -n 'flock -n 3' "$runner" >/dev/null ||
+		fail "SV1D runner does not revalidate inherited lock ownership: $runner"
 done
 
 expected_calendar_timeline=$(cat <<'EOF'
