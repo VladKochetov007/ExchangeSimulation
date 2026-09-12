@@ -1546,3 +1546,30 @@ capacity once, build pinned Go 1.27 binaries, and run only the development
 seed-659 activation probe. Do not rerun completed gates or consume `dev-607`
 until that probe is independently inspected; do not read holdouts `619/631/641`
 before explicit freeze authorization.
+
+## Append-only quota-stop checkpoint: descriptor-bound SV1D locking (`fe33dd8`) — 2026-09-12
+
+The exact scientific tree is clean, pushed, and pinned at `fe33dd8`. This
+code-bearing checkpoint adds the reusable Linux `sv1dlock` adapter and wires it
+into the development-only SV1D activation and binary-capacity runners. The
+adapter opens the existing namespace lock without truncation, rejects symlinked
+parents/final paths using descriptor-relative `openat`, takes a non-blocking
+exclusive `flock`, and passes the held descriptor to the child. Resource
+manifest validation now binds the exact ordered ten-stage path/stage sequence.
+The lock binary digest is retained in capacity and activation provenance.
+No R2 economics, SV1D participant behavior, historical evidence, or experiment
+configuration changed.
+
+Focused package tests, shell syntax, and `git diff --check` passed. The bounded
+full `make test` run completed every package and ordinary contract suite; its
+only reported nonzero conditions were the intentional dirty-worktree parity and
+archive guards, so a clean post-commit full gate remains deferred. The quota
+pause began immediately after this commit; no clean full rerun, vet/race pass,
+independent review, capacity measurement, pinned campaign build, SV1D probe,
+development cell, freeze, or holdout `619/631/641` was run.
+
+Next session: run the clean final-tree mechanical checks once, fetch only
+performance commits newer than `b1847ac`, obtain one independent exact-tree
+Sol-xhigh review, and proceed only if accepted to the registered binary
+capacity preflight and seed-659 activation probe. Do not launch `dev-607` or
+touch holdouts before those gates and explicit freeze authorization.

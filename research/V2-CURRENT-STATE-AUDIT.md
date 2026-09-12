@@ -1322,3 +1322,32 @@ Go 1.27 build. The next scientific execution is the development-only seed-659
 activation probe, not `dev-607`; its complete tri-arm and resource evidence
 must be accepted before the registered development sequence. Holdouts
 `619/631/641` remain untouched and unauthorized.
+
+## Append-only quota-stop update: SV1D namespace lock hardening (`fe33dd8`) — 2026-09-12
+
+Scientific HEAD is clean and pushed at `fe33dd8`. The checkpoint is operational
+provenance hardening only: a separately testable Linux lock adapter now binds
+the SV1D namespace lock to an opened regular-file descriptor, rejects final or
+parent symlinks, preserves existing lock contents, and prevents concurrent
+capacity/activation namespaces. Both runners retain the helper binary and
+digest. The activation resource manifest additionally requires the exact
+ordered arm/stage path set and corresponding stage labels. No economic or
+historical claim was changed.
+
+The bounded full test finished all Go package and ordinary contract suites. Its
+exit was nonzero only because the source tree was intentionally dirty while
+the parity/archive checks require a clean gate worktree; this does not replace
+the deferred clean post-commit gate. Focused tests, shell syntax, and diff
+hygiene passed. The weekly quota stop occurred before clean `make test`, vet,
+race/fresh-process revalidation, independent review, capacity, activation, or
+any development/holdout execution. Disk was approximately 33 GiB free, RAM
+approximately 27 GiB available, and swap was absent at pause.
+
+Promotion remains closed. The next controlled sequence is: clean final-tree
+mechanical checks; performance-feed delta check after `b1847ac`; one fresh
+independent Sol-xhigh review of R2 calendar semantics, correctness hardening,
+binary evidence, strict scoring, resource manifests, and locking; then, only
+on acceptance, one binary-capacity measurement, pinned Go 1.27 build, and the
+development-only seed-659 SV1D activation probe. `dev-607`, `dev-613`,
+`dev-617`, parity controls, freeze, and holdouts `619/631/641` remain
+unauthorized.
