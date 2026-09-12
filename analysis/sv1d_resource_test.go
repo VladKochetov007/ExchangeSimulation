@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -58,6 +59,29 @@ func TestMeasureSV1DCommandRecordsFailedChildWithoutCertifyingIt(t *testing.T) {
 	}
 	if measurement.SampleCount < 2 || measurement.SamplesSHA256 == "" {
 		t.Fatalf("failed command did not retain its trace: %+v", measurement)
+	}
+}
+
+func TestMeasureSV1DCommandProvidesParentBoundChildHandoff(t *testing.T) {
+	root := t.TempDir()
+	handoffPath := filepath.Join(root, "handoff.txt")
+	measurement, err := MeasureSV1DCommand(context.Background(), SV1DResourceOptions{
+		Command:      []string{"/bin/sh", "-c", "IFS= read -r handoff <&3; printf '%s' \"$handoff\" > \"$1\"; sleep 0.03", "sh", handoffPath},
+		OutputParent: root, MeasurementRoot: root, SampleInterval: 10 * time.Millisecond,
+		RequireFiniteCgroupLimit: false, RequireChildHandoff: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !measurement.Complete || measurement.ExitStatus != 0 {
+		t.Fatalf("handoff command completion = %t/%d: %+v", measurement.Complete, measurement.ExitStatus, measurement)
+	}
+	handoff, err := os.ReadFile(handoffPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(string(handoff), sv1DResourceChildHandoffPrefix+":") {
+		t.Fatalf("child handoff = %q", handoff)
 	}
 }
 

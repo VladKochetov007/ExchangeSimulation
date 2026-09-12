@@ -30,6 +30,7 @@ func run() error {
 	measurementRoot := flag.String("measurement-root", "", "fresh output tree measured for footprint")
 	interval := flag.Duration("sample-interval", 250*time.Millisecond, "resource sampling interval")
 	requireFiniteCgroup := flag.Bool("require-finite-cgroup", true, "reject an unbounded cgroup memory limit")
+	requireChildHandoff := flag.Bool("require-child-handoff", false, "pass a one-shot parent handoff on child file descriptor 3")
 	flag.Parse()
 	if *inspectFilesystem != "" {
 		identity, err := analysis.InspectSV1DFilesystem(*inspectFilesystem)
@@ -51,6 +52,7 @@ func run() error {
 		MeasurementRoot:          *measurementRoot,
 		SampleInterval:           *interval,
 		RequireFiniteCgroupLimit: *requireFiniteCgroup,
+		RequireChildHandoff:      *requireChildHandoff,
 	})
 	if err := publishMeasurement(*out, measurement); err != nil {
 		if measurementErr != nil {

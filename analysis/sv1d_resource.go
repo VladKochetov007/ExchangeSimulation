@@ -22,6 +22,7 @@ import (
 const (
 	SV1DResourceMeasurementContract = "v2-r2-sv1d-resource-measurement-v1"
 	SV1DResourceDefaultIntervalNano = uint64(250_000_000)
+	sv1DResourceChildHandoffPrefix  = "v2-r2-sv1dresource-child-handoff-v1"
 )
 
 // SV1DFilesystemIdentity is the immutable filesystem identity used to bind a
@@ -93,6 +94,7 @@ type SV1DResourceOptions struct {
 	MeasurementRoot          string
 	SampleInterval           time.Duration
 	RequireFiniteCgroupLimit bool
+	RequireChildHandoff      bool
 }
 
 // ValidateSV1DResourceMeasurement recomputes the retained resource aggregates
@@ -263,10 +265,35 @@ func MeasureSV1DCommand(ctx context.Context, options SV1DResourceOptions) (SV1DR
 
 	command := exec.CommandContext(ctx, options.Command[0], options.Command[1:]...)
 	command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	var childHandoffRead *os.File
+	if options.RequireChildHandoff {
+		readPipe, writePipe, pipeErr := os.Pipe()
+		if pipeErr != nil {
+			return measurement, fmt.Errorf("create measured-child handoff: %w", pipeErr)
+		}
+		handoff := fmt.Sprintf("%s:%d\n", sv1DResourceChildHandoffPrefix, os.Getpid())
+		if _, pipeErr = writePipe.WriteString(handoff); pipeErr != nil {
+			_ = readPipe.Close()
+			_ = writePipe.Close()
+			return measurement, fmt.Errorf("write measured-child handoff: %w", pipeErr)
+		}
+		if pipeErr = writePipe.Close(); pipeErr != nil {
+			_ = readPipe.Close()
+			return measurement, fmt.Errorf("close measured-child handoff: %w", pipeErr)
+		}
+		childHandoffRead = readPipe
+		command.ExtraFiles = []*os.File{childHandoffRead}
+	}
 	if err := command.Start(); err != nil {
+		if childHandoffRead != nil {
+			_ = childHandoffRead.Close()
+		}
 		measurement.Error = err.Error()
 		finalizeSV1DResourceMeasurement(&measurement)
 		return measurement, fmt.Errorf("start measured command: %w", err)
+	}
+	if childHandoffRead != nil {
+		_ = childHandoffRead.Close()
 	}
 	cgroupPath, err := cgroupPathForPID(command.Process.Pid)
 	if err != nil {

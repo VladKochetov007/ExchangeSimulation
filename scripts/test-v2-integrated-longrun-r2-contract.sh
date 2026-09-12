@@ -79,6 +79,26 @@ for runner in \
 done
 rg -n 'SV1D_LOCK_HELD.*== 1' "$root_dir/scripts/run-v2-r2-sv1d-capacity-preflight.sh" >/dev/null ||
 	fail "SV1D capacity runner does not guard its internal arm entrypoint"
+rg -n 'handoff_target.*pipe:|v2-r2-sv1dresource-child-handoff-v1|resource_parent_name.*sv1dresource' \
+	"$root_dir/scripts/run-v2-r2-sv1d-capacity-preflight.sh" >/dev/null ||
+	fail "SV1D capacity runner does not require the resource-wrapper handoff"
+
+forged_arm_dir="$tmp_root/forged-internal-arm"
+forged_lock_path="$tmp_root/forged-capacity.lock"
+(
+	exec 3<>"$forged_lock_path"
+	flock -n 3
+	set +e
+	SV1D_LOCK_HELD=1 SV1D_CAPACITY_LOCK_PATH="$forged_lock_path" SV1D_CAPACITY_ROOT_DIR="$root_dir" \
+		bash "$root_dir/scripts/run-v2-r2-sv1d-capacity-preflight.sh" --internal-arm treatment \
+		"$root_dir/research/configs/v2-r2-sv1d-activation/activation-659-treatment.json" \
+		"$forged_arm_dir" "$tmp_root/forged-rendered" /bin/true /bin/true /bin/true \
+		0123456789abcdef0123456789abcdef01234567 forged \
+		"$tmp_root/forged.stdout" "$tmp_root/forged.stderr"
+	forged_status=$?
+	set -e
+	[[ "$forged_status" -ne 0 && ! -e "$forged_arm_dir" ]]
+) || fail "direct forged lock-marker invocation reached the internal arm"
 
 expected_calendar_timeline=$(cat <<'EOF'
 [

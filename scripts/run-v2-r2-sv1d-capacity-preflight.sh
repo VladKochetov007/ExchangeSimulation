@@ -20,7 +20,7 @@ simulation_end_nano=1735689900000000000
 capacity_hypothesis="V2-R2-SV1D-CAPACITY-ONLY"
 capacity_contract="v2-r2-sv1d-capacity-runner-v1"
 capacity_probe_id="v2-r2-sv1d-activation-659"
-capacity_lock_path="/home/vlad/v2-r2-sv1d-capacity-977.lock"
+capacity_lock_path=${SV1D_CAPACITY_LOCK_PATH:-"/home/vlad/v2-r2-sv1d-capacity-977.lock"}
 
 fail() {
 	echo "SV1D capacity preflight: $*" >&2
@@ -215,11 +215,21 @@ run_capacity_arm() {
 # Internal arm invocation is deliberately after all helper definitions but
 # before normal argument parsing. The resource wrapper executes this exact
 # checked-in file so simulator and renderer remain within one sampled tree.
+# FD3 is a one-shot pipe capability supplied by sv1dresource; the outer
+# capacity runner's flock remains held by the waiting parent process.
 if [[ "${1:-}" == "--internal-arm" ]]; then
 	shift
 	[[ "${SV1D_LOCK_HELD:-0}" == 1 ]] || exit 1
-	[[ "$(readlink "/proc/$$/fd/3" 2>/dev/null)" == "$capacity_lock_path" ]] || exit 3
-	flock -n 3 || exit 4
+	handoff_target=$(readlink "/proc/$$/fd/3" 2>/dev/null) || exit 3
+	[[ "$handoff_target" == pipe:* ]] || exit 3
+	resource_parent_exe=$(readlink "/proc/$PPID/exe" 2>/dev/null) || exit 4
+	resource_parent_name=${resource_parent_exe##*/}
+	[[ "$resource_parent_name" == sv1dresource || "$resource_parent_name" == sv1dresource-* ]] || exit 4
+	IFS= read -r resource_handoff <&3 || exit 5
+	[[ "$resource_handoff" == "v2-r2-sv1dresource-child-handoff-v1:$PPID" ]] || exit 5
+	if IFS= read -r unexpected_handoff <&3; then
+		exit 6
+	fi
 	[[ $# -eq 11 ]] || exit 2
 	source "$root_dir/scripts/v2-integrated-longrun-r2-contract.sh"
 	run_capacity_arm "$@"
@@ -484,7 +494,7 @@ for arm in treatment mode-off no-roster; do
 	arm_result="$measurement_records_root/$arm-record.json"
 	set +e
 	GOMAXPROCS=2 GOMEMLIMIT=4GiB SV1D_CAPACITY_ROOT_DIR="$root_dir" SV1D_CAPACITY_SCRIPT_PATH="$retained_capacity_runner" "$staged_sv1dresource" -out "$measurement_path" -output-parent "$output_parent" -measurement-root "$output_root" \
-		-sample-interval 250ms -require-finite-cgroup -- \
+		-sample-interval 250ms -require-finite-cgroup -require-child-handoff -- \
 		"$retained_capacity_runner" --internal-arm "$arm" "${capacity_config_for[$arm]}" "$arm_dir" "$rendered_dir" "$staged_multivenue" "$staged_sv1dprobe" "$staged_evsrender" "$source_revision" \
 		"${capacity_experiment_for[$arm]}" "$stdout_log" "$stderr_log"
 	resource_status=$?
