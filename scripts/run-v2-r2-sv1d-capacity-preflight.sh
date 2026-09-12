@@ -66,7 +66,7 @@ build_field() {
 }
 
 binary_go_version() {
-	go version -m "$1" | awk '$1 == "go" {print $2; exit}'
+	go version -m "$1" | sed -n '1s/.*: //p'
 }
 
 require_clean_pinned_binary() {

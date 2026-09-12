@@ -21,6 +21,27 @@ expect_failure() {
 "$root_dir/scripts/check-v2-integrated-longrun-r2-configs.sh" >/dev/null
 source "$root_dir/scripts/v2-integrated-longrun-r2-contract.sh"
 
+go() {
+	if [[ "$1" == version && "$2" == -m ]]; then
+		printf '%s\n' '/fixture: go1.27.0' $'\tpath\texchange_sim/cmd/fixture'
+		return 0
+	fi
+	return 1
+}
+[[ "$(v2_r2_binary_go_version /fixture)" == "go1.27.0" ]] ||
+	fail "Go toolchain version parser does not read the Go 1.27 first line"
+unset -f go
+for runner in \
+	"$root_dir/scripts/run-v2-r2-sv1d-capacity-preflight.sh" \
+	"$root_dir/scripts/run-v2-r2-sv1d-activation.sh" \
+	"$root_dir/scripts/audit-v2-r2-sv1d-activation.sh"; do
+	rg --fixed-strings "sed -n '1s/.*: //p'" "$runner" >/dev/null ||
+		fail "SV1D toolchain parser is not bound to the Go 1.27 first-line form: $runner"
+	if rg --fixed-strings '$1 == "go"' "$runner" >/dev/null; then
+		fail "SV1D toolchain parser still expects the obsolete Go metadata row: $runner"
+	fi
+done
+
 left_manifest_dir="$tmp_root/ordered-left"
 right_manifest_dir="$tmp_root/ordered-right"
 mkdir -p "$left_manifest_dir" "$right_manifest_dir"
