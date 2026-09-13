@@ -1869,3 +1869,17 @@ This is an external review-availability stop, not a change to R2 economics or
 the capacity-digest correction. Retry a fresh Luna xhigh review of this exact
 tree before rebuilding the signed successor bundle. The failed capacity
 namespaces remain retained and holdouts remain untouched.
+
+## Append-only repeated Luna review availability stop — 2026-09-13
+
+After the availability stop above, a final bounded Luna xhigh attempt targeted
+exact HEAD `e5e238121dc0c50ef941d679287edda403136d0a` (tree
+`acf102aef4cb326ac45ca53fab931ae73b063074`) and returned `REJECT — review
+unavailable`. This is the third unsuccessful fresh review attempt at the
+post-fix promotion boundary; none produced a scientific verdict. The exact
+candidate remains unpromoted. Do not substitute the prior `ef839a2` review or
+bundle for this changed tree.
+
+No capacity, activation, development cell, freeze, or holdout was run. Resume
+with one complete Luna xhigh exact-tree review, then rebuild the pinned bundle
+only after acceptance.

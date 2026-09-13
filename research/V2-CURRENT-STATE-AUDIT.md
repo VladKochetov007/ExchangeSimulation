@@ -1636,3 +1636,16 @@ unchanged through `b1847ac`. The candidate stays closed at the independent
 review gate. A fresh Luna xhigh acceptance is required before a new pinned
 build, signed bundle, and capacity namespace; both incomplete prior capacity
 namespaces remain preserved as non-measurements.
+
+## Append-only repeated Luna review availability stop — 2026-09-13
+
+The final bounded Luna xhigh attempt reviewed neither a scientific verdict nor
+an acceptance for exact HEAD `e5e238121dc0c50ef941d679287edda403136d0a`
+(tree `acf102aef4cb326ac45ca53fab931ae73b063074`) and returned `REJECT — review
+unavailable`. This is the third post-fix availability failure; it is not a
+candidate rejection. The changed capacity runner therefore remains outside
+the accepted review/bundle identity.
+
+The branch remains mechanically green and clean. No capacity, activation,
+development, freeze, or holdout run occurred. The promotion gate stays closed
+until a complete Luna xhigh exact-tree review accepts this candidate.
