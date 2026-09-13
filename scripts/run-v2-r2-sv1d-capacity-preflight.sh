@@ -316,6 +316,10 @@ if [[ "${1:-}" == "--internal-arm" ]]; then
 		-no-roster-config "${SV1D_CAPACITY_INTERNAL_NO_ROSTER_CONFIG:?}" -binary-sha256 "$SV1D_CAPACITY_INTERNAL_SIMULATOR_SHA256" \
 		-analyzer-sha256 "$SV1D_CAPACITY_INTERNAL_ANALYZER_SHA256" -renderer-sha256 "$SV1D_CAPACITY_INTERNAL_RENDERER_SHA256" || exit 11
 	identity_filter='del(.seed,.experiment_id,.hypothesis_id,.status,.description)'
+	jq -e --arg experiment "$expected_experiment_id" \
+		'.seed == 977 and .experiment_id == $experiment and
+		 .hypothesis_id == "V2-R2-SV1D-CAPACITY-ONLY" and .status == "capacity-preflight-only" and
+		 .description == "Outcome-ineligible binary-evidence capacity preflight arm"' "$config" >/dev/null || exit 12
 	[[ "$(jq -S "$identity_filter" "$target_config")" == "$(jq -S "$identity_filter" "$config")" ]] || exit 12
 	source "$root_dir/scripts/v2-integrated-longrun-r2-contract.sh"
 	run_capacity_arm "$@"
@@ -609,7 +613,8 @@ for arm in treatment mode-off no-roster; do
 	set +e
 	GOMAXPROCS=2 GOMEMLIMIT=4GiB SV1D_CAPACITY_ROOT_DIR="$root_dir" SV1D_CAPACITY_SCRIPT_PATH="$retained_capacity_runner" "$staged_sv1dresource" -out "$measurement_path" -output-parent "$output_parent" -measurement-root "$output_root" \
 		-sample-interval 250ms -require-finite-cgroup -inherit-fd 3 -- \
-		"$retained_capacity_runner" --internal-arm "$arm" "${capacity_config_for[$arm]}" "$arm_dir" "$rendered_dir" "$staged_multivenue" "$staged_sv1dprobe" "$staged_evsrender" "$source_revision" \
+		"$retained_capacity_runner" --internal-arm "$arm" "${capacity_config_for[$arm]}" "$arm_dir" "$rendered_dir" \
+		"$output_root/tools/multivenue-$multivenue_sha256" "$output_root/tools/sv1dprobe-$sv1dprobe_sha256" "$output_root/tools/evsrender-$evsrender_sha256" "$source_revision" \
 		"${capacity_experiment_for[$arm]}" "$stdout_log" "$stderr_log"
 	resource_status=$?
 	set -e
