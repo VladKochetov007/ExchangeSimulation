@@ -275,6 +275,7 @@ if [[ "${1:-}" == "--internal-arm" ]]; then
 	internal_review_report=${SV1D_CAPACITY_INTERNAL_REVIEW_REPORT:-}
 	internal_trusted_key=${SV1D_CAPACITY_INTERNAL_TRUSTED_KEY:-}
 	internal_review_plan=${SV1D_CAPACITY_INTERNAL_REVIEW_PLAN:-}
+	internal_review_plan_file_sha256=${SV1D_CAPACITY_INTERNAL_REVIEW_PLAN_FILE_SHA256:-}
 	internal_parent_registration=${SV1D_CAPACITY_INTERNAL_PARENT_REGISTRATION:-}
 	internal_amendment=${SV1D_CAPACITY_INTERNAL_AMENDMENT:-}
 	for review_file in "$internal_review_attestation" "$internal_review_report" "$internal_trusted_key" "$internal_review_plan" "$internal_parent_registration" "$internal_amendment" "$target_config" "$config" "$simulator" "$analyzer" "$renderer" "$0"; do
@@ -290,7 +291,8 @@ if [[ "${1:-}" == "--internal-arm" ]]; then
 	[[ "$(hash_file "$internal_review_attestation")" == "${SV1D_CAPACITY_INTERNAL_REVIEW_ATTESTATION_SHA256:-}" ]] || exit 9
 	[[ "$(hash_file "$internal_review_report")" == "${SV1D_CAPACITY_INTERNAL_REVIEW_REPORT_SHA256:-}" ]] || exit 9
 	[[ "$(hash_file "$internal_trusted_key")" == "${SV1D_CAPACITY_INTERNAL_TRUSTED_KEY_SHA256:-}" ]] || exit 9
-	[[ "$(hash_file "$internal_review_plan")" == "${SV1D_CAPACITY_INTERNAL_REVIEW_PLAN_SHA256:-}" ]] || exit 9
+	[[ "$internal_review_plan_file_sha256" =~ ^[0-9a-f]{64}$ ]] || exit 9
+	[[ "$(hash_file "$internal_review_plan")" == "$internal_review_plan_file_sha256" ]] || exit 9
 	[[ "$(hash_file "$internal_parent_registration")" == "${SV1D_CAPACITY_INTERNAL_PARENT_REGISTRATION_SHA256:-}" ]] || exit 9
 	[[ "$(hash_file "$internal_amendment")" == "${SV1D_CAPACITY_INTERNAL_AMENDMENT_SHA256:-}" ]] || exit 9
 	[[ "$expected_target_config_sha256" =~ ^[0-9a-f]{64}$ ]] || exit 9
@@ -467,6 +469,7 @@ review_plan="$staging_root/probe-plan.json"
 	-binary-sha256 "$multivenue_sha256" -analyzer-sha256 "$sv1dprobe_sha256" -renderer-sha256 "$evsrender_sha256" ||
 	fail "could not derive capacity review-bound plan"
 review_plan_sha256=$(jq -er '.plan_sha256 | select(test("^[0-9a-f]{64}$"))' "$review_plan") || fail "review-bound plan has no canonical digest"
+review_plan_file_sha256=$(hash_file "$review_plan")
 "$staged_sv1dprobe" -mode verify-review \
 	-review-attestation "$staged_review_attestation" -review-report "$staged_review_report" -trusted-review-key "$staged_trusted_key" \
 	-source-revision "$source_revision" -tree-revision "$tree_revision" -plan-sha256 "$review_plan_sha256" \
@@ -481,6 +484,7 @@ export SV1D_CAPACITY_INTERNAL_REVIEW_ATTESTATION="$staged_review_attestation"
 export SV1D_CAPACITY_INTERNAL_REVIEW_REPORT="$staged_review_report"
 export SV1D_CAPACITY_INTERNAL_TRUSTED_KEY="$staged_trusted_key"
 export SV1D_CAPACITY_INTERNAL_REVIEW_PLAN="$review_plan"
+export SV1D_CAPACITY_INTERNAL_REVIEW_PLAN_FILE_SHA256="$review_plan_file_sha256"
 export SV1D_CAPACITY_INTERNAL_PARENT_REGISTRATION="$staged_parent_registration"
 export SV1D_CAPACITY_INTERNAL_AMENDMENT="$staged_amendment"
 export SV1D_CAPACITY_INTERNAL_TREE_REVISION="$tree_revision"

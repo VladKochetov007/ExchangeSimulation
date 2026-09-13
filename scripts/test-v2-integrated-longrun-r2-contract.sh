@@ -110,6 +110,16 @@ rg -n -- '-inherit-fd 3' "$root_dir/scripts/run-v2-r2-sv1d-capacity-preflight.sh
 rg -n 'SV1D_CAPACITY_INTERNAL_REVIEW_ATTESTATION|SV1D_CAPACITY_INTERNAL_RESOURCE_SHA256|verify-review|expected_target_config_sha256' \
 	"$root_dir/scripts/run-v2-r2-sv1d-capacity-preflight.sh" >/dev/null ||
 	fail "SV1D capacity runner does not revalidate its signed review identity"
+rg -n 'review_plan_file_sha256=\$\(hash_file "\$review_plan"\)' \
+	"$root_dir/scripts/run-v2-r2-sv1d-capacity-preflight.sh" >/dev/null ||
+	fail "SV1D capacity runner does not retain the raw probe-plan file digest"
+rg -n 'hash_file "\$internal_review_plan".*internal_review_plan_file_sha256|SV1D_CAPACITY_INTERNAL_REVIEW_PLAN_FILE_SHA256' \
+	"$root_dir/scripts/run-v2-r2-sv1d-capacity-preflight.sh" >/dev/null ||
+	fail "SV1D capacity runner conflates canonical plan and plan-file digests"
+if rg -n 'hash_file "\$internal_review_plan".*SV1D_CAPACITY_INTERNAL_REVIEW_PLAN_SHA256' \
+	"$root_dir/scripts/run-v2-r2-sv1d-capacity-preflight.sh" >/dev/null; then
+	fail "SV1D capacity runner compares raw plan bytes with the canonical plan digest"
+fi
 if rg -n 'require-child-handoff|v2-r2-sv1dresource-child-handoff-v1|handoff_target.*pipe:' \
 	"$root_dir/analysis" "$root_dir/cmd/sv1dresource" "$root_dir/scripts/run-v2-r2-sv1d-capacity-preflight.sh" >/dev/null; then
 	fail "obsolete forgeable SV1D handoff token remains in the capacity path"
