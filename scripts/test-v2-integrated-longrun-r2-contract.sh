@@ -90,6 +90,8 @@ if rg -n 'exec \{(lock_fd|capacity_lock_fd)\}>' \
 	"$root_dir/scripts/run-v2-r2-sv1d-capacity-preflight.sh" >/dev/null; then
 	fail "SV1D runners reopen and truncate the descriptor-bound namespace lock"
 fi
+[[ -x "$root_dir/scripts/run-v2-r2-sv1d-capacity-preflight.sh" ]] ||
+	fail "SV1D capacity runner must be executable for its lock re-entry path"
 for runner in \
 	"$root_dir/scripts/run-v2-r2-sv1d-activation.sh" \
 	"$root_dir/scripts/run-v2-r2-sv1d-capacity-preflight.sh"; do
