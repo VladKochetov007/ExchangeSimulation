@@ -1813,3 +1813,20 @@ committed tree, including parity and archive contracts. The previous signed
 bundle is no longer valid for this tree; obtain a fresh exact-tree review and
 rebuild before retrying capacity. No activation, development, freeze, or
 holdout ran.
+
+## Append-only Luna review-availability stop — 2026-09-13
+
+The exact current candidate is `62316d40f9ab60975806d31eb0fbd10ff075e740`
+(tree `faf8c448d426fea9e6627fa94a8f0826dc864bc4`). A fresh independent Luna
+xhigh reviewer was launched against that immutable tree. After an immediate
+completion request, it returned **REJECT — review unavailable** rather than a
+scientific semantic verdict. This is an external-review availability stop, not
+acceptance and not a candidate correctness rejection.
+
+The exact-tree non-scientific checks are green: full `make test`, `go vet ./...`,
+the prescribed targeted race matrix, shell syntax checks, and `git diff --check`.
+No capacity arm, pinned campaign build, activation probe, development cell,
+freeze, or holdout `619/631/641` was run. The performance feed remains reviewed
+through `b1847ac` with no newer commit and no performance branch code was
+imported. Retry one complete Luna xhigh exact-tree review before the binary
+capacity preflight; preserve the execution boundary.

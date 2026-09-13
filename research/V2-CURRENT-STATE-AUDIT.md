@@ -1581,3 +1581,19 @@ adds a regression assertion. Focused R2 checks and clean full `make test` pass
 at that commit, including parity and archive contracts. The source-tree change
 invalidates the prior review bundle; fresh review and pinned rebuild are
 required before capacity. No activation, development, freeze, or holdout ran.
+
+## Append-only Luna review-availability stop — 2026-09-13
+
+Fresh Luna xhigh review of exact HEAD `62316d40f9ab60975806d31eb0fbd10ff075e740`
+(tree `faf8c448d426fea9e6627fa94a8f0826dc864bc4`) returned the terminal result
+**REJECT — review unavailable** after an immediate completion request. The
+review did not provide a scientific semantic verdict, so this records only an
+external availability stop. It does not alter the R2 negative-control result or
+the SV1D successor economics.
+
+Exact-tree verification passed: `make test`, `go vet ./...`, targeted race
+coverage, shell syntax, and `git diff --check`. No capacity, pinned build,
+activation, development, freeze, or holdout run occurred. The next promotion
+action is a fresh Luna xhigh review of the post-note exact tree, followed only
+on acceptance by pinned rebuild, independent bundle, and outcome-ineligible
+capacity measurement.
