@@ -1669,3 +1669,13 @@ unavailable`; no scientific verdict was produced. This is an external service
 stop, not candidate rejection. No capacity, activation, development, freeze,
 or holdout action occurred. The candidate remains closed until a complete
 independent Luna review accepts the exact tree.
+
+## Append-only Luna review availability stop — 2026-09-13
+
+The latest bounded Luna xhigh review targeted exact HEAD
+`644dc942020be110dd379b02de9a2783f377b335` (tree
+`9acbdf1143325515fd58baffd959036dc66676d2`) and returned `REJECT — review
+unavailable`; no scientific verdict was produced. This is a repeated external
+availability blocker, not candidate rejection. No capacity, activation,
+development, freeze, or holdout action occurred. The candidate remains closed
+until independent Luna acceptance of the exact tree.

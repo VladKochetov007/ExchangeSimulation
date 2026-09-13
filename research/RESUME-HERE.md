@@ -1906,3 +1906,15 @@ unavailable`. No scientific verdict was produced. The candidate remains
 unpromoted; no capacity, activation, development, freeze, or holdout action
 occurred. The next permitted gate is another complete Luna review of the clean
 resulting tree, followed only by acceptance with a fresh pinned bundle.
+
+## Append-only Luna review availability stop — 2026-09-13
+
+The latest continuation’s fresh bounded Luna xhigh reviewer targeted exact HEAD
+`644dc942020be110dd379b02de9a2783f377b335` (tree
+`9acbdf1143325515fd58baffd959036dc66676d2`) and returned `REJECT — review
+unavailable`. No scientific verdict was produced. This repeated external
+blocker leaves the candidate unpromoted; no capacity, activation, development,
+freeze, or holdout action occurred.
+
+The goal remains active and should resume with a successful exact-tree Luna
+review, followed by the already documented pinned-build and capacity gates.
