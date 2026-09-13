@@ -1620,3 +1620,19 @@ namespace remain preserved. A fresh exact-tree Luna xhigh review, pinned
 rebuild, signed bundle, and fresh capacity namespace are required before the
 seed-659 activation probe. No development cell, freeze, or holdout
 `619/631/641` has been consumed.
+
+## Append-only exact-tree Luna review availability stop — 2026-09-13
+
+The post-fix candidate was inspected at exact HEAD
+`7d1228d57cafee4d44b6652c28037b812f1991bf` (tree
+`0bb57c3c508958a0824039608fc4edc3500e2ad4`). The first Luna xhigh reviewer
+did not return a verdict after bounded completion requests. A second bounded
+Luna xhigh reviewer returned `REJECT — review unavailable`. This is not a
+scientific rejection and does not authorize capacity, activation, development,
+freeze, or holdout execution.
+
+The exact-tree mechanical checks remain green, and the performance feed is
+unchanged through `b1847ac`. The candidate stays closed at the independent
+review gate. A fresh Luna xhigh acceptance is required before a new pinned
+build, signed bundle, and capacity namespace; both incomplete prior capacity
+namespaces remain preserved as non-measurements.

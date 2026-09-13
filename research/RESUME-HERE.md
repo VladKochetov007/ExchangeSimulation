@@ -1853,3 +1853,19 @@ namespace is retained and must not be treated as a measurement.
 The next gate is a fresh Luna xhigh review of the exact post-fix successor tree,
 then a fresh pinned build/bundle and a new capacity namespace. No economic
 retuning, development cell, freeze, or holdout `619/631/641` is authorized.
+
+## Append-only exact-tree Luna review availability stop — 2026-09-13
+
+The post-fix candidate was reviewed at exact HEAD
+`7d1228d57cafee4d44b6652c28037b812f1991bf` (tree
+`0bb57c3c508958a0824039608fc4edc3500e2ad4`). One Luna xhigh review attempt
+did not return a verdict after completion requests; a second bounded Luna
+xhigh attempt returned `REJECT — review unavailable`. No scientific REJECT was
+issued and no acceptance can be inferred. The candidate remains at the
+independent-review gate. Exact-tree `make test`, `go vet`, targeted race,
+shell, and diff checks are green; no new capacity or scientific run occurred.
+
+This is an external review-availability stop, not a change to R2 economics or
+the capacity-digest correction. Retry a fresh Luna xhigh review of this exact
+tree before rebuilding the signed successor bundle. The failed capacity
+namespaces remain retained and holdouts remain untouched.
