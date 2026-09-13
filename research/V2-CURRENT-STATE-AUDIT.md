@@ -1550,3 +1550,15 @@ adds contract coverage. Clean full tests, vet, targeted race, fresh-process
 checks, shell syntax, and diff hygiene pass. The pre-correction bundle and
 tools are invalidated; the next gate is a fresh exact-tree review of `527d55a`
 followed by corrected pinned builds and capacity only.
+
+## Append-only exact-tree review rejection — 2026-09-13
+
+Reviewer `Gauss` (`01a09810-a506-7bf3-bed8-7d8ca07ef6e4`) independently
+examined exact `054c60a` and returned **REJECT** because the newly tracked Go
+1.27 launch note used a system-temporary binary path as an illustrative path. The existing
+tracked-path contract rejects system-temporary paths. The finding is strictly
+documentation/provenance hygiene; no simulator or scientific run was affected.
+
+The placeholder is corrected to `example-binary`. The next required evidence is
+an uncached full `make test`, then another exact-tree independent review. No
+capacity, activation, development, freeze, or holdout was run.

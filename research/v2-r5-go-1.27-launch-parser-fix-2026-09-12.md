@@ -19,7 +19,7 @@ the R2 predecessor, historical evidence, or earlier review verdicts.
 The reviewer reproduced a reachable operational defect in all three SV1D
 launch/audit adapters. `go version -m` under Go 1.27 begins with a line such as:
 
-    /tmp/tool: go1.27.0
+    example-binary: go1.27.0
 
 The capacity and activation runners, and the adjacent SV1D audit adapter,
 looked for a nonexistent `go` metadata row using `awk '$1 == "go" {print $2; exit}'`.
@@ -77,3 +77,18 @@ Sol-xhigh review of `527d55a`, followed by clean pinned rebuilds, a newly
 authenticated review bundle bound to that corrected tree and tool set, and the
 outcome-ineligible binary capacity preflight. No activation, development cell,
 freeze, or holdout `619/631/641` is authorized by this correction.
+
+## Append-only exact-tree review rejection — 2026-09-13
+
+Fresh reviewer `Gauss` (`01a09810-a506-7bf3-bed8-7d8ca07ef6e4`) independently
+reviewed exact HEAD `054c60a` and returned **REJECT** for the narrow next gate.
+The reviewer found that this note’s illustrative metadata line used the
+system-temporary binary path, while
+`tests/repository_paths_test.go:TestTrackedFilesAvoidSystemTempPaths` rejects
+system-temporary paths in tracked files. This was a documentation-contract
+defect, not an economic, simulator, evidence, or historical-result defect.
+
+The illustrative path is corrected above to `example-binary`, with no change to
+the Go 1.27 finding or its classification. The exact `054c60a` tree must still
+demonstrate an uncached full `make test` and receive a fresh exact-tree review.
+No capacity, activation, development, freeze, or holdout action was authorized.

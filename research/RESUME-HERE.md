@@ -1779,3 +1779,16 @@ for launch. Rebuild the tools at `527d55a`, obtain one fresh exact-tree review
 and a valid bundle bound to those tools, then run only the outcome-ineligible
 binary capacity preflight. No activation, development cell, freeze, or
 holdout `619/631/641` is authorized.
+
+## Append-only exact-tree review rejection — 2026-09-13
+
+Fresh reviewer `Gauss` (`01a09810-a506-7bf3-bed8-7d8ca07ef6e4`) reviewed exact
+HEAD `054c60a` and returned **REJECT** for the narrow promotion step. The new
+Go 1.27 provenance note contained an illustrative tracked system-temporary
+binary path,
+which the repository path-contract test correctly rejects. This is a
+documentation-only gate defect with no economic or historical impact; no
+capacity, activation, development, freeze, or holdout ran.
+
+The path is being replaced with `example-binary`, followed by a genuinely
+uncached full `make test`. A fresh exact-tree review is required afterward.

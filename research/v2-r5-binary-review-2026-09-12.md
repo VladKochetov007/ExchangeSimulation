@@ -186,3 +186,16 @@ determinism/evidence-neutrality, shell syntax, and diff checks pass. The
 corrected candidate now requires one fresh exact-tree Sol-xhigh review before
 rebuilding tools and running capacity. Full details are in
 `research/v2-r5-go-1.27-launch-parser-fix-2026-09-12.md`.
+
+## Append-only exact-tree review rejection — 2026-09-13
+
+Fresh reviewer `Gauss` (`01a09810-a506-7bf3-bed8-7d8ca07ef6e4`) reviewed exact
+HEAD `054c60a` and returned **REJECT** for the narrow next promotion step. The
+new launch-parser note used a system-temporary binary path as an illustrative tracked path, and
+the repository path-contract test rejects system-temporary paths. The defect
+was documentation-only and had no economic, simulator, evidence, or
+historical activation impact. No capacity, activation, development, freeze,
+or holdout ran.
+
+The placeholder is corrected to `example-binary`; an uncached full `make test`
+and a fresh exact-tree review are required before rebuilding or capacity.
