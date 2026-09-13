@@ -1883,3 +1883,16 @@ bundle for this changed tree.
 No capacity, activation, development cell, freeze, or holdout was run. Resume
 with one complete Luna xhigh exact-tree review, then rebuild the pinned bundle
 only after acceptance.
+
+## Append-only Luna gate retry availability stop — 2026-09-13
+
+On the next continuation, a bounded Luna xhigh review targeted the clean exact
+candidate `84ff77cf4462edf63c59882313357a99120997d5` (tree
+`2e8f33ae2e1151cec47ed03e5060d67e95937791`) and again returned `REJECT —
+review unavailable` after no inference verdict. This adds no scientific
+rejection and does not extend the accepted review/bundle identity. No capacity,
+activation, development, freeze, or holdout run occurred.
+
+The next permitted action remains a complete Luna xhigh review of the resulting
+clean tree; only acceptance may authorize a fresh pinned build and capacity
+preflight.

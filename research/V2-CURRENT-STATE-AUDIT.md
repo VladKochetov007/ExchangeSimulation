@@ -1649,3 +1649,13 @@ the accepted review/bundle identity.
 The branch remains mechanically green and clean. No capacity, activation,
 development, freeze, or holdout run occurred. The promotion gate stays closed
 until a complete Luna xhigh exact-tree review accepts this candidate.
+
+## Append-only Luna gate retry availability stop — 2026-09-13
+
+The latest bounded Luna xhigh retry targeted exact HEAD
+`84ff77cf4462edf63c59882313357a99120997d5` (tree
+`2e8f33ae2e1151cec47ed03e5060d67e95937791`) and returned `REJECT — review
+unavailable`; no scientific verdict was produced. This is an external service
+stop, not candidate rejection. No capacity, activation, development, freeze,
+or holdout action occurred. The candidate remains closed until a complete
+independent Luna review accepts the exact tree.
