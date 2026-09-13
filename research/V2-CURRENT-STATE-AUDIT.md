@@ -1597,3 +1597,26 @@ activation, development, freeze, or holdout run occurred. The next promotion
 action is a fresh Luna xhigh review of the post-note exact tree, followed only
 on acceptance by pinned rebuild, independent bundle, and outcome-ineligible
 capacity measurement.
+
+## Append-only capacity plan-digest correction — 2026-09-13
+
+The finite-cgroup retry at `/home/vlad/v2-r2-sv1d-capacity-977-v2-cgroup8g`
+was measured but did not execute a scientific or capacity arm. Each arm
+returned exit status 9 before creating its output directory. The resource
+records show an 8 GiB finite cgroup, no local or aggregate OOM events, and no
+simulator evidence; they are retained as failed preflight diagnostics only.
+
+The cause was a promotion-runner identity mismatch. The parent exported the
+canonical typed probe-plan digest (`05e27b81...`) as the internal plan hash,
+while the internal arm compared that value to the raw plan-file SHA-256
+(`8f8432ef...`). Commit `38d9bd2` adds a separate raw plan-file digest binding
+and leaves the canonical digest as the only value used for signed-review
+verification. The focused R2 contract test and clean bounded `make test` pass.
+This operational defect had no historical impact because no capacity,
+activation, development, freeze, or holdout run used the affected path.
+
+The incomplete `v1` unbounded-cgroup namespace and `v2` finite-cgroup
+namespace remain preserved. A fresh exact-tree Luna xhigh review, pinned
+rebuild, signed bundle, and fresh capacity namespace are required before the
+seed-659 activation probe. No development cell, freeze, or holdout
+`619/631/641` has been consumed.

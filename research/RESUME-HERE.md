@@ -1830,3 +1830,26 @@ freeze, or holdout `619/631/641` was run. The performance feed remains reviewed
 through `b1847ac` with no newer commit and no performance branch code was
 imported. Retry one complete Luna xhigh exact-tree review before the binary
 capacity preflight; preserve the execution boundary.
+
+## Append-only capacity plan-digest correction — 2026-09-13
+
+The first finite-cgroup capacity retry was correctly fail-closed before any
+simulator arm started. The parent runner exported the canonical typed probe-plan
+digest (`05e27b81...`), but the internal handoff compared it with the raw SHA-256
+of the temporary plan JSON file (`8f8432ef...`). Those identities are different
+by contract because the canonical digest includes a domain separator and typed
+plan encoding. The retry therefore produced three incomplete exit-status-9
+measurements, with finite 8 GiB cgroup limits but no arm evidence, no capacity
+attestation, and zero OOM deltas.
+
+Commit `38d9bd2` carries the raw plan-file digest in a separate environment
+binding while retaining the canonical digest for signed-review verification.
+The control-plane regression rejects conflation of the two identities. Clean
+bounded `make test` passes at the commit. This is a reachable promotion-runner
+defect with no historical impact: no capacity, activation, development,
+freeze, or holdout run used the affected path. The incomplete capacity
+namespace is retained and must not be treated as a measurement.
+
+The next gate is a fresh Luna xhigh review of the exact post-fix successor tree,
+then a fresh pinned build/bundle and a new capacity namespace. No economic
+retuning, development cell, freeze, or holdout `619/631/641` is authorized.
