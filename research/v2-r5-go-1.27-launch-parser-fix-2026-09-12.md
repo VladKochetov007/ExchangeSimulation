@@ -105,3 +105,25 @@ registered envelope and the cgroup OOM counters remained zero.
 
 The exact tree is now ready for one new independent Sol-xhigh review. No
 capacity, activation, development, freeze, or holdout action has occurred.
+
+## Append-only capacity-runner executable-bit finding and correction — 2026-09-13
+
+The first authorized capacity invocation against `5bcc897` reached the
+runner’s lock handoff but exited with status 126 before creating any output.
+The tracked capacity runner had mode `0644`, while its trusted lock re-entry
+uses `env ... "$0"` and therefore requires the runner itself to be executable.
+This was a reachable launch-contract bug, not a simulator or capacity result;
+no arm, evidence stream, attestation, or scientific outcome was produced.
+
+Commit `7d35958` changes only the runner mode to `0755` and adds a focused R2
+contract assertion that the capacity runner is executable. The focused R2
+contract passed. A full suite attempted before committing the mode fix stopped
+only at the intentional clean-worktree parity prerequisite; after the commit,
+the clean full `make test` passed package, evidence, integrated-long-run, R2,
+and archive/parity contracts. No OOM event or retained-evidence deletion
+occurred.
+
+The prior signed bundle is invalidated by the source-tree change. A fresh
+exact-tree review, pinned rebuild, independently authenticated bundle, and
+capacity preflight are required again. No capacity arm completed, and no
+activation, development, freeze, or holdout action was authorized.

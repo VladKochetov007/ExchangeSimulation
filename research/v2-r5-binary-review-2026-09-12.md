@@ -207,3 +207,16 @@ The placeholder correction was pushed as `5ce2c7b`. A fresh uncached full
 R2, and archive contracts. The expected negative resource diagnostic was
 observed without changing the zero exit status, and no OOM event occurred.
 The next required step is a fresh exact-tree Sol-xhigh review of `5ce2c7b`.
+
+## Append-only capacity-runner executable-bit correction — 2026-09-13
+
+The first authorized capacity invocation against `5bcc897` exited 126 at the
+lock re-entry before creating any arm output because the tracked capacity
+runner was mode `0644` but re-executed its own `$0` directly. This was a
+reachable launch-contract defect with no capacity or historical impact. Commit
+`7d35958` sets mode `0755` and adds a focused executable-bit contract check.
+Focused R2 checks and a clean full `make test` pass at the committed tree,
+including parity and archive contracts. The earlier signed bundle is invalid
+for this new tree; fresh exact-tree review, pinned rebuild, and bundle are
+required before retrying capacity. No activation, development, freeze, or
+holdout ran.

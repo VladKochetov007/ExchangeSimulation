@@ -1801,3 +1801,15 @@ integrated-long-run contracts, R2 contracts, and archive contracts. The
 negative resource-contract diagnostic was expected and the command exited
 zero; no OOM event occurred. The next gate is a fresh exact-tree independent
 review of `5ce2c7b`.
+
+## Append-only capacity-runner executable-bit correction — 2026-09-13
+
+The first capacity launch reached the lock handoff but exited 126 before any
+output because the tracked capacity runner was `0644` and its direct `$0`
+re-entry required executable mode. No capacity arm or evidence was produced.
+Commit `7d35958` sets the runner to `0755` and adds a contract assertion for
+that requirement. Focused R2 checks and a clean full `make test` pass at the
+committed tree, including parity and archive contracts. The previous signed
+bundle is no longer valid for this tree; obtain a fresh exact-tree review and
+rebuild before retrying capacity. No activation, development, freeze, or
+holdout ran.

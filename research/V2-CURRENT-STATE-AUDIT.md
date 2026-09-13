@@ -1570,3 +1570,14 @@ fresh-process multivenue, integrated-long-run, R2, and archive contracts. The
 intentional incomplete-resource negative case did not change the zero exit
 status, and no cgroup OOM event occurred. The candidate now needs a fresh
 exact-tree independent review; no scientific or holdout run occurred.
+
+## Append-only capacity-runner executable-bit finding and correction — 2026-09-13
+
+The first authorized capacity invocation did not run an arm: the capacity
+runner reached its lock re-entry and exited 126 because the tracked script was
+not executable (`0644`) although re-entry executes `$0` directly. No output,
+evidence, or measurement was created. Commit `7d35958` sets mode `0755` and
+adds a regression assertion. Focused R2 checks and clean full `make test` pass
+at that commit, including parity and archive contracts. The source-tree change
+invalidates the prior review bundle; fresh review and pinned rebuild are
+required before capacity. No activation, development, freeze, or holdout ran.
