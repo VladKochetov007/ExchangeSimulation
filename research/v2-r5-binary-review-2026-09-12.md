@@ -199,3 +199,11 @@ or holdout ran.
 
 The placeholder is corrected to `example-binary`; an uncached full `make test`
 and a fresh exact-tree review are required before rebuilding or capacity.
+
+## Append-only uncached verification — 2026-09-13
+
+The placeholder correction was pushed as `5ce2c7b`. A fresh uncached full
+`make test` passed all package, fresh-process multivenue, integrated-long-run,
+R2, and archive contracts. The expected negative resource diagnostic was
+observed without changing the zero exit status, and no OOM event occurred.
+The next required step is a fresh exact-tree Sol-xhigh review of `5ce2c7b`.

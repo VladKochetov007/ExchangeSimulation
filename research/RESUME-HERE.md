@@ -1792,3 +1792,12 @@ capacity, activation, development, freeze, or holdout ran.
 
 The path is being replaced with `example-binary`, followed by a genuinely
 uncached full `make test`. A fresh exact-tree review is required afterward.
+
+## Append-only uncached verification — 2026-09-13
+
+The placeholder correction is committed as `5ce2c7b`. Its fresh uncached full
+`make test` passed: all packages, fresh-process multivenue evidence checks,
+integrated-long-run contracts, R2 contracts, and archive contracts. The
+negative resource-contract diagnostic was expected and the command exited
+zero; no OOM event occurred. The next gate is a fresh exact-tree independent
+review of `5ce2c7b`.

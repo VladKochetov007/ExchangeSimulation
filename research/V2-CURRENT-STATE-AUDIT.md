@@ -1562,3 +1562,11 @@ documentation/provenance hygiene; no simulator or scientific run was affected.
 The placeholder is corrected to `example-binary`. The next required evidence is
 an uncached full `make test`, then another exact-tree independent review. No
 capacity, activation, development, freeze, or holdout was run.
+
+## Append-only uncached verification — 2026-09-13
+
+At exact `5ce2c7b`, the uncached full `make test` passed across package,
+fresh-process multivenue, integrated-long-run, R2, and archive contracts. The
+intentional incomplete-resource negative case did not change the zero exit
+status, and no cgroup OOM event occurred. The candidate now needs a fresh
+exact-tree independent review; no scientific or holdout run occurred.

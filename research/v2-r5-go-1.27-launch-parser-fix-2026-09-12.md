@@ -92,3 +92,16 @@ The illustrative path is corrected above to `example-binary`, with no change to
 the Go 1.27 finding or its classification. The exact `054c60a` tree must still
 demonstrate an uncached full `make test` and receive a fresh exact-tree review.
 No capacity, activation, development, freeze, or holdout action was authorized.
+
+## Append-only correction verification — 2026-09-13
+
+At exact HEAD `5ce2c7b`, after the placeholder correction, a fresh uncached
+`make test` was run after clearing the Go build and test caches. It passed the
+complete package suite, the fresh-process multivenue evidence matrix, the
+integrated-long-run contracts, the R2 contracts, and both archive contracts.
+The expected incomplete-resource diagnostic was confined to the negative
+contract case; the run exited zero. Memory and disk remained within the
+registered envelope and the cgroup OOM counters remained zero.
+
+The exact tree is now ready for one new independent Sol-xhigh review. No
+capacity, activation, development, freeze, or holdout action has occurred.
