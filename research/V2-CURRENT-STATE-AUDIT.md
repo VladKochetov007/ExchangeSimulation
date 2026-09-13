@@ -1646,6 +1646,16 @@ unavailable`. This is the third post-fix availability failure; it is not a
 candidate rejection. The changed capacity runner therefore remains outside
 the accepted review/bundle identity.
 
+## Append-only Luna review availability stop — 2026-09-13
+
+The current continuation’s fresh bounded Luna xhigh review targeted exact HEAD
+`76b09a2cda184fcf7f31b807c33370b114eb7192` (tree
+`ae3ccc2a3f15365bb4b88f889df945672d78c99a`) and returned `REJECT — review
+unavailable`; no scientific verdict was produced. This external stop leaves
+the candidate unpromoted. No capacity, activation, development, freeze, or
+holdout action occurred, and the next gate remains complete Luna review before
+any new pinned build or capacity preflight.
+
 The branch remains mechanically green and clean. No capacity, activation,
 development, freeze, or holdout run occurred. The promotion gate stays closed
 until a complete Luna xhigh exact-tree review accepts this candidate.

@@ -1896,3 +1896,13 @@ activation, development, freeze, or holdout run occurred.
 The next permitted action remains a complete Luna xhigh review of the resulting
 clean tree; only acceptance may authorize a fresh pinned build and capacity
 preflight.
+
+## Append-only Luna review availability stop — 2026-09-13
+
+On this continuation, a fresh bounded Luna xhigh reviewer targeted exact HEAD
+`76b09a2cda184fcf7f31b807c33370b114eb7192` (tree
+`ae3ccc2a3f15365bb4b88f889df945672d78c99a`) and returned `REJECT — review
+unavailable`. No scientific verdict was produced. The candidate remains
+unpromoted; no capacity, activation, development, freeze, or holdout action
+occurred. The next permitted gate is another complete Luna review of the clean
+resulting tree, followed only by acceptance with a fresh pinned bundle.
