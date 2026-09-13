@@ -1,7 +1,9 @@
 package analysis
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -69,12 +71,15 @@ func TestMeasureSV1DCommandMaintainsStrictGapAcrossMultipleTicks(t *testing.T) {
 
 func TestMeasureSV1DCommandRecordsFailedChildWithoutCertifyingIt(t *testing.T) {
 	root := t.TempDir()
+	var stdout, stderr bytes.Buffer
 	measurement, err := MeasureSV1DCommand(context.Background(), SV1DResourceOptions{
-		Command:                  []string{"/bin/sh", "-c", "exit 7"},
+		Command:                  []string{"/bin/sh", "-c", "printf 'child output'; printf 'child diagnostic' >&2; exit 7"},
 		OutputParent:             root,
 		MeasurementRoot:          root,
 		SampleInterval:           10 * time.Millisecond,
 		RequireFiniteCgroupLimit: false,
+		Stdout:                   &stdout,
+		Stderr:                   &stderr,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -84,6 +89,140 @@ func TestMeasureSV1DCommandRecordsFailedChildWithoutCertifyingIt(t *testing.T) {
 	}
 	if measurement.SampleCount < 2 || measurement.SamplesSHA256 == "" {
 		t.Fatalf("failed command did not retain its trace: %+v", measurement)
+	}
+	if stdout.String() != "child output" || stderr.String() != "child diagnostic" || !strings.Contains(measurement.Error, "exit status 7") {
+		t.Fatalf("child diagnostics = %q/%q/%q", stdout.String(), stderr.String(), measurement.Error)
+	}
+}
+
+func TestMeasureSV1DCommandRejectsUnboundedCgroupBeforeChildStarts(t *testing.T) {
+	cgroupPath, err := cgroupPathForPID(os.Getpid())
+	if err != nil {
+		t.Skipf("cgroup v2 unavailable: %v", err)
+	}
+	cgroup, err := readResourceCgroup(cgroupPath)
+	if err != nil {
+		t.Skipf("cgroup memory counters unavailable: %v", err)
+	}
+	if cgroup.limit != 0 {
+		t.Skip("requires an unbounded cgroup; current cgroup has a finite limit")
+	}
+	root := t.TempDir()
+	marker := filepath.Join(root, "child-started")
+	measurement, err := MeasureSV1DCommand(context.Background(), SV1DResourceOptions{
+		Command:                  []string{"/bin/sh", "-c", "printf started > \"$1\"", "sh", marker},
+		OutputParent:             root,
+		MeasurementRoot:          root,
+		RequireFiniteCgroupLimit: true,
+	})
+	if err == nil || !strings.Contains(err.Error(), "finite cgroup memory limit before start") {
+		t.Fatalf("unbounded preflight error = %v", err)
+	}
+	if _, err := os.Stat(marker); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("child marker exists or cannot be inspected: %v", err)
+	}
+	if measurement.Complete || measurement.ExitStatus != -1 || measurement.Error != err.Error() || measurement.SampleCount != 1 || measurement.SamplesSHA256 == "" {
+		t.Fatalf("preflight diagnostics lost: %+v", measurement)
+	}
+}
+
+func TestMeasureSV1DCommandAcceptsFiniteInheritedCgroup(t *testing.T) {
+	cgroupPath, err := cgroupPathForPID(os.Getpid())
+	if err != nil {
+		t.Skipf("cgroup v2 unavailable: %v", err)
+	}
+	cgroup, err := readResourceCgroup(cgroupPath)
+	if err != nil {
+		t.Skipf("cgroup memory counters unavailable: %v", err)
+	}
+	if cgroup.limit == 0 {
+		t.Skip("requires a finite inherited cgroup memory limit")
+	}
+	root := t.TempDir()
+	measurement, err := MeasureSV1DCommand(context.Background(), SV1DResourceOptions{
+		Command:      []string{"/bin/sh", "-c", "printf payload > \"$1/payload\"; sleep 0.08", "sh", root},
+		OutputParent: root, MeasurementRoot: root,
+		SampleInterval:           250 * time.Millisecond,
+		RequireFiniteCgroupLimit: true,
+	})
+	if err != nil || !measurement.Complete || measurement.ExitStatus != 0 || measurement.CgroupMemoryLimitBytes != cgroup.limit {
+		t.Fatalf("finite inherited cgroup = %+v/%v", measurement, err)
+	}
+}
+
+func TestMeasureSV1DCommandRetainsStartFailure(t *testing.T) {
+	root := t.TempDir()
+	measurement, err := MeasureSV1DCommand(context.Background(), SV1DResourceOptions{
+		Command:      []string{filepath.Join(root, "missing-command")},
+		OutputParent: root, MeasurementRoot: root,
+	})
+	if err == nil || !strings.Contains(err.Error(), "start measured command") || measurement.Error != err.Error() || measurement.Complete || measurement.ExitStatus != -1 {
+		t.Fatalf("start failure = %+v/%v", measurement, err)
+	}
+	if measurement.SampleCount != 1 || measurement.SamplesSHA256 == "" {
+		t.Fatalf("start failure lost preflight trace: %+v", measurement)
+	}
+}
+
+func TestMeasureSV1DCommandRetainsExitStateWhenFinalSampleFails(t *testing.T) {
+	for _, exitCode := range []string{"0", "7"} {
+		t.Run(exitCode, func(t *testing.T) {
+			root := t.TempDir()
+			var stderr bytes.Buffer
+			measurement, err := MeasureSV1DCommand(context.Background(), SV1DResourceOptions{
+				Command:      []string{"/bin/sh", "-c", "sleep 0.1; ln -s target \"$1/link\"; printf 'child diagnostic' >&2; exit \"$2\"", "sh", root, exitCode},
+				OutputParent: root, MeasurementRoot: root,
+				SampleInterval: time.Second,
+				Stderr:         &stderr,
+			})
+			if err == nil || !strings.Contains(err.Error(), "capture final resource sample") || !strings.Contains(err.Error(), "symlink") {
+				t.Fatalf("final sample error = %v", err)
+			}
+			if measurement.Complete || measurement.ExitStatus != int(exitCode[0]-'0') || !strings.Contains(measurement.Error, err.Error()) {
+				t.Fatalf("final sample failure lost exit state: %+v", measurement)
+			}
+			if stderr.String() != "child diagnostic" || (exitCode == "7" && !strings.Contains(measurement.Error, "exit status 7")) {
+				t.Fatalf("diagnostics = %q/%q", stderr.String(), measurement.Error)
+			}
+			if measurement.SampleCount < 2 || measurement.SamplesSHA256 == "" {
+				t.Fatalf("partial trace lost: %+v", measurement)
+			}
+		})
+	}
+}
+
+func TestMeasureSV1DCommandRetainsKilledChildStateOnSamplingFailure(t *testing.T) {
+	root := t.TempDir()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	measurement, err := MeasureSV1DCommand(ctx, SV1DResourceOptions{
+		Command:      []string{"/bin/sh", "-c", "sleep 0.1; ln -s target \"$1/link\"; sleep 10", "sh", root},
+		OutputParent: root, MeasurementRoot: root,
+		SampleInterval: 50 * time.Millisecond,
+	})
+	if err == nil || !strings.Contains(err.Error(), "symlink") || measurement.Complete || measurement.ExitStatus != -1 {
+		t.Fatalf("sampling failure = %+v/%v", measurement, err)
+	}
+	if !strings.Contains(measurement.Error, "signal: killed") || !strings.Contains(measurement.Error, "symlink") || measurement.SamplesSHA256 == "" {
+		t.Fatalf("sampling failure diagnostics lost: %+v", measurement)
+	}
+}
+
+func TestVerifySV1DResourceCgroupRejectsPlacementAndLimitMismatch(t *testing.T) {
+	cgroupPath, err := cgroupPathForPID(os.Getpid())
+	if err != nil {
+		t.Skipf("cgroup v2 unavailable: %v", err)
+	}
+	if err := verifySV1DResourceCgroupPlacement(os.Getpid(), cgroupPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := verifySV1DResourceCgroupPlacement(os.Getpid(), cgroupPath+"/different"); err == nil || !strings.Contains(err.Error(), "placement mismatch") {
+		t.Fatalf("placement mismatch error = %v", err)
+	}
+	for _, limit := range []uint64{0, 2048} {
+		if err := verifySV1DResourceCgroupLimit(SV1DResourceSample{CgroupMemoryLimitBytes: limit}, 1024); err == nil {
+			t.Fatalf("accepted changed limit %d", limit)
+		}
 	}
 }
 

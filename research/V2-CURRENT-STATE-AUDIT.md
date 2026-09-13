@@ -1,3 +1,13 @@
+# Current operational pointer — 2026-09-13
+
+Apply the prospective operational amendment in
+`v2-r2-sv1d-activation-contract-amendment-2026-09-11.md`: model-neutral independent
+review, separate execution/verdict, one pinned candidate checkout, external
+review/status artifacts, fresh signed bundle, successfully verified bounded
+seed-977 capacity before seed-659 activation. Older audits and unavailable-review
+records below are historical, not instructions to churn the review target.
+No economic retuning, historical deletion, or holdout authorization is implied.
+
 # V2 current-state reconciliation audit
 
 **Audit cut:** 2026-08-27, after inspection of the working tree and retained

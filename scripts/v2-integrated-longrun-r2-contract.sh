@@ -7,6 +7,22 @@ v2_r2_output_root="/home/vlad/v2-integrated-longrun-r2-candidate-20260830-v1"
 v2_r2_attestation_root="/home/vlad/v2-integrated-longrun-r2-candidate-20260830-v1-attestations"
 v2_r2_namespace_lock_path="/home/vlad/v2-integrated-longrun-r2-candidate.lock"
 
+v2_r2_publish_verified_capacity_attestation() {
+	[[ $# -ge 6 ]] || return 1
+	local provisional=$1 destination=$2 output_parent=$3 required_disk_bytes=$4 required_memory_bytes=$5
+	shift 5
+	[[ -f "$provisional" && ! -L "$provisional" && ! -e "$destination" && ! -L "$destination" ]] || return 1
+	[[ "$required_disk_bytes" =~ ^[0-9]+$ && "$required_memory_bytes" =~ ^[0-9]+$ ]] || return 1
+	"$@" || return 1
+	local available_kb host_available_bytes
+	available_kb=$(df -Pk -- "$output_parent" | awk 'NR == 2 {print $4}') || return 1
+	[[ "$available_kb" =~ ^[0-9]+$ && $((available_kb * 1024)) -ge "$required_disk_bytes" ]] || return 1
+	host_available_bytes=$(awk '$1 == "MemAvailable:" {printf "%.0f\n", $2 * 1024; exit}' /proc/meminfo) || return 1
+	[[ "$host_available_bytes" =~ ^[0-9]+$ && "$host_available_bytes" -ge "$required_memory_bytes" ]] || return 1
+	# Publish without replacement only after validation; keep provisional evidence on failure.
+	ln -T -- "$provisional" "$destination"
+}
+
 v2_r2_expected_calendar_listing_timeline() {
 	local calendar_epoch_nano=1735689600000000000
 	local calendar_hour_nano=3600000000000

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"math"
 	"os"
@@ -97,6 +98,8 @@ type SV1DResourceOptions struct {
 	SampleInterval           time.Duration
 	RequireFiniteCgroupLimit bool
 	InheritedFileDescriptors []int
+	Stdout                   io.Writer
+	Stderr                   io.Writer
 }
 
 // ValidateSV1DResourceMeasurement recomputes the retained resource aggregates
@@ -231,15 +234,26 @@ func InspectSV1DFilesystem(path string) (SV1DFilesystemIdentity, error) {
 // MeasureSV1DCommand runs command and samples its resource envelope until it
 // exits. A non-zero child exit is represented in the returned record; only an
 // inability to measure the command itself returns a non-nil error.
-func MeasureSV1DCommand(ctx context.Context, options SV1DResourceOptions) (SV1DResourceMeasurement, error) {
-	measurement := SV1DResourceMeasurement{
+func MeasureSV1DCommand(ctx context.Context, options SV1DResourceOptions) (measurement SV1DResourceMeasurement, measurementErr error) {
+	measurement = SV1DResourceMeasurement{
 		SchemaVersion:      1,
 		Contract:           SV1DResourceMeasurementContract,
 		Command:            append([]string(nil), options.Command...),
 		OutputParent:       options.OutputParent,
 		MeasurementRoot:    options.MeasurementRoot,
 		SampleIntervalNano: uint64(options.SampleInterval),
+		ExitStatus:         -1,
 	}
+	defer func() {
+		if measurementErr != nil {
+			measurement.Complete = false
+			if measurement.Error != "" {
+				measurement.Error += "\n"
+			}
+			measurement.Error += measurementErr.Error()
+		}
+		finalizeSV1DResourceMeasurement(&measurement)
+	}()
 	if len(options.Command) == 0 {
 		return measurement, errors.New("resource measurement requires a command")
 	}
@@ -259,14 +273,23 @@ func MeasureSV1DCommand(ctx context.Context, options SV1DResourceOptions) (SV1DR
 	}
 	measurement.Filesystem = filesystem
 
-	initial, err := captureSV1DResourceSample(0, options.OutputParent, options.MeasurementRoot, "")
+	cgroupPath, err := cgroupPathForPID(os.Getpid())
+	if err != nil {
+		return measurement, fmt.Errorf("resolve inherited cgroup: %w", err)
+	}
+	initial, err := captureSV1DResourceSample(0, options.OutputParent, options.MeasurementRoot, cgroupPath)
 	if err != nil {
 		return measurement, fmt.Errorf("capture initial resource sample: %w", err)
 	}
 	measurement.Samples = append(measurement.Samples, initial)
+	if options.RequireFiniteCgroupLimit && initial.CgroupMemoryLimitBytes == 0 {
+		return measurement, errors.New("measured command requires a finite cgroup memory limit before start")
+	}
 
 	command := exec.CommandContext(ctx, options.Command[0], options.Command[1:]...)
 	command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	command.Stdout = options.Stdout
+	command.Stderr = options.Stderr
 	inheritedFiles, err := duplicateResourceFileDescriptors(options.InheritedFileDescriptors)
 	if err != nil {
 		return measurement, err
@@ -279,32 +302,51 @@ func MeasureSV1DCommand(ctx context.Context, options SV1DResourceOptions) (SV1DR
 	}
 	if err := command.Start(); err != nil {
 		closeInheritedFiles()
-		measurement.Error = err.Error()
-		finalizeSV1DResourceMeasurement(&measurement)
 		return measurement, fmt.Errorf("start measured command: %w", err)
 	}
 	closeInheritedFiles()
-	cgroupPath, err := cgroupPathForPID(command.Process.Pid)
-	if err != nil {
+	var childWaitErr error
+	defer func() {
+		if command.ProcessState != nil {
+			measurement.ExitStatus = command.ProcessState.ExitCode()
+		}
+		if childWaitErr != nil {
+			measurement.Error = childWaitErr.Error()
+		}
+	}()
+	if err := verifySV1DResourceCgroupPlacement(command.Process.Pid, cgroupPath); err != nil {
 		killResourceProcessGroup(command.Process.Pid)
-		_ = command.Wait()
-		measurement.Error = err.Error()
-		finalizeSV1DResourceMeasurement(&measurement)
-		return measurement, fmt.Errorf("resolve measured command cgroup: %w", err)
+		childWaitErr = command.Wait()
+		return measurement, err
 	}
 
 	first, err := captureSV1DResourceSample(command.Process.Pid, options.OutputParent, options.MeasurementRoot, cgroupPath)
+	if err == nil {
+		measurement.Samples = append(measurement.Samples, first)
+		err = verifySV1DResourceCgroupLimit(first, initial.CgroupMemoryLimitBytes)
+	}
 	if err != nil {
 		killResourceProcessGroup(command.Process.Pid)
-		_ = command.Wait()
-		measurement.Error = err.Error()
-		finalizeSV1DResourceMeasurement(&measurement)
+		childWaitErr = command.Wait()
 		return measurement, fmt.Errorf("capture first resource sample: %w", err)
 	}
-	measurement.Samples = append(measurement.Samples, first)
 
 	waitResult := make(chan error, 1)
 	go func() { waitResult <- command.Wait() }()
+	finish := func(waitErr error) (SV1DResourceMeasurement, error) {
+		childWaitErr = waitErr
+		measurement.ExitStatus = command.ProcessState.ExitCode()
+		measurement.Complete = waitErr == nil && measurement.ExitStatus == 0
+		final, finalErr := captureSV1DResourceSample(command.Process.Pid, options.OutputParent, options.MeasurementRoot, cgroupPath)
+		if finalErr == nil {
+			measurement.Samples = append(measurement.Samples, final)
+			finalErr = verifySV1DResourceCgroupLimit(final, initial.CgroupMemoryLimitBytes)
+		}
+		if finalErr != nil {
+			return measurement, fmt.Errorf("capture final resource sample: %w", finalErr)
+		}
+		return measurement, nil
+	}
 	samplingCadence := sv1dResourceSamplingCadence(options.SampleInterval)
 	nextSampleDeadline := time.Now().Add(samplingCadence)
 	for {
@@ -312,34 +354,26 @@ func MeasureSV1DCommand(ctx context.Context, options SV1DResourceOptions) (SV1DR
 		select {
 		case waitErr := <-waitResult:
 			stopSV1DResourceTimer(sampleTimer)
-			measurement.ExitStatus = command.ProcessState.ExitCode()
-			measurement.Complete = waitErr == nil && measurement.ExitStatus == 0
-			if waitErr != nil {
-				measurement.Error = waitErr.Error()
-			}
-			final, finalErr := captureSV1DResourceSample(command.Process.Pid, options.OutputParent, options.MeasurementRoot, cgroupPath)
-			if finalErr != nil {
-				measurement.Error = finalErr.Error()
-				finalErr = fmt.Errorf("capture final resource sample: %w", finalErr)
-				finalizeSV1DResourceMeasurement(&measurement)
-				return measurement, finalErr
-			}
-			measurement.Samples = append(measurement.Samples, final)
-			finalizeSV1DResourceMeasurement(&measurement)
-			if options.RequireFiniteCgroupLimit && measurement.CgroupMemoryLimitBytes == 0 {
-				return measurement, errors.New("measured command has no finite cgroup memory limit")
-			}
-			return measurement, nil
+			return finish(waitErr)
 		case <-sampleTimer.C:
+			if placementErr := verifySV1DResourceCgroupPlacement(command.Process.Pid, cgroupPath); placementErr != nil {
+				if errors.Is(placementErr, os.ErrNotExist) {
+					return finish(<-waitResult)
+				}
+				killResourceProcessGroup(command.Process.Pid)
+				childWaitErr = <-waitResult
+				return measurement, placementErr
+			}
 			sample, sampleErr := captureSV1DResourceSample(command.Process.Pid, options.OutputParent, options.MeasurementRoot, cgroupPath)
+			if sampleErr == nil {
+				measurement.Samples = append(measurement.Samples, sample)
+				sampleErr = verifySV1DResourceCgroupLimit(sample, initial.CgroupMemoryLimitBytes)
+			}
 			if sampleErr != nil {
 				killResourceProcessGroup(command.Process.Pid)
-				<-waitResult
-				measurement.Error = sampleErr.Error()
-				finalizeSV1DResourceMeasurement(&measurement)
+				childWaitErr = <-waitResult
 				return measurement, fmt.Errorf("capture resource sample: %w", sampleErr)
 			}
-			measurement.Samples = append(measurement.Samples, sample)
 			nextSampleDeadline = nextSampleDeadline.Add(samplingCadence)
 			if !nextSampleDeadline.After(time.Now()) {
 				nextSampleDeadline = time.Now().Add(samplingCadence)
@@ -347,13 +381,28 @@ func MeasureSV1DCommand(ctx context.Context, options SV1DResourceOptions) (SV1DR
 		case <-ctx.Done():
 			stopSV1DResourceTimer(sampleTimer)
 			killResourceProcessGroup(command.Process.Pid)
-			<-waitResult
-			measurement.ExitStatus = -1
-			measurement.Error = ctx.Err().Error()
-			finalizeSV1DResourceMeasurement(&measurement)
+			childWaitErr = <-waitResult
 			return measurement, ctx.Err()
 		}
 	}
+}
+
+func verifySV1DResourceCgroupPlacement(pid int, expectedPath string) error {
+	actualPath, err := cgroupPathForPID(pid)
+	if err != nil {
+		return fmt.Errorf("resolve measured command cgroup: %w", err)
+	}
+	if actualPath != expectedPath {
+		return fmt.Errorf("measured command cgroup placement mismatch: got %q, want %q", actualPath, expectedPath)
+	}
+	return nil
+}
+
+func verifySV1DResourceCgroupLimit(sample SV1DResourceSample, expectedLimit uint64) error {
+	if sample.CgroupMemoryLimitBytes != expectedLimit {
+		return fmt.Errorf("measured command cgroup memory limit changed: got %d, want %d", sample.CgroupMemoryLimitBytes, expectedLimit)
+	}
+	return nil
 }
 
 func sv1dResourceSamplingCadence(maximumSampleGap time.Duration) time.Duration {

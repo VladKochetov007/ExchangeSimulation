@@ -189,3 +189,71 @@ mechanism as inactive, falsified, unsupported, or invalid according to the
 failed status. Do not retune the supplier or rescue the result by changing this
 amendment after observing the outcome; a material change requires a new named
 successor and preregistration.
+
+## Owner-authorized operational amendment — 2026-09-13
+
+This prospective amendment supersedes model-specific review and moving-HEAD
+workflow requirements in the SV1D parent registration, capacity protocol, and
+operational notes. Economic semantics, numeric predicates, seeds, horizons,
+resource requirements, acceptance scope, and historical identities do not change.
+The ef839a2 acceptance does not cover the corrected runner in 38d9bd2 or later
+source changes. All earlier attempts, bundles, namespaces, and verdicts remain.
+
+Independent review is mandatory; a particular model is not. Use a capable fresh
+read-only reviewer context that did not implement the candidate. Decide fallback
+before receiving any substantive verdict: first use the available native agent
+launcher with its inherited model; if execution is unavailable, use one fresh
+separate session when available; otherwise prepare one complete package for a
+qualified external reviewer/human. Each automated attempt has a 30-minute
+execution budget, with observation intervals at most 60 seconds. Observation
+timeouts are not failures and must not interrupt an otherwise working review.
+One retry is permitted only for a diagnosed transient launch failure. Record
+actual launcher/configuration and returned errors to distinguish provider,
+authentication, configuration, capacity, timeout, and wrapper failures. Never
+alter access controls or credentials. Resolve substantive REJECT findings with
+the same reviewer through an explicit successor/amendment, not reviewer shopping.
+
+Each attempt has an external record containing candidate commit/tree, reviewer
+context identity, launcher, start/end timestamps, diagnostic/report paths, and
+separate fields:
+
+- `execution`: `COMPLETED`, `UNAVAILABLE`, or `FAILED`;
+- `verdict`: `ACCEPT`, `REJECT`, or `NOT_ISSUED`.
+
+Only completed substantive reviews issue ACCEPT or REJECT. Service errors and
+interrupted/incomplete attempts issue NOT_ISSUED. Historical records phrased
+`REJECT — review unavailable` remain unchanged but are not substantive reviews.
+Attempt records cannot authorize execution; the existing signed acceptance-v1
+verifier and exact source/config/plan/binary/report bindings remain mandatory.
+
+After the smallest coherent operational/source repair passes tests and is
+committed, designate one immutable candidate commit C including runner, verifier,
+build sources, configs, and protocols. Review C, build C, bind a fresh bundle to
+C. Use a clean standalone checkout with full exact-commit checks. Keep reports,
+failed-attempt logs, test transcripts, bundle artifacts, and operational updates
+outside that checkout in external-scratch. Appending those records does not
+change C or trigger a new scientific review. Any changed executable source,
+runner, configuration, or scientific protocol does require a reviewed successor
+or explicit amendment. No provenance exclusion list is introduced.
+
+The review package must contain exact C/tree, this numeric amendment and parent
+registration, prior substantive findings/fixes, diff from the last accepted
+candidate, runner/verifier and relevant evidence contracts, tests and actual
+results. Require concrete reasoning about raw-file versus canonical typed-plan
+digests; finite-cgroup enforcement before startup and actual child placement;
+exit propagation and diagnostic retention; incomplete outputs; source, config,
+binary and review bindings; capacity attestation publication only after successful
+verification and live resource checks; and the development/holdout boundary.
+Generic approval or a model name is insufficient. This gate does not commission
+new economics, optimization, serialization, or unrelated mechanism audits.
+
+Execution order is: substantive source acceptance of C; clean registered Go
+1.27 pinned build; independent build/identity verification and fresh signed
+bundle through the existing verifier; seed-977 five-minute three-arm capacity
+preflight in a new finite 8-GiB cgroup with swap disabled, GOMAXPROCS=2 and
+GOMEMLIMIT=4GiB; independently verified capacity result; then the registered
+seed-659 five-minute activation probe only if authorized by that result. Retain
+all existing disk/memory floor formulas and sample requirements. A failed or
+incomplete capacity attempt publishes no final attestation and cannot authorize
+activation. Subsequently apply the existing activation review and development
+ordering; separate explicit freeze authorization remains required for holdouts.

@@ -1,3 +1,14 @@
+# Current operational pointer — 2026-09-13
+
+The owner-authorized operational amendment in
+`v2-r2-sv1d-activation-contract-amendment-2026-09-11.md` supersedes older
+model-specific/moving-HEAD review instructions below. Pin the repaired candidate
+once, review/build/bind that exact commit, and keep further records outside its
+checkout. Current gate: genuinely reviewed seed-977 capacity preflight, then
+seed-659 activation if authorized. No holdouts; no economic changes. Historical
+unavailable attempts are not substantive rejections. The ef839a2 bundle remains
+historical and cannot authorize corrected code.
+
 # Resume the frozen audit
 
 Paused mid-campaign for a laptop restart. Nothing here needs re-deriving; it

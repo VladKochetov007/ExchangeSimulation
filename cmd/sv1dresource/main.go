@@ -55,6 +55,8 @@ func run() error {
 		SampleInterval:           *interval,
 		RequireFiniteCgroupLimit: *requireFiniteCgroup,
 		InheritedFileDescriptors: inheritedFileDescriptors,
+		Stdout:                   os.Stdout,
+		Stderr:                   os.Stderr,
 	})
 	if err := publishMeasurement(*out, measurement); err != nil {
 		if measurementErr != nil {
@@ -65,13 +67,15 @@ func run() error {
 	if measurementErr != nil {
 		return measurementErr
 	}
-	if *requireFiniteCgroup {
-		if measurementErr := analysis.ValidateSV1DResourceMeasurement(measurement, true); measurementErr != nil {
-			return measurementErr
-		}
-	}
+	return validateCommandMeasurement(measurement, *requireFiniteCgroup)
+}
+
+func validateCommandMeasurement(measurement analysis.SV1DResourceMeasurement, requireFiniteCgroup bool) error {
 	if !measurement.Complete {
 		return fmt.Errorf("measured command was incomplete: exit status %d", measurement.ExitStatus)
+	}
+	if requireFiniteCgroup {
+		return analysis.ValidateSV1DResourceMeasurement(measurement, true)
 	}
 	return nil
 }

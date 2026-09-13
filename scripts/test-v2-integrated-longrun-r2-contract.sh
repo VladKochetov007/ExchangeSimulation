@@ -21,6 +21,19 @@ expect_failure() {
 "$root_dir/scripts/check-v2-integrated-longrun-r2-configs.sh" >/dev/null
 source "$root_dir/scripts/v2-integrated-longrun-r2-contract.sh"
 
+provisional_capacity="$tmp_root/provisional-capacity.json"
+published_capacity="$tmp_root/published-capacity.json"
+printf '{"test":true}\n' >"$provisional_capacity"
+expect_failure v2_r2_publish_verified_capacity_attestation "$provisional_capacity" "$published_capacity" "$tmp_root" 1 1 false
+[[ ! -e "$published_capacity" && -s "$provisional_capacity" ]] || fail "failed verification published capacity or lost diagnostic"
+expect_failure v2_r2_publish_verified_capacity_attestation "$provisional_capacity" "$published_capacity" "$tmp_root" 9000000000000000000 1 true
+[[ ! -e "$published_capacity" ]] || fail "disk-floor failure published capacity"
+expect_failure v2_r2_publish_verified_capacity_attestation "$provisional_capacity" "$published_capacity" "$tmp_root" 1 9000000000000000000 true
+[[ ! -e "$published_capacity" ]] || fail "memory-floor failure published capacity"
+v2_r2_publish_verified_capacity_attestation "$provisional_capacity" "$published_capacity" "$tmp_root" 1 1 true || fail "valid capacity publication failed"
+cmp "$provisional_capacity" "$published_capacity" || fail "publication changed attestation bytes"
+expect_failure v2_r2_publish_verified_capacity_attestation "$provisional_capacity" "$published_capacity" "$tmp_root" 1 1 true
+
 go() {
 	if [[ "$1" == version && "$2" == -m ]]; then
 		printf '%s\n' '/fixture: go1.27.0' $'\tpath\texchange_sim/cmd/fixture'

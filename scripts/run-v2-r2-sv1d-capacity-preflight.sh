@@ -758,9 +758,10 @@ jq -S -n \
 	 samples_sha256: $samples_sha256, oom_events_delta: $oom_events_delta, oom_kill_events_delta: $oom_kill_events_delta,
 	 cgroup_oom_events_delta: $cgroup_oom_events_delta, cgroup_oom_kill_events_delta: $cgroup_oom_kill_events_delta, arms: $arms}' \
 	>"$capacity_attestation.tmp-$$"
-mv -- "$capacity_attestation.tmp-$$" "$capacity_attestation"
-
-"$staged_sv1dprobe" -mode verify-capacity -capacity-attestation "$capacity_attestation" \
+source "$root_dir/scripts/v2-integrated-longrun-r2-contract.sh"
+v2_r2_publish_verified_capacity_attestation "$capacity_attestation.tmp-$$" "$capacity_attestation" \
+	"$output_parent" "$required_free_bytes" "$required_available_memory_bytes" \
+	"$staged_sv1dprobe" -mode verify-capacity -capacity-attestation "$capacity_attestation.tmp-$$" \
 	-source-revision "$source_revision" -tree-revision "$tree_revision" -plan-sha256 "$review_plan_sha256" \
 	-review-attestation "$review_attestation_sha256" -review-report "$review_report_sha256" -trusted-review-key-sha256 "$trusted_review_key_sha256" \
 	-treatment-config "${staged_target_for[treatment]}" -mode-off-config "${staged_target_for[mode-off]}" -no-roster-config "${staged_target_for[no-roster]}" \
@@ -770,12 +771,6 @@ mv -- "$capacity_attestation.tmp-$$" "$capacity_attestation"
 	-output-parent "$output_parent" -measurement-root "$output_root" -filesystem-device "$output_parent_device" -filesystem-id "$output_parent_id" \
 	-filesystem-type "$output_parent_type" -filesystem-mount-id "$output_parent_mount_id" -filesystem-uuid "$output_parent_uuid" \
 	-measurement-records-root "$measurement_records_root" -measurement-records-sha256 "$measurement_records_sha256" ||
-	fail "generated capacity attestation did not pass the independent typed verifier"
-
-available_kb=$(df -Pk -- "$output_parent" | awk 'NR == 2 {print $4}')
-[[ "$available_kb" =~ ^[0-9]+$ ]] || fail "could not measure current output-parent free space"
-[[ $((available_kb * 1024)) -ge "$required_free_bytes" ]] || fail "current output-parent free space is below measured required floor"
-host_available_bytes=$(awk '$1 == "MemAvailable:" {print $2 * 1024; exit}' /proc/meminfo)
-[[ "$host_available_bytes" =~ ^[0-9]+$ && "$host_available_bytes" -ge "$required_available_memory_bytes" ]] || fail "current host available memory is below measured required floor"
+	fail "capacity publication failed verification, live resource floors, or no-overwrite check; provisional evidence retained"
 
 echo "completed outcome-ineligible SV1D binary-capacity preflight: $capacity_attestation"
