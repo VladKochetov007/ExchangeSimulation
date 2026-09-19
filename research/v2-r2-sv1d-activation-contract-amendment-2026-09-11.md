@@ -257,3 +257,15 @@ all existing disk/memory floor formulas and sample requirements. A failed or
 incomplete capacity attempt publishes no final attestation and cannot authorize
 activation. Subsequently apply the existing activation review and development
 ordering; separate explicit freeze authorization remains required for holdouts.
+
+### Subsequent owner model ceiling — 2026-09-13
+
+The owner prohibits Astra and sets Luna xhigh as the maximum subagent selection.
+Prospectively use an explicitly selected fresh Luna reviewer, not an inherited
+model that could exceed that ceiling. Independent review is not waived. If that
+permitted route cannot execute, retain its actual execution error and prepare
+the qualified external/human-review package under the bounded fallback policy;
+do not silently escalate models. The prior inherited-model reviewer is closed
+at the owner's direction. Carry every substantive rejection and its raw evidence
+to the new reviewer; this mandated model transition does not resolve findings
+or authorize shopping for a favorable verdict.

@@ -188,34 +188,36 @@ type sv1dCapacitySampleAggregateEntry struct {
 }
 
 type sv1dCapacityRunMetadata struct {
-	SchemaVersion            int    `json:"schema_version"`
-	RunnerContract           string `json:"runner_contract"`
-	ProbeID                  string `json:"probe_id"`
-	CapacityOnly             bool   `json:"capacity_only"`
-	ScientificResultEligible bool   `json:"scientific_result_eligible"`
-	Arm                      string `json:"arm"`
-	ExperimentID             string `json:"experiment_id"`
-	ConfigExperimentID       string `json:"config_experiment_id"`
-	HypothesisID             string `json:"hypothesis_id"`
-	Seed                     int64  `json:"seed"`
-	SimulatedHorizon         string `json:"simulated_horizon"`
-	SimulationStartNano      int64  `json:"simulation_start_nano"`
-	SimulationEndNano        int64  `json:"simulation_end_nano"`
-	ConfigSHA256             string `json:"config_sha256"`
-	BinarySHA256             string `json:"binary_sha256"`
-	GitRevision              string `json:"git_revision"`
-	BinaryPath               string `json:"binary_path"`
-	BinaryGoVersion          string `json:"binary_go_version"`
-	BinaryGOOS               string `json:"binary_goos"`
-	BinaryGOARCH             string `json:"binary_goarch"`
-	BinaryGOAMD64            string `json:"binary_goamd64"`
-	AnalyzerSHA256           string `json:"analyzer_sha256"`
-	RendererSHA256           string `json:"renderer_sha256"`
-	LogMode                  string `json:"log_mode"`
-	EvidenceFormat           string `json:"evidence_format"`
-	GOMAXPROCS               int    `json:"gomaxprocs"`
-	OutputDir                string `json:"output_dir"`
-	Holdout                  bool   `json:"holdout"`
+	SchemaVersion            int      `json:"schema_version"`
+	RunnerContract           string   `json:"runner_contract"`
+	ProbeID                  string   `json:"probe_id"`
+	CapacityOnly             bool     `json:"capacity_only"`
+	ScientificResultEligible bool     `json:"scientific_result_eligible"`
+	Arm                      string   `json:"arm"`
+	ExperimentID             string   `json:"experiment_id"`
+	ConfigExperimentID       string   `json:"config_experiment_id"`
+	HypothesisID             string   `json:"hypothesis_id"`
+	Seed                     int64    `json:"seed"`
+	SimulatedHorizon         string   `json:"simulated_horizon"`
+	SimulationStartNano      int64    `json:"simulation_start_nano"`
+	SimulationEndNano        int64    `json:"simulation_end_nano"`
+	ConfigSHA256             string   `json:"config_sha256"`
+	BinarySHA256             string   `json:"binary_sha256"`
+	GitRevision              string   `json:"git_revision"`
+	BinaryPath               string   `json:"binary_path"`
+	BinaryGoVersion          string   `json:"binary_go_version"`
+	BinaryGOOS               string   `json:"binary_goos"`
+	BinaryGOARCH             string   `json:"binary_goarch"`
+	BinaryGOAMD64            string   `json:"binary_goamd64"`
+	AnalyzerSHA256           string   `json:"analyzer_sha256"`
+	RendererSHA256           string   `json:"renderer_sha256"`
+	LogMode                  string   `json:"log_mode"`
+	EvidenceFormat           string   `json:"evidence_format"`
+	GOMAXPROCS               int      `json:"gomaxprocs"`
+	OutputDir                string   `json:"output_dir"`
+	Holdout                  bool     `json:"holdout"`
+	Command                  []string `json:"command"`
+	RawLogPolicy             string   `json:"raw_log_policy"`
 }
 
 type sv1dCapacityRunStatus struct {
@@ -240,14 +242,17 @@ type sv1dCapacityRunStatus struct {
 	CheckpointsSHA256               string   `json:"checkpoints_sha256"`
 	EvidenceManifestSHA256          string   `json:"evidence_manifest_sha256"`
 	BinaryEvidenceAttestationSHA256 string   `json:"binary_evidence_attestation_sha256"`
+	MarketDataEvidenceSHA256        string   `json:"market_data_evidence_sha256"`
+	MarketDataSchedulesSHA256       string   `json:"market_data_schedules_sha256"`
+	MarketDataReceiptsSHA256        string   `json:"market_data_receipts_sha256"`
+	MarketDataDecisionsSHA256       string   `json:"market_data_decisions_sha256"`
 }
 
 type sv1dCapacityRendererReport struct {
 	EventFrames         uint64 `json:"event_frames"`
 	DictionaryFrames    uint64 `json:"dictionary_frames"`
-	StreamFrames        uint64 `json:"stream_frames"`
 	ExecutionStreamHash string `json:"execution_stream_hash"`
-	Routes              uint64 `json:"routes"`
+	Routes              int    `json:"routes"`
 	RenderedDigest      string `json:"rendered_digest"`
 }
 
@@ -874,6 +879,10 @@ func verifySV1DCapacityArmRunMetadata(attestation SV1DCapacityAttestation, arm S
 		return fmt.Errorf("SV1D capacity arm %s: run metadata identity is inconsistent", arm.Name)
 	}
 	expectedBinaryPath := filepath.Join(attestation.MeasurementRoot, "tools", "multivenue-"+attestation.BinarySHA256)
+	expectedCommand := []string{"multivenue", "-config", "run-config.json", "-duration", "5m", "-log-mode", "full", "-evidence-format", "evstream_v3"}
+	if !sameSV1DStrings(metadata.Command, expectedCommand) || metadata.RawLogPolicy != "retain until the capacity attestation and successor promotion gates pass" {
+		return fmt.Errorf("SV1D capacity arm %s: run metadata command or raw log policy is inconsistent", arm.Name)
+	}
 	if metadata.BinaryPath != expectedBinaryPath || metadata.BinaryGoVersion == "" || metadata.BinaryGOOS != "linux" || metadata.BinaryGOARCH != "amd64" || metadata.BinaryGOAMD64 != "v1" {
 		return fmt.Errorf("SV1D capacity arm %s: run metadata has an invalid simulator identity", arm.Name)
 	}
@@ -891,7 +900,8 @@ func verifySV1DCapacityArmRunStatus(arm SV1DCapacityArm, armDir string, snapshot
 	}
 	var status sv1dCapacityRunStatus
 	if err := decodeSV1DJSONWithRequiredFields(statusRaw, &status,
-		"schema_version", "contract", "capacity_only", "scientific_result_eligible", "cell", "experiment_id", "config_experiment_id", "hypothesis_id", "exit_status", "completion_verified", "simulated_horizon", "simulation_start_nano", "simulation_end_nano", "completion_sentinels", "run_metadata_sha256", "manifest_sha256", "greeks_sha256", "latency_sha256", "checkpoints_sha256", "evidence_manifest_sha256", "binary_evidence_attestation_sha256"); err != nil {
+		"schema_version", "contract", "capacity_only", "scientific_result_eligible", "cell", "experiment_id", "config_experiment_id", "hypothesis_id", "exit_status", "completion_verified", "simulated_horizon", "simulation_start_nano", "simulation_end_nano", "completion_sentinels", "run_metadata_sha256", "manifest_sha256", "greeks_sha256", "latency_sha256", "checkpoints_sha256", "evidence_manifest_sha256", "binary_evidence_attestation_sha256",
+		"market_data_evidence_sha256", "market_data_schedules_sha256", "market_data_receipts_sha256", "market_data_decisions_sha256"); err != nil {
 		return sv1dCapacityRunStatus{}, fmt.Errorf("SV1D capacity arm %s: decode run status: %w", arm.Name, err)
 	}
 	if status.SchemaVersion != 1 || status.Contract != "v2-r2-sv1d-capacity-arm-status-v1" || !status.CapacityOnly || status.ScientificResultEligible || status.Cell != arm.Name || status.ExperimentID != arm.CapacityExperimentID || status.ConfigExperimentID != arm.CapacityExperimentID || status.HypothesisID != arm.CapacityHypothesisID || status.ExitStatus != 0 || !status.CompletionVerified || status.SimulatedHorizon != "5m" || status.SimulationStartNano != int64(SV1DCapacityStartNano) || status.SimulationEndNano != int64(SV1DCapacityEndNano) || !sameSV1DStrings(status.CompletionSentinels, []string{"greeks.json", "latency.json"}) || status.RunMetadataSHA256 != arm.RunMetadataSHA256 || status.ManifestSHA256 != arm.ManifestSHA256 || status.EvidenceManifestSHA256 != arm.EvidenceManifestSHA256 || status.BinaryEvidenceAttestationSHA256 != arm.BinaryEvidenceAttestationSHA256 {
@@ -902,6 +912,10 @@ func verifySV1DCapacityArmRunStatus(arm SV1DCapacityArm, armDir string, snapshot
 		digest string
 	}{
 		{"greeks.json", status.GreeksSHA256}, {"latency.json", status.LatencySHA256}, {"checkpoints.jsonl", status.CheckpointsSHA256},
+		{"market-data-evidence-v2.json", status.MarketDataEvidenceSHA256},
+		{"market-data-schedules-v2.bin", status.MarketDataSchedulesSHA256},
+		{"market-data-receipts-v2.bin", status.MarketDataReceiptsSHA256},
+		{"market-data-decisions-v2.bin", status.MarketDataDecisionsSHA256},
 	} {
 		if !isSV1DHexDigest(artifact.digest) {
 			return sv1dCapacityRunStatus{}, fmt.Errorf("SV1D capacity arm %s: run status has no valid %s digest", arm.Name, artifact.name)
@@ -957,7 +971,11 @@ func verifySV1DCapacityArmRenderer(attestation SV1DCapacityAttestation, arm SV1D
 	if err := decodeSV1DJSONWithRequiredFields(reportRaw, &report, jsonFieldNames(reflect.TypeOf(report), true)...); err != nil {
 		return fmt.Errorf("SV1D capacity arm %s: decode renderer report: %w", arm.Name, err)
 	}
-	if report.EventFrames != arm.EventFrames || report.DictionaryFrames+report.EventFrames != report.StreamFrames || report.StreamFrames != arm.StreamFrames || report.ExecutionStreamHash != arm.ExecutionStreamHash || report.Routes == 0 || report.RenderedDigest != arm.RenderedTreeDigest || !isSV1DHexDigest(report.RenderedDigest) {
+	if report.DictionaryFrames > math.MaxUint64-report.EventFrames {
+		return fmt.Errorf("SV1D capacity arm %s: renderer report frame count overflows", arm.Name)
+	}
+	streamFrames := report.DictionaryFrames + report.EventFrames
+	if report.EventFrames != arm.EventFrames || streamFrames != arm.StreamFrames || report.ExecutionStreamHash != arm.ExecutionStreamHash || report.Routes == 0 || report.RenderedDigest != arm.RenderedTreeDigest || !isSV1DHexDigest(report.RenderedDigest) {
 		return fmt.Errorf("SV1D capacity arm %s: renderer report identity is inconsistent", arm.Name)
 	}
 	renderedAttestationRaw, ok := snapshot.renderedFiles["rendered-binary-evidence-attestation.json"]

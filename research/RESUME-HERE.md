@@ -1,3 +1,27 @@
+# Current operational pointer — 2026-09-19
+
+The owner resumed the SV1D capacity-gate repair. The current C3
+producer/verifier schema correction is the successor patch based on `94e63d6`.
+The C2 review was a substantive REJECT, not an availability failure; its three
+production-schema findings are now covered by focused round-trip and mutation
+tests. A clean detached C3 snapshot passed `make test`, `go vet ./...`, the
+targeted race suites, finite-cgroup validation, and `git diff --check`. The
+exact candidate still requires fresh independent review and has no execution
+authorization. Future independent review must explicitly select Luna xhigh or
+lower; Astra is prohibited. No capacity, activation, development, freeze, or
+holdout run has occurred.
+
+# Owner-requested pause — 2026-09-13 (historical handoff)
+
+Research was stopped at the owner's request. Read
+`research/SV1D-PAUSE-2026-09-13.md` before resuming. Scientific branch HEAD is
+`94e63d6`; a partially completed C3 verifier/production-schema correction and
+the Luna-xhigh model ceiling are **uncommitted**. Preserve these edits. Focused
+SV1D tests pass; C3 has not passed full gates or independent review. No new
+capacity, activation, development or holdout run occurred. Both inherited-model
+agents are closed. Do not restart them: future subagents must not use Astra;
+Luna xhigh is the owner's ceiling. All substantive review findings still apply.
+
 # Current operational pointer — 2026-09-13
 
 The owner-authorized operational amendment in

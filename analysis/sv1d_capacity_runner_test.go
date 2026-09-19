@@ -3,6 +3,7 @@ package analysis
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -10,151 +11,166 @@ import (
 	"testing"
 )
 
-// This regression expands the production command through a capture
-// function. It never executes the resource wrapper, internal arm, or simulator.
-func TestSV1DCapacityProductionPaths(t *testing.T) {
-	root := t.TempDir()
-	retained := filepath.Join(root, "retained")
-	staging := filepath.Join(root, "staging")
-	runnerRaw, err := os.ReadFile("../scripts/run-v2-r2-sv1d-capacity-preflight.sh")
+func capacityRunnerSection(t *testing.T, source, start, end string) string {
+	t.Helper()
+	begin := strings.Index(source, start)
+	if begin < 0 {
+		t.Fatalf("source section start missing: %q", start)
+	}
+	finish := strings.Index(source[begin:], end)
+	if finish < 0 {
+		t.Fatalf("source section end missing: %q", end)
+	}
+	return source[begin : begin+finish]
+}
+
+func readCapacityProducerFixture(t *testing.T, path string) []byte {
+	t.Helper()
+	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	runnerDigest := sha256DigestHex(runnerRaw)
-	runnerPath := filepath.Join(retained, "tools", "capacity-runner-"+runnerDigest+".sh")
-	if err := os.MkdirAll(filepath.Dir(runnerPath), 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(runnerPath, runnerRaw, 0444); err != nil {
-		t.Fatal(err)
-	}
-	simulatorBytes := []byte("reviewer fixture bytes; not executable")
-	attestation := SV1DCapacityAttestation{
-		MeasurementRoot: retained, RunnerSHA256: runnerDigest,
-		BinarySHA256: sha256DigestHex(simulatorBytes), AnalyzerSHA256: strings.Repeat("b", 64),
-		RendererSHA256: strings.Repeat("c", 64), SourceRevision: "67bba6699a39167e1c2f6cf7e432cfcda16aeda4",
-		ProbeID: "v2-r2-sv1d-activation-659",
-	}
-	arm := SV1DCapacityArm{Name: "treatment", CapacityExperimentID: "v2-r2-sv1d-capacity-977-treatment",
-		CapacityHypothesisID: "V2-R2-SV1D-CAPACITY-ONLY", CapacityConfigSHA256: strings.Repeat("d", 64)}
-	source := string(runnerRaw)
-	start := strings.Index(source, "\tGOMAXPROCS=2 GOMEMLIMIT=4GiB SV1D_CAPACITY_ROOT_DIR=")
-	if start < 0 {
-		t.Fatal("production resource invocation not found")
-	}
-	end := strings.Index(source[start:], "\n\tresource_status=$?")
-	if end < 0 {
-		t.Fatal("production resource invocation end not found")
-	}
-	invocation := source[start : start+end]
-	for _, assignment := range []string{
-		`staged_multivenue="$staging_root/tools/multivenue-$(hash_file "$multivenue_binary")"`,
-		`staged_sv1dprobe="$staging_root/tools/sv1dprobe-$(hash_file "$sv1dprobe_binary")"`,
-		`staged_evsrender="$staging_root/tools/evsrender-$(hash_file "$evsrender_binary")"`,
-	} {
-		if !strings.Contains(source, assignment) {
-			t.Fatalf("staging definition changed: %s", assignment)
-		}
-	}
-	script := `set -euo pipefail
-capture_resource() {
-    while [[ "$1" != -- ]]; do shift; done
-    shift
-    printf '%s\0' "$@"
+	return raw
 }
+
+func writeCapacityProducerFixture(t *testing.T, path string, raw []byte) {
+	t.Helper()
+	if err := os.WriteFile(path, raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func capacityProducerConfigFixture(t *testing.T, arm string) (string, map[string]json.RawMessage) {
+	t.Helper()
+	target, err := filepath.Abs("../research/configs/v2-r2-sv1d-activation/activation-659-" + arm + ".json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var config map[string]json.RawMessage
+	if err := json.Unmarshal(readCapacityProducerFixture(t, target), &config); err != nil {
+		t.Fatal(err)
+	}
+	config["seed"] = json.RawMessage("977")
+	config["experiment_id"] = json.RawMessage(fmt.Sprintf("%q", "v2-r2-sv1d-capacity-977-"+arm))
+	config["hypothesis_id"] = json.RawMessage(`"V2-R2-SV1D-CAPACITY-ONLY"`)
+	config["status"] = json.RawMessage(`"capacity-preflight-only"`)
+	config["description"] = json.RawMessage(`"Outcome-ineligible binary-evidence capacity preflight arm"`)
+	return target, config
+}
+
+func TestSV1DCapacityProductionPaths(t *testing.T) {
+	runnerRaw := readCapacityProducerFixture(t, "../scripts/run-v2-r2-sv1d-capacity-preflight.sh")
+	source := string(runnerRaw)
+	invocation := capacityRunnerSection(t, source, "\tGOMAXPROCS=2 GOMEMLIMIT=4GiB SV1D_CAPACITY_ROOT_DIR=", "\n\tresource_status=$?")
+	metadataProducer := capacityRunnerSection(t, source, "\tjq -n \\\n\t\t--arg arm", "\n\trun_metadata_sha256_before=")
+	for _, name := range []string{"treatment", "mode-off", "no-roster"} {
+		t.Run(name, func(t *testing.T) {
+			root := filepath.Join(t.TempDir(), "retained with spaces")
+			if err := os.MkdirAll(filepath.Join(root, "tools"), 0755); err != nil {
+				t.Fatal(err)
+			}
+			fixtureBinary := []byte("independent non-executable simulator identity fixture")
+			attestation := SV1DCapacityAttestation{MeasurementRoot: root, RunnerSHA256: sha256DigestHex(runnerRaw), BinarySHA256: sha256DigestHex(fixtureBinary), AnalyzerSHA256: strings.Repeat("b", 64), RendererSHA256: strings.Repeat("c", 64), SourceRevision: "94e63d6abaaac5d790a070f303a08da4445b28af", ProbeID: "v2-r2-sv1d-activation-659"}
+			runnerPath := filepath.Join(root, "tools", "capacity-runner-"+attestation.RunnerSHA256+".sh")
+			writeCapacityProducerFixture(t, runnerPath, runnerRaw)
+			_, config := capacityProducerConfigFixture(t, name)
+			configRaw, err := json.Marshal(config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			arm := SV1DCapacityArm{Name: name, CapacityExperimentID: "v2-r2-sv1d-capacity-977-" + name, CapacityHypothesisID: "V2-R2-SV1D-CAPACITY-ONLY", CapacityConfigSHA256: sha256DigestHex(configRaw)}
+			script := `set -euo pipefail
+capture_resource() { while [[ "$1" != -- ]]; do shift; done; shift; printf '%s\0' "$@"; }
 staged_sv1dresource=capture_resource
-root_dir=$SOURCE_ROOT
-output_root=$RETAINED_ROOT
-output_parent=$REPRO_ROOT
+output_root=$FIXTURE_ROOT
+output_parent=$FIXTURE_ROOT
+root_dir=$FIXTURE_ROOT
 retained_capacity_runner=$RUNNER_PATH
-staged_multivenue="$STAGING_ROOT/tools/multivenue-$SIM_HASH"
-staged_sv1dprobe="$STAGING_ROOT/tools/sv1dprobe-$ANALYZER_HASH"
-staged_evsrender="$STAGING_ROOT/tools/evsrender-$RENDERER_HASH"
+staged_multivenue=/unexecuted-staging/multivenue
+staged_sv1dprobe=/unexecuted-staging/sv1dprobe
+staged_evsrender=/unexecuted-staging/evsrender
+arm=$ARM_NAME
 multivenue_sha256=$SIM_HASH
 sv1dprobe_sha256=$ANALYZER_HASH
 evsrender_sha256=$RENDERER_HASH
 source_revision=$SOURCE_REVISION
-arm=treatment
 arm_dir="$output_root/arms/$arm"
 rendered_dir="$output_root/rendered/$arm"
 stdout_log="$output_root/logs/$arm.simulator.stdout.log"
 stderr_log="$output_root/logs/$arm.simulator.stderr.log"
-measurement_path="$REPRO_ROOT/measurement.json"
+measurement_path="$output_root/$arm-measurement.json"
 declare -A capacity_config_for capacity_experiment_for
-capacity_config_for[treatment]="$output_root/configs/capacity-treatment.json"
-capacity_experiment_for[treatment]=v2-r2-sv1d-capacity-977-treatment
+capacity_config_for[$arm]="$output_root/configs/capacity-$arm.json"
+capacity_experiment_for[$arm]="v2-r2-sv1d-capacity-977-$arm"
 ` + invocation
-	command := exec.Command("/bin/bash", "-c", script)
-	sourceRoot, err := filepath.Abs("..")
-	if err != nil {
-		t.Fatal(err)
+			command := exec.Command("/bin/bash", "-c", script)
+			command.Env = append(os.Environ(), "FIXTURE_ROOT="+root, "RUNNER_PATH="+runnerPath, "ARM_NAME="+name, "SIM_HASH="+attestation.BinarySHA256, "ANALYZER_HASH="+attestation.AnalyzerSHA256, "RENDERER_HASH="+attestation.RendererSHA256, "SOURCE_REVISION="+attestation.SourceRevision)
+			var stderr bytes.Buffer
+			command.Stderr = &stderr
+			output, err := command.Output()
+			if err != nil {
+				t.Fatalf("capture failed: %v: %s", err, stderr.String())
+			}
+			args := strings.Split(strings.TrimSuffix(string(output), "\x00"), "\x00")
+			measurement := SV1DResourceMeasurement{Command: args}
+			if err := validateSV1DCapacityResourceCommand(measurement, attestation, arm); err != nil {
+				t.Fatal(err)
+			}
+			for index := range args {
+				mutated := SV1DResourceMeasurement{Command: append([]string(nil), args...)}
+				mutated.Command[index] += "-tampered"
+				if err := validateSV1DCapacityResourceCommand(mutated, attestation, arm); err == nil {
+					t.Fatalf("argv index %d tamper accepted", index)
+				}
+			}
+			t.Logf("%s: production argv verifies and all 13 argument mutations reject; captured tool paths=%q", name, args[6:9])
+			if err := os.MkdirAll(args[4], 0755); err != nil {
+				t.Fatal(err)
+			}
+			metadataScript := `set -euo pipefail
+hash_file() { case "$1" in "$simulator") printf '%s' "$SIM_HASH";; "$analyzer") printf '%s' "$ANALYZER_HASH";; "$renderer") printf '%s' "$RENDERER_HASH";; *) exit 97;; esac; }
+binary_go_version() { printf 'go1.27.0'; }
+arm=$ARM_NAME
+experiment_id=$EXPERIMENT
+hypothesis_id=V2-R2-SV1D-CAPACITY-ONLY
+capacity_seed=977
+capacity_horizon=5m
+simulation_start_nano=1735689600000000000
+simulation_end_nano=1735689900000000000
+config_digest=$CONFIG_HASH
+source_revision=$SOURCE_REVISION
+simulator=$SIM_PATH
+analyzer=$ANALYZER_PATH
+renderer=$RENDERER_PATH
+arm_dir=$ARM_DIR
+log_mode=full
+evidence_format=evstream_v3
+capacity_contract=v2-r2-sv1d-capacity-runner-v1
+capacity_probe_id=v2-r2-sv1d-activation-659
+` + metadataProducer
+			metadataCommand := exec.Command("/bin/bash", "-c", metadataScript)
+			metadataCommand.Env = append(command.Env, "EXPERIMENT="+arm.CapacityExperimentID, "CONFIG_HASH="+arm.CapacityConfigSHA256, "SIM_PATH="+args[6], "ANALYZER_PATH="+args[7], "RENDERER_PATH="+args[8], "ARM_DIR="+args[4])
+			if output, err := metadataCommand.CombinedOutput(); err != nil {
+				t.Fatalf("metadata producer failed: %v: %s", err, output)
+			}
+			raw := readCapacityProducerFixture(t, filepath.Join(args[4], "run-metadata.json"))
+			t.Logf("actual production metadata JSON: %s", raw)
+			snapshot := sv1dCapacityArmSnapshot{armFiles: map[string][]byte{"run-metadata.json": raw}, retainedFiles: map[string][]byte{"simulator": fixtureBinary}}
+			if err := verifySV1DCapacityArmRunMetadata(attestation, arm, args[4], snapshot); err != nil {
+				t.Fatalf("actual metadata rejected: %v", err)
+			}
+			assertCapacitySerializationRejectsMutations(t, raw, func(mutated []byte) error {
+				snapshot.armFiles["run-metadata.json"] = mutated
+				return verifySV1DCapacityArmRunMetadata(attestation, arm, args[4], snapshot)
+			})
+			snapshot.armFiles["run-metadata.json"] = raw
+			snapshot.retainedFiles["simulator"] = []byte("mutated")
+			if err := verifySV1DCapacityArmRunMetadata(attestation, arm, args[4], snapshot); err == nil {
+				t.Fatal("metadata simulator-byte mutation accepted")
+			}
+			t.Logf("%s: actual argv and actual jq metadata verified, 13 argv mutations and retained-byte mutation rejected; fixture root contains spaces", name)
+		})
 	}
-	command.Env = append(os.Environ(), "SOURCE_ROOT="+sourceRoot, "RETAINED_ROOT="+retained,
-		"REPRO_ROOT="+root, "RUNNER_PATH="+runnerPath, "STAGING_ROOT="+staging,
-		"SIM_HASH="+attestation.BinarySHA256, "ANALYZER_HASH="+attestation.AnalyzerSHA256,
-		"RENDERER_HASH="+attestation.RendererSHA256, "SOURCE_REVISION="+attestation.SourceRevision)
-	var stderr bytes.Buffer
-	command.Stderr = &stderr
-	output, err := command.Output()
-	if err != nil {
-		t.Fatalf("capture only shell: %v: %s", err, stderr.String())
-	}
-	args := strings.Split(strings.TrimSuffix(string(output), "\x00"), "\x00")
-	if len(args) != 13 {
-		t.Fatalf("captured %d arguments: %q", len(args), args)
-	}
-	emitted := SV1DResourceMeasurement{Command: args}
-	t.Run("retained_path_control", func(t *testing.T) {
-		control := emitted
-		control.Command = append([]string(nil), args...)
-		for _, index := range []int{6, 7, 8} {
-			control.Command[index] = filepath.Join(retained, "tools", filepath.Base(args[index]))
-		}
-		if err := validateSV1DCapacityResourceCommand(control, attestation, arm); err != nil {
-			t.Fatal(err)
-		}
-	})
-	t.Run("production_command_should_verify", func(t *testing.T) {
-		t.Logf("captured simulator=%s; verifier requires=%s", args[6], filepath.Join(retained, "tools", filepath.Base(args[6])))
-		if err := validateSV1DCapacityResourceCommand(emitted, attestation, arm); err != nil {
-			t.Fatalf("production command is rejected: %v", err)
-		}
-	})
-	t.Run("production_metadata_should_verify", func(t *testing.T) {
-		metadata := sv1dCapacityRunMetadata{
-			SchemaVersion: 1, RunnerContract: "v2-r2-sv1d-capacity-runner-v1", ProbeID: attestation.ProbeID,
-			CapacityOnly: true, Arm: arm.Name, ExperimentID: arm.CapacityExperimentID,
-			ConfigExperimentID: arm.CapacityExperimentID, HypothesisID: arm.CapacityHypothesisID,
-			Seed: SV1DCapacitySeed, SimulatedHorizon: "5m", SimulationStartNano: int64(SV1DCapacityStartNano),
-			SimulationEndNano: int64(SV1DCapacityEndNano), ConfigSHA256: arm.CapacityConfigSHA256,
-			BinarySHA256: attestation.BinarySHA256, GitRevision: attestation.SourceRevision,
-			AnalyzerSHA256: attestation.AnalyzerSHA256, RendererSHA256: attestation.RendererSHA256,
-			LogMode: "full", EvidenceFormat: "evstream_v3", GOMAXPROCS: SV1DCapacityGOMAXPROCS,
-			OutputDir: args[4], BinaryPath: args[6], BinaryGoVersion: "go1.27.0",
-			BinaryGOOS: "linux", BinaryGOARCH: "amd64", BinaryGOAMD64: "v1",
-		}
-		raw, err := json.Marshal(metadata)
-		if err != nil {
-			t.Fatal(err)
-		}
-		snapshot := sv1dCapacityArmSnapshot{armFiles: map[string][]byte{"run-metadata.json": raw},
-			retainedFiles: map[string][]byte{"simulator": simulatorBytes}}
-		control := metadata
-		control.BinaryPath = filepath.Join(retained, "tools", filepath.Base(args[6]))
-		controlRaw, err := json.Marshal(control)
-		if err != nil {
-			t.Fatal(err)
-		}
-		controlSnapshot := snapshot
-		controlSnapshot.armFiles = map[string][]byte{"run-metadata.json": controlRaw}
-		if err := verifySV1DCapacityArmRunMetadata(attestation, arm, args[4], controlSnapshot); err != nil {
-			t.Fatalf("retained metadata control failed: %v", err)
-		}
-		t.Log("retained binary_path control passed")
-		if err := verifySV1DCapacityArmRunMetadata(attestation, arm, args[4], snapshot); err != nil {
-			t.Fatalf("production binary_path is rejected: %v", err)
-		}
-	})
 }
 
 func TestSV1DCapacityPlanDigestGate(t *testing.T) {

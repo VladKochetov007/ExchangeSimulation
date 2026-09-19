@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"exchange_sim/simulations/multivenue"
 )
 
 func TestValidateSV1DCapacityAttestationAcceptsMeasuredCompleteRecord(t *testing.T) {
@@ -503,6 +505,8 @@ func writeSV1DCapacityArmArtifacts(t *testing.T, attestation *SV1DCapacityAttest
 			BinaryGOOS: "linux", BinaryGOARCH: "amd64", BinaryGOAMD64: "v1", AnalyzerSHA256: attestation.AnalyzerSHA256,
 			RendererSHA256: attestation.RendererSHA256, LogMode: "full", EvidenceFormat: "evstream_v3", GOMAXPROCS: SV1DCapacityGOMAXPROCS,
 			OutputDir: armDir, Holdout: false,
+			Command:      []string{"multivenue", "-config", "run-config.json", "-duration", "5m", "-log-mode", "full", "-evidence-format", "evstream_v3"},
+			RawLogPolicy: "retain until the capacity attestation and successor promotion gates pass",
 		}
 		metadataRaw, err := json.Marshal(metadata)
 		if err != nil {
@@ -512,7 +516,7 @@ func writeSV1DCapacityArmArtifacts(t *testing.T, attestation *SV1DCapacityAttest
 		arm.RunMetadataSHA256 = sha256DigestHex(metadataRaw)
 
 		for _, name := range []string{"manifest.json", "greeks.json", "latency.json", "checkpoints.jsonl", "market-data-evidence-v2.json", "market-data-schedules-v2.bin", "market-data-receipts-v2.bin", "market-data-decisions-v2.bin"} {
-			writeArmRaw(t, filepath.Join(armDir, name), []byte(`{"fixture":true}`))
+			writeArmRaw(t, filepath.Join(armDir, name), []byte(`{"fixture":"`+name+`"}`))
 		}
 		arm.ManifestSHA256 = testSV1DFileHash(t, filepath.Join(armDir, "manifest.json"))
 		writeStrictCDFBinaryEvidence(t, armDir, []strictCDFFixtureRow{{
@@ -566,7 +570,7 @@ func writeSV1DCapacityArmArtifacts(t *testing.T, attestation *SV1DCapacityAttest
 		if err != nil {
 			t.Fatal(err)
 		}
-		report := sv1dCapacityRendererReport{EventFrames: arm.EventFrames, DictionaryFrames: arm.StreamFrames - arm.EventFrames, StreamFrames: arm.StreamFrames, ExecutionStreamHash: arm.ExecutionStreamHash, Routes: 1, RenderedDigest: renderedDigest}
+		report := multivenue.BinaryRenderReport{EventFrames: arm.EventFrames, DictionaryFrames: arm.StreamFrames - arm.EventFrames, ExecutionHash: arm.ExecutionStreamHash, Routes: 1, RenderedDigest: renderedDigest}
 		reportRaw, err := json.Marshal(report)
 		if err != nil {
 			t.Fatal(err)
@@ -625,6 +629,10 @@ func writeSV1DCapacityArmArtifacts(t *testing.T, attestation *SV1DCapacityAttest
 			GreeksSHA256: testSV1DFileHash(t, filepath.Join(armDir, "greeks.json")), LatencySHA256: testSV1DFileHash(t, filepath.Join(armDir, "latency.json")),
 			CheckpointsSHA256: testSV1DFileHash(t, filepath.Join(armDir, "checkpoints.jsonl")), EvidenceManifestSHA256: arm.EvidenceManifestSHA256,
 			BinaryEvidenceAttestationSHA256: arm.BinaryEvidenceAttestationSHA256,
+			MarketDataEvidenceSHA256:        testSV1DFileHash(t, filepath.Join(armDir, "market-data-evidence-v2.json")),
+			MarketDataSchedulesSHA256:       testSV1DFileHash(t, filepath.Join(armDir, "market-data-schedules-v2.bin")),
+			MarketDataReceiptsSHA256:        testSV1DFileHash(t, filepath.Join(armDir, "market-data-receipts-v2.bin")),
+			MarketDataDecisionsSHA256:       testSV1DFileHash(t, filepath.Join(armDir, "market-data-decisions-v2.bin")),
 		}
 		statusRaw, err := json.Marshal(status)
 		if err != nil {
