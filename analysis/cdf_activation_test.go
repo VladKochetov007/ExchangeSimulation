@@ -2587,6 +2587,60 @@ func TestCDFTradeIdentityCannotBeCountedTwice(t *testing.T) {
 	}
 }
 
+func TestCDFStrictTradeAcceptsZeroBasedFirstTradeIdentity(t *testing.T) {
+	payload, err := json.Marshal(cdfTradeEvidence{
+		TradeID: 0, Price: 100, Qty: 3, Side: "SELL", MakerOrderID: 11, TakerOrderID: 12,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := &CDFActivationAudit{strictMechanics: true}
+	r.processCDFTrade(Event{VenueID: "north", GlobalSequence: 1, payload: payload})
+	if len(r.Checks) != 0 || r.TotalVolumeQty != 3 || len(r.trades) != 1 {
+		t.Fatalf("zero-based trade was rejected: checks=%+v volume=%d trades=%d", r.Checks, r.TotalVolumeQty, len(r.trades))
+	}
+}
+
+func TestCDFStrictFillsAcceptZeroBasedFirstTradeIdentity(t *testing.T) {
+	contract := RegisteredSV1DActivationContract().Suppliers[0]
+	quantity := contract.MinimumQualifyingQty
+	price := contract.ReferencePrice - contract.TickSize
+	fee := cdfFixtureFee(price, quantity, contract.BasePrecision, contract.MakerFeeBps)
+	state := &cdfSupplierState{
+		audit:    CDFSupplierActivationAudit{VenueID: "north", Role: contract.Role, ClientID: 7},
+		contract: contract,
+	}
+	states := map[cdfParticipantKey]*cdfSupplierState{{venueID: "north", clientID: 7}: state}
+	r := &CDFActivationAudit{strictMechanics: true}
+	observed := cdfFillEvidence{
+		Role: contract.Role, ClientID: 7, Symbol: cdfActivationSymbol, OrderID: 11, TradeID: 0,
+		Timestamp: 10, Side: "BUY", Price: price, Qty: quantity, FeeAmount: fee, FeeAsset: contract.QuoteAsset,
+		IsFull: true, PositionBefore: 0, PositionAfter: quantity,
+	}
+	observedRaw, err := json.Marshal(observed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.processCDFFill(Event{SimTS: 10, GlobalSequence: 7, VenueID: "north", ClientID: 7, payload: observedRaw}, states, map[cdfFillKey]cdfFillEvidence{})
+
+	orders := map[cdfOrderKey]*cdfOrderState{{venueID: "north", clientID: 7, orderID: 11}: {
+		side: "BUY", price: price, originalQty: quantity, remainingQty: quantity,
+		acceptedAt: 9, acceptedGlobalSeq: 3,
+	}}
+	actual := cdfOrderFillEvidence{
+		OrderID: 11, TradeID: 0, Side: "BUY", Price: price, Qty: quantity,
+		FeeAmount: fee, FeeAsset: contract.QuoteAsset, FilledQty: quantity, RemainingQty: 0, IsFull: true,
+	}
+	actualRaw, err := json.Marshal(actual)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.processCDFOrderFill(Event{SimTS: 10, GlobalSequence: 6, VenueID: "north", ClientID: 7, payload: actualRaw}, states, orders, map[cdfFillKey]cdfOrderFillEvidence{})
+	if len(r.Checks) != 0 {
+		t.Fatalf("zero-based supplier/exchange fills were rejected: %+v", r.Checks)
+	}
+}
+
 func TestCDFStrictTradeAttributionUsesMakerOrderIdentity(t *testing.T) {
 	contract := RegisteredSV1DActivationContract().Suppliers[0]
 	quantity := contract.MinimumQualifyingQty

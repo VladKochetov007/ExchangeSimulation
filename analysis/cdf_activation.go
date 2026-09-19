@@ -2914,7 +2914,7 @@ func (r *CDFActivationAudit) processCDFFill(event Event, states map[cdfParticipa
 		r.addEventCheck(event, state, "duplicate CDF supplier fill identity")
 		return
 	}
-	if fill.OrderID == 0 || fill.TradeID == 0 || fill.Price <= 0 || fill.Qty <= 0 || fill.FeeAmount < 0 ||
+	if fill.OrderID == 0 || fill.Price <= 0 || fill.Qty <= 0 || fill.FeeAmount < 0 ||
 		fill.FeeAsset != state.contract.QuoteAsset {
 		r.addEventCheck(event, state, "CDF supplier fill has invalid order, quantity, price, or fee")
 		return
@@ -3262,7 +3262,7 @@ func (r *CDFActivationAudit) processCDFOrderFill(event Event, states map[cdfPart
 	}
 	orderKey := cdfOrderKey{event.VenueID, event.ClientID, fill.OrderID}
 	order := orders[orderKey]
-	if order == nil || fill.TradeID == 0 || fill.Side != order.side || fill.Price != order.price || fill.Qty <= 0 ||
+	if order == nil || fill.Side != order.side || fill.Price != order.price || fill.Qty <= 0 ||
 		fill.Qty > order.remainingQty || fill.FilledQty <= 0 || fill.RemainingQty < 0 ||
 		(r.strictMechanics && !cdfEventAfter(event, order.acceptedAt, order.acceptedGlobalSeq)) ||
 		(!r.strictMechanics && event.SimTS < order.acceptedAt) {
@@ -3588,7 +3588,7 @@ func (r *CDFActivationAudit) processCDFTrade(event Event) {
 		r.addCheck(CDFActivationCheck{VenueID: event.VenueID, Ordinal: event.Ordinal, Failure: "malformed CDF trade evidence: " + err.Error()})
 		return
 	}
-	if trade.TradeID == 0 || trade.Price <= 0 || trade.Qty <= 0 || (trade.Side != "BUY" && trade.Side != "SELL") ||
+	if trade.Price <= 0 || trade.Qty <= 0 || (trade.Side != "BUY" && trade.Side != "SELL") ||
 		(r.strictMechanics && (trade.MakerOrderID == 0 || trade.TakerOrderID == 0 || trade.MakerOrderID == trade.TakerOrderID)) {
 		r.addCheck(CDFActivationCheck{VenueID: event.VenueID, Ordinal: event.Ordinal, Failure: "CDF trade evidence has invalid identity, price, quantity, or side"})
 		return
