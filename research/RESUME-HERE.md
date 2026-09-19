@@ -2076,3 +2076,34 @@ Because the source changed, the exact final tree needs fresh full mechanical
 gates and one fresh independent Luna review before a new pinned Go 1.27 bundle,
 seed-977 capacity preflight, or seed-659 activation. No 24-hour development
 cell, freeze, or holdout `619/631/641` has run.
+
+## Append-only current checkpoint: explicit empty SV1D bootstrap correction — 2026-09-19
+
+The fresh pinned successor bundle for exact `66555a5` passed review binding,
+clean Go 1.27 rebuild identity, and a new finite-cgroup seed-977 capacity
+preflight. The independent capacity verifier returned `CAPACITY_VERIFY_PASS`:
+all three outcome-ineligible arms completed with exit status 0, no OOM or swap,
+peak cgroup memory about 603 MiB under the 8 GiB limit, and approximately
+37 GiB disk free afterward.
+
+The newly allocated seed-659 activation namespace then completed simulation and
+rendering but correctly failed closed with `INVALID_EVIDENCE`. Independent
+rendering showed one explicit empty CDF/USD bootstrap snapshot per venue with
+`source_sequence=0`; the strict extraction treated that engine bootstrap as a
+malformed public observation. This produced the exact three-venue control
+failure pattern. The retained namespace is preserved externally and is not a
+scientific result or a rescore candidate.
+
+Commit `3d1135f05036fb55f0509477594c101ae48d3d3c` accepts only an explicit,
+all-empty sequence-zero bootstrap and skips it from actor-observable snapshot
+identity/observation extraction. Positive-sequence snapshots retain the exact
+complete-to-public projection checks, and nonempty/null sequence-zero frames
+still fail closed. Focused analysis, probe, resource, mvanalyze, prunegate,
+and tests passed; no economic mechanism or registered population changed.
+The detailed contract record is
+`research/v2-r2-sv1d-activation-bootstrap-contract-repair-2026-09-19.md`.
+
+The exact tree now needs full mechanical gates and one fresh independent Luna
+review before a new pinned bundle, capacity preflight, or fresh seed-659
+activation. No 24-hour development cell, freeze, or holdout `619/631/641` has
+run.

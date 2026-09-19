@@ -1825,3 +1825,35 @@ of this exact final tree. Only acceptance may authorize a new Go 1.27 pinned
 bundle, verified finite-cgroup seed-977 capacity preflight, and fresh
 development-only seed-659 probe. No development cell, freeze, or holdout
 `619/631/641` has run.
+
+## Append-only current checkpoint: seed-659 bootstrap evidence correction — 2026-09-19
+
+Exact predecessor `66555a5` was rebuilt cleanly with Go 1.27 and passed a new
+verified finite-cgroup seed-977 capacity preflight. The fresh seed-659 tri-arm
+activation was run in a new namespace only after that verification. It
+completed simulation/rendering but exited with the fail-closed status
+`INVALID_EVIDENCE`; the retained artifacts are not an executable activation
+result and were not rescored.
+
+The failure was independently localized to the evidence parser. Each venue's
+CDF/USD route begins with an explicit empty `BookSnapshot` whose
+`source_sequence` is zero. The strict treatment/control extraction rejected
+that bootstrap frame as lacking a sequence/public projection, even though the
+frame has all four required empty side arrays and the first positive-sequence
+snapshots provide the publishable public state. The three-venue count and
+rendered payloads make this a reachable parser-contract defect rather than a
+market-survival observation.
+
+Current exact HEAD is `3d1135f05036fb55f0509477594c101ae48d3d3c`. Its narrow fix
+is to admit only an explicit all-empty sequence-zero bootstrap and exclude it
+from actor-observable snapshot indexing/observation; nonempty, null, malformed,
+or positive-sequence-invalid frames remain fail-closed. Focused extraction and
+all directly relevant tests pass. The full contract and retained evidence
+paths are recorded in
+`research/v2-r2-sv1d-activation-bootstrap-contract-repair-2026-09-19.md`.
+
+This is not an economic or historical-result amendment. R2 remains archived
+as the negative predecessor, the failed activation remains invalid evidence,
+and no 24-hour development cell, freeze, or holdout `619/631/641` has run. The
+next gate is full verification, fresh Luna review of the exact tree, a new
+bundle/capacity preflight, and only then a new seed-659 probe.
