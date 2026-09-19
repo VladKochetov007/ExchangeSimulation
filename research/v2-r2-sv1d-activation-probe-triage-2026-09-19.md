@@ -285,3 +285,79 @@ regressions for both inverted and valid same-timestamp rejection order. No
 simulation, historical rescore, development cell, or holdout is authorized
 until this successor completes the full gates and receives another fresh
 independent review.
+
+## Delayed local-quote reconstruction successor — `4908766`
+
+The exact scientific parent was `4d7f4b710b1df0c5dc8c440eaf4beed6244aa1ad`.
+The successor correction is committed as `49087660ed52639df104665da0100993c72894a7`
+and pushed on `autoresearch/ffa-ecology-gen0`. It changes only the strict CDF
+activation analyzer and its regressions; R2 calendar/lifecycle semantics,
+exchange economics, registered configurations, seeds, horizons, and actor
+implementation are unchanged.
+
+### Invariant and implementation
+
+The actor owns a delayed local quote state. Exchange-side `OrderFill` evidence
+must update exchange reconciliation state but cannot overwrite the actor's
+unacknowledged local remainder. A supplier fill must match the acknowledged
+local order, side, price, quantity, and full/partial status before any fill
+ledger, position, observation, or response-window state changes. In strict v2,
+a supplier fill with no locally acknowledged live quote fails closed. A fill
+after a terminal cancellation is diagnosed separately and also fails closed.
+
+The post-fill response predicate compares policy-relevant public state (best
+prices, book mode, mark, risk mark, and mark availability), not exact displayed
+depth quantities. Quantity changes caused by a fill therefore do not erase a
+valid inventory response, while positive-to-zero side transitions remain
+visible through the book mode. Private reference/target drift is admitted only
+when the same order's reconstructed local quantity decreased and the later
+decision is a changed-term `reprice_for_inventory_or_touch` cancellation. The
+ordinary path still rejects target-only, reference-only, order-ID-only, and
+market-state replays.
+
+### Independent review and tests
+
+A fresh independent Luna xhigh reviewer, Dalton, inspected the source/test
+correction that became `4908766` and returned **ACCEPT**. The retained review
+record is `/home/vlad/external-scratch/sv1d-review-4908766-20260919.md`.
+The review found the correction internally consistent and accepted the
+depth-only relaxation, same-order local-fill proof, exchange/local state
+separation, strict no-live-quote rejection, cancellation race handling, and
+the end-to-end reprice and immutability regressions. The review did not
+authorize a development run; it required the normal clean build/capacity and
+activation gates.
+
+On the exact committed tree:
+
+- `make test` passed on the clean worktree, including all Go packages, the
+  integrated long-run contract, R2 contract/archive tests, and matching G8
+  parity checks;
+- `go vet ./...` passed;
+- `GOMAXPROCS=2 GOMEMLIMIT=4GiB go test -race ./analysis ./cmd/mvanalyze ./cmd/prunegate ./tests -count=1` passed;
+- the focused CDF analyzer/multivenue suites passed repeatedly.
+
+The first pre-commit `make test` attempt was intentionally run on the dirty
+working tree and reached all Go packages successfully, but its final gate
+correctly failed the clean-worktree requirement; it is not treated as a code
+failure. The clean rerun passed.
+
+### Retained-evidence diagnostic and historical impact
+
+The old treatment namespace from the prior `4d7f4b7` bundle remains immutable:
+
+`/home/vlad/external-scratch/sv1d-activation-4d7f4b7-20260919-cgroup8g/`
+
+Running the current analyzer diagnostically against that retained evidence,
+with no result files rewritten, still returned `valid=false`,
+`evidence=false`, `activation=false`, `anti=false`, with 228 checks, 1,791
+decisions, 523 fills, and zero restorations. The leading retained-run failure
+was the old general-evidence timestamp ordering contract. This diagnostic is
+not a rescore and does not change the old `INVALID_EVIDENCE` record or claim an
+economic activation/non-activation result.
+
+The correction has no historical R2 impact because the finite CDF roster was
+off in those configurations. No holdout `619`, `631`, or `641` was inspected
+or consumed. No development cell is authorized by this note; the next gate is
+the final docs-inclusive independent review, pinned Go 1.27 rebuild, fresh
+finite-cgroup capacity preflight, and only then the registered seed-659
+development-only activation probe.
