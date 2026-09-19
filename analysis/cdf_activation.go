@@ -606,6 +606,12 @@ type cdfPublicSnapshotEvidence struct {
 	PublicAsks     []etypes.PriceLevel `json:"public_asks"`
 }
 
+func isCDFInitialEmptySnapshot(snapshot cdfPublicSnapshotEvidence) bool {
+	return snapshot.SourceSequence == 0 && snapshot.Bids != nil && len(snapshot.Bids) == 0 &&
+		snapshot.Asks != nil && len(snapshot.Asks) == 0 && snapshot.PublicBids != nil && len(snapshot.PublicBids) == 0 &&
+		snapshot.PublicAsks != nil && len(snapshot.PublicAsks) == 0
+}
+
 type cdfBookDeltaEvidence struct {
 	Side       string `json:"side"`
 	Price      int64  `json:"price"`
@@ -2143,7 +2149,13 @@ func (r *CDFActivationAudit) indexCDFSnapshots(run *Run) (map[cdfSnapshotKey]cdf
 				r.addCheck(CDFActivationCheck{VenueID: event.VenueID, Ordinal: event.Ordinal, Failure: "malformed public CDF snapshot: " + err.Error()})
 				return
 			}
-			if snapshot.SourceSequence == 0 || snapshot.Bids == nil || snapshot.Asks == nil || snapshot.PublicBids == nil || snapshot.PublicAsks == nil || !validCDFSnapshotProjection(snapshot) {
+			if snapshot.SourceSequence == 0 {
+				if !isCDFInitialEmptySnapshot(snapshot) {
+					r.addCheck(CDFActivationCheck{VenueID: event.VenueID, Ordinal: event.Ordinal, Failure: "public CDF snapshot lacks explicit sequence or side presence"})
+				}
+				return
+			}
+			if snapshot.Bids == nil || snapshot.Asks == nil || snapshot.PublicBids == nil || snapshot.PublicAsks == nil || !validCDFSnapshotProjection(snapshot) {
 				r.addCheck(CDFActivationCheck{VenueID: event.VenueID, Ordinal: event.Ordinal, Failure: "public CDF snapshot lacks explicit sequence or side presence"})
 				return
 			}
@@ -3623,7 +3635,13 @@ func (r *CDFActivationAudit) processCDFDepthSnapshot(event Event, states map[cdf
 	if err := decodeRequiredJSON(event.Raw(), &snapshot, "bids", "asks", "source_sequence", "public_bids", "public_asks"); err != nil {
 		return
 	}
-	if snapshot.SourceSequence == 0 || snapshot.Bids == nil || snapshot.Asks == nil || snapshot.PublicBids == nil || snapshot.PublicAsks == nil || !validCDFSnapshotProjection(snapshot) {
+	if snapshot.SourceSequence == 0 {
+		if !isCDFInitialEmptySnapshot(snapshot) {
+			r.addCheck(CDFActivationCheck{VenueID: event.VenueID, Ordinal: event.Ordinal, Failure: "public CDF snapshot lacks a verified public projection"})
+		}
+		return
+	}
+	if snapshot.Bids == nil || snapshot.Asks == nil || snapshot.PublicBids == nil || snapshot.PublicAsks == nil || !validCDFSnapshotProjection(snapshot) {
 		r.addCheck(CDFActivationCheck{VenueID: event.VenueID, Ordinal: event.Ordinal, Failure: "public CDF snapshot lacks a verified public projection"})
 		return
 	}

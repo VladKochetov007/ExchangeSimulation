@@ -165,7 +165,13 @@ func collectCDFPublicDepthObservations(events []Event, venueIDs []string, startA
 				checks = append(checks, CDFActivationCheck{VenueID: event.VenueID, Ordinal: event.Ordinal, Failure: "malformed public CDF snapshot: " + err.Error()})
 				continue
 			}
-			if snapshot.SourceSequence == 0 || snapshot.Bids == nil || snapshot.Asks == nil || snapshot.PublicBids == nil || snapshot.PublicAsks == nil || !validCDFSnapshotProjection(snapshot) {
+			if snapshot.SourceSequence == 0 {
+				if !isCDFInitialEmptySnapshot(snapshot) {
+					checks = append(checks, CDFActivationCheck{VenueID: event.VenueID, Ordinal: event.Ordinal, Failure: "public CDF snapshot lacks a verified public projection"})
+				}
+				continue
+			}
+			if snapshot.Bids == nil || snapshot.Asks == nil || snapshot.PublicBids == nil || snapshot.PublicAsks == nil || !validCDFSnapshotProjection(snapshot) {
 				checks = append(checks, CDFActivationCheck{VenueID: event.VenueID, Ordinal: event.Ordinal, Failure: "public CDF snapshot lacks a verified public projection"})
 				continue
 			}
@@ -362,7 +368,17 @@ func collectCDFLegacyPublicDepthObservations(run *Run, venueIDs []string, startA
 			}
 			if event.Name == "BookSnapshot" {
 				var snapshot cdfPublicSnapshotEvidence
-				if err := decodeRequiredJSON(event.Raw(), &snapshot, "bids", "asks", "source_sequence", "public_bids", "public_asks"); err != nil || snapshot.SourceSequence == 0 || snapshot.Bids == nil || snapshot.Asks == nil || snapshot.PublicBids == nil || snapshot.PublicAsks == nil || !validCDFSnapshotProjection(snapshot) {
+				if err := decodeRequiredJSON(event.Raw(), &snapshot, "bids", "asks", "source_sequence", "public_bids", "public_asks"); err != nil {
+					checks = append(checks, CDFActivationCheck{VenueID: event.VenueID, Ordinal: event.Ordinal, Failure: "malformed or unverifiable public CDF snapshot"})
+					return
+				}
+				if snapshot.SourceSequence == 0 {
+					if !isCDFInitialEmptySnapshot(snapshot) {
+						checks = append(checks, CDFActivationCheck{VenueID: event.VenueID, Ordinal: event.Ordinal, Failure: "malformed or unverifiable public CDF snapshot"})
+					}
+					return
+				}
+				if snapshot.Bids == nil || snapshot.Asks == nil || snapshot.PublicBids == nil || snapshot.PublicAsks == nil || !validCDFSnapshotProjection(snapshot) {
 					checks = append(checks, CDFActivationCheck{VenueID: event.VenueID, Ordinal: event.Ordinal, Failure: "malformed or unverifiable public CDF snapshot"})
 					return
 				}

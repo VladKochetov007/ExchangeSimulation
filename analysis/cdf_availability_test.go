@@ -44,6 +44,29 @@ func TestCollectCDFPublicDepthObservationsMeasuresBookModes(t *testing.T) {
 	}
 }
 
+func TestCollectCDFPublicDepthObservationsSkipsEmptySequenceZeroBootstrap(t *testing.T) {
+	empty := []etypes.PriceLevel{}
+	makeSnapshot := func(sequence uint64, at int64, bids, asks []etypes.PriceLevel) Event {
+		raw, err := json.Marshal(cdfPublicSnapshotEvidence{
+			Bids: bids, Asks: asks, SourceSequence: sequence, PublicBids: bids, PublicAsks: asks,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return Event{SimTS: at, Name: "BookSnapshot", VenueID: "north", GlobalSequence: sequence + 1, payload: raw}
+	}
+	observations, checks := collectCDFPublicDepthObservations([]Event{
+		makeSnapshot(0, 101, empty, empty),
+		makeSnapshot(1, 101, []etypes.PriceLevel{{Price: 99, VisibleQty: 10}}, []etypes.PriceLevel{{Price: 101, VisibleQty: 10}}),
+	}, []string{"north"}, 100, 110)
+	if len(checks) != 0 {
+		t.Fatalf("bootstrap checks = %+v", checks)
+	}
+	if len(observations["north"]) != 1 || observations["north"][0].at != 101 {
+		t.Fatalf("bootstrap observation was retained as public sequence: %+v", observations["north"])
+	}
+}
+
 func TestValidateCDFObservationCadenceCoversOpeningAndTerminalIntervals(t *testing.T) {
 	observations := []cdfDepthObservation{
 		{at: 1, globalSequence: 1, snapshot: true},

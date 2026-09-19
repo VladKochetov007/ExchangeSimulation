@@ -3169,6 +3169,27 @@ func TestCDFSnapshotProjectionRequiresExactPublicView(t *testing.T) {
 	}
 }
 
+func TestCDFInitialEmptySnapshotIsBootstrapOnly(t *testing.T) {
+	initial := cdfPublicSnapshotEvidence{
+		Bids: []etypes.PriceLevel{}, Asks: []etypes.PriceLevel{}, SourceSequence: 0,
+		PublicBids: []etypes.PriceLevel{}, PublicAsks: []etypes.PriceLevel{},
+	}
+	if !isCDFInitialEmptySnapshot(initial) {
+		t.Fatal("explicit empty sequence-zero bootstrap was rejected")
+	}
+	initial.PublicBids = []etypes.PriceLevel{{Price: 100, VisibleQty: 1}}
+	if isCDFInitialEmptySnapshot(initial) {
+		t.Fatal("sequence-zero bootstrap with public depth was accepted")
+	}
+	initial = cdfPublicSnapshotEvidence{
+		Bids: []etypes.PriceLevel{}, Asks: []etypes.PriceLevel{}, SourceSequence: 0,
+		PublicBids: nil, PublicAsks: []etypes.PriceLevel{},
+	}
+	if isCDFInitialEmptySnapshot(initial) {
+		t.Fatal("sequence-zero bootstrap with omitted public side was accepted")
+	}
+}
+
 func TestCDFVenueConcentrationSeparatesBookAvailabilityStates(t *testing.T) {
 	contract := RegisteredSV1DActivationContract()
 	observations := []cdfDepthObservation{
