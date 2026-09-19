@@ -54,7 +54,7 @@ type ElasticLiquiditySupplierSpec struct {
 	RegisteredMinimumExecutableQty int64 `json:"registered_minimum_executable_qty,omitempty"`
 	// QuoteOnOneSidedLocalBook opts into the SV1D successor behavior. False
 	// preserves the predecessor's two-sided-only policy.
-	QuoteOnOneSidedLocalBook bool `json:"quote_on_one_sided_local_book,omitempty"`
+	QuoteOnOneSidedLocalBook bool `json:"quote_on_one_sided_local_book"`
 	// MaxLossQuote is a finite quote-denominated loss budget. Zero preserves
 	// the historical supplier contract; the SV1B roster must register a
 	// positive budget so the participant can withdraw when its marked equity

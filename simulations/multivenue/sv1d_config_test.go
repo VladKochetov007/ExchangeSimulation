@@ -1,6 +1,7 @@
 package multivenue
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -67,6 +68,68 @@ func TestRegisteredSV1DActivationConfigs(t *testing.T) {
 			for _, supplier := range config.ElasticLiquiditySuppliers {
 				if supplier.QuoteOnOneSidedLocalBook != test.wantOneSidedMode {
 					t.Fatalf("supplier %s one-sided mode=%t, want %t", supplier.Role, supplier.QuoteOnOneSidedLocalBook, test.wantOneSidedMode)
+				}
+			}
+		})
+	}
+}
+
+func TestSV1DManifestRetainsExplicitOneSidedSupplierOption(t *testing.T) {
+	tests := []struct {
+		name string
+		want bool
+	}{
+		{name: "activation-659-treatment", want: true},
+		{name: "activation-659-mode-off", want: false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			configPath := filepath.Join("..", "..", "research", "configs", "v2-r2-sv1d-activation", test.name+".json")
+			raw, err := os.ReadFile(configPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			config, err := DecodeConfig(raw)
+			if err != nil {
+				t.Fatal(err)
+			}
+			config.LogDir = t.TempDir()
+			sim, err := NewSim(time.Second, config)
+			if err != nil {
+				t.Fatalf("NewSim: %v", err)
+			}
+			t.Cleanup(func() {
+				if err := sim.Close(); err != nil {
+					t.Errorf("close simulation: %v", err)
+				}
+			})
+
+			manifestRaw, err := os.ReadFile(filepath.Join(config.LogDir, "manifest.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var manifest struct {
+				Config struct {
+					ElasticLiquiditySuppliers []map[string]json.RawMessage `json:"elastic_liquidity_suppliers"`
+				} `json:"config"`
+			}
+			if err := json.Unmarshal(manifestRaw, &manifest); err != nil {
+				t.Fatalf("decode manifest: %v", err)
+			}
+			if got := len(manifest.Config.ElasticLiquiditySuppliers); got != len(config.ElasticLiquiditySuppliers) {
+				t.Fatalf("manifest supplier count = %d, want %d", got, len(config.ElasticLiquiditySuppliers))
+			}
+			for index, supplier := range manifest.Config.ElasticLiquiditySuppliers {
+				encoded, present := supplier["quote_on_one_sided_local_book"]
+				if !present {
+					t.Fatalf("supplier %d omitted explicit one-sided option", index)
+				}
+				var got bool
+				if err := json.Unmarshal(encoded, &got); err != nil {
+					t.Fatalf("decode supplier %d one-sided option: %v", index, err)
+				}
+				if got != test.want {
+					t.Fatalf("supplier %d one-sided option = %t, want %t", index, got, test.want)
 				}
 			}
 		})

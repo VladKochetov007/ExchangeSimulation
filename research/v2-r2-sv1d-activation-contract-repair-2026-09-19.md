@@ -113,3 +113,37 @@ market, evidence, or development boundary.
   interpreted as a measurement.
 * Holdouts `619`, `631`, and `641` remain untouched.
 * No old economic result is rescored, and no R2 predecessor claim is reopened.
+
+## Post-review activation finding — explicit false manifest field — 2026-09-19
+
+The reviewed `2192451` candidate passed its fresh Go 1.27 rebuild, seed-977
+finite-cgroup capacity preflight, and independent capacity verification. The
+authorized development-only seed-659 tri-arm then completed simulation and
+rendering for treatment, mode-off, and no-roster. The strict audit accepted
+treatment and no-roster, but mode-off failed closed before scoring with:
+
+    cdf activation: decode config: decode elastic supplier 0: missing quote_on_one_sided_local_book
+
+The checked-in mode-off configuration did contain the explicit registered
+`false` value, and its copied `run-config.json` hash matched that source. The
+production simulator instead serialized `manifest.config` from the typed Go
+configuration. `ElasticLiquiditySupplierSpec.QuoteOnOneSidedLocalBook` used
+`omitempty`, so the false value disappeared from the manifest. The strict
+decoder correctly requires the key because omission and explicit false are
+different contract states. This is an evidence/provenance serialization bug,
+not a CDF economic result.
+
+The activation namespace and its incomplete typed mode-off result are retained
+outside the repository and classified as `INVALID_EVIDENCE`; no arm score,
+development-cell result, freeze, or holdout claim is derived from them. The
+minimal successor correction removes `omitempty` from this one field and adds
+a production `NewSim` regression that loads both registered treatment and
+mode-off configurations, reads the emitted manifest, and requires the field
+with its exact true/false value.
+
+Because the defect was reachable in the authorized probe, the old bundle,
+capacity attestation, binaries, and activation namespace do not authorize a
+rerun. The corrected tree requires focused/full tests, fresh independent Luna
+review, a clean pinned rebuild and bundle, a new capacity namespace, and only
+then a fresh seed-659 activation. No historical R2 result was affected; no
+registered 24-hour development cell or holdout was consumed.
