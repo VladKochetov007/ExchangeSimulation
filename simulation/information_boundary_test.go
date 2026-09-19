@@ -296,3 +296,14 @@ func TestDelayedGatewayNowUnixNanoUsesLocalSimulationClock(t *testing.T) {
 		t.Fatalf("advanced local clock = %d, want %d", got, clock.NowUnixNano())
 	}
 }
+
+func TestDelayedGatewayWithoutSimulationClockIsNotAdvertised(t *testing.T) {
+	inner := &boundaryGateway{id: 10, resp: make(chan exchange.Response, 1), md: make(chan *exchange.MarketDataMsg, 1)}
+	delayed := NewDelayedGateway(inner, nil, nil, nil)
+	if delayed.SimulationClockConfigured() {
+		t.Fatal("unconfigured delayed gateway advertised a simulation clock")
+	}
+	if got := delayed.NowUnixNano(); got != 0 {
+		t.Fatalf("unconfigured delayed gateway time = %d, want zero sentinel", got)
+	}
+}

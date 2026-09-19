@@ -149,15 +149,49 @@ performance-branch code is imported by this correction.
 
 ## Successor implementation checkpoint
 
-The zero-based identity correction is committed as `8103bcd`. The timestamp
-correction is the next uncommitted candidate change in this worktree. It adds
-no serialized configuration field and no market-state input: `DelayedGateway`
-exposes only its current participant-local clock, `Sim.addVenue` injects that
-clock into the CDF actor, and the actor uses one sampled execution timestamp
-for observation-age checks, private reference aging, decision evidence, and
-quote submission. Direct actor tests retain the nominal-ticker fallback.
+The zero-based identity correction is committed as `8103bcd`. The execution
+timestamp correction is committed as `4f14dfb`. It adds no serialized
+configuration field and no market-state input: `DelayedGateway` exposes only
+its current participant-local clock, `Sim.addVenue` injects that clock into the
+CDF actor, and the actor uses one sampled execution timestamp for
+observation-age checks, private reference aging, decision evidence, and quote
+submission. Direct actor tests retain the nominal-ticker fallback.
 
-The focused simulation and multivenue regressions pass. The change still
-requires the clean full test/vet/race/evidence gates, fresh independent review,
-fresh pinned rebuild/capacity verification, and a new development-only seed-659
-probe before it can advance the scientific program.
+## Independent review of `4f14dfb`
+
+A fresh read-only Luna xhigh reviewer (`Kierkegaard`) inspected the exact
+candidate commit `4f14dfb` and tree
+`baa07deb9376e49c57753cbf9310e8505bb86c7c`. Review execution was
+`COMPLETED`; the substantive verdict was **ACCEPT WITH CONDITIONS**. The
+reviewer found no calendar, exchange, or scheduled-risk regression and agreed
+that the zero-based identity correction preserves positive price/quantity,
+valid-side, nonzero/distinct maker/taker, scoped uniqueness, and reconciliation
+invariants. The reviewer also accepted the execution-clock wiring on the
+registered deterministic path: the gateway clock is participant-local, the
+same sampled time is used consistently, and the regression covers the nominal
+timer-versus-execution boundary.
+
+The reviewer required three bounded follow-ups before promotion:
+
+1. complete a focused multivenue race run;
+2. add an end-to-end registered-fixture reconciliation test whose first trade
+   identity is zero (the prior tests were direct helper-level regressions);
+3. prevent a manually constructed gateway without a scheduler/clock from
+   advertising a zero-valued execution clock to a supplier.
+
+The first follow-up's changed-path focused race run passed after review. The
+broader multivenue race matrix had previously exceeded its ten-minute test
+timeout in the existing fresh-process determinism case without a race report;
+it is not treated as a substantive acceptance. The second and third follow-ups
+are implemented in the successor checkpoint: the full registered fixture now
+accepts a zero-based first trade, and clock injection requires both
+`NowUnixNano` and `SimulationClockConfigured` to report a deterministic
+scheduler/clock pair. This changes the candidate tree, so a fresh independent
+review is required; the `4f14dfb` review does not cover the successor.
+
+The focused simulation, multivenue, and analysis regressions pass at this
+checkpoint. The successor still requires the clean full test/vet/race/evidence
+gates, a fresh independent review, a fresh pinned Go 1.27 rebuild/capacity
+verification, and a new development-only seed-659 probe before it can advance
+the scientific program. No 24-hour development cells or holdouts are
+authorized by this note.

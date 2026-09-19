@@ -3523,7 +3523,10 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 		}); ok {
 			liquidityConfig.ObservationFrontier = frontierGateway.MarketDataFrontier
 		}
-		if executionClock, ok := gateway.(interface{ NowUnixNano() int64 }); ok {
+		if executionClock, ok := gateway.(interface {
+			NowUnixNano() int64
+			SimulationClockConfigured() bool
+		}); ok && executionClock.SimulationClockConfigured() {
 			liquidityConfig.DecisionNow = executionClock.NowUnixNano
 		}
 		if s.Config.RecordElasticLiquiditySupplierDecisions {

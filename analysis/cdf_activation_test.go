@@ -195,6 +195,7 @@ type cdfActivationFixtureOptions struct {
 	omitCancellation      bool
 	dominantVolume        bool
 	dominantDepth         bool
+	zeroBasedFirstTrade   bool
 }
 
 type cdfActivationFixtureParticipant struct {
@@ -226,6 +227,20 @@ func TestAuditCDFLiquidityActivationAcceptsCompleteRegisteredFixture(t *testing.
 	}
 	if audit.SupplierCount != 12 || audit.FillCount != 12 || audit.WithdrawalCount != 12 || audit.OneSidedRestorationCount != 4 {
 		t.Fatalf("activation counts = suppliers %d fills %d withdrawals %d restorations %d", audit.SupplierCount, audit.FillCount, audit.WithdrawalCount, audit.OneSidedRestorationCount)
+	}
+}
+
+func TestAuditCDFLiquidityActivationAcceptsZeroBasedFirstTrade(t *testing.T) {
+	run := writeRegisteredCDFActivationFixture(t, cdfActivationFixtureOptions{zeroBasedFirstTrade: true})
+	audit, err := run.AuditCDFLiquidityActivation(CDFActivationOptions{Contract: RegisteredSV1DActivationContract(), AllowLegacyJSON: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !audit.Valid || !audit.EvidenceValid || !audit.ActivationSatisfied || !audit.AntiCheatingSatisfied {
+		t.Fatalf("zero-based first trade activation audit = %+v", audit)
+	}
+	if audit.SupplierCount != 12 || audit.FillCount != 12 || audit.WithdrawalCount != 12 || audit.OneSidedRestorationCount != 4 {
+		t.Fatalf("zero-based first trade activation counts = suppliers %d fills %d withdrawals %d restorations %d", audit.SupplierCount, audit.FillCount, audit.WithdrawalCount, audit.OneSidedRestorationCount)
 	}
 }
 
@@ -1482,6 +1497,9 @@ func appendCDFParticipantEvents(
 	orderOne := cdfFixtureOrderID(participant.clientID, 1)
 	orderTwo := cdfFixtureOrderID(participant.clientID, 2)
 	tradeID := cdfFixtureTradeID(participant.clientID)
+	if options.zeroBasedFirstTrade && participantOrdinal == 0 {
+		tradeID = 0
+	}
 	firstDecisionAt := start + 2_000_000_000 + supplier.DecisionPhaseOffset
 	acceptedOneAt := start + 4_000_000_000 + supplier.DecisionPhaseOffset
 	fillAt := start + 6_000_000_000 + supplier.DecisionPhaseOffset

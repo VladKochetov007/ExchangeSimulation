@@ -148,6 +148,14 @@ func (d *DelayedGateway) NowUnixNano() int64 {
 	return d.clock.NowUnixNano()
 }
 
+// SimulationClockConfigured reports whether this gateway is attached to the
+// deterministic scheduler and simulation clock needed for execution-time
+// evidence. It is separate from NowUnixNano because zero is a valid clock
+// value, while an unconfigured gateway must not advertise a usable clock.
+func (d *DelayedGateway) SimulationClockConfigured() bool {
+	return d != nil && d.scheduler != nil && d.clock != nil
+}
+
 // UseScheduler switches to scheduled delivery at exact simulation times.
 // Must be called before Start.
 func (d *DelayedGateway) UseScheduler(s *EventScheduler, c types.Clock) {
