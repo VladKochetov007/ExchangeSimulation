@@ -1542,8 +1542,11 @@ type Venue struct {
 	RiskTimeline              []VenueRiskSnapshot
 	PreExpiryRisk             []VenueRiskSnapshot
 	TerminalRisk              *VenueRiskSnapshot
+	RiskCaptureDiagnostics    []VenueRiskCaptureDiagnostic
 	riskErr                   error
 	riskLastNano              int64
+	riskLastAttemptNano       int64
+	riskCaptureAttempts       uint64
 	optionListedNano          map[string]int64
 	nextClient                uint64
 }
@@ -1885,6 +1888,21 @@ type VenueRiskSnapshot struct {
 	Account           etypes.MarkedAccountSnapshot `json:"account"`
 	GreekProfile      derivsim.GreekProfile        `json:"greek_profile"`
 	GreekPositions    []derivsim.GreekPosition     `json:"greek_positions"`
+}
+
+// VenueRiskCaptureDiagnostic records a scheduled risk-telemetry attempt. A
+// transient unavailable mark is a producer-side observation gap, not a valid
+// risk result; the diagnostic keeps the deferral and its later retry explicit
+// in the evidence stream while terminal and pre-expiry captures remain strict.
+type VenueRiskCaptureDiagnostic struct {
+	VenueID         string `json:"venue_id"`
+	Phase           string `json:"phase"`
+	SimTime         int64  `json:"sim_time"`
+	Attempt         uint64 `json:"attempt"`
+	AttemptKind     string `json:"attempt_kind"`
+	Outcome         string `json:"outcome"`
+	NextAttemptNano int64  `json:"next_attempt_nano,omitempty"`
+	Error           string `json:"error,omitempty"`
 }
 
 // Sim owns the three venue ecology and every log file created for it.
@@ -4292,16 +4310,54 @@ func captureScheduledVenueRisk(venue *Venue, interval, automationInterval time.D
 		return
 	}
 	now := venue.Exchange.Clock.NowUnixNano()
-	if now <= 0 || (venue.riskLastNano != 0 && now-venue.riskLastNano < interval.Nanoseconds() && !hasNearExpiryOption(venue, now, automationInterval)) {
+	nearExpiry := hasNearExpiryOption(venue, now, automationInterval)
+	if now <= 0 || (venue.riskLastAttemptNano != 0 && now-venue.riskLastAttemptNano < interval.Nanoseconds() && !nearExpiry) {
 		return
+	}
+	venue.riskLastAttemptNano = now
+	venue.riskCaptureAttempts++
+	attemptKind := "initial"
+	if venue.riskCaptureAttempts > 1 {
+		attemptKind = "retry"
 	}
 	risk, err := captureVenueRisk(venue, "post_derivative_mark")
 	if err != nil {
+		if errors.Is(err, etypes.ErrNoPrice) {
+			retryAfter := interval
+			if nearExpiry && automationInterval > 0 {
+				retryAfter = automationInterval
+			}
+			venue.recordRiskCaptureDiagnostic(VenueRiskCaptureDiagnostic{
+				VenueID: venue.ID, Phase: "post_derivative_mark", SimTime: now,
+				Attempt: venue.riskCaptureAttempts, AttemptKind: attemptKind,
+				Outcome: "deferred", NextAttemptNano: now + retryAfter.Nanoseconds(),
+				Error: err.Error(),
+			})
+			return
+		}
+		venue.recordRiskCaptureDiagnostic(VenueRiskCaptureDiagnostic{
+			VenueID: venue.ID, Phase: "post_derivative_mark", SimTime: now,
+			Attempt: venue.riskCaptureAttempts, AttemptKind: attemptKind,
+			Outcome: "failed", Error: err.Error(),
+		})
 		venue.riskErr = err
 		return
 	}
 	venue.riskLastNano = now
 	venue.RiskTimeline = append(venue.RiskTimeline, *risk)
+	venue.recordRiskCaptureDiagnostic(VenueRiskCaptureDiagnostic{
+		VenueID: venue.ID, Phase: "post_derivative_mark", SimTime: now,
+		Attempt: venue.riskCaptureAttempts, AttemptKind: attemptKind,
+		Outcome: "captured",
+	})
+}
+
+func (venue *Venue) recordRiskCaptureDiagnostic(diagnostic VenueRiskCaptureDiagnostic) {
+	venue.RiskCaptureDiagnostics = append(venue.RiskCaptureDiagnostics, diagnostic)
+	if venue.makerStateLog.inner == nil && !venue.makerStateLog.sink.includesEvidenceOnly() {
+		return
+	}
+	venue.makerStateLog.LogEvidenceOnly(diagnostic.SimTime, venue.OptionDealerClientID, "risk_capture_diagnostic", diagnostic)
 }
 
 func hasNearExpiryOption(venue *Venue, now int64, cadence time.Duration) bool {

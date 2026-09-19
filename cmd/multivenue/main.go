@@ -22,20 +22,21 @@ import (
 )
 
 type greekOutput struct {
-	SchemaVersion    int                                       `json:"schema_version"`
-	InitialRisk      map[string]multivenue.VenueRiskSnapshot   `json:"initial_risk"`
-	RiskTimeline     map[string][]multivenue.VenueRiskSnapshot `json:"risk_timeline"`
-	PreExpiryRisk    map[string][]multivenue.VenueRiskSnapshot `json:"pre_expiry_risk"`
-	TerminalRisk     map[string]multivenue.VenueRiskSnapshot   `json:"terminal_risk"`
-	Microstructure   []multivenue.MicrostructureStats          `json:"microstructure"`
-	Metaorders       []multivenue.MetaorderRecord              `json:"metaorders,omitempty"`
-	CarryActivity    []multivenue.CarryActivity                `json:"carry_activity,omitempty"`
-	RouterReports    []multivenue.CrossVenueArbReport          `json:"router_reports,omitempty"`
-	InitialAccounts  []multivenue.ParticipantAccountSnapshot   `json:"initial_accounts,omitempty"`
-	TerminalAccounts []multivenue.ParticipantAccountSnapshot   `json:"terminal_accounts,omitempty"`
-	VenueLedgers     []multivenue.VenueLedger                  `json:"venue_ledgers,omitempty"`
-	RequestBudgets   []multivenue.RequestBudgetReport          `json:"request_budgets,omitempty"`
-	Caveats          []string                                  `json:"caveats"`
+	SchemaVersion    int                                                `json:"schema_version"`
+	InitialRisk      map[string]multivenue.VenueRiskSnapshot            `json:"initial_risk"`
+	RiskTimeline     map[string][]multivenue.VenueRiskSnapshot          `json:"risk_timeline"`
+	PreExpiryRisk    map[string][]multivenue.VenueRiskSnapshot          `json:"pre_expiry_risk"`
+	RiskDiagnostics  map[string][]multivenue.VenueRiskCaptureDiagnostic `json:"risk_capture_diagnostics,omitempty"`
+	TerminalRisk     map[string]multivenue.VenueRiskSnapshot            `json:"terminal_risk"`
+	Microstructure   []multivenue.MicrostructureStats                   `json:"microstructure"`
+	Metaorders       []multivenue.MetaorderRecord                       `json:"metaorders,omitempty"`
+	CarryActivity    []multivenue.CarryActivity                         `json:"carry_activity,omitempty"`
+	RouterReports    []multivenue.CrossVenueArbReport                   `json:"router_reports,omitempty"`
+	InitialAccounts  []multivenue.ParticipantAccountSnapshot            `json:"initial_accounts,omitempty"`
+	TerminalAccounts []multivenue.ParticipantAccountSnapshot            `json:"terminal_accounts,omitempty"`
+	VenueLedgers     []multivenue.VenueLedger                           `json:"venue_ledgers,omitempty"`
+	RequestBudgets   []multivenue.RequestBudgetReport                   `json:"request_budgets,omitempty"`
+	Caveats          []string                                           `json:"caveats"`
 }
 
 type runProfiles struct {
@@ -224,12 +225,13 @@ func run() (err error) {
 	}
 	closed = true
 	output := greekOutput{
-		SchemaVersion:  6,
-		InitialRisk:    make(map[string]multivenue.VenueRiskSnapshot, len(sim.Venues)),
-		RiskTimeline:   make(map[string][]multivenue.VenueRiskSnapshot, len(sim.Venues)),
-		PreExpiryRisk:  make(map[string][]multivenue.VenueRiskSnapshot, len(sim.Venues)),
-		TerminalRisk:   make(map[string]multivenue.VenueRiskSnapshot, len(sim.Venues)),
-		Microstructure: make([]multivenue.MicrostructureStats, 0, len(sim.Venues)),
+		SchemaVersion:   7,
+		InitialRisk:     make(map[string]multivenue.VenueRiskSnapshot, len(sim.Venues)),
+		RiskTimeline:    make(map[string][]multivenue.VenueRiskSnapshot, len(sim.Venues)),
+		PreExpiryRisk:   make(map[string][]multivenue.VenueRiskSnapshot, len(sim.Venues)),
+		RiskDiagnostics: make(map[string][]multivenue.VenueRiskCaptureDiagnostic, len(sim.Venues)),
+		TerminalRisk:    make(map[string]multivenue.VenueRiskSnapshot, len(sim.Venues)),
+		Microstructure:  make([]multivenue.MicrostructureStats, 0, len(sim.Venues)),
 		Caveats: []string{
 			"Venues are independently funded. A configured cross-venue router has one local account per venue; it models neither asset transfer nor atomic legs.",
 			"Greek timeline rows are recomputed from exchange-owned option positions and the atomic underlying mark paired with each option premium. They are not actor-local quote-cache measurements.",
@@ -245,6 +247,7 @@ func run() (err error) {
 		output.InitialRisk[venue.ID] = *venue.InitialRisk
 		output.RiskTimeline[venue.ID] = append([]multivenue.VenueRiskSnapshot(nil), venue.RiskTimeline...)
 		output.PreExpiryRisk[venue.ID] = append([]multivenue.VenueRiskSnapshot(nil), venue.PreExpiryRisk...)
+		output.RiskDiagnostics[venue.ID] = append([]multivenue.VenueRiskCaptureDiagnostic(nil), venue.RiskCaptureDiagnostics...)
 		output.TerminalRisk[venue.ID] = *venue.TerminalRisk
 		if venue.Microstructure != nil {
 			output.Microstructure = append(output.Microstructure, *venue.Microstructure)

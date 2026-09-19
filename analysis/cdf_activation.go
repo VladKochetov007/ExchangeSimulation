@@ -1199,6 +1199,7 @@ type cdfGreeksSidecar struct {
 	TerminalRisk               json.RawMessage   `json:"terminal_risk"`
 	RiskTimeline               json.RawMessage   `json:"risk_timeline"`
 	PreExpiryRisk              json.RawMessage   `json:"pre_expiry_risk"`
+	RiskCaptureDiagnostics     json.RawMessage   `json:"risk_capture_diagnostics"`
 	Microstructure             []json.RawMessage `json:"microstructure"`
 	Metaorders                 []json.RawMessage `json:"metaorders"`
 	CarryActivity              []json.RawMessage `json:"carry_activity"`
@@ -1337,6 +1338,9 @@ func validateCDFCompletionSidecars(dir string, metadata cdfActivationMetadata, e
 		!cdfJSONObject(greeks.InitialRisk) || !cdfJSONObject(greeks.TerminalRisk) ||
 		!cdfJSONObject(greeks.RiskTimeline) || len(greeks.Microstructure) == 0 {
 		return fmt.Errorf("cdf activation: greeks sidecar is structurally incomplete")
+	}
+	if greeks.SchemaVersion >= 7 && !cdfJSONObject(greeks.RiskCaptureDiagnostics) {
+		return fmt.Errorf("cdf activation: greeks sidecar omits risk capture diagnostics")
 	}
 
 	latencyRaw, err := readSV1DRegularFile(filepath.Join(dir, "latency.json"))
