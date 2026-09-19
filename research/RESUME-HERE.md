@@ -1,3 +1,26 @@
+# Current operational pointer — 2026-09-19 (scheduled-risk recovery successor)
+
+The C5 seed-659 producer/risk gate has been corrected only in successor source
+commit `88ea00d` (`fix: defer transient scheduled risk telemetry gaps`). The
+fresh independent Luna adjudication accepted the narrow correction: transient
+scheduled `ErrNoPrice` is deferred and retried, while stale option marks,
+phase ordering, pre-expiry valuation, terminal valuation, and the registered
+fixture remain strict and unchanged. Every attempt is retained as an auditable
+`risk_capture_diagnostic`; schema-7 `greeks.json` and binary evidence-contract
+v2 carry the record, while legacy binary contract v1 does not consume a
+dropped evidence-only sequence.
+
+The correction has passed the focused recovery/renderer tests and the complete
+`go test ./simulations/multivenue ./analysis -count=1` gate. It has not yet
+received a review of the final successor tree including this research record,
+has not been rebuilt into a new pinned bundle, and has not been rerun on
+seed-659. The next gate is exactly that fresh independent review, followed by
+clean build/provenance verification and a new development-only activation
+probe. No development cells, freeze, or holdouts may run before those gates.
+
+See `research/v2-r2-scheduled-risk-recovery-2026-09-19.md` for the invariant,
+implementation, tests, and historical-impact decision.
+
 # Current operational pointer — 2026-09-19 (C5 activation diagnosis)
 
 C5 (`5015fd00a3720c3bd9312d93ae5635fdbf8647a4`, tree

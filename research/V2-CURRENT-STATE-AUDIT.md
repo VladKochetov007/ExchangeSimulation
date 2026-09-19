@@ -1,3 +1,21 @@
+# Current operational pointer — 2026-09-19 (scheduled-risk recovery successor)
+
+The C5 seed-659 producer/risk gate is superseded only by successor source
+commit `88ea00d` (`fix: defer transient scheduled risk telemetry gaps`). A
+fresh independent Luna review found the exchange's strict unavailable-option
+mark behavior correct but identified the scheduled telemetry coupling as the
+minimal producer defect. The successor defers only transient scheduled
+`ErrNoPrice`, retries at the next registered boundary, records every attempt
+in the canonical evidence path, and leaves stale-mark clearing, phase order,
+pre-expiry, terminal valuation, seed, config, roster, and economics unchanged.
+
+Focused recovery/renderer tests and the full multivenue+analysis Go gate pass.
+The final tree still needs one fresh independent review, clean pinned build,
+and provenance verification before a new seed-659 activation probe. No
+development cell, freeze, or holdout has been consumed under this successor.
+The detailed amendment is
+`research/v2-r2-scheduled-risk-recovery-2026-09-19.md`.
+
 # Current operational pointer — 2026-09-19 (C5 activation diagnosis)
 
 The authoritative successor pointer is C5 (`5015fd00a3720c3bd9312d93ae5635fdbf8647a4`,

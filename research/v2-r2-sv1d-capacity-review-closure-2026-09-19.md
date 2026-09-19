@@ -167,3 +167,15 @@ valuation remain intact and the gap remains auditable. Reusing stale option
 marks, changing deterministic phase ordering, altering the registered
 configuration/roster/warm-up, or treating an incomplete arm as an economic
 result is explicitly rejected pending a new scientific amendment.
+
+## Successor correction — 2026-09-19
+
+The fresh Luna independent adjudication accepted the narrow producer correction
+described above. Source commit `88ea00d` now defers only scheduled `ErrNoPrice`
+captures, retries at the next normal boundary, fails immediately on other
+errors, and records `risk_capture_diagnostic` evidence. Strict option mark
+clearing, phase order, pre-expiry capture, and terminal valuation are
+unchanged. Focused recovery/renderer regressions and the full
+`go test ./simulations/multivenue ./analysis -count=1` gate pass. This is a
+successor semantic amendment, not an offline repair of C5; a fresh exact-tree
+review, clean pinned build, and new seed-659 activation are still required.
