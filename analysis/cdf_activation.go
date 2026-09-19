@@ -939,7 +939,7 @@ var cdfStrictActivationConfigRequiredFields = []string{
 }
 
 var cdfStrictActivationMetadataRequiredFields = []string{
-	"schema_version", "runner_contract", "probe_id", "arm", "experiment_id", "config_experiment_id",
+	"schema_version", "runner_contract", "probe_id", "arm", "cell", "experiment_id", "config_experiment_id",
 	"hypothesis_id", "seed", "simulated_horizon", "simulation_start_nano", "simulation_end_nano",
 	"config_sha256", "binary_sha256", "git_revision", "tree_revision", "binary_path", "binary_go_version",
 	"binary_goos", "binary_goarch", "binary_goamd64", "analyzer_sha256", "renderer_sha256", "runner_sha256",
@@ -1075,7 +1075,8 @@ func loadCDFActivationIdentity(dir string, strict bool) (cdfActivationConfig, cd
 	}
 	if metadata.GitRevision != manifest.Build.Revision || metadata.BinaryGOOS != manifest.Build.GOOS ||
 		metadata.BinaryGOARCH != manifest.Build.GOARCH || metadata.BinaryGOAMD64 != manifest.Build.GOAMD64 ||
-		metadata.Seed != config.Seed || metadata.ConfigExperimentID != config.ExperimentID ||
+		metadata.Seed != config.Seed || metadata.Cell == "" || metadata.Cell != metadata.Arm ||
+		metadata.ExperimentID != config.ExperimentID || metadata.ConfigExperimentID != config.ExperimentID ||
 		metadata.HypothesisID != config.HypothesisID || metadata.LogMode != config.LogMode ||
 		metadata.EvidenceFormat != config.EvidenceFormat || !sameCDFStrings(manifest.VenueIDs, config.VenueIDs) {
 		return cdfActivationConfig{}, cdfActivationMetadata{}, fmt.Errorf("cdf activation: metadata, manifest, and config identities disagree")

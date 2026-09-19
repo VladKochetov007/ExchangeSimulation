@@ -256,6 +256,99 @@ func TestCDFStrictRunStatusAcceptsActivationRunnerIdentityFields(t *testing.T) {
 	}
 }
 
+func TestCDFStrictActivationBindsRunnerMetadataIdentity(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(map[string]json.RawMessage)
+		want   string
+	}{
+		{
+			name: "missing cell",
+			mutate: func(fields map[string]json.RawMessage) {
+				delete(fields, "cell")
+			},
+			want: "decode run metadata",
+		},
+		{
+			name: "cell does not identify arm",
+			mutate: func(fields map[string]json.RawMessage) {
+				fields["cell"] = json.RawMessage(`"other-arm"`)
+			},
+			want: "metadata, manifest, and config identities disagree",
+		},
+		{
+			name: "experiment does not identify config",
+			mutate: func(fields map[string]json.RawMessage) {
+				fields["experiment_id"] = json.RawMessage(`"other-experiment"`)
+			},
+			want: "metadata, manifest, and config identities disagree",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			run := writeRegisteredCDFActivationFixture(t, cdfActivationFixtureOptions{})
+			metadataPath := filepath.Join(run.Dir, "run-metadata.json")
+			metadataRaw, err := os.ReadFile(metadataPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var fields map[string]json.RawMessage
+			if err := json.Unmarshal(metadataRaw, &fields); err != nil {
+				t.Fatal(err)
+			}
+			test.mutate(fields)
+			mutated, err := json.Marshal(fields)
+			if err != nil {
+				t.Fatal(err)
+			}
+			writeCDFFixtureFile(t, metadataPath, append(mutated, '\n'))
+			if _, _, err := loadCDFActivationIdentity(run.Dir, true); err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("strict metadata identity error = %v, want %q", err, test.want)
+			}
+		})
+	}
+}
+
+func TestValidateCDFCompletionArtifactsBindsRunnerMetadataIdentity(t *testing.T) {
+	run := writeRegisteredCDFActivationFixture(t, cdfActivationFixtureOptions{strictMechanics: true})
+	contract := RegisteredSV1DActivationContract()
+	rows := readStrictCDFFixtureRows(t, filepath.Join(run.Dir, "venues"))
+	writeStrictCDFBinaryEvidence(t, run.Dir, rows, contract.BinarySchemaEpoch)
+	rewriteStrictCDFCompletionIdentity(t, run.Dir, contract)
+	if err := os.RemoveAll(filepath.Join(run.Dir, "venues")); err != nil {
+		t.Fatal(err)
+	}
+	metadataRaw, err := os.ReadFile(filepath.Join(run.Dir, "run-metadata.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var metadata cdfActivationMetadata
+	if err := json.Unmarshal(metadataRaw, &metadata); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateCDFCompletionArtifacts(run.Dir, metadata, contract.BinarySchemaEpoch); err != nil {
+		t.Fatalf("runner-shaped completion artifacts rejected: %v", err)
+	}
+	statusPath := filepath.Join(run.Dir, "run-status.json")
+	statusRaw, err := os.ReadFile(statusPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var status cdfRunStatus
+	if err := json.Unmarshal(statusRaw, &status); err != nil {
+		t.Fatal(err)
+	}
+	status.Cell = "wrong-arm"
+	mutatedStatus, err := json.Marshal(status)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeCDFFixtureFile(t, statusPath, append(mutatedStatus, '\n'))
+	if err := validateCDFCompletionArtifacts(run.Dir, metadata, contract.BinarySchemaEpoch); err == nil || !strings.Contains(err.Error(), "complete registered horizon") {
+		t.Fatalf("runner-shaped status identity mutation was accepted: %v", err)
+	}
+}
+
 func TestAuditCDFLiquidityActivationFailsClosedOnContractMutations(t *testing.T) {
 	tests := []struct {
 		name           string

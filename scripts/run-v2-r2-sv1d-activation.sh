@@ -644,7 +644,7 @@ run_arm() {
 			--arg capacity_attestation_sha256 "$capacity_attestation_sha256" --arg log_mode "$log_mode" --arg evidence_format "$evidence_format" \
 			--arg capacity_records_sha256 "$capacity_records_sha256" --arg trusted_review_key_sha256 "$trusted_review_key_sha256" \
 		--arg output_dir "$arm_dir" --argjson gomaxprocs 2 \
-		'{schema_version: 2, runner_contract: "v2-r2-sv1d-activation-runner-v2", probe_id: "v2-r2-sv1d-activation-659", arm: $arm,
+		'{schema_version: 2, runner_contract: "v2-r2-sv1d-activation-runner-v2", probe_id: "v2-r2-sv1d-activation-659", arm: $arm, cell: $arm,
 		  experiment_id: $experiment_id, config_experiment_id: $experiment_id, hypothesis_id: $hypothesis_id, seed: $seed, simulated_horizon: $horizon,
 		  simulation_start_nano: $simulation_start_nano, simulation_end_nano: $simulation_end_nano,
 		  config_sha256: $config_sha256, binary_sha256: $binary_sha256, git_revision: $git_revision, tree_revision: $tree_revision,

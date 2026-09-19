@@ -59,6 +59,19 @@ The successor correction makes two bounded changes:
    existing tri-arm identity filter continues to ignore only this registered
    one-sided option when comparing treatment and mode-off.
 
+The subsequent independent review of the exact `b33f7b9` tree found one more
+runner/analyzer boundary defect before any rerun: the shell runner wrote
+`cell` only in `run-status.json`, not in each arm's `run-metadata.json`, while
+the strict completion validator compared those identities. The same review
+also required the CDF identity loader to bind `metadata.experiment_id`
+directly to the copied registered config rather than relying only on the outer
+SV1D validator. The successor correction therefore adds `cell: $arm` to the
+runner metadata, makes `cell` a strict metadata field, and rejects empty or
+mismatched cell/arm and experiment/config identities. Runner-shaped metadata
+and completion regressions cover missing/mismatched identity, ineligible
+status, complete-horizon acceptance, and status/hash mutation fail-closed
+behavior.
+
 No matching, risk, lifecycle, participant economics, seed, horizon, schedule,
 event order, historical supplier, capacity formula, or holdout boundary is
 changed by this correction. The config hash, probe plan, binary bundle, review
