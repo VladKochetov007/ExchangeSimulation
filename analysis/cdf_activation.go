@@ -3248,7 +3248,9 @@ func (r *CDFActivationAudit) processCDFRejected(event Event, states map[cdfParti
 		return
 	}
 	submission := submissions[cdfRequestKey{event.VenueID, event.ClientID, rejected.RequestID}]
-	if submission == nil || rejected.Success || rejected.Error == "" || event.SimTS < submission.event.SimTS {
+	if submission == nil || rejected.Success || rejected.Error == "" ||
+		(r.strictMechanics && !cdfEventAfter(event, submission.event.SimTS, submission.event.GlobalSequence)) ||
+		(!r.strictMechanics && event.SimTS < submission.event.SimTS) {
 		r.addEventCheck(event, state, "CDF order rejection has no matching prior submission")
 		return
 	}

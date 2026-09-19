@@ -269,3 +269,19 @@ gates, a fresh independent review, a fresh pinned Go 1.27 rebuild/capacity
 verification, and a new development-only seed-659 probe before it can advance
 the scientific program. No 24-hour development cells or holdouts are
 authorized by this note.
+
+## Fresh review of `a113a7f`
+
+A second fresh independent Luna xhigh reviewer (`Meitner`) inspected exact
+candidate `a113a7f1d4c30937a60a5bfec8f6bac71baf76ae` and confirmed that the
+prior bounded conditions were implemented. Review execution was **COMPLETED**,
+but the substantive verdict remained **REJECT pending one bounded fix**.
+
+The reviewer found that strict `OrderRejected` processing still checked only
+simulation time and not global event sequence. Consequently, a rejection at
+the same simulated timestamp but before its submission could be accepted as a
+valid terminal outcome. The successor adds a strict `cdfEventAfter` check and
+regressions for both inverted and valid same-timestamp rejection order. No
+simulation, historical rescore, development cell, or holdout is authorized
+until this successor completes the full gates and receives another fresh
+independent review.

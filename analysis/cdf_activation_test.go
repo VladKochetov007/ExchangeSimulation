@@ -2696,6 +2696,35 @@ func TestCDFRepricePredicateReconstructsPartialFillBeforeDecision(t *testing.T) 
 	}
 }
 
+func TestCDFStrictOrderRejectionRequiresLaterGlobalSequence(t *testing.T) {
+	contract := RegisteredSV1DActivationContract().Suppliers[0]
+	state := &cdfSupplierState{contract: contract}
+	states := map[cdfParticipantKey]*cdfSupplierState{{venueID: "north", clientID: 7}: state}
+	requestKey := cdfRequestKey{venueID: "north", clientID: 7, requestID: 17}
+	newSubmission := func() map[cdfRequestKey]*cdfSubmission {
+		return map[cdfRequestKey]*cdfSubmission{requestKey: {
+			event:    Event{SimTS: 20, GlobalSequence: 10},
+			decision: cdfDecisionEvidence{QuoteRequestID: 17, Action: "submit", Reason: "inventory_target_gap"},
+		}}
+	}
+	payload, err := json.Marshal(cdfRejectedEvidence{RequestID: 17, Success: false, Error: etypes.RejectPostOnlyWouldTake})
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := newSubmission()
+	audit := &CDFActivationAudit{strictMechanics: true}
+	audit.processCDFRejected(Event{SimTS: 20, GlobalSequence: 9, VenueID: "north", ClientID: 7, payload: payload}, states, before)
+	if before[requestKey].rejected || !hasCDFActivationFailure(audit.Checks, "CDF order rejection has no matching prior submission") {
+		t.Fatalf("same-timestamp rejection before submission was accepted: checks=%+v submission=%+v", audit.Checks, before[requestKey])
+	}
+	after := newSubmission()
+	audit = &CDFActivationAudit{strictMechanics: true}
+	audit.processCDFRejected(Event{SimTS: 20, GlobalSequence: 11, VenueID: "north", ClientID: 7, payload: payload}, states, after)
+	if len(audit.Checks) != 0 || !after[requestKey].rejected {
+		t.Fatalf("same-timestamp rejection after submission was rejected: checks=%+v submission=%+v", audit.Checks, after[requestKey])
+	}
+}
+
 func TestCDFTradeIdentityCannotBeCountedTwice(t *testing.T) {
 	r := &CDFActivationAudit{}
 	payload, err := json.Marshal(cdfTradeEvidence{TradeID: 9, Price: 100, Qty: 3, Side: "SELL"})
