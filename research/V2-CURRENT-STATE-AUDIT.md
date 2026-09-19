@@ -1,3 +1,30 @@
+# Current operational pointer — 2026-09-19 (C5 activation diagnosis)
+
+The authoritative successor pointer is C5 (`5015fd00a3720c3bd9312d93ae5635fdbf8647a4`,
+tree `9409efe743d02b0dae2d4aa7f65de61c1ad1ca26`). C5 was independently
+accepted, cleanly rebuilt with Go 1.27, and passed the registered seed-977
+finite-cgroup capacity preflight plus a separate capacity verification. The
+capacity attestation reports zero OOM/swap events; it is outcome-ineligible and
+does not authorize any scientific cell.
+
+The authorized seed-659 activation probe is retained but non-advancing:
+treatment, mode-off, and no-roster all failed closed with the same
+`simulator_exit_status_1` at strict option dealer risk capture. The retained
+rendered evidence shows the deterministic phase ordering: derivative marks and
+risk telemetry run before same-timestamp maker quote work; the ABC/USD book is
+empty at that boundary, the declared option underlying has no usable reference,
+and the exchange clears the option mark rather than preserving stale risk data.
+The later public book is not evidence that the earlier risk boundary was
+priceable. This is classified `INCOMPLETE_ARM`, not treatment activation,
+economic survival, or a broad R2 failure.
+
+No development cell, freeze, or holdout was consumed. Historical results are
+unchanged. Before any retry, an independent reviewer must adjudicate whether
+the coupling of a transient scheduled telemetry gap to the permanent venue
+`riskErr` is a producer defect. Any correction must preserve the registered
+seed/config/roster/warm-up/event order, strict stale-mark clearing, and strict
+terminal valuation; otherwise it is a new amendment rather than a repair.
+
 # Current operational pointer — 2026-09-19
 
 SV1D remains at the narrow capacity-gate repair. C4 (`6cab934`) closed the

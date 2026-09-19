@@ -107,3 +107,63 @@ scheduled terminal-boundary checkpoints until `Close` and adds a regression with
 multiple events at the same terminal timestamp. Because simulator evidence
 semantics changed, the successor requires full clean gates, a fresh pinned
 build/bundle, and fresh independent review before a new capacity namespace.
+
+## C5 accepted review, capacity verification, and seed-659 activation diagnosis — 2026-09-19
+
+The exact C5 candidate is `5015fd00a3720c3bd9312d93ae5635fdbf8647a4`, tree
+`9409efe743d02b0dae2d4aa7f65de61c1ad1ca26`. It contains only the terminal
+binary-checkpoint correction and its regression on top of the accepted C4
+source. The fresh primary Luna-xhigh launch did not return a substantive report
+within its bounded observation window; the separate independent Luna review
+execution recorded at `/home/vlad/external-scratch/sv1d-capacity-review-5015fd0/`
+completed on the exact tree with verdict **ACCEPT**. The report and execution
+status are retained outside the candidate tree. No reviewer edited the source
+or ran a scientific world.
+
+The C5 validation snapshot passed `make test`, `go vet ./...`, the targeted
+race suites, finite-cgroup validation, `git diff --check`, and the binary
+evidence contract tests. Clean Go 1.27.0 rebuilds from independent clean
+checkouts produced byte-identical registered binaries. The fresh signed bundle
+passed canonical-plan replay, exact-tree/review/config/binary identity checks,
+registered tamper rejections, and final manifest verification. The bundle is
+retained under `/home/vlad/external-scratch/sv1d-capacity-pinned-5015fd0-20260919/`.
+
+The authorized seed-977 five-minute tri-arm capacity preflight then completed
+under `MemoryMax=8G`, no swap, `GOMAXPROCS=2`, and `GOMEMLIMIT=4GiB`. It
+reported zero cgroup OOM and swap deltas, a peak tree RSS of 212,246,528 bytes,
+and a minimum free disk observation of 43,852,029,952 bytes. Its attestation
+was outcome-ineligible by contract. The independent verifier passed using the
+corrected verification wrapper. Capacity artifacts are retained under
+`/home/vlad/external-scratch/sv1d-capacity-run-5015fd0-20260919/`.
+
+The separately authorized seed-659 activation probe was launched only after
+those gates. All three arms retained binary evidence but exited with status 1
+and were classified `INCOMPLETE_ARM`; the scorer issued no directional result.
+The common simulator error was:
+
+    marked position ABC-OPT-U4142432f555344-1735696800-K4900000000-C:
+    option risk mark: no usable price
+
+The failure occurred at the same simulated boundary in treatment, mode-off,
+and no-roster. The retained binary stream was rendered once for diagnosis; the
+derived report shows that the option was listed at
+`1735689603000000000`, while at `1735689777000000000` the deterministic
+post-derivative-mark phase observed an empty ABC/USD book for the relevant
+venue. `derivativeUnderlyingPrice` therefore had no declared usable reference;
+`UpdateDerivativeMarks` cleared the option's paired mark and removed its risk
+epoch. This behavior is required by the existing stale-option regression and is
+not being weakened. The same timestamp later contains actor order work and
+public snapshots that restore ABC/USD liquidity, but that later state cannot
+retroactively make the earlier risk boundary priceable.
+
+The activation is therefore a non-advancing producer/risk-telemetry gate, not
+evidence for or against the CDF supplier hypothesis. It is not a historical
+activation: no development cell, freeze, holdout, or prior retained result used
+this C5 seed-659 execution. The next decision is an independent review of the
+minimal admissible correction. A candidate may defer a transient *scheduled
+telemetry* capture only if the strict exchange mark-clearing behavior,
+cross-margin fail-closed behavior, pre-expiry requirements, and strict terminal
+valuation remain intact and the gap remains auditable. Reusing stale option
+marks, changing deterministic phase ordering, altering the registered
+configuration/roster/warm-up, or treating an incomplete arm as an economic
+result is explicitly rejected pending a new scientific amendment.

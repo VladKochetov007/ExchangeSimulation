@@ -1,3 +1,38 @@
+# Current operational pointer — 2026-09-19 (C5 activation diagnosis)
+
+C5 (`5015fd00a3720c3bd9312d93ae5635fdbf8647a4`, tree
+`9409efe743d02b0dae2d4aa7f65de61c1ad1ca26`) closed the terminal binary
+checkpoint-prefix defect. The exact C5 tree passed the clean test, vet, race,
+finite-cgroup, and evidence-contract gates; its fresh Luna review was
+`COMPLETED / ACCEPT`; a clean Go 1.27 bundle was built and verified; and the
+registered outcome-ineligible seed-977 binary capacity preflight completed with
+zero OOM/swap events and passed independent capacity verification. Those
+artifacts are retained under
+`/home/vlad/external-scratch/sv1d-capacity-pinned-5015fd0-20260919/` and
+`/home/vlad/external-scratch/sv1d-capacity-run-5015fd0-20260919/`.
+
+The authorized development-only seed-659 tri-arm activation probe then ran
+from the C5 pinned bundle. It is **NON-ADVANCING / INCOMPLETE_ARM**, not a CDF
+survival result: treatment, mode-off, and no-roster all exited with status 1 at
+the same strict option-risk boundary. At simulated time
+`1735689777000000000`, the deterministic automation phase evaluated derivative
+marks before same-timestamp actor quoting. The ABC/USD book was temporarily
+empty during that phase, so the declared option underlying was unavailable;
+the exchange correctly cleared the option's stale mark, and the strict dealer
+account capture then failed closed on that held option. Later same-timestamp
+actor events restored public ABC/USD liquidity, but the arm had already been
+retained as incomplete. The exact stderr, binary evidence, rendered diagnostic,
+arm results, and score attempt remain immutable under the activation run root.
+
+This is not evidence that the CDF supplier activated or failed economically;
+none of the three arms reached the registered endpoint and no directional score
+was issued. No development cell, freeze, or holdout was consumed, and no
+historical result is affected. The current next gate is an independent review
+of whether scheduled risk telemetry may defer this transient producer error
+while retaining strict stale-mark and terminal-valuation semantics. No stale
+option-mark reuse, phase reordering, configuration change, or economic tuning
+is authorized by this pointer.
+
 # Current operational pointer — 2026-09-19
 
 The owner resumed the SV1D capacity-gate repair. C4 (`6cab934`) closed the
