@@ -2307,7 +2307,8 @@ func TestCDFBalanceSnapshotCannotForgeIntermediateFillState(t *testing.T) {
 	contract := RegisteredSV1DActivationContract().Suppliers[0]
 	state := &cdfSupplierState{
 		contract: contract, initialBaseBalance: contract.InitialBaseBalance, initialQuoteBalance: contract.InitialQuoteBalance,
-		audit: CDFSupplierActivationAudit{VenueID: "north", Role: contract.Role, ClientID: 7, InitialEquity: 1},
+		audit:            CDFSupplierActivationAudit{VenueID: "north", Role: contract.Role, ClientID: 7, InitialEquity: 1},
+		liveQuoteOrderID: 11, liveQuoteSide: "BUY", liveQuotePrice: contract.ReferencePrice, liveQuoteQty: contract.MinimumQualifyingQty,
 	}
 	audit := &CDFActivationAudit{strictMechanics: true}
 	fill := cdfFillEvidence{
@@ -2357,7 +2358,8 @@ func TestCDFStrictBalanceReconstructionIgnoresActorOnlyFill(t *testing.T) {
 	contract := RegisteredSV1DActivationContract().Suppliers[0]
 	state := &cdfSupplierState{
 		contract: contract, initialBaseBalance: contract.InitialBaseBalance, initialQuoteBalance: contract.InitialQuoteBalance,
-		audit: CDFSupplierActivationAudit{VenueID: "north", Role: contract.Role, ClientID: 7, InitialEquity: 1},
+		audit:            CDFSupplierActivationAudit{VenueID: "north", Role: contract.Role, ClientID: 7, InitialEquity: 1},
+		liveQuoteOrderID: 11, liveQuoteSide: "BUY", liveQuotePrice: contract.ReferencePrice, liveQuoteQty: contract.MinimumQualifyingQty,
 	}
 	audit := &CDFActivationAudit{strictMechanics: true}
 	fill := cdfFillEvidence{
@@ -2421,6 +2423,156 @@ func TestCDFPostFillResponseAcceptsLaterObservation(t *testing.T) {
 	})
 	if state.audit.PostFillResponsiveCount != 1 || !state.fillResponses[0].responded {
 		t.Fatalf("later observation was not accepted as a post-fill response: %+v", state)
+	}
+}
+
+func TestCDFPostFillResponseAcceptsDepthOnlyChange(t *testing.T) {
+	state := &cdfSupplierState{
+		fillResponses: []cdfFillResponseWindow{{
+			fillAt: 10, fillGlobalSeq: 3, positionAfter: 5,
+			preFillDecision: cdfDecisionEvidence{
+				ObservationSequence: 1, ObservationDeliveredAt: 5,
+				BestBid: 99, BestBidQty: 10, BestAsk: 101, BestAskQty: 10,
+				MarkPrice: 100, RiskMarkPrice: 100, RiskMarkCurrent: true,
+				LocalBookMode: "two_sided", ReferencePrice: 100, TargetPosition: 2, Position: 0,
+				Action: "submit", Side: "BUY", QuotePrice: 99, QuoteQty: 2,
+			},
+			preFillKnown: true,
+		}},
+	}
+	audit := &CDFActivationAudit{strictMechanics: true}
+	audit.recordCDFPostFillResponse(Event{SimTS: 20, GlobalSequence: 5}, state, cdfDecisionEvidence{
+		ObservationSequence: 2, ObservationDeliveredAt: 20,
+		BestBid: 99, BestBidQty: 8, BestAsk: 101, BestAskQty: 7,
+		MarkPrice: 100, RiskMarkPrice: 100, RiskMarkCurrent: true,
+		LocalBookMode: "two_sided", ReferencePrice: 100, TargetPosition: 2, Position: 5,
+		Action: "submit", Side: "SELL", QuotePrice: 102, QuoteQty: 5,
+	})
+	if state.audit.PostFillResponsiveCount != 1 || !state.fillResponses[0].responded {
+		t.Fatalf("depth-only market change was incorrectly treated as a non-response: %+v", state)
+	}
+}
+
+func TestCDFPostFillResponseCreditsLocalFillRepriceWithPrivateDrift(t *testing.T) {
+	state := &cdfSupplierState{
+		liveQuoteOrderID: 11, liveQuoteSide: "BUY", liveQuotePrice: 99, liveQuoteQty: 3,
+		fillResponses: []cdfFillResponseWindow{{
+			fillAt: 10, fillGlobalSeq: 3, fillOrderID: 11, localQuoteQtyBefore: 5, localQuoteQtyAfter: 3, positionAfter: 5,
+			preFillDecision: cdfDecisionEvidence{
+				ObservationSequence: 1, ObservationDeliveredAt: 5,
+				BestBid: 99, BestBidQty: 10, BestAsk: 101, BestAskQty: 10,
+				MarkPrice: 100, RiskMarkPrice: 100, RiskMarkCurrent: true,
+				LocalBookMode: "two_sided", ReferencePrice: 100, TargetPosition: 2, Position: 0,
+				Action: "submit", Side: "BUY", QuotePrice: 99, QuoteQty: 5, QuoteOrderID: 11,
+			},
+			preFillKnown: true,
+		}},
+	}
+	audit := &CDFActivationAudit{strictMechanics: true}
+	audit.recordCDFPostFillResponse(Event{SimTS: 20, GlobalSequence: 5}, state, cdfDecisionEvidence{
+		ObservationSequence: 2, ObservationDeliveredAt: 20,
+		BestBid: 99, BestBidQty: 8, BestAsk: 101, BestAskQty: 7,
+		MarkPrice: 100, RiskMarkPrice: 100, RiskMarkCurrent: true,
+		LocalBookMode: "two_sided", ReferencePrice: 101, TargetPosition: 3, Position: 5,
+		Action: "cancel", Reason: "reprice_for_inventory_or_touch", Side: "BUY", QuotePrice: 99, QuoteQty: 5, QuoteOrderID: 11,
+	})
+	if state.audit.PostFillResponsiveCount != 1 || !state.fillResponses[0].responded {
+		t.Fatalf("local-fill reprice with private drift was not credited: %+v", state)
+	}
+}
+
+func TestCDFPostFillResponseRejectsPrivateDriftWithoutLocalFillProof(t *testing.T) {
+	state := &cdfSupplierState{
+		liveQuoteOrderID: 11, liveQuoteSide: "BUY", liveQuotePrice: 99, liveQuoteQty: 3,
+		fillResponses: []cdfFillResponseWindow{{
+			fillAt: 10, fillGlobalSeq: 3, fillOrderID: 11, localQuoteQtyBefore: 5, localQuoteQtyAfter: 5, positionAfter: 5,
+			preFillDecision: cdfDecisionEvidence{
+				ObservationSequence: 1, ObservationDeliveredAt: 5,
+				BestBid: 99, BestBidQty: 10, BestAsk: 101, BestAskQty: 10,
+				MarkPrice: 100, RiskMarkPrice: 100, RiskMarkCurrent: true,
+				LocalBookMode: "two_sided", ReferencePrice: 100, TargetPosition: 2, Position: 0,
+				Action: "submit", Side: "BUY", QuotePrice: 99, QuoteQty: 5, QuoteOrderID: 11,
+			},
+			preFillKnown: true,
+		}},
+	}
+	audit := &CDFActivationAudit{strictMechanics: true}
+	audit.recordCDFPostFillResponse(Event{SimTS: 20, GlobalSequence: 5}, state, cdfDecisionEvidence{
+		ObservationSequence: 2, ObservationDeliveredAt: 20,
+		BestBid: 99, BestBidQty: 8, BestAsk: 101, BestAskQty: 7,
+		MarkPrice: 100, RiskMarkPrice: 100, RiskMarkCurrent: true,
+		LocalBookMode: "two_sided", ReferencePrice: 101, TargetPosition: 3, Position: 5,
+		Action: "cancel", Reason: "reprice_for_inventory_or_touch", Side: "BUY", QuotePrice: 99, QuoteQty: 5, QuoteOrderID: 11,
+	})
+	if state.audit.PostFillResponsiveCount != 0 || state.fillResponses[0].responded {
+		t.Fatalf("private drift without local fill proof was incorrectly credited: %+v", state)
+	}
+}
+
+func TestCDFPostFillResponseRejectsPriceOnlyMarketChange(t *testing.T) {
+	state := &cdfSupplierState{
+		fillResponses: []cdfFillResponseWindow{{
+			fillAt: 10, fillGlobalSeq: 3, positionAfter: 5,
+			preFillDecision: cdfDecisionEvidence{
+				ObservationSequence: 1, ObservationDeliveredAt: 5,
+				BestBid: 99, BestBidQty: 10, BestAsk: 101, BestAskQty: 10,
+				MarkPrice: 100, RiskMarkPrice: 100, RiskMarkCurrent: true,
+				LocalBookMode: "two_sided", ReferencePrice: 100, TargetPosition: 2, Position: 0,
+				Action: "submit", Side: "BUY", QuotePrice: 99, QuoteQty: 2,
+			},
+			preFillKnown: true,
+		}},
+	}
+	audit := &CDFActivationAudit{strictMechanics: true}
+	audit.recordCDFPostFillResponse(Event{SimTS: 20, GlobalSequence: 5}, state, cdfDecisionEvidence{
+		ObservationSequence: 2, ObservationDeliveredAt: 20,
+		BestBid: 100, BestBidQty: 8, BestAsk: 102, BestAskQty: 7,
+		MarkPrice: 101, RiskMarkPrice: 101, RiskMarkCurrent: true,
+		LocalBookMode: "two_sided", ReferencePrice: 100, TargetPosition: 2, Position: 5,
+		Action: "submit", Side: "SELL", QuotePrice: 103, QuoteQty: 5,
+	})
+	if state.audit.PostFillResponsiveCount != 0 || state.fillResponses[0].responded {
+		t.Fatalf("price/mark market change was incorrectly credited as an inventory response: %+v", state)
+	}
+}
+
+func TestCDFPostFillResponseRejectsEachPolicyRelevantMarketChange(t *testing.T) {
+	basePrevious := cdfDecisionEvidence{
+		ObservationSequence: 1, ObservationDeliveredAt: 5,
+		BestBid: 99, BestBidQty: 10, BestAsk: 101, BestAskQty: 10,
+		MarkPrice: 100, RiskMarkPrice: 100, RiskMarkCurrent: true,
+		LocalBookMode: "two_sided", ReferencePrice: 100, TargetPosition: 2, Position: 0,
+		Action: "submit", Side: "BUY", QuotePrice: 99, QuoteQty: 2,
+	}
+	cases := []struct {
+		name   string
+		mutate func(*cdfDecisionEvidence)
+	}{
+		{name: "best bid", mutate: func(decision *cdfDecisionEvidence) { decision.BestBid = 100 }},
+		{name: "best ask", mutate: func(decision *cdfDecisionEvidence) { decision.BestAsk = 102 }},
+		{name: "mark", mutate: func(decision *cdfDecisionEvidence) { decision.MarkPrice = 101 }},
+		{name: "risk mark", mutate: func(decision *cdfDecisionEvidence) { decision.RiskMarkPrice = 101 }},
+		{name: "risk mark current", mutate: func(decision *cdfDecisionEvidence) { decision.RiskMarkCurrent = false }},
+		{name: "local book mode", mutate: func(decision *cdfDecisionEvidence) { decision.LocalBookMode = "one_sided" }},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			state := &cdfSupplierState{fillResponses: []cdfFillResponseWindow{{
+				fillAt: 10, fillGlobalSeq: 3, positionAfter: 5,
+				preFillDecision: basePrevious, preFillKnown: true,
+			}}}
+			current := basePrevious
+			current.ObservationSequence = 2
+			current.ObservationDeliveredAt = 20
+			current.Position = 5
+			current.Action, current.Side, current.QuotePrice, current.QuoteQty = "submit", "SELL", 102, 5
+			testCase.mutate(&current)
+			audit := &CDFActivationAudit{strictMechanics: true}
+			audit.recordCDFPostFillResponse(Event{SimTS: 20, GlobalSequence: 5}, state, current)
+			if state.audit.PostFillResponsiveCount != 0 || state.fillResponses[0].responded {
+				t.Fatalf("market change %s was incorrectly credited: %+v", testCase.name, state)
+			}
+		})
 	}
 }
 
@@ -2595,6 +2747,7 @@ func TestCDFRepricePredicateUsesLiveRemainingQuoteAfterPartialFill(t *testing.T)
 	contract := RegisteredSV1DActivationContract().Suppliers[0]
 	state := &cdfSupplierState{
 		contract:         contract,
+		audit:            CDFSupplierActivationAudit{VenueID: "north", Role: contract.Role, ClientID: 7},
 		hasLastDecision:  true,
 		liveQuoteOrderID: 11,
 		liveQuoteSide:    "BUY",
@@ -2657,6 +2810,7 @@ func TestCDFRepricePredicateReconstructsPartialFillBeforeDecision(t *testing.T) 
 	remainingQty := originalQty - partialQty
 	state := &cdfSupplierState{
 		contract:         contract,
+		audit:            CDFSupplierActivationAudit{VenueID: "north", Role: contract.Role, ClientID: 7},
 		hasLastDecision:  true,
 		liveQuoteOrderID: 11,
 		liveQuoteSide:    "BUY",
@@ -2680,8 +2834,17 @@ func TestCDFRepricePredicateReconstructsPartialFillBeforeDecision(t *testing.T) 
 	audit := &CDFActivationAudit{strictMechanics: true, terminalOrders: make(map[cdfOrderKey]*cdfOrderState)}
 	states := map[cdfParticipantKey]*cdfSupplierState{{venueID: "north", clientID: 7}: state}
 	audit.processCDFOrderFill(Event{SimTS: 20, GlobalSequence: 2, VenueID: "north", ClientID: 7, payload: payload}, states, orders, map[cdfFillKey]cdfOrderFillEvidence{})
+	supplierPayload, err := json.Marshal(cdfFillEvidence{
+		Role: contract.Role, ClientID: 7, Symbol: cdfActivationSymbol, OrderID: 11, TradeID: 12,
+		Timestamp: 20, Side: "BUY", Price: contract.ReferencePrice, Qty: partialQty,
+		FeeAmount: fee, FeeAsset: contract.QuoteAsset, PositionBefore: 0, PositionAfter: partialQty,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	audit.processCDFFill(Event{SimTS: 20, GlobalSequence: 3, VenueID: "north", ClientID: 7, payload: supplierPayload}, states, map[cdfFillKey]cdfFillEvidence{})
 	if len(audit.Checks) != 0 || state.liveQuoteQty != remainingQty {
-		t.Fatalf("partial-fill reconstruction = checks=%+v live=%d, want live=%d", audit.Checks, state.liveQuoteQty, remainingQty)
+		t.Fatalf("partial-fill local reconstruction = checks=%+v live=%d, want live=%d", audit.Checks, state.liveQuoteQty, remainingQty)
 	}
 	decision := cdfDecisionEvidence{
 		Action: "cancel", Reason: "reprice_for_inventory_or_touch", QuoteOrderID: 11,
@@ -2693,6 +2856,82 @@ func TestCDFRepricePredicateReconstructsPartialFillBeforeDecision(t *testing.T) 
 	decision.QuoteQty = remainingQty
 	if cdfDecisionReasonPredicate(decision, state) {
 		t.Fatal("same live remainder was accepted as a reprice after reconstructed partial fill")
+	}
+}
+
+func TestCDFRepriceUsesLocalQuoteAfterExchangeFillBeatsDelayedSupplierFill(t *testing.T) {
+	contract := RegisteredSV1DActivationContract().Suppliers[0]
+	const orderID uint64 = 11
+	state := &cdfSupplierState{
+		contract:         contract,
+		audit:            CDFSupplierActivationAudit{VenueID: "north", Role: contract.Role, ClientID: 7},
+		hasLastDecision:  true,
+		liveQuoteOrderID: orderID, liveQuoteSide: "BUY", liveQuotePrice: contract.ReferencePrice, liveQuoteQty: 5,
+		lastDecision: cdfDecisionEvidence{
+			ObservationSequence: 1, ObservationDeliveredAt: 5,
+			BestBid: 99, BestBidQty: 10, BestAsk: 101, BestAskQty: 10,
+			MarkPrice: 100, RiskMarkPrice: 100, RiskMarkCurrent: true,
+			LocalBookMode: "two_sided", ReferencePrice: 100, TargetPosition: 2, Position: 0,
+			Action: "submit", Side: "BUY", QuotePrice: 99, QuoteQty: 5, QuoteOrderID: orderID,
+		},
+	}
+	states := map[cdfParticipantKey]*cdfSupplierState{{venueID: "north", clientID: 7}: state}
+	orders := map[cdfOrderKey]*cdfOrderState{{venueID: "north", clientID: 7, orderID: orderID}: {
+		side: "BUY", price: contract.ReferencePrice, originalQty: 5, remainingQty: 5,
+		acceptedAt: 10, acceptedGlobalSeq: 1,
+	}}
+	audit := &CDFActivationAudit{strictMechanics: true, terminalOrders: make(map[cdfOrderKey]*cdfOrderState)}
+	actual := make(map[cdfFillKey]cdfOrderFillEvidence)
+	applyExchangeFill := func(t *testing.T, at int64, sequence uint64, tradeID uint64, qty, filledQty, remainingQty int64, isFull bool) {
+		t.Helper()
+		fee := cdfFixtureFee(contract.ReferencePrice, qty, contract.BasePrecision, contract.MakerFeeBps)
+		payload, err := json.Marshal(cdfOrderFillEvidence{
+			OrderID: orderID, TradeID: tradeID, Side: "BUY", Price: contract.ReferencePrice, Qty: qty,
+			FeeAmount: fee, FeeAsset: contract.QuoteAsset, FilledQty: filledQty, RemainingQty: remainingQty, IsFull: isFull,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		audit.processCDFOrderFill(Event{SimTS: at, GlobalSequence: sequence, VenueID: "north", ClientID: 7, payload: payload}, states, orders, actual)
+	}
+	applySupplierFill := func(t *testing.T, at int64, sequence uint64, tradeID uint64, qty int64, positionBefore, positionAfter int64, isFull bool) {
+		t.Helper()
+		fee := cdfFixtureFee(contract.ReferencePrice, qty, contract.BasePrecision, contract.MakerFeeBps)
+		payload, err := json.Marshal(cdfFillEvidence{
+			Role: contract.Role, ClientID: 7, Symbol: cdfActivationSymbol, OrderID: orderID, TradeID: tradeID,
+			Timestamp: at, Side: "BUY", Price: contract.ReferencePrice, Qty: qty, FeeAmount: fee,
+			FeeAsset: contract.QuoteAsset, IsFull: isFull, PositionBefore: positionBefore, PositionAfter: positionAfter,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		audit.processCDFFill(Event{SimTS: at, GlobalSequence: sequence, VenueID: "north", ClientID: 7, payload: payload}, states, map[cdfFillKey]cdfFillEvidence{})
+	}
+
+	applyExchangeFill(t, 20, 2, 12, 2, 2, 3, false)
+	applySupplierFill(t, 20, 3, 12, 2, 0, 2, false)
+	applyExchangeFill(t, 21, 4, 13, 3, 5, 0, true)
+	if len(audit.Checks) != 0 || state.liveQuoteQty != 3 {
+		t.Fatalf("exchange fill incorrectly changed delayed local quote: checks=%+v state=%+v", audit.Checks, state)
+	}
+	decision := cdfDecisionEvidence{
+		ObservationSequence: 2, ObservationDeliveredAt: 21,
+		BestBid: 99, BestBidQty: 8, BestAsk: 101, BestAskQty: 7,
+		MarkPrice: 100, RiskMarkPrice: 100, RiskMarkCurrent: true, LocalBookMode: "two_sided",
+		ReferencePrice: 101, TargetPosition: 3, Position: 2,
+		Action: "cancel", Reason: "reprice_for_inventory_or_touch", QuoteOrderID: orderID,
+		CancelRequestID: 14, Side: "BUY", QuotePrice: contract.ReferencePrice, QuoteQty: 5,
+	}
+	if !cdfDecisionReasonPredicate(decision, state) {
+		t.Fatal("reprice race was rejected although the actor still had a three-unit local remainder")
+	}
+	audit.recordCDFPostFillResponse(Event{SimTS: 21, GlobalSequence: 6, VenueID: "north", ClientID: 7}, state, decision)
+	if state.audit.PostFillResponsiveCount != 1 || !state.fillResponses[0].responded {
+		t.Fatalf("processed local-fill reprice was not credited: state=%+v responses=%+v", state, state.fillResponses)
+	}
+	applySupplierFill(t, 21, 5, 13, 3, 2, 5, true)
+	if len(audit.Checks) != 0 || state.liveQuoteOrderID != 0 {
+		t.Fatalf("delayed full supplier fill did not close local quote: checks=%+v state=%+v", audit.Checks, state)
 	}
 }
 
@@ -2759,8 +2998,9 @@ func TestCDFStrictFillsAcceptZeroBasedFirstTradeIdentity(t *testing.T) {
 	price := contract.ReferencePrice - contract.TickSize
 	fee := cdfFixtureFee(price, quantity, contract.BasePrecision, contract.MakerFeeBps)
 	state := &cdfSupplierState{
-		audit:    CDFSupplierActivationAudit{VenueID: "north", Role: contract.Role, ClientID: 7},
-		contract: contract,
+		audit:            CDFSupplierActivationAudit{VenueID: "north", Role: contract.Role, ClientID: 7},
+		contract:         contract,
+		liveQuoteOrderID: 11, liveQuoteSide: "BUY", liveQuotePrice: price, liveQuoteQty: quantity,
 	}
 	states := map[cdfParticipantKey]*cdfSupplierState{{venueID: "north", clientID: 7}: state}
 	r := &CDFActivationAudit{strictMechanics: true}
@@ -3026,6 +3266,131 @@ func TestCDFCancelRejectedForcedCancelRaceIsReconciled(t *testing.T) {
 	}
 }
 
+func TestCDFDelayedSupplierFillAfterCancellationFailsClosed(t *testing.T) {
+	contract := RegisteredSV1DActivationContract().Suppliers[0]
+	state := &cdfSupplierState{
+		contract:         contract,
+		audit:            CDFSupplierActivationAudit{VenueID: "north", Role: contract.Role, ClientID: 7},
+		currentPosition:  0,
+		liveQuoteOrderID: 11, liveQuoteSide: "BUY", liveQuotePrice: contract.ReferencePrice, liveQuoteQty: 5,
+	}
+	orderKey := cdfOrderKey{venueID: "north", clientID: 7, orderID: 11}
+	orders := map[cdfOrderKey]*cdfOrderState{orderKey: {
+		requestID: 13, side: "BUY", price: contract.ReferencePrice, originalQty: 5, remainingQty: 5,
+		acceptedAt: 10, acceptedGlobalSeq: 1,
+	}}
+	withdrawalKey := cdfRequestKey{venueID: "north", clientID: 7, requestID: 13}
+	withdrawals := map[cdfRequestKey]*cdfWithdrawal{withdrawalKey: {
+		event:    Event{SimTS: 11, GlobalSequence: 2},
+		decision: cdfDecisionEvidence{QuoteOrderID: 11, Action: "cancel", Reason: "reprice_for_inventory_or_touch"},
+	}}
+	audit := &CDFActivationAudit{strictMechanics: true, terminalOrders: make(map[cdfOrderKey]*cdfOrderState)}
+	states := map[cdfParticipantKey]*cdfSupplierState{{venueID: "north", clientID: 7}: state}
+	cancelPayload, err := json.Marshal(cdfCancelledEvidence{OrderID: 11, RequestID: 13, RemainingQty: 5})
+	if err != nil {
+		t.Fatal(err)
+	}
+	audit.processCDFCancelled(Event{SimTS: 20, GlobalSequence: 3, VenueID: "north", ClientID: 7, payload: cancelPayload},
+		states, withdrawals, orders, nil, nil)
+	if len(audit.Checks) != 0 || state.liveQuoteOrderID != 0 || audit.terminalOrders[orderKey].terminalState != "cancelled" {
+		t.Fatalf("cancellation did not close local quote cleanly: checks=%+v state=%+v terminal=%+v", audit.Checks, state, audit.terminalOrders[orderKey])
+	}
+	quantity := int64(5)
+	fee := cdfFixtureFee(contract.ReferencePrice, quantity, contract.BasePrecision, contract.MakerFeeBps)
+	fillPayload, err := json.Marshal(cdfFillEvidence{
+		Role: contract.Role, ClientID: 7, Symbol: cdfActivationSymbol, OrderID: 11, TradeID: 12,
+		Timestamp: 21, Side: "BUY", Price: contract.ReferencePrice, Qty: quantity,
+		FeeAmount: fee, FeeAsset: contract.QuoteAsset, IsFull: true, PositionBefore: 0, PositionAfter: quantity,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	audit.processCDFFill(Event{SimTS: 21, GlobalSequence: 5, VenueID: "north", ClientID: 7, payload: fillPayload}, states, map[cdfFillKey]cdfFillEvidence{})
+	if !hasCDFActivationFailure(audit.Checks, "CDF supplier fill arrived after the local quote was terminally cancelled") {
+		t.Fatalf("delayed fill after cancellation was not rejected: checks=%+v", audit.Checks)
+	}
+	if state.fillBaseDelta != 0 || state.fillQuoteDelta != 0 || len(state.fillResponses) != 0 {
+		t.Fatalf("rejected delayed fill mutated supplier state: state=%+v", state)
+	}
+}
+
+func TestCDFSupplierFillWithoutLocalQuoteFailsClosed(t *testing.T) {
+	contract := RegisteredSV1DActivationContract().Suppliers[0]
+	state := &cdfSupplierState{
+		contract: contract,
+		audit:    CDFSupplierActivationAudit{VenueID: "north", Role: contract.Role, ClientID: 7},
+	}
+	states := map[cdfParticipantKey]*cdfSupplierState{{venueID: "north", clientID: 7}: state}
+	quantity := contract.MinimumQualifyingQty
+	fee := cdfFixtureFee(contract.ReferencePrice, quantity, contract.BasePrecision, contract.MakerFeeBps)
+	payload, err := json.Marshal(cdfFillEvidence{
+		Role: contract.Role, ClientID: 7, Symbol: cdfActivationSymbol, OrderID: 11, TradeID: 12,
+		Timestamp: 10, Side: "BUY", Price: contract.ReferencePrice, Qty: quantity,
+		FeeAmount: fee, FeeAsset: contract.QuoteAsset, IsFull: true, PositionBefore: 0, PositionAfter: quantity,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	audit := &CDFActivationAudit{strictMechanics: true}
+	audit.processCDFFill(Event{SimTS: 10, GlobalSequence: 3, VenueID: "north", ClientID: 7, payload: payload}, states, map[cdfFillKey]cdfFillEvidence{})
+	if !hasCDFActivationFailure(audit.Checks, "CDF supplier fill has no locally acknowledged live quote") {
+		t.Fatalf("unanchored supplier fill was not rejected: checks=%+v", audit.Checks)
+	}
+	if state.currentPosition != 0 || state.fillBaseDelta != 0 || state.fillQuoteDelta != 0 || state.audit.FillCount != 0 || len(state.fillResponses) != 0 {
+		t.Fatalf("unanchored supplier fill mutated state: state=%+v", state)
+	}
+}
+
+func TestCDFSupplierFillLocalQuoteMismatchesAreImmutable(t *testing.T) {
+	contract := RegisteredSV1DActivationContract().Suppliers[0]
+	cases := []struct {
+		name   string
+		mutate func(*cdfFillEvidence)
+	}{
+		{name: "order identity", mutate: func(fill *cdfFillEvidence) { fill.OrderID = 12 }},
+		{name: "side", mutate: func(fill *cdfFillEvidence) { fill.Side, fill.PositionAfter = "SELL", -fill.Qty }},
+		{name: "price", mutate: func(fill *cdfFillEvidence) {
+			fill.Price += contract.TickSize
+			fill.FeeAmount = cdfFixtureFee(fill.Price, fill.Qty, contract.BasePrecision, contract.MakerFeeBps)
+		}},
+		{name: "over quantity", mutate: func(fill *cdfFillEvidence) {
+			fill.Qty = 6
+			fill.PositionAfter = 6
+			fill.FeeAmount = cdfFixtureFee(fill.Price, fill.Qty, contract.BasePrecision, contract.MakerFeeBps)
+		}},
+		{name: "full flag", mutate: func(fill *cdfFillEvidence) { fill.IsFull = true }},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			quantity := int64(3)
+			state := &cdfSupplierState{
+				contract:         contract,
+				audit:            CDFSupplierActivationAudit{VenueID: "north", Role: contract.Role, ClientID: 7},
+				liveQuoteOrderID: 11, liveQuoteSide: "BUY", liveQuotePrice: contract.ReferencePrice, liveQuoteQty: 5,
+			}
+			fill := cdfFillEvidence{
+				Role: contract.Role, ClientID: 7, Symbol: cdfActivationSymbol, OrderID: 11, TradeID: 12,
+				Timestamp: 10, Side: "BUY", Price: contract.ReferencePrice, Qty: quantity,
+				FeeAmount: cdfFixtureFee(contract.ReferencePrice, quantity, contract.BasePrecision, contract.MakerFeeBps),
+				FeeAsset:  contract.QuoteAsset, IsFull: false, PositionBefore: 0, PositionAfter: quantity,
+			}
+			testCase.mutate(&fill)
+			payload, err := json.Marshal(fill)
+			if err != nil {
+				t.Fatal(err)
+			}
+			audit := &CDFActivationAudit{strictMechanics: true}
+			observed := make(map[cdfFillKey]cdfFillEvidence)
+			audit.processCDFFill(Event{SimTS: 10, GlobalSequence: 3, VenueID: "north", ClientID: 7, payload: payload},
+				map[cdfParticipantKey]*cdfSupplierState{{venueID: "north", clientID: 7}: state}, observed)
+			if len(audit.Checks) == 0 || state.currentPosition != 0 || state.fillBaseDelta != 0 || state.fillQuoteDelta != 0 ||
+				state.audit.FillCount != 0 || len(state.fillResponses) != 0 || len(observed) != 0 || state.liveQuoteQty != 5 {
+				t.Fatalf("mismatched fill mutated state: checks=%+v state=%+v observed=%+v", audit.Checks, state, observed)
+			}
+		})
+	}
+}
+
 func TestCDFOpenOrderIsRightCensoredAtTerminalHorizon(t *testing.T) {
 	state := &cdfSupplierState{audit: CDFSupplierActivationAudit{VenueID: "north", Role: "cdf_supplier_1", ClientID: 7}}
 	orderKey := cdfOrderKey{venueID: "north", clientID: 7, orderID: 11}
@@ -3075,6 +3440,16 @@ func TestCDFOrderLifecycleRecordsPartialThenFullFill(t *testing.T) {
 			t.Fatal(err)
 		}
 		audit.processCDFOrderFill(Event{SimTS: fill.at, GlobalSequence: uint64(fill.sequence), VenueID: "north", ClientID: 7, payload: payload}, states, orders, actual)
+		supplierPayload, err := json.Marshal(cdfFillEvidence{
+			Role: contract.Role, ClientID: 7, Symbol: cdfActivationSymbol, OrderID: 11, TradeID: uint64(fill.tradeID),
+			Timestamp: fill.at, Side: "BUY", Price: contract.ReferencePrice, Qty: fill.qty,
+			FeeAmount: fee, FeeAsset: contract.QuoteAsset, IsFull: fill.isFull,
+			PositionBefore: fill.filledQty - fill.qty, PositionAfter: fill.filledQty,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		audit.processCDFFill(Event{SimTS: fill.at, GlobalSequence: uint64(fill.sequence + 1), VenueID: "north", ClientID: 7, payload: supplierPayload}, states, map[cdfFillKey]cdfFillEvidence{})
 		if fill.isFull && state.liveQuoteOrderID != 0 {
 			t.Fatalf("full fill left live quote state: %+v", state)
 		}

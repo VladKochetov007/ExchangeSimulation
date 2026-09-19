@@ -445,6 +445,9 @@ type cdfSupplierState struct {
 type cdfFillResponseWindow struct {
 	fillAt                   int64
 	fillGlobalSeq            uint64
+	fillOrderID              uint64
+	localQuoteQtyBefore      int64
+	localQuoteQtyAfter       int64
 	positionAfter            int64
 	preFillDecision          cdfDecisionEvidence
 	preFillKnown             bool
@@ -2808,7 +2811,10 @@ func (r *CDFActivationAudit) recordCDFPostFillResponse(event Event, state *cdfSu
 		marketStateUnchanged := cdfDecisionMarketStateEqual(response.preFillDecision, decision)
 		privateInventoryStateUnchanged := response.preFillDecision.ReferencePrice == decision.ReferencePrice &&
 			response.preFillDecision.TargetPosition == decision.TargetPosition
-		if response.preFillKnown && marketStateUnchanged && privateInventoryStateUnchanged && decision.Action == "wait" && decision.Reason == "inventory_at_target" &&
+		localFillReprice := cdfPostFillLocalReprice(response, state, decision)
+		if response.preFillKnown && marketStateUnchanged && localFillReprice {
+			response.responded = true
+		} else if response.preFillKnown && marketStateUnchanged && privateInventoryStateUnchanged && decision.Action == "wait" && decision.Reason == "inventory_at_target" &&
 			decision.TargetPosition == decision.Position && decision.TargetPosition == response.preFillDecision.TargetPosition {
 			response.responded = true
 		} else if response.preFillKnown && marketStateUnchanged && privateInventoryStateUnchanged &&
@@ -2821,6 +2827,17 @@ func (r *CDFActivationAudit) recordCDFPostFillResponse(event Event, state *cdfSu
 			state.audit.PostFillResponsiveCount++
 		}
 	}
+}
+
+func cdfPostFillLocalReprice(response *cdfFillResponseWindow, state *cdfSupplierState, decision cdfDecisionEvidence) bool {
+	if response == nil || state == nil || response.fillOrderID == 0 ||
+		response.localQuoteQtyBefore <= response.localQuoteQtyAfter ||
+		decision.Action != "cancel" || decision.Reason != "reprice_for_inventory_or_touch" ||
+		decision.QuoteOrderID != response.fillOrderID || state.liveQuoteOrderID != response.fillOrderID {
+		return false
+	}
+	return decision.Side != state.liveQuoteSide || decision.QuotePrice != state.liveQuotePrice ||
+		decision.QuoteQty != state.liveQuoteQty
 }
 
 func cdfDecisionUsesFreshObservation(previous, current cdfDecisionEvidence, fillAt int64) bool {
@@ -2849,12 +2866,12 @@ func cdfPostFillWithdrawalJustified(decision cdfDecisionEvidence) bool {
 }
 
 func cdfDecisionMarketStateEqual(previous, current cdfDecisionEvidence) bool {
-	// Compare the delayed public market and coherent risk mark, not the
-	// supplier's private reference or target. Those private fields are the
-	// response variables under test; treating their normal evolution as a
-	// market change would let target-only replays evade this gate.
-	return previous.BestBid == current.BestBid && previous.BestBidQty == current.BestBidQty &&
-		previous.BestAsk == current.BestAsk && previous.BestAskQty == current.BestAskQty &&
+	// Compare the delayed public prices, book mode, and coherent risk mark, not
+	// displayed depth quantities. The supplier's quote logic does not consume
+	// those quantities, and a fill can change them while leaving the economic
+	// touch and mark unchanged. Private reference/target remain separate
+	// response variables so target-only replays cannot evade this gate.
+	return previous.BestBid == current.BestBid && previous.BestAsk == current.BestAsk &&
 		previous.MarkPrice == current.MarkPrice && previous.RiskMarkPrice == current.RiskMarkPrice &&
 		previous.RiskMarkCurrent == current.RiskMarkCurrent && previous.LocalBookMode == current.LocalBookMode
 }
@@ -2953,8 +2970,42 @@ func (r *CDFActivationAudit) processCDFFill(event Event, states map[cdfParticipa
 		r.addEventCheck(event, state, "CDF supplier fill balance delta overflows")
 		return
 	}
+	localQuoteHasFill := state.liveQuoteOrderID != 0
+	localQuoteWillClose := false
+	localQuoteQtyBefore := int64(0)
+	localQuoteRemaining := int64(0)
+	if localQuoteHasFill {
+		localQuoteQtyBefore = state.liveQuoteQty
+		localQuoteRemaining = state.liveQuoteQty
+		if state.liveQuoteOrderID != fill.OrderID || state.liveQuoteSide != fill.Side ||
+			state.liveQuotePrice != fill.Price || fill.Qty > state.liveQuoteQty ||
+			fill.IsFull != (fill.Qty == state.liveQuoteQty) {
+			r.addEventCheck(event, state, "CDF supplier fill does not match the supplier's delayed local quote state")
+			return
+		}
+		localQuoteWillClose = fill.IsFull
+		if !localQuoteWillClose {
+			localQuoteRemaining -= fill.Qty
+		}
+	} else if r.strictMechanics {
+		failure := "CDF supplier fill has no locally acknowledged live quote"
+		if terminal := r.terminalOrders[cdfOrderKey{venueID: event.VenueID, clientID: event.ClientID, orderID: fill.OrderID}]; terminal != nil &&
+			(terminal.terminalState == "cancelled" || terminal.terminalState == "forced_cancelled") {
+			failure = "CDF supplier fill arrived after the local quote was terminally cancelled"
+		}
+		r.addEventCheck(event, state, failure)
+		return
+	}
 	state.fillBaseDelta = updatedBase
 	state.fillQuoteDelta = updatedQuote
+	if localQuoteHasFill {
+		if localQuoteWillClose {
+			clearCDFLiveQuote(state)
+			localQuoteRemaining = 0
+		} else {
+			state.liveQuoteQty = localQuoteRemaining
+		}
+	}
 	observed[key] = fill
 	if r.observedFillGlobal == nil {
 		r.observedFillGlobal = make(map[cdfFillKey]uint64)
@@ -2971,7 +3022,9 @@ func (r *CDFActivationAudit) processCDFFill(event Event, states map[cdfParticipa
 	state.lastFillPosition = fill.PositionAfter
 	state.currentPosition = fill.PositionAfter
 	state.fillResponses = append(state.fillResponses, cdfFillResponseWindow{
-		fillAt: event.SimTS, fillGlobalSeq: event.GlobalSequence, positionAfter: fill.PositionAfter,
+		fillAt: event.SimTS, fillGlobalSeq: event.GlobalSequence, fillOrderID: fill.OrderID,
+		localQuoteQtyBefore: localQuoteQtyBefore, localQuoteQtyAfter: localQuoteRemaining,
+		positionAfter:   fill.PositionAfter,
 		preFillDecision: preFillDecision, preFillKnown: preFillKnown,
 		requiresFreshObservation: requiresFreshObservation,
 	})
@@ -3331,9 +3384,10 @@ func (r *CDFActivationAudit) processCDFOrderFill(event Event, states map[cdfPart
 	order.remainingQty = expectedRemaining
 	order.filledQty = expectedFilled
 	order.fillCount = updatedFillCount
-	if state.liveQuoteOrderID == fill.OrderID {
-		state.liveQuoteQty = expectedRemaining
-	}
+	// Keep exchange execution state separate from the supplier's local quote.
+	// A delayed actor may legally reprice against a remainder it has not yet
+	// learned was filled; processCDFFill advances liveQuoteQty when that
+	// notification reaches the actor.
 	if order.firstFillAt == 0 {
 		order.firstFillAt = event.SimTS
 	}
@@ -3342,7 +3396,6 @@ func (r *CDFActivationAudit) processCDFOrderFill(event Event, states map[cdfPart
 			r.addEventCheck(event, state, "filled CDF order has an invalid or overflowing quote lifetime")
 		}
 		order.terminalState = "filled"
-		clearCDFLiveQuote(state)
 		r.rememberCDFTerminalOrder(orderKey, order)
 		delete(orders, orderKey)
 		r.forgetCDFLiveOrder(cdfParticipantKey{event.VenueID, event.ClientID}, orderKey)
