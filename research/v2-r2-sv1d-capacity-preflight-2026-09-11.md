@@ -102,3 +102,32 @@ The next sequence remains:
 
 No holdout `619`, `631`, or `641` is permitted before a separate explicit
 freeze authorization.
+
+## Append-only protocol supersession — 2026-09-19
+
+The numbered sequence immediately above is retained as historical preregistration
+text, but its promotion ordering is non-authoritative and must not be executed.
+It is superseded by the owner-authorized activation-contract amendment and this
+append-only clarification. The authoritative order for the current SV1D
+successor is:
+
+1. obtain a substantive independent review of one exact immutable candidate
+   commit, including the source correction, runner/verifier, configs, and
+   protocols;
+2. after acceptance, build that exact candidate with the registered pinned Go
+   1.27 toolchain and independently verify source, tree, binary, and plan
+   identities;
+3. execute a fresh seed-977 five-minute three-arm capacity preflight in the
+   registered finite cgroup and retain its complete measurement evidence;
+4. independently verify the capacity result and its attestation, including
+   exit status, completeness, resource limits, and the measured capacity
+   formulas;
+5. only if that verification passes, execute the registered seed-659
+   five-minute activation probe.
+
+No build, capacity preflight, activation probe, development cell, freeze, or
+holdout is authorized by this clarification until the preceding gate has
+passed. This clarification changes only the operational ordering; it does not
+change SV1D economics, numeric predicates, resource requirements, evidence
+contracts, historical identities, or the separate freeze requirement for
+holdouts.
