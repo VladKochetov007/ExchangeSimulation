@@ -1,3 +1,25 @@
+# Current operational pointer — 2026-09-19 (SV1D non-activation closure)
+
+At exact scientific HEAD `8de607d` (tree
+`c86f26d564cf798322de3f776dbc0d91dcc78957`), the queued supplier-fill
+analyzer correction passed its mechanical gates and fresh independent Luna
+review. The immutable seed-659 treatment evidence was rescored in a separate
+namespace: evidence is valid and anti-cheating checks pass, but the
+preregistered supplier activation predicate is false (`0` one-sided
+restorations). Classify the current SV1D successor as
+`TREATMENT_NOT_ACTIVATED`, not as invalid evidence and not as market survival.
+
+This closes the current finite CDF-liquidity successor without changing the
+R2 calendar, historical results, or raw evidence. No registered 24-hour
+development cell, parity cell, freeze, or holdout was consumed. The detailed
+record is `research/v2-r2-sv1d-activation-closure-2026-09-19.md`.
+
+The old R2 candidate remains non-viable at the 24-hour market-survival gate.
+The current protocol therefore forbids advancing to `dev-607/613/617` from
+this non-activating SV1D result. A new economic mechanism, if pursued, must be
+a separately preregistered successor with an independent review; do not keep
+churning analyzer fixes or reinterpret retained trajectories.
+
 # Current operational pointer — 2026-09-19 (activation contract repair successor)
 
 The `85c927d` scheduled-risk successor passed its source review, clean Go 1.27

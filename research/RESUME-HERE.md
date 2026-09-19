@@ -1,3 +1,24 @@
+# Current operational pointer — 2026-09-19 (SV1D non-activation closure)
+
+The exact clean scientific HEAD is `8de607d` (tree
+`c86f26d564cf798322de3f776dbc0d91dcc78957`). The corrected queued-fill
+analyzer was independently reviewed and the retained seed-659 treatment was
+rescored without changing raw evidence. The rescore is evidence-valid and
+anti-cheating-valid, but `activation_satisfied=false` with zero one-sided
+restorations. The current finite CDF supplier successor is therefore closed as
+`TREATMENT_NOT_ACTIVATED`; it is not a 24-hour survival result and does not
+authorize `dev-607`, `dev-613`, `dev-617`, parity cells, freeze, or holdouts.
+
+The predecessor R2 candidate remains `NON-VIABLE AT THE 24H MARKET-SURVIVAL
+GATE`. No historical result was rewritten, and holdouts `619/631/641` remain
+untouched. The detailed closure, including the exact evidence and review
+boundary, is `research/v2-r2-sv1d-activation-closure-2026-09-19.md`.
+
+Do not repeat analyzer-only repairs or launch a full campaign from this
+successor. A future continuation requires a materially different,
+preregistered economic hypothesis, fresh exact-tree review, and its own
+capacity/activation gates.
+
 # Current operational pointer — 2026-09-19 (activation contract repair successor)
 
 The exact `85c927d` successor passed independent review, clean Go 1.27
