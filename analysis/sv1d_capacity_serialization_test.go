@@ -117,6 +117,16 @@ func TestSV1DCapacityRealRendererSerialization(t *testing.T) {
 			if err := verifySV1DCapacityArmRenderer(attestation, arm, armDir, renderedDir, snapshot); err == nil {
 				t.Fatal("overflowing dictionary count accepted")
 			}
+			report.DictionaryFrames = arm.StreamFrames - arm.EventFrames
+			report.Routes = -1
+			negativeRoutes, err := json.Marshal(report)
+			if err != nil {
+				t.Fatal(err)
+			}
+			snapshot.armFiles["renderer-report.json"] = negativeRoutes
+			if err := verifySV1DCapacityArmRenderer(attestation, arm, armDir, renderedDir, snapshot); err == nil {
+				t.Fatal("negative renderer route count accepted")
+			}
 		})
 	}
 }

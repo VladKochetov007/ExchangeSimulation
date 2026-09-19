@@ -975,7 +975,7 @@ func verifySV1DCapacityArmRenderer(attestation SV1DCapacityAttestation, arm SV1D
 		return fmt.Errorf("SV1D capacity arm %s: renderer report frame count overflows", arm.Name)
 	}
 	streamFrames := report.DictionaryFrames + report.EventFrames
-	if report.EventFrames != arm.EventFrames || streamFrames != arm.StreamFrames || report.ExecutionStreamHash != arm.ExecutionStreamHash || report.Routes == 0 || report.RenderedDigest != arm.RenderedTreeDigest || !isSV1DHexDigest(report.RenderedDigest) {
+	if report.EventFrames != arm.EventFrames || streamFrames != arm.StreamFrames || report.ExecutionStreamHash != arm.ExecutionStreamHash || report.Routes <= 0 || report.RenderedDigest != arm.RenderedTreeDigest || !isSV1DHexDigest(report.RenderedDigest) {
 		return fmt.Errorf("SV1D capacity arm %s: renderer report identity is inconsistent", arm.Name)
 	}
 	renderedAttestationRaw, ok := snapshot.renderedFiles["rendered-binary-evidence-attestation.json"]

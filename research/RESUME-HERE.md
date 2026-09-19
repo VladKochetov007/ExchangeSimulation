@@ -1,14 +1,13 @@
 # Current operational pointer — 2026-09-19
 
-The owner resumed the SV1D capacity-gate repair. The current C3
-producer/verifier schema correction is the successor patch based on `94e63d6`.
-The C2 review was a substantive REJECT, not an availability failure; its three
-production-schema findings are now covered by focused round-trip and mutation
-tests. A clean detached C3 snapshot passed `make test`, `go vet ./...`, the
-targeted race suites, finite-cgroup validation, and `git diff --check`. The
-exact candidate still requires fresh independent review and has no execution
-authorization. Future independent review must explicitly select Luna xhigh or
-lower; Astra is prohibited. No capacity, activation, development, freeze, or
+The owner resumed the SV1D capacity-gate repair. C3 (`447a492`) passed clean
+mechanical gates but received a substantive independent REJECT for
+`SV1D-C3-001`: the typed renderer verifier accepted a negative `routes` count.
+The report and separate execution/verdict record are preserved outside the
+candidate checkout under `/home/vlad/external-scratch/sv1d-capacity-review-447a492/`.
+The current successor patch adds the minimal positive-domain guard and a
+negative-route mutation regression. Its clean gates and same-reviewer
+re-review are outstanding. No capacity, activation, development, freeze, or
 holdout run has occurred.
 
 # Owner-requested pause — 2026-09-13 (historical handoff)

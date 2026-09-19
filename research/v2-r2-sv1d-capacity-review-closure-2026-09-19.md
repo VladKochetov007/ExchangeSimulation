@@ -46,3 +46,21 @@ an execution authorization. After clean gates and review: build pinned Go 1.27
 binaries, create a fresh verified signed bundle, run only the registered seed977
 finite-cgroup capacity preflight, and independently verify it before seed659
 activation. Holdouts remain forbidden before separate freeze authorization.
+
+## C3 independent review closure — 2026-09-19
+
+The exact C3 candidate `447a492718e78a7cc974c2363deee5ae13c2ae6a`, tree
+`35e6060a3488e215143861ac90559abee6305138`, received a completed substantive
+REJECT from a fresh Luna xhigh reviewer. The immutable report and separate
+execution/verdict record are preserved at
+`/home/vlad/external-scratch/sv1d-capacity-review-447a492/`. The finding is
+`SV1D-C3-001`: the Go renderer verifier mirrored the producer's `int` route
+field but rejected only zero, so a negative retained `routes` value could pass
+the final typed verification boundary. The shell producer's positive check did
+not close that Go-side fail-open path.
+
+The successor patch changes the predicate to `Routes <= 0` and adds a negative
+route-count mutation regression. This is a minimal correctness correction; it
+does not change market economics, registered configurations, resource formulas,
+evidence format, or scientific predicates. Clean gates and re-review by the
+same reviewer are required before any build, capacity, or scientific run.

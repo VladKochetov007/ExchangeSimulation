@@ -1,13 +1,13 @@
 # Current operational pointer — 2026-09-19
 
-SV1D resumed at the narrow capacity-gate correction. The C3 successor patch is
-based on scientific HEAD `94e63d6` and contains producer/verifier schema fixes
-and focused tests. C2's substantive rejection found three real round-trip
-mismatches in metadata, status and renderer artifacts; C3 closes them with
-actual producer serialization tests. A clean detached C3 snapshot passed the
-full test, vet, targeted race, finite-cgroup, and diff gates. No scientific or
-holdout world has run. Do not treat the candidate as reviewed or authorized
-until a fresh Luna xhigh independent review passes.
+SV1D resumed at the narrow capacity-gate correction. C3 (`447a492`) contained
+the producer/verifier schema fixes and passed the clean full gates, but its
+fresh independent review found substantive `SV1D-C3-001`: the typed renderer
+verifier accepted negative `routes`. The preserved review is outside the
+candidate checkout under `/home/vlad/external-scratch/sv1d-capacity-review-447a492/`.
+The current successor patch adds the minimal positive-domain guard and
+negative-route regression; clean gates and same-reviewer re-review remain
+required. No scientific or holdout world has run.
 
 # Current operational pointer — 2026-09-13
 
