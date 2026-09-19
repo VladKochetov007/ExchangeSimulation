@@ -147,3 +147,26 @@ rerun. The corrected tree requires focused/full tests, fresh independent Luna
 review, a clean pinned rebuild and bundle, a new capacity namespace, and only
 then a fresh seed-659 activation. No historical R2 result was affected; no
 registered 24-hour development cell or holdout was consumed.
+
+## Independent-review follow-up — explicit mode-off triad presence — 2026-09-19
+
+The fresh Luna xhigh review of exact `11d2497` / tree
+`72931a4fa05890e00f3a33939619b172da947013` returned **ACCEPT WITH
+CONDITIONS**. It confirmed that the `omitempty` correction is minimal, that
+the regression exercises the production `NewSim` manifest path, and that no
+market or participant behavior changes. It identified one adjacent
+fail-closed contract inconsistency: `validateSV1DSupplierRoster` rejected a
+present non-false mode-off value but accepted an omitted key, while the strict
+production CDF decoder requires explicit presence for every supplier. An
+omitted mode-off key therefore could pass the triad precheck and fail only
+later during arm audit.
+
+The follow-up correction requires `quote_on_one_sided_local_book` to be
+present and explicitly false in mode-off, and adds a triad regression that
+removes the field from a registered mode-off roster and requires rejection.
+No-roster omission remains intentional because it has no supplier entries.
+This is evidence/provenance-only, preserves fail-closed behavior, and does not
+alter economics or any retained trajectory. The Luna conditions require a
+fresh exact-tree review followed by a new pinned bundle, capacity preflight,
+and development-only seed-659 probe; the previous `INVALID_EVIDENCE`
+activation remains immutable and is not rescored.

@@ -351,6 +351,12 @@ func TestValidateSV1DConfigTriadRejectsEconomicOrArmDrift(t *testing.T) {
 			noRoster:  noRoster,
 		},
 		{
+			name:      "mode-off explicit false omitted",
+			treatment: treatment,
+			modeOff:   bytes.Replace(modeOff, []byte("      \"quote_on_one_sided_local_book\": false,\n"), nil, 1),
+			noRoster:  noRoster,
+		},
+		{
 			name:      "duplicate JSON key",
 			treatment: bytes.Replace(treatment, []byte(`"seed": 659`), []byte(`"seed": 659, "seed": 659`), 1),
 			modeOff:   modeOff,

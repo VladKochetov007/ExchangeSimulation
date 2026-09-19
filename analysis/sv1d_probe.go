@@ -1428,7 +1428,7 @@ func validateSV1DSupplierRoster(config map[string]any, oneSided bool) error {
 			if !present || oneSidedValue != true {
 				return fmt.Errorf("supplier %s does not enable one-sided quoting", role)
 			}
-		} else if present && oneSidedValue != false {
+		} else if !present || oneSidedValue != false {
 			return fmt.Errorf("supplier %s enables one-sided quoting in mode-off", role)
 		}
 		expectedRaw, err := json.Marshal(expected[index])
