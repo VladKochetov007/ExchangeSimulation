@@ -195,6 +195,28 @@ fresh independent review, clean pinned rebuild/capacity verification, and a
 new seed-659 probe. No prior namespace is repaired, and no development cells
 or holdouts are authorized by this amendment.
 
+## Fresh review of `7f28bfa`
+
+A fresh independent Luna xhigh reviewer (`Nash`) inspected the exact candidate
+`7f28bfac37842955274e944a5b564cb4e6208f5a`, tree
+`cce1b449fd2e74031ffb7f32c381a9139fe9b81f`, with no edits or simulations.
+Review execution was **COMPLETED**. The substantive verdict was **REJECT
+pending bounded conditions**, so no new seed-659 probe is authorized.
+
+The reviewer accepted the live-order reprice reconstruction and the scoped
+terminal wiring, but identified three narrow conditions. Terminal `wait`
+censoring must require reconstructed absence of a live order rather than trust
+the decision's zero `QuoteOrderID`; the actor and analyzer must agree at the
+exact `TerminalNano - 2*Interval` boundary; and the candidate needs fail-closed
+tests for absent/mismatched live state, exact-boundary behavior, pending
+acceptance/cancellation ordering, and a strict partial-fill-to-reprice replay.
+
+The conditions are being implemented as a successor of `7f28bfa`. The review
+is retained externally at
+`/home/vlad/external-scratch/sv1d-review-7f28bfa-20260919.md`; its rejection is
+not reclassified as service failure or acceptance. The 7f28bfa tree remains
+historical and the retained b466 activation remains immutable.
+
 The previous invalid activation namespace remains immutable historical evidence.
 The performance branch and its binary-evidence prototype remain deferred; no
 performance-branch code is imported by this correction.

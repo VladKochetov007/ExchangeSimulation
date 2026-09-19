@@ -4848,9 +4848,10 @@ func cdfDecisionReasonPredicate(decision cdfDecisionEvidence, state *cdfSupplier
 			return false
 		}
 		if decision.Action == "wait" {
-			return !hasQuote
+			return !hasQuote && state.liveQuoteOrderID == 0
 		}
-		return decision.Action == "withdraw" && hasQuote && decision.CancelRequestID != 0
+		return decision.Action == "withdraw" && hasQuote && decision.CancelRequestID != 0 &&
+			state.liveQuoteOrderID == decision.QuoteOrderID
 	case "reprice_for_inventory_or_touch":
 		if decision.Action != "cancel" || !hasQuote || decision.CancelRequestID == 0 || !state.hasLastDecision {
 			return false

@@ -2622,18 +2622,77 @@ func TestCDFHorizonCensorPredicateRequiresRegisteredWindow(t *testing.T) {
 	if !cdfDecisionReasonPredicate(decision, state) {
 		t.Fatal("registered terminal censor window was rejected")
 	}
+	decision.DecisionTime = 96 * second
+	if !cdfDecisionReasonPredicate(decision, state) {
+		t.Fatal("exact actor/analyzer terminal censor boundary was rejected")
+	}
 	decision.DecisionTime = 95 * second
 	if cdfDecisionReasonPredicate(decision, state) {
 		t.Fatal("decision outside the terminal censor window was accepted")
 	}
 	decision.DecisionTime = 97 * second
+	state.liveQuoteOrderID = 11
+	if cdfDecisionReasonPredicate(decision, state) {
+		t.Fatal("terminal wait ignored a reconstructed live order")
+	}
 	decision.Action, decision.QuoteOrderID, decision.CancelRequestID = "withdraw", 11, 12
 	if !cdfDecisionReasonPredicate(decision, state) {
 		t.Fatal("bounded terminal withdrawal was rejected")
 	}
+	decision.QuoteOrderID = 12
+	if cdfDecisionReasonPredicate(decision, state) {
+		t.Fatal("terminal withdrawal for a mismatched live order was accepted")
+	}
+	decision.QuoteOrderID = 11
 	decision.CancelRequestID = 0
 	if cdfDecisionReasonPredicate(decision, state) {
 		t.Fatal("terminal withdrawal without a cancellation identity was accepted")
+	}
+}
+
+func TestCDFRepricePredicateReconstructsPartialFillBeforeDecision(t *testing.T) {
+	contract := RegisteredSV1DActivationContract().Suppliers[0]
+	originalQty := contract.MinimumQualifyingQty
+	partialQty := int64(400_000)
+	remainingQty := originalQty - partialQty
+	state := &cdfSupplierState{
+		contract:         contract,
+		hasLastDecision:  true,
+		liveQuoteOrderID: 11,
+		liveQuoteSide:    "BUY",
+		liveQuotePrice:   contract.ReferencePrice,
+		liveQuoteQty:     originalQty,
+	}
+	orderKey := cdfOrderKey{venueID: "north", clientID: 7, orderID: 11}
+	orders := map[cdfOrderKey]*cdfOrderState{orderKey: {
+		side: "BUY", price: contract.ReferencePrice, originalQty: originalQty,
+		remainingQty: originalQty, acceptedAt: 10, acceptedGlobalSeq: 1,
+	}}
+	fee := cdfFixtureFee(contract.ReferencePrice, partialQty, contract.BasePrecision, contract.MakerFeeBps)
+	payload, err := json.Marshal(cdfOrderFillEvidence{
+		OrderID: 11, TradeID: 12, Side: "BUY", Price: contract.ReferencePrice,
+		Qty: partialQty, FeeAmount: fee, FeeAsset: contract.QuoteAsset,
+		FilledQty: partialQty, RemainingQty: remainingQty, IsFull: false,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	audit := &CDFActivationAudit{strictMechanics: true, terminalOrders: make(map[cdfOrderKey]*cdfOrderState)}
+	states := map[cdfParticipantKey]*cdfSupplierState{{venueID: "north", clientID: 7}: state}
+	audit.processCDFOrderFill(Event{SimTS: 20, GlobalSequence: 2, VenueID: "north", ClientID: 7, payload: payload}, states, orders, map[cdfFillKey]cdfOrderFillEvidence{})
+	if len(audit.Checks) != 0 || state.liveQuoteQty != remainingQty {
+		t.Fatalf("partial-fill reconstruction = checks=%+v live=%d, want live=%d", audit.Checks, state.liveQuoteQty, remainingQty)
+	}
+	decision := cdfDecisionEvidence{
+		Action: "cancel", Reason: "reprice_for_inventory_or_touch", QuoteOrderID: 11,
+		CancelRequestID: 13, Side: "BUY", QuotePrice: contract.ReferencePrice, QuoteQty: originalQty,
+	}
+	if !cdfDecisionReasonPredicate(decision, state) {
+		t.Fatal("reprice after reconstructed partial fill was rejected")
+	}
+	decision.QuoteQty = remainingQty
+	if cdfDecisionReasonPredicate(decision, state) {
+		t.Fatal("same live remainder was accepted as a reprice after reconstructed partial fill")
 	}
 }
 

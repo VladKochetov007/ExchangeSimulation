@@ -945,7 +945,7 @@ func (s *ElasticLiquiditySupplier) terminalRoundTripCensored(now int64) bool {
 		return true
 	}
 	deadline, ok = etypes.TryAdd(deadline, interval)
-	return !ok || deadline > s.cfg.TerminalNano
+	return !ok || deadline >= s.cfg.TerminalNano
 }
 
 func (s *ElasticLiquiditySupplier) availableBuyInventory() int64 {

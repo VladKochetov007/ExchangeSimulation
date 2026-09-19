@@ -142,7 +142,7 @@ func TestCDFSupplierCensorsTerminalRoundTripWithoutLiveQuote(t *testing.T) {
 	gateway := newMetaGateway()
 	decisions := make([]ElasticLiquiditySupplierDecision, 0, 1)
 	cfg := cdfSupplierUnitConfig()
-	cfg.TerminalNano = int64(3 * time.Second)
+	cfg.TerminalNano = int64(4 * time.Second)
 	cfg.DecisionObserver = func(decision ElasticLiquiditySupplierDecision) {
 		decisions = append(decisions, decision)
 	}
@@ -152,6 +152,41 @@ func TestCDFSupplierCensorsTerminalRoundTripWithoutLiveQuote(t *testing.T) {
 	supplier.onTick(time.Unix(0, int64(2*time.Second)))
 	if len(gateway.requests) != 0 || len(decisions) != 1 || decisions[0].Action != "wait" || decisions[0].Reason != "simulation_horizon_censored" {
 		t.Fatalf("terminal no-quote censor = requests %+v decisions %+v", gateway.requests, decisions)
+	}
+}
+
+func TestCDFSupplierTerminalCensorPreservesPendingResponseOrdering(t *testing.T) {
+	const terminal = 4 * time.Second
+	decisions := make([]ElasticLiquiditySupplierDecision, 0, 2)
+	cfg := cdfSupplierUnitConfig()
+	cfg.TerminalNano = int64(terminal)
+	cfg.DecisionObserver = func(decision ElasticLiquiditySupplierDecision) {
+		decisions = append(decisions, decision)
+	}
+
+	pendingGateway := newMetaGateway()
+	pending := NewElasticLiquiditySupplier(1, pendingGateway, cfg)
+	pending.subscribed = true
+	pending.pendingRequestID = 17
+	pending.onTick(time.Unix(0, int64(2*time.Second)))
+	if decisions[len(decisions)-1].Action != "wait" || decisions[len(decisions)-1].Reason != "order_pending" || len(pendingGateway.requests) != 0 {
+		t.Fatalf("pending terminal response was not preserved: decision=%+v requests=%+v", decisions[len(decisions)-1], pendingGateway.requests)
+	}
+	pending.HandleEvent(context.Background(), &actor.Event{Type: actor.EventOrderAccepted, Data: actor.OrderAcceptedEvent{OrderID: 42, RequestID: 17}})
+	pending.onTick(time.Unix(0, int64(2*time.Second)))
+	if decisions[len(decisions)-1].Action != "withdraw" || decisions[len(decisions)-1].Reason != "simulation_horizon_censored" || len(pendingGateway.requests) != 1 {
+		t.Fatalf("accepted pending quote was not terminally withdrawn: decision=%+v requests=%+v", decisions[len(decisions)-1], pendingGateway.requests)
+	}
+
+	cancelGateway := newMetaGateway()
+	cancel := NewElasticLiquiditySupplier(1, cancelGateway, cfg)
+	cancel.subscribed = true
+	cancel.quote = elasticLiquidityQuote{orderID: 42, requestID: 17, side: exchange.Buy, price: 1_200, qty: 10}
+	cancel.cancelPending = true
+	cancel.cancelRequestID = 18
+	cancel.onTick(time.Unix(0, int64(2*time.Second)))
+	if cancelGateway.requests != nil || cancel.cancelRequestID != 18 {
+		t.Fatalf("pending cancellation was duplicated at terminal boundary: requests=%+v cancel_request=%d", cancelGateway.requests, cancel.cancelRequestID)
 	}
 }
 
