@@ -111,6 +111,50 @@ func TestCDFSupplierUsesExecutionClockForDecisionAndQuoteTimestamps(t *testing.T
 	}
 }
 
+func TestCDFSupplierCensorsTerminalRoundTripBeforeRequote(t *testing.T) {
+	gateway := newMetaGateway()
+	decisions := make([]ElasticLiquiditySupplierDecision, 0, 3)
+	cfg := cdfSupplierUnitConfig()
+	cfg.TerminalNano = int64(5 * time.Second)
+	cfg.DecisionObserver = func(decision ElasticLiquiditySupplierDecision) {
+		decisions = append(decisions, decision)
+	}
+	supplier := NewElasticLiquiditySupplier(1, gateway, cfg)
+	supplier.onTick(time.Unix(0, int64(time.Second)))
+	supplier.HandleEvent(context.Background(), cdfSupplierBookEvent(cfg.Symbol, int64(time.Second), 11, 1_200, 1_300, 100, 100))
+	supplier.onTick(time.Unix(0, int64(2*time.Second)))
+	orders := gateway.orders()
+	if len(orders) != 1 {
+		t.Fatalf("initial orders = %+v, want one quote", orders)
+	}
+	supplier.HandleEvent(context.Background(), &actor.Event{Type: actor.EventOrderAccepted, Data: actor.OrderAcceptedEvent{OrderID: 42, RequestID: orders[0].RequestID}})
+	supplier.onTick(time.Unix(0, int64(4*time.Second)))
+	decision := decisions[len(decisions)-1]
+	if decision.Action != "withdraw" || decision.Reason != "simulation_horizon_censored" || decision.QuoteOrderID != 42 || decision.CancelRequestID == 0 {
+		t.Fatalf("terminal censor decision = %+v", decision)
+	}
+	if len(gateway.orders()) != 1 || len(gateway.requests) != 3 || gateway.requests[2].Type != etypes.ReqCancelOrder {
+		t.Fatalf("terminal censor requests = %+v orders = %+v", gateway.requests, gateway.orders())
+	}
+}
+
+func TestCDFSupplierCensorsTerminalRoundTripWithoutLiveQuote(t *testing.T) {
+	gateway := newMetaGateway()
+	decisions := make([]ElasticLiquiditySupplierDecision, 0, 1)
+	cfg := cdfSupplierUnitConfig()
+	cfg.TerminalNano = int64(3 * time.Second)
+	cfg.DecisionObserver = func(decision ElasticLiquiditySupplierDecision) {
+		decisions = append(decisions, decision)
+	}
+	supplier := NewElasticLiquiditySupplier(1, gateway, cfg)
+	supplier.subscribed = true
+	supplier.HandleEvent(context.Background(), cdfSupplierBookEvent(cfg.Symbol, int64(time.Second), 11, 1_200, 1_300, 100, 100))
+	supplier.onTick(time.Unix(0, int64(2*time.Second)))
+	if len(gateway.requests) != 0 || len(decisions) != 1 || decisions[0].Action != "wait" || decisions[0].Reason != "simulation_horizon_censored" {
+		t.Fatalf("terminal no-quote censor = requests %+v decisions %+v", gateway.requests, decisions)
+	}
+}
+
 func TestCDFSupplierMissingSnapshotClearsStaleLocalState(t *testing.T) {
 	gateway := newMetaGateway()
 	cfg := cdfSupplierUnitConfig()

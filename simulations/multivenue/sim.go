@@ -3517,6 +3517,7 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 			QuoteOnOneSidedLocalBook:       spec.QuoteOnOneSidedLocalBook,
 			MaxLossQuote:                   spec.MaxLossQuote,
 			MakerFeeBps:                    spec.MakerFeeBps,
+			TerminalNano:                   s.terminalNano,
 		}
 		if frontierGateway, ok := gateway.(interface {
 			MarketDataFrontier() simulation.MarketDataFrontier

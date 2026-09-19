@@ -407,6 +407,7 @@ type cdfParticipantKey struct {
 type cdfSupplierState struct {
 	audit                  CDFSupplierActivationAudit
 	contract               CDFSupplierContract
+	terminalNano           int64
 	lastFillAt             int64
 	lastFillPosition       int64
 	currentPosition        int64
@@ -427,6 +428,10 @@ type cdfSupplierState struct {
 	equityStateSet         bool
 	lastDecision           cdfDecisionEvidence
 	hasLastDecision        bool
+	liveQuoteOrderID       uint64
+	liveQuoteSide          string
+	liveQuotePrice         int64
+	liveQuoteQty           int64
 	fillResponses          []cdfFillResponseWindow
 	pendingReprice         bool
 	pendingRepriceOrderID  uint64
@@ -1967,7 +1972,7 @@ func (r *CDFActivationAudit) indexCDFAccounts(report Report, config cdfActivatio
 			continue
 		}
 		state := &cdfSupplierState{
-			contract: supplier, initialAccountSeen: true,
+			contract: supplier, terminalNano: contract.SimulationEndNano, initialAccountSeen: true,
 			reconstructedReference: supplier.ReferencePrice,
 			reconstructedRiskMark:  supplier.ReferencePrice,
 			reconstructedEquity:    row.Account.Equity,
@@ -2498,8 +2503,9 @@ func (r *CDFActivationAudit) validateCDFObservation(
 	snapshots map[cdfSnapshotKey]cdfSnapshotProof,
 ) bool {
 	if decision.ObservationSequence == 0 || decision.ObservationLinkID == 0 || decision.ObservationOrdinal == 0 {
-		if decision.Action != "wait" || decision.Reason != "subscribe" &&
-			decision.Reason != "stale_or_missing_observation" && decision.Reason != "equity_unavailable" {
+		if decision.Reason != "simulation_horizon_censored" &&
+			(decision.Action != "wait" || decision.Reason != "subscribe" &&
+				decision.Reason != "stale_or_missing_observation" && decision.Reason != "equity_unavailable") {
 			r.addEventCheck(event, state, "actionable CDF decision has no delivered observation frontier")
 		}
 		return false
@@ -3223,6 +3229,10 @@ func (r *CDFActivationAudit) processCDFAccepted(event Event, states map[cdfParti
 		oneSidedCandidate: oneSidedCandidate, minimumQualifying: submission.decision.MinimumQualifyingQty,
 	}
 	r.liveOrderBySupplier[participantKey] = orderKey
+	state.liveQuoteOrderID = accepted.OrderID
+	state.liveQuoteSide = accepted.Side
+	state.liveQuotePrice = accepted.Price
+	state.liveQuoteQty = accepted.Qty
 	state.audit.AcceptedOrderCount++
 	r.AcceptedOrderCount++
 }
@@ -3319,6 +3329,9 @@ func (r *CDFActivationAudit) processCDFOrderFill(event Event, states map[cdfPart
 	order.remainingQty = expectedRemaining
 	order.filledQty = expectedFilled
 	order.fillCount = updatedFillCount
+	if state.liveQuoteOrderID == fill.OrderID {
+		state.liveQuoteQty = expectedRemaining
+	}
 	if order.firstFillAt == 0 {
 		order.firstFillAt = event.SimTS
 	}
@@ -3327,6 +3340,7 @@ func (r *CDFActivationAudit) processCDFOrderFill(event Event, states map[cdfPart
 			r.addEventCheck(event, state, "filled CDF order has an invalid or overflowing quote lifetime")
 		}
 		order.terminalState = "filled"
+		clearCDFLiveQuote(state)
 		r.rememberCDFTerminalOrder(orderKey, order)
 		delete(orders, orderKey)
 		r.forgetCDFLiveOrder(cdfParticipantKey{event.VenueID, event.ClientID}, orderKey)
@@ -3392,6 +3406,7 @@ func (r *CDFActivationAudit) processCDFCancelled(
 			r.addEventCheck(event, state, "forced CDF cancellation has an invalid or overflowing quote lifetime")
 		}
 		order.terminalState = "forced_cancelled"
+		clearCDFLiveQuote(state)
 		r.rememberCDFTerminalOrder(orderKey, order)
 		delete(orders, orderKey)
 		r.forgetCDFLiveOrder(cdfParticipantKey{event.VenueID, event.ClientID}, orderKey)
@@ -3417,6 +3432,7 @@ func (r *CDFActivationAudit) processCDFCancelled(
 	withdrawal.closed = true
 	delete(orders, orderKey)
 	order.terminalState = "cancelled"
+	clearCDFLiveQuote(state)
 	r.rememberCDFTerminalOrder(orderKey, order)
 	r.forgetCDFLiveOrder(cdfParticipantKey{event.VenueID, event.ClientID}, orderKey)
 	if !incrementCDFCounter(&state.audit.WithdrawalCount) {
@@ -3521,6 +3537,16 @@ func (r *CDFActivationAudit) forgetCDFLiveOrder(participant cdfParticipantKey, k
 	if liveOrder, exists := r.liveOrderBySupplier[participant]; exists && liveOrder == key {
 		delete(r.liveOrderBySupplier, participant)
 	}
+}
+
+func clearCDFLiveQuote(state *cdfSupplierState) {
+	if state == nil {
+		return
+	}
+	state.liveQuoteOrderID = 0
+	state.liveQuoteSide = ""
+	state.liveQuotePrice = 0
+	state.liveQuoteQty = 0
 }
 
 func (r *CDFActivationAudit) recordCDFOrderClosure(state *cdfSupplierState, order *cdfOrderState, closedAt int64, terminalKind string) bool {
@@ -4724,7 +4750,8 @@ func cdfDecisionReasonAllowed(action, reason string) bool {
 		switch reason {
 		case "subscribe", "order_pending", "cancel_pending", "awaiting_fresh_observation_after_close",
 			"loss_limit", "equity_unavailable", "stale_or_missing_observation", "one_sided_or_locked_book",
-			"limit_or_touch_unavailable", "below_minimum_executable_qty", "inventory_at_target", "quote_cash_limit":
+			"limit_or_touch_unavailable", "below_minimum_executable_qty", "inventory_at_target", "quote_cash_limit",
+			"simulation_horizon_censored":
 			return true
 		}
 	case "submit":
@@ -4737,7 +4764,7 @@ func cdfDecisionReasonAllowed(action, reason string) bool {
 		switch reason {
 		case "loss_limit", "equity_unavailable", "stale_or_missing_observation", "one_sided_or_locked_book",
 			"limit_or_touch_unavailable", "below_minimum_executable_qty", "position_gap_overflow",
-			"inventory_at_target", "quote_cash_limit":
+			"inventory_at_target", "quote_cash_limit", "simulation_horizon_censored":
 			return true
 		}
 	}
@@ -4808,12 +4835,31 @@ func cdfDecisionReasonPredicate(decision cdfDecisionEvidence, state *cdfSupplier
 		return decision.Action == "submit" && decision.TargetPosition != decision.Position
 	case "quote_unchanged":
 		return decision.Action == "rest" && hasQuote && decision.QuotePrice > 0 && decision.QuoteQty > 0
+	case "simulation_horizon_censored":
+		if state.terminalNano <= 0 || decision.DecisionTime > state.terminalNano {
+			return false
+		}
+		interval := state.contract.Interval
+		if interval <= 0 || interval > math.MaxInt64/2 {
+			return false
+		}
+		censorStart := state.terminalNano - 2*interval
+		if decision.DecisionTime < censorStart {
+			return false
+		}
+		if decision.Action == "wait" {
+			return !hasQuote
+		}
+		return decision.Action == "withdraw" && hasQuote && decision.CancelRequestID != 0
 	case "reprice_for_inventory_or_touch":
 		if decision.Action != "cancel" || !hasQuote || decision.CancelRequestID == 0 || !state.hasLastDecision {
 			return false
 		}
-		return decision.Side != state.lastDecision.Side || decision.QuotePrice != state.lastDecision.QuotePrice ||
-			decision.QuoteQty != state.lastDecision.QuoteQty
+		if state.liveQuoteOrderID != decision.QuoteOrderID {
+			return false
+		}
+		return decision.Side != state.liveQuoteSide || decision.QuotePrice != state.liveQuotePrice ||
+			decision.QuoteQty != state.liveQuoteQty
 	default:
 		return false
 	}

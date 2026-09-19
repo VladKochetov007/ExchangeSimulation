@@ -143,6 +143,58 @@ verification, and a new development-only authorization, seed 659 must be rerun
 from the corrected binary. No 24-hour development cells or holdouts are
 authorized by this note.
 
+## b466 activation adjudication and terminal-contract successor
+
+The exact `b466b57fd2bfcbdcb1319a1942ac8370a86d6ba4` candidate passed its fresh
+Go 1.27 rebuild/provenance and finite-cgroup capacity preflight. Its registered
+seed-659 development-only activation probe was retained but failed closed with
+`INVALID_EVIDENCE`; the old namespace remains immutable at
+`/home/vlad/external-scratch/sv1d-activation-b466b57-20260919-cgroup8g`.
+
+A separate fresh Luna xhigh adjudication (`Peirce`) inspected b466 and the
+retained raw evidence. It classified the remaining failures as follows:
+
+* The 264 `reprice_for_inventory_or_touch` failures were an analyzer defect.
+  The actor compares the desired quote with its live order remainder after a
+  partial fill, while the analyzer compared against the prior decision's
+  quantity. The strict invariant is comparison with the reconstructed live
+  order `(side, price, remaining quantity)`, not with a self-authored prior
+  decision.
+* Three terminal submissions and three terminal cancellations were
+  right-censored transport requests at the exact simulation endpoint. They
+  must not be inferred accepted, rejected, or closed; pre-terminal unresolved
+  requests remain hard failures.
+* Four missing supplier-fill rows and the four corresponding producer-order
+  failures were one terminal-tail execution/evidence defect, not eight
+  independent failures. The exchange filled live CDF orders at the endpoint,
+  but the actor's delayed fill callback could not arrive before shutdown.
+
+These findings are reachable in the successor and invalidate the b466
+activation result as a scientific activation claim. They do not affect any
+historical R2 result because the finite CDF roster was not enabled there, and
+no holdout has been consumed. The retained b466 activation is not rescored or
+rewritten.
+
+The successor correction has two independent parts. First, strict analysis
+reconstructs live supplier quote identity and remaining quantity from accepted
+orders, partial/full fills, and cancellations; the reprice predicate remains
+fail-closed when the live order cannot be reconstructed. Second, the CDF actor
+receives the registered simulation horizon and uses a two-interval
+round-trip-censor window. Within that window it emits the explicit
+`simulation_horizon_censored` wait/withdraw lifecycle reason, withdraws any
+live quote, and submits no new quote. A strict predicate accepts that reason
+only in the registered terminal window and never treats it as an exchange
+outcome. This mirrors the existing terminal-tail policy used by other
+successor actors and prevents the simulator from creating unobservable
+endpoint fills.
+
+Focused actor/analyzer regressions pass, including partial-fill reprice
+reconstruction and both live-quote/no-live-quote terminal censor paths. The
+candidate still requires the remaining full tests, race/static/evidence gates,
+fresh independent review, clean pinned rebuild/capacity verification, and a
+new seed-659 probe. No prior namespace is repaired, and no development cells
+or holdouts are authorized by this amendment.
+
 The previous invalid activation namespace remains immutable historical evidence.
 The performance branch and its binary-evidence prototype remain deferred; no
 performance-branch code is imported by this correction.

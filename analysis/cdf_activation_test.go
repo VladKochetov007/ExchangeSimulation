@@ -2591,6 +2591,52 @@ func TestCDFLimitOrTouchUnavailableRequiresObservableFailure(t *testing.T) {
 	}
 }
 
+func TestCDFRepricePredicateUsesLiveRemainingQuoteAfterPartialFill(t *testing.T) {
+	contract := RegisteredSV1DActivationContract().Suppliers[0]
+	state := &cdfSupplierState{
+		contract:         contract,
+		hasLastDecision:  true,
+		liveQuoteOrderID: 11,
+		liveQuoteSide:    "BUY",
+		liveQuotePrice:   contract.ReferencePrice,
+		liveQuoteQty:     3,
+	}
+	decision := cdfDecisionEvidence{
+		Action: "cancel", Reason: "reprice_for_inventory_or_touch", QuoteOrderID: 11,
+		CancelRequestID: 12, Side: "BUY", QuotePrice: contract.ReferencePrice, QuoteQty: 5,
+	}
+	if !cdfDecisionReasonPredicate(decision, state) {
+		t.Fatal("reprice after a partial fill was rejected even though the desired quantity differs from the live remainder")
+	}
+	decision.QuoteQty = 3
+	if cdfDecisionReasonPredicate(decision, state) {
+		t.Fatal("same-term cancellation was accepted as a reprice")
+	}
+}
+
+func TestCDFHorizonCensorPredicateRequiresRegisteredWindow(t *testing.T) {
+	const second = int64(1_000_000_000)
+	contract := RegisteredSV1DActivationContract().Suppliers[0]
+	state := &cdfSupplierState{contract: contract, terminalNano: 100 * second}
+	decision := cdfDecisionEvidence{Action: "wait", Reason: "simulation_horizon_censored", DecisionTime: 97 * second}
+	if !cdfDecisionReasonPredicate(decision, state) {
+		t.Fatal("registered terminal censor window was rejected")
+	}
+	decision.DecisionTime = 95 * second
+	if cdfDecisionReasonPredicate(decision, state) {
+		t.Fatal("decision outside the terminal censor window was accepted")
+	}
+	decision.DecisionTime = 97 * second
+	decision.Action, decision.QuoteOrderID, decision.CancelRequestID = "withdraw", 11, 12
+	if !cdfDecisionReasonPredicate(decision, state) {
+		t.Fatal("bounded terminal withdrawal was rejected")
+	}
+	decision.CancelRequestID = 0
+	if cdfDecisionReasonPredicate(decision, state) {
+		t.Fatal("terminal withdrawal without a cancellation identity was accepted")
+	}
+}
+
 func TestCDFTradeIdentityCannotBeCountedTwice(t *testing.T) {
 	r := &CDFActivationAudit{}
 	payload, err := json.Marshal(cdfTradeEvidence{TradeID: 9, Price: 100, Qty: 3, Side: "SELL"})
@@ -2911,8 +2957,9 @@ func TestCDFOpenOrderIsRightCensoredAtTerminalHorizon(t *testing.T) {
 func TestCDFOrderLifecycleRecordsPartialThenFullFill(t *testing.T) {
 	contract := RegisteredSV1DActivationContract().Suppliers[0]
 	state := &cdfSupplierState{
-		contract: contract,
-		audit:    CDFSupplierActivationAudit{VenueID: "north", Role: contract.Role, ClientID: 7},
+		contract:         contract,
+		audit:            CDFSupplierActivationAudit{VenueID: "north", Role: contract.Role, ClientID: 7},
+		liveQuoteOrderID: 11, liveQuoteSide: "BUY", liveQuotePrice: contract.ReferencePrice, liveQuoteQty: 5,
 	}
 	orderKey := cdfOrderKey{venueID: "north", clientID: 7, orderID: 11}
 	orders := map[cdfOrderKey]*cdfOrderState{orderKey: {
@@ -2940,6 +2987,12 @@ func TestCDFOrderLifecycleRecordsPartialThenFullFill(t *testing.T) {
 			t.Fatal(err)
 		}
 		audit.processCDFOrderFill(Event{SimTS: fill.at, GlobalSequence: uint64(fill.sequence), VenueID: "north", ClientID: 7, payload: payload}, states, orders, actual)
+		if fill.isFull && state.liveQuoteOrderID != 0 {
+			t.Fatalf("full fill left live quote state: %+v", state)
+		}
+		if !fill.isFull && state.liveQuoteQty != fill.remainingQty {
+			t.Fatalf("partial fill live remainder = %d, want %d", state.liveQuoteQty, fill.remainingQty)
+		}
 	}
 	if len(audit.Checks) != 0 || len(orders) != 0 || state.audit.FilledOrderCount != 1 || state.audit.TotalQuoteLifetimeNano != 20 {
 		t.Fatalf("partial/full lifecycle = checks=%+v orders=%+v state=%+v", audit.Checks, orders, state)

@@ -167,9 +167,14 @@ type ElasticLiquiditySupplierConfig struct {
 	QuoteOnOneSidedLocalBook       bool
 	MaxLossQuote                   int64
 	MakerFeeBps                    int64
-	DecisionObserver               func(ElasticLiquiditySupplierDecision)
-	FillObserver                   func(ElasticLiquiditySupplierFill)
-	ObservationFrontier            func() simulation.MarketDataFrontier
+	// TerminalNano is the registered simulation horizon. A finite
+	// round-trip censor window prevents this actor from creating a quote or
+	// cancellation request whose exchange outcome cannot be delivered before
+	// the run ends.
+	TerminalNano        int64
+	DecisionObserver    func(ElasticLiquiditySupplierDecision)
+	FillObserver        func(ElasticLiquiditySupplierFill)
+	ObservationFrontier func() simulation.MarketDataFrontier
 	// DecisionNow is the participant-local execution clock. Deterministic
 	// runners inject the delayed gateway clock so a nominal timer timestamp
 	// cannot precede the actor-facing delivery boundary. Direct unit contexts
@@ -736,6 +741,12 @@ func (s *ElasticLiquiditySupplier) onTick(now time.Time) {
 		s.emitDecision(decision)
 		return
 	}
+	if s.terminalRoundTripCensored(decisionAt) {
+		decision.Action, decision.Reason = s.withdrawIfNeeded("simulation_horizon_censored")
+		decision.CancelRequestID = s.cancelRequestID
+		s.emitDecision(decision)
+		return
+	}
 	if s.riskLimitTriggered || s.equityUnavailable {
 		reason := "loss_limit"
 		if s.equityUnavailable {
@@ -922,6 +933,19 @@ func (s *ElasticLiquiditySupplier) decisionTimestamp(nominalTimestamp int64) int
 		return s.cfg.DecisionNow()
 	}
 	return nominalTimestamp
+}
+
+func (s *ElasticLiquiditySupplier) terminalRoundTripCensored(now int64) bool {
+	if s.cfg.TerminalNano == 0 {
+		return false
+	}
+	interval := int64(s.cfg.Interval)
+	deadline, ok := etypes.TryAdd(now, interval)
+	if !ok {
+		return true
+	}
+	deadline, ok = etypes.TryAdd(deadline, interval)
+	return !ok || deadline > s.cfg.TerminalNano
 }
 
 func (s *ElasticLiquiditySupplier) availableBuyInventory() int64 {
