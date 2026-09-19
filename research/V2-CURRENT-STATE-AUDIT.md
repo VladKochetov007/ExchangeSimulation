@@ -1799,3 +1799,29 @@ exact tree; a new pinned Go 1.27 build/bundle; a new verified finite-cgroup
 seed-977 capacity preflight; and only then a fresh seed-659 development probe.
 No registered 24-hour development cell, freeze, or holdout `619/631/641` has
 been consumed.
+
+## Append-only current checkpoint: `85fc5a4` triad presence correction — 2026-09-19
+
+The fresh Luna xhigh review of exact `11d2497` / tree
+`72931a4fa05890e00f3a33939619b172da947013` returned **ACCEPT WITH
+CONDITIONS**. It confirmed that the explicit-false manifest correction is
+minimal and production-path tested, then identified one adjacent contract
+inconsistency: the mode-off triad validator accepted an omitted supplier field
+although the strict production decoder requires explicit false. No-roster
+omission is intentionally valid because it has no supplier roster.
+
+The condition is corrected in exact HEAD
+`85fc5a4402eee7055d4cfb3c48c6113d92285392` (tree
+`9ac1165e90310ca9932e2ce1bbaf98b8f78ea189`): mode-off now requires the key and
+boolean false, with a negative triad regression. This remains a fail-closed
+evidence/provenance correction only; no economics, historical trajectory,
+registered config, seed, horizon, calendar, or holdout boundary changed. The
+prior seed-659 activation remains `INVALID_EVIDENCE` and its artifacts remain
+immutable.
+
+The current gate is fresh full tests, vet, established plus changed-boundary
+race checks, and fresh-process checks; then one fresh independent Luna review
+of this exact final tree. Only acceptance may authorize a new Go 1.27 pinned
+bundle, verified finite-cgroup seed-977 capacity preflight, and fresh
+development-only seed-659 probe. No development cell, freeze, or holdout
+`619/631/641` has run.

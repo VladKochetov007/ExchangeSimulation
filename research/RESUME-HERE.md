@@ -2058,3 +2058,21 @@ then one fresh independent Luna xhigh review of this exact tree. If accepted,
 build a new pinned bundle, run a new verified finite-cgroup seed-977 capacity
 preflight, and only then repeat the registered development-only seed-659 probe.
 No 24-hour development cell, freeze, or holdout `619/631/641` has run.
+
+## Append-only current checkpoint: explicit mode-off triad correction — 2026-09-19
+
+Fresh Luna xhigh review of exact `11d2497` accepted the manifest fix with one
+condition: the triad validator still permitted an omitted
+`quote_on_one_sided_local_book` key in mode-off even though the strict
+production decoder requires explicit `false`. Commit `85fc5a4402eee7055d4cfb3c48c6113d92285392`
+(tree `9ac1165e90310ca9932e2ce1bbaf98b8f78ea189`) now requires presence and
+explicit false and adds a negative triad regression. No-roster omission remains
+valid because that arm has no supplier entries.
+
+This is a fail-closed evidence/provenance correction only; it does not alter
+market behavior, economics, historical trajectories, or the holdout boundary.
+The prior seed-659 namespace remains `INVALID_EVIDENCE` and is not rescored.
+Because the source changed, the exact final tree needs fresh full mechanical
+gates and one fresh independent Luna review before a new pinned Go 1.27 bundle,
+seed-977 capacity preflight, or seed-659 activation. No 24-hour development
+cell, freeze, or holdout `619/631/641` has run.
