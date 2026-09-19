@@ -1766,3 +1766,36 @@ unavailable`; no scientific verdict was produced. This is a repeated external
 availability blocker, not candidate rejection. No capacity, activation,
 development, freeze, or holdout action occurred. The candidate remains closed
 until independent Luna acceptance of the exact tree.
+
+## Append-only current checkpoint: `47bd21a` mode-off manifest correction — 2026-09-19
+
+The current scientific branch is clean and pushed at exact HEAD
+`47bd21a6342c829ffe14a2be2607fb3546c7ca9d` (tree
+`a7a8223b35bbb04da188f69013ae0cf77ea8ec46`). The performance red-team feed was
+refreshed through `b1847ac`; there is no newer reviewed commit and no
+performance implementation was imported.
+
+The reviewed predecessor `2192451` passed its clean Go 1.27 rebuild, verified
+finite-cgroup seed-977 capacity preflight, and authorized seed-659 tri-arm
+execution. Treatment and no-roster reached complete strict audits. The mode-off
+arm failed closed before scoring because the production simulator's typed
+manifest serialization omitted `quote_on_one_sided_local_book` when its
+registered value was `false` (`omitempty`), even though the checked-in config
+and copied run-config contained the explicit false. This is a reachable
+evidence/provenance contract defect, not an economic outcome. The complete
+activation namespace remains retained externally and is classified
+`INVALID_EVIDENCE`; no score or directional claim is issued.
+
+Commit `47bd21a` removes only that `omitempty` tag, adds an actual `NewSim`
+manifest regression for the registered treatment and mode-off configs, and
+records the failure and correction in the dated SV1D repair note. No R2
+economics, calendar, roster, risk behavior, seed, horizon, historical result,
+or holdout boundary changed. The prior review, bundle, binaries, capacity
+attestation, and activation artifacts do not authorize a rerun.
+
+The current gate is: clean full `make test`, `go vet ./...`, targeted race and
+fresh-process evidence checks; one fresh independent Luna xhigh review of this
+exact tree; a new pinned Go 1.27 build/bundle; a new verified finite-cgroup
+seed-977 capacity preflight; and only then a fresh seed-659 development probe.
+No registered 24-hour development cell, freeze, or holdout `619/631/641` has
+been consumed.

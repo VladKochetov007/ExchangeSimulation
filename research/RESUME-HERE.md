@@ -2033,3 +2033,28 @@ freeze, or holdout action occurred.
 
 The goal remains active and should resume with a successful exact-tree Luna
 review, followed by the already documented pinned-build and capacity gates.
+
+## Append-only current checkpoint: mode-off manifest contract correction — 2026-09-19
+
+The exact scientific HEAD is `47bd21a6342c829ffe14a2be2607fb3546c7ca9d` (tree
+`a7a8223b35bbb04da188f69013ae0cf77ea8ec46`), clean and pushed. The authorized
+seed-659 activation built from the prior reviewed candidate `2192451` completed
+simulation and rendering for all three development arms, but strict extraction
+failed closed for mode-off because the production `manifest.json` omitted the
+registered `quote_on_one_sided_local_book: false` field. The typed supplier
+struct used `omitempty`; the copied run configuration was correct, but the
+strict analyzer reads the production manifest first. The retained activation is
+`INVALID_EVIDENCE`, not a scientific score, and is preserved outside the repo.
+
+Commit `47bd21a` removes `omitempty` for that explicit contract field, adds a
+production `NewSim` manifest regression for treatment and mode-off, and records
+the failure and classification in
+`research/v2-r2-sv1d-activation-contract-repair-2026-09-19.md`. No participant,
+calendar, risk, seed, horizon, or historical result changed. The old bundle,
+capacity attestation, and binaries do not authorize a rerun.
+
+The immediate gate is a clean full test/vet/race/fresh-process verification,
+then one fresh independent Luna xhigh review of this exact tree. If accepted,
+build a new pinned bundle, run a new verified finite-cgroup seed-977 capacity
+preflight, and only then repeat the registered development-only seed-659 probe.
+No 24-hour development cell, freeze, or holdout `619/631/641` has run.
