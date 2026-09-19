@@ -87,6 +87,30 @@ func TestCDFSupplierDecisionCarriesDeliveredObservationFingerprint(t *testing.T)
 	}
 }
 
+func TestCDFSupplierUsesExecutionClockForDecisionAndQuoteTimestamps(t *testing.T) {
+	gateway := newMetaGateway()
+	decisions := make([]ElasticLiquiditySupplierDecision, 0, 2)
+	executionTime := int64(time.Second)
+	cfg := cdfSupplierUnitConfig()
+	cfg.DecisionNow = func() int64 { return executionTime }
+	cfg.DecisionObserver = func(decision ElasticLiquiditySupplierDecision) {
+		decisions = append(decisions, decision)
+	}
+	supplier := NewElasticLiquiditySupplier(1, gateway, cfg)
+	supplier.onTick(time.Unix(0, int64(1500*time.Millisecond)))
+	supplier.HandleEvent(context.Background(), cdfSupplierBookEvent(cfg.Symbol, int64(4*time.Second), 11, 1_200, 1_300, 100, 100))
+	executionTime = int64(5 * time.Second)
+	supplier.onTick(time.Unix(0, int64(4500*time.Millisecond)))
+	if len(decisions) != 2 {
+		t.Fatalf("decisions = %+v, want subscription and quote decisions", decisions)
+	}
+	decision := decisions[len(decisions)-1]
+	if decision.Action != "submit" || decision.DecisionTime != executionTime || decision.QuoteSubmittedAt != executionTime ||
+		decision.ObservationAge != executionTime-int64(4*time.Second) {
+		t.Fatalf("execution timestamp was not used consistently: %+v", decision)
+	}
+}
+
 func TestCDFSupplierMissingSnapshotClearsStaleLocalState(t *testing.T) {
 	gateway := newMetaGateway()
 	cfg := cdfSupplierUnitConfig()

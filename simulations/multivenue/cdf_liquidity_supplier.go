@@ -170,6 +170,11 @@ type ElasticLiquiditySupplierConfig struct {
 	DecisionObserver               func(ElasticLiquiditySupplierDecision)
 	FillObserver                   func(ElasticLiquiditySupplierFill)
 	ObservationFrontier            func() simulation.MarketDataFrontier
+	// DecisionNow is the participant-local execution clock. Deterministic
+	// runners inject the delayed gateway clock so a nominal timer timestamp
+	// cannot precede the actor-facing delivery boundary. Direct unit contexts
+	// may leave it nil and use the ticker timestamp.
+	DecisionNow func() int64
 }
 
 // ElasticLiquiditySupplierDecision records the local information and action
@@ -712,7 +717,8 @@ func ceilToPositiveTick(price, tick int64) (int64, bool) {
 }
 
 func (s *ElasticLiquiditySupplier) onTick(now time.Time) {
-	decision := s.baseDecision(now.UnixNano())
+	decisionAt := s.decisionTimestamp(now.UnixNano())
+	decision := s.baseDecision(decisionAt)
 	if !s.subscribed {
 		s.Subscribe(s.cfg.Symbol, exchange.MDSnapshot)
 		s.subscribed = true
@@ -741,7 +747,7 @@ func (s *ElasticLiquiditySupplier) onTick(now time.Time) {
 		return
 	}
 
-	if !s.observationUsable(now.UnixNano()) {
+	if !s.observationUsable(decisionAt) {
 		decision.Action, decision.Reason = s.withdrawIfNeeded("stale_or_missing_observation")
 		decision.CancelRequestID = s.cancelRequestID
 		s.emitDecision(decision)
@@ -750,8 +756,8 @@ func (s *ElasticLiquiditySupplier) onTick(now time.Time) {
 	localBook := s.observeLocalBook()
 	if !localBook.ok {
 		if localBook.anchorPrice > 0 && localBook.localBookMode == "one_sided" {
-			s.reviseReference(localBook.anchorPrice, now.UnixNano())
-			decision = s.baseDecision(now.UnixNano())
+			s.reviseReference(localBook.anchorPrice, decisionAt)
+			decision = s.baseDecision(decisionAt)
 			decision.MarkPrice, decision.ReferencePrice = localBook.anchorPrice, s.reference
 			// The anchor is still a valid input to the participant's inventory
 			// target even when the risk mark is unavailable. Do not submit against
@@ -772,14 +778,14 @@ func (s *ElasticLiquiditySupplier) onTick(now time.Time) {
 		s.emitDecision(decision)
 		return
 	}
-	s.reviseReference(localBook.anchorPrice, now.UnixNano())
-	decision = s.baseDecision(now.UnixNano())
+	s.reviseReference(localBook.anchorPrice, decisionAt)
+	decision = s.baseDecision(decisionAt)
 	decision.MarkPrice, decision.ReferencePrice = localBook.anchorPrice, s.reference
 	decision.LocalBookMode, decision.RiskMarkSource = localBook.localBookMode, localBook.riskMarkSource
 	target := s.TargetPosition(localBook.anchorPrice)
 	decision.TargetPosition = target
 	if !s.updateMarkedRisk(localBook.riskMarkPrice) {
-		decision = s.baseDecision(now.UnixNano())
+		decision = s.baseDecision(decisionAt)
 		decision.MarkPrice, decision.ReferencePrice, decision.TargetPosition = localBook.anchorPrice, s.reference, target
 		decision.LocalBookMode, decision.RiskMarkSource = localBook.localBookMode, localBook.riskMarkSource
 		decision.Action, decision.Reason = s.withdrawIfNeeded("equity_unavailable")
@@ -787,7 +793,7 @@ func (s *ElasticLiquiditySupplier) onTick(now time.Time) {
 		s.emitDecision(decision)
 		return
 	}
-	decision = s.baseDecision(now.UnixNano())
+	decision = s.baseDecision(decisionAt)
 	decision.MarkPrice, decision.ReferencePrice, decision.TargetPosition = localBook.anchorPrice, s.reference, target
 	decision.LocalBookMode, decision.RiskMarkSource = localBook.localBookMode, localBook.riskMarkSource
 	decision.RiskMarkCurrent = true
@@ -903,12 +909,19 @@ func (s *ElasticLiquiditySupplier) onTick(now time.Time) {
 	requestID := s.SubmitPostOnlyOrder(s.cfg.Symbol, desiredSide, desiredPrice, quantity)
 	s.pendingRequestID = requestID
 	s.pendingReplacementOrderID = s.lastClosedOrderID
-	s.quote = elasticLiquidityQuote{requestID: requestID, side: desiredSide, price: desiredPrice, qty: quantity, submittedAt: now.UnixNano(), observationSequence: s.observationSequence, observationTimestamp: s.observationTime, oneSidedObservation: localBook.localBookMode == "one_sided"}
+	s.quote = elasticLiquidityQuote{requestID: requestID, side: desiredSide, price: desiredPrice, qty: quantity, submittedAt: decisionAt, observationSequence: s.observationSequence, observationTimestamp: s.observationTime, oneSidedObservation: localBook.localBookMode == "one_sided"}
 	decision.Action, decision.Reason = "submit", "inventory_target_gap"
-	decision.QuoteRequestID, decision.QuoteSubmittedAt = requestID, now.UnixNano()
+	decision.QuoteRequestID, decision.QuoteSubmittedAt = requestID, decisionAt
 	decision.ReplacesOrderID = s.lastClosedOrderID
 	s.lastClosedOrderID = 0
 	s.emitDecision(decision)
+}
+
+func (s *ElasticLiquiditySupplier) decisionTimestamp(nominalTimestamp int64) int64 {
+	if s.cfg.DecisionNow != nil {
+		return s.cfg.DecisionNow()
+	}
+	return nominalTimestamp
 }
 
 func (s *ElasticLiquiditySupplier) availableBuyInventory() int64 {

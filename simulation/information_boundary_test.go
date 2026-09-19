@@ -280,3 +280,19 @@ func TestScheduledZeroLatencyProducesZeroTelemetry(t *testing.T) {
 		t.Fatalf("zero-delay telemetry is incomplete or nonzero: %+v", rows)
 	}
 }
+
+func TestDelayedGatewayNowUnixNanoUsesLocalSimulationClock(t *testing.T) {
+	clock := NewSimulatedClock(int64(time.Second))
+	scheduler := NewEventScheduler(clock)
+	clock.SetScheduler(scheduler)
+	inner := &boundaryGateway{id: 10, resp: make(chan exchange.Response, 1), md: make(chan *exchange.MarketDataMsg, 1)}
+	delayed := NewDelayedGateway(inner, nil, nil, nil)
+	delayed.UseScheduler(scheduler, clock)
+	if got := delayed.NowUnixNano(); got != clock.NowUnixNano() {
+		t.Fatalf("initial local clock = %d, want %d", got, clock.NowUnixNano())
+	}
+	clock.Advance(3 * time.Second)
+	if got := delayed.NowUnixNano(); got != clock.NowUnixNano() {
+		t.Fatalf("advanced local clock = %d, want %d", got, clock.NowUnixNano())
+	}
+}

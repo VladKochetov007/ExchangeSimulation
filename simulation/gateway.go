@@ -137,6 +137,17 @@ func (d *DelayedGateway) MarketDataFrontier() MarketDataFrontier {
 	return frontier
 }
 
+// NowUnixNano returns the delayed gateway's participant-local simulation time.
+// It exposes no market state; it only lets a locally executing actor stamp an
+// action at the actual deterministic runner boundary rather than at a nominal
+// timer due time that may already be in the past.
+func (d *DelayedGateway) NowUnixNano() int64 {
+	if d == nil || d.clock == nil {
+		return 0
+	}
+	return d.clock.NowUnixNano()
+}
+
 // UseScheduler switches to scheduled delivery at exact simulation times.
 // Must be called before Start.
 func (d *DelayedGateway) UseScheduler(s *EventScheduler, c types.Clock) {

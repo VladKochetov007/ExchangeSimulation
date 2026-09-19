@@ -147,3 +147,17 @@ The previous invalid activation namespace remains immutable historical evidence.
 The performance branch and its binary-evidence prototype remain deferred; no
 performance-branch code is imported by this correction.
 
+## Successor implementation checkpoint
+
+The zero-based identity correction is committed as `8103bcd`. The timestamp
+correction is the next uncommitted candidate change in this worktree. It adds
+no serialized configuration field and no market-state input: `DelayedGateway`
+exposes only its current participant-local clock, `Sim.addVenue` injects that
+clock into the CDF actor, and the actor uses one sampled execution timestamp
+for observation-age checks, private reference aging, decision evidence, and
+quote submission. Direct actor tests retain the nominal-ticker fallback.
+
+The focused simulation and multivenue regressions pass. The change still
+requires the clean full test/vet/race/evidence gates, fresh independent review,
+fresh pinned rebuild/capacity verification, and a new development-only seed-659
+probe before it can advance the scientific program.
