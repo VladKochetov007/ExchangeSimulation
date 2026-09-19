@@ -3,6 +3,7 @@ package multivenue
 import (
 	"bufio"
 	"bytes"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -65,6 +66,42 @@ func TestCheckpointSinkClosesAtRegisteredFinalTime(t *testing.T) {
 	}
 	if len(records) != 2 || records[len(records)-1].SimTime != 3*second {
 		t.Fatalf("checkpoint closure = %+v, want final time %d", records, 3*second)
+	}
+}
+
+func TestBinaryCheckpointDefersTerminalBoundaryUntilAllSameTimestampEvents(t *testing.T) {
+	const second = int64(1_000_000_000)
+	t.Setenv("EXSIM_BINARY_EVIDENCE", "file")
+	dir := t.TempDir()
+	sink, err := newCheckpointSink(dir, 1, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sink.finalSimTime = 2 * second
+	sink.observe(1*second, 1, "event", "north", map[string]int{"n": 1}, "general.jsonl", 1)
+	sink.observe(2*second, 1, "event", "north", map[string]int{"n": 2}, "general.jsonl", 2)
+	sink.observe(2*second, 1, "event", "north", map[string]int{"n": 3}, "general.jsonl", 3)
+	if err := sink.close(); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(dir + "/checkpoints.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var records []checkpointRecord
+	for _, line := range bytes.Split(bytes.TrimSpace(raw), []byte("\n")) {
+		var record checkpointRecord
+		if err := json.Unmarshal(line, &record); err != nil {
+			t.Fatal(err)
+		}
+		records = append(records, record)
+	}
+	if len(records) != 1 || records[0].SimTime != 2*second || records[0].EventCount != 3 {
+		t.Fatalf("terminal checkpoint = %+v, want one full record at %d with 3 events", records, 2*second)
+	}
+	digest := sink.binary.executionHash()
+	if records[0].ExecutionStreamHash != hex.EncodeToString(digest[:]) {
+		t.Fatalf("terminal checkpoint hash = %s, want final binary hash %s", records[0].ExecutionStreamHash, hex.EncodeToString(digest[:]))
 	}
 }
 

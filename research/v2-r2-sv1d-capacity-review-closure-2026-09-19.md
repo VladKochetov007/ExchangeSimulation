@@ -64,3 +64,46 @@ route-count mutation regression. This is a minimal correctness correction; it
 does not change market economics, registered configurations, resource formulas,
 evidence format, or scientific predicates. Clean gates and re-review by the
 same reviewer are required before any build, capacity, or scientific run.
+
+## C4 accepted review and failed capacity attempt — 2026-09-19
+
+The exact C4 candidate `6cab9343c80045a7c13cc6cfa11fbc029536809a`, tree
+`68a2f6ef1df7deebe29d5028f46686528ab2dbd6`, received `COMPLETED / ACCEPT` from
+the same fresh Luna xhigh reviewer. The report and separate status record are
+preserved at `/home/vlad/external-scratch/sv1d-capacity-review-6cab934/`.
+The exact-tree validation snapshot passed `make test`, `go vet ./...`, targeted
+race suites, finite-cgroup validation, and `git diff --check`.
+
+A fresh Go 1.27.0 build from two clean C4 checkouts produced seven
+byte-identical binaries. The new bundle at
+`/home/vlad/external-scratch/sv1d-capacity-pinned-6cab934-20260919/bundle-retry-signature-v1/`
+passed canonical-plan replay, source/tree/config/binary identity checks, signed
+review verification, all registered tamper rejections, and its final manifest
+hash check. The first packaging attempt is retained separately because its
+helper used an unregistered signing domain; it was never used for execution.
+
+The authorized outcome-ineligible seed-977, five-minute, three-arm capacity
+preflight then ran under `MemoryMax=8G`, `MemorySwapMax=0`, `GOMAXPROCS=2`, and
+`GOMEMLIMIT=4GiB` from a clean real Git clone. Treatment, mode-off, and
+no-roster simulator children all completed their 5-minute worlds and produced
+manifests, greeks, latency, binary evidence, checkpoints, and market-data
+sidecars. The resource traces observed zero swap and zero OOM events with
+approximately 8 GiB cgroup limits and safe host free-space/RAM margins.
+
+The runner nevertheless returned exit 99 for every arm and correctly issued no
+capacity attestation. At the terminal simulated timestamp, the first event of
+that timestamp caused the scheduled checkpoint to be written; later events at
+the same timestamp extended the binary stream, but `lastCheckpointAt` prevented
+the close-time checkpoint from being refreshed. For example, the retained
+treatment arm had terminal checkpoint event count `161987` while its binary
+attestation had `162663` event frames, with different hashes. This is an
+evidence/runner contract defect, not a capacity pass, market result, or
+historical scientific result. The complete partial attempt remains immutable at
+`/home/vlad/external-scratch/sv1d-capacity-run-6cab934-20260919/`.
+
+No activation, development, freeze, or holdout run used this failed attempt, so
+there is no historical outcome to invalidate. The successor correction defers
+scheduled terminal-boundary checkpoints until `Close` and adds a regression with
+multiple events at the same terminal timestamp. Because simulator evidence
+semantics changed, the successor requires full clean gates, a fresh pinned
+build/bundle, and fresh independent review before a new capacity namespace.

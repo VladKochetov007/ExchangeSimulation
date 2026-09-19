@@ -1,13 +1,17 @@
 # Current operational pointer — 2026-09-19
 
-The owner resumed the SV1D capacity-gate repair. C3 (`447a492`) passed clean
-mechanical gates but received a substantive independent REJECT for
-`SV1D-C3-001`: the typed renderer verifier accepted a negative `routes` count.
-The report and separate execution/verdict record are preserved outside the
-candidate checkout under `/home/vlad/external-scratch/sv1d-capacity-review-447a492/`.
-The current successor patch adds the minimal positive-domain guard and a
-negative-route mutation regression. Its clean gates and same-reviewer
-re-review are outstanding. No capacity, activation, development, freeze, or
+The owner resumed the SV1D capacity-gate repair. C4 (`6cab934`) closed the
+substantive C3 route-domain rejection, passed clean mechanical gates, and was
+accepted by the same fresh Luna xhigh reviewer. A fresh Go 1.27 binary bundle
+was built and verified, but the registered seed-977 capacity preflight failed
+closed at the runner's terminal checkpoint consistency predicate: all three
+simulator arms completed safely, yet their terminal checkpoint was a prefix of
+the binary attestation. No capacity attestation was issued. Partial capacity
+outputs and measurements are retained under
+`/home/vlad/external-scratch/sv1d-capacity-run-6cab934-20260919/`.
+The current successor defers the terminal boundary until close and adds a
+same-timestamp binary checkpoint regression. Its full clean gates and fresh
+independent re-review remain required. No activation, development, freeze, or
 holdout run has occurred.
 
 # Owner-requested pause — 2026-09-13 (historical handoff)

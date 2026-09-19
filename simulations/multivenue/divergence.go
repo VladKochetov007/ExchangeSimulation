@@ -106,6 +106,15 @@ type traceRecord struct {
 	PayloadHash string `json:"payload_hash"`
 }
 
+func (s *checkpointSink) shouldWriteScheduledCheckpoint(simTime int64) bool {
+	if s.intervalNano <= 0 || simTime < s.nextBound {
+		return false
+	}
+	// Several deterministic phases can emit events at the terminal timestamp.
+	// Defer that boundary to close so the terminal record covers the full stream.
+	return s.finalSimTime <= 0 || s.nextBound < s.finalSimTime
+}
+
 // newCheckpointSink opens the sink's outputs inside the run directory. A zero
 // interval disables checkpoints; an empty window disables the trace.
 func newCheckpointSink(dir string, intervalSeconds int, traceFrom, traceTo int64) (*checkpointSink, error) {
@@ -198,7 +207,7 @@ func (s *checkpointSink) observe(simTime int64, clientID uint64, eventName, venu
 			s.nextBound = simTime - simTime%s.intervalNano + s.intervalNano
 			s.firstEvent = false
 		}
-		if s.intervalNano > 0 && simTime >= s.nextBound {
+		if s.shouldWriteScheduledCheckpoint(simTime) {
 			s.writeCheckpointLocked(s.nextBound)
 			s.nextBound = simTime - simTime%s.intervalNano + s.intervalNano
 		}
@@ -255,7 +264,7 @@ func (s *checkpointSink) observe(simTime int64, clientID uint64, eventName, venu
 		}
 	}
 
-	if s.intervalNano > 0 && simTime >= s.nextBound {
+	if s.shouldWriteScheduledCheckpoint(simTime) {
 		s.writeCheckpointLocked(s.nextBound)
 		s.nextBound = simTime - simTime%s.intervalNano + s.intervalNano
 	}

@@ -1,13 +1,17 @@
 # Current operational pointer — 2026-09-19
 
-SV1D resumed at the narrow capacity-gate correction. C3 (`447a492`) contained
-the producer/verifier schema fixes and passed the clean full gates, but its
-fresh independent review found substantive `SV1D-C3-001`: the typed renderer
-verifier accepted negative `routes`. The preserved review is outside the
-candidate checkout under `/home/vlad/external-scratch/sv1d-capacity-review-447a492/`.
-The current successor patch adds the minimal positive-domain guard and
-negative-route regression; clean gates and same-reviewer re-review remain
-required. No scientific or holdout world has run.
+SV1D remains at the narrow capacity-gate repair. C4 (`6cab934`) closed the
+negative-route review finding, passed clean full gates, and was accepted by the
+same fresh Luna xhigh reviewer. Its fresh Go 1.27 bundle passed provenance and
+tamper verification, but the registered seed-977 capacity preflight failed
+closed because the terminal checkpoint did not include same-timestamp events
+that were present in the binary attestation. All three short simulator arms
+completed without OOM or swap use; no capacity attestation was published.
+Retained partial outputs are under
+`/home/vlad/external-scratch/sv1d-capacity-run-6cab934-20260919/`. The current
+successor defers the terminal checkpoint boundary to close and adds a focused
+regression. Full clean gates and a fresh independent review are required. No
+scientific or holdout world has run.
 
 # Current operational pointer — 2026-09-13
 
