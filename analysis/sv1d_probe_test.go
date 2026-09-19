@@ -199,16 +199,17 @@ func TestValidateSV1DActivationMetadataBindsPathAndDigest(t *testing.T) {
 }
 
 func TestSV1DActivationArmMetadataAcceptsRunnerCellAndRejectsOmission(t *testing.T) {
+	testRoot := filepath.Join(t.TempDir(), "runner")
 	metadata := sv1dActivationArmMetadata{
 		SchemaVersion: 2, RunnerContract: sv1dActivationRunnerContract, ProbeID: "v2-r2-sv1d-activation-659",
 		Arm: "treatment", Cell: "treatment", ExperimentID: "v2-r2-sv1d-activation-659-treatment",
 		ConfigExperimentID: "v2-r2-sv1d-activation-659-treatment", HypothesisID: "V2-R2-SV1D-ONE-SIDED-ELASTIC-LIQUIDITY",
 		Seed: 659, SimulatedHorizon: "5m", SimulationStartNano: 1, SimulationEndNano: 2,
 		ConfigSHA256: strings.Repeat("a", 64), BinarySHA256: strings.Repeat("b", 64), GitRevision: strings.Repeat("c", 40), TreeRevision: strings.Repeat("d", 40),
-		BinaryPath: "/tmp/multivenue", BinaryGoVersion: "go1.27.0", BinaryGOOS: "linux", BinaryGOARCH: "amd64", BinaryGOAMD64: "v1",
+		BinaryPath: filepath.Join(testRoot, "multivenue"), BinaryGoVersion: "go1.27.0", BinaryGOOS: "linux", BinaryGOARCH: "amd64", BinaryGOAMD64: "v1",
 		AnalyzerSHA256: strings.Repeat("e", 64), RendererSHA256: strings.Repeat("f", 64), RunnerSHA256: strings.Repeat("0", 64),
 		ReviewAttestationSHA256: strings.Repeat("1", 64), ReviewReportSHA256: strings.Repeat("2", 64), CapacityAttestationSHA256: strings.Repeat("3", 64), CapacityRecordsSHA256: strings.Repeat("4", 64), TrustedReviewKeySHA256: strings.Repeat("5", 64),
-		LogMode: "full", EvidenceFormat: "evstream_v3", EvidenceSchemaEpoch: 4, GOMAXPROCS: 2, GOMEMLIMIT: "4GiB", OutputDir: "/tmp/treatment", Holdout: false,
+		LogMode: "full", EvidenceFormat: "evstream_v3", EvidenceSchemaEpoch: 4, GOMAXPROCS: 2, GOMEMLIMIT: "4GiB", OutputDir: filepath.Join(testRoot, "treatment"), Holdout: false,
 		Command: []string{"multivenue"}, RawLogPolicy: "retain",
 	}
 	raw, err := json.Marshal(metadata)
