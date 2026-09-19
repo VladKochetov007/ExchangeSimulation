@@ -213,6 +213,7 @@ type CDFActivationAudit struct {
 	liveOrderBySupplier map[cdfParticipantKey]cdfOrderKey
 	observedFillGlobal  map[cdfFillKey]uint64
 	actualFillGlobal    map[cdfFillKey]uint64
+	actualFillAt        map[cdfFillKey]int64
 	tradeGlobal         map[cdfTradeKey]uint64
 }
 
@@ -737,6 +738,12 @@ type cdfOrderState struct {
 	fillCount         int64
 	firstFillAt       int64
 	terminalState     string
+	terminalAt        int64
+	terminalGlobalSeq uint64
+	localQuoteWasLive bool
+	localQuoteSide    string
+	localQuotePrice   int64
+	localQuoteQty     int64
 }
 
 type cdfDepthObservation struct {
@@ -782,6 +789,7 @@ func (r *Run) AuditCDFLiquidityActivation(options CDFActivationOptions) (*CDFAct
 		liveOrderBySupplier: make(map[cdfParticipantKey]cdfOrderKey),
 		observedFillGlobal:  make(map[cdfFillKey]uint64),
 		actualFillGlobal:    make(map[cdfFillKey]uint64),
+		actualFillAt:        make(map[cdfFillKey]int64),
 		tradeGlobal:         make(map[cdfTradeKey]uint64),
 	}
 	config, metadata, err := loadCDFActivationIdentity(evidenceDir, !options.AllowLegacyJSON)
@@ -2281,7 +2289,7 @@ func (r *CDFActivationAudit) scanCDFOrdered(
 		case "elastic_liquidity_supplier_decision":
 			r.processCDFDecision(event, states, receipts, snapshots, submissions, withdrawals)
 		case "elastic_liquidity_supplier_fill":
-			r.processCDFFill(event, states, observedFills)
+			r.processCDFFill(event, states, observedFills, actualFills)
 		case "balance_snapshot":
 			r.processCDFBalanceSnapshot(event, states)
 		case "borrow":
@@ -2339,7 +2347,7 @@ func (r *CDFActivationAudit) scanCDFGeneral(
 			case "elastic_liquidity_supplier_decision":
 				r.processCDFDecision(event, states, receipts, snapshots, submissions, withdrawals)
 			case "elastic_liquidity_supplier_fill":
-				r.processCDFFill(event, states, observedFills)
+				r.processCDFFill(event, states, observedFills, nil)
 			case "balance_snapshot":
 				r.processCDFBalanceSnapshot(event, states)
 			case "borrow":
@@ -2919,7 +2927,56 @@ func (r *CDFActivationAudit) validateCDFSubmitEconomics(event Event, state *cdfS
 	}
 }
 
-func (r *CDFActivationAudit) processCDFFill(event Event, states map[cdfParticipantKey]*cdfSupplierState, observed map[cdfFillKey]cdfFillEvidence) {
+// queuedCDFLocalQuote returns the local quote snapshot that was still live
+// when the exchange published a cancellation. The exchange logs a fill and a
+// later cancellation before their responses reach the actor; a fill
+// notification can therefore be recorded after the cancellation frame even
+// though the actor processes the queued fill while its quote is still live.
+// This exception is deliberately narrow: the exact exchange fill, its unique
+// trade, producer ordering, and execution timestamp must all precede the
+// cancellation, and the cancellation must have captured a live local quote.
+func (r *CDFActivationAudit) queuedCDFLocalQuote(
+	event Event,
+	fill cdfFillEvidence,
+	actual map[cdfFillKey]cdfOrderFillEvidence,
+) *cdfOrderState {
+	key := cdfFillKey{venueID: event.VenueID, clientID: event.ClientID, orderID: fill.OrderID, tradeID: fill.TradeID}
+	terminal := r.terminalOrders[cdfOrderKey{venueID: event.VenueID, clientID: event.ClientID, orderID: fill.OrderID}]
+	if terminal == nil || (terminal.terminalState != "cancelled" && terminal.terminalState != "forced_cancelled") ||
+		!terminal.localQuoteWasLive || terminal.localQuoteQty < terminal.remainingQty || terminal.terminalAt <= 0 ||
+		terminal.terminalGlobalSeq == 0 || actual == nil {
+		return nil
+	}
+	exchangeFill, exists := actual[key]
+	if !exists || exchangeFill.Side != fill.Side || exchangeFill.Price != fill.Price || exchangeFill.Qty != fill.Qty ||
+		exchangeFill.FeeAmount != fill.FeeAmount || exchangeFill.FeeAsset != fill.FeeAsset || exchangeFill.IsFull != fill.IsFull {
+		return nil
+	}
+	actualSequence := r.actualFillGlobal[key]
+	actualAt := r.actualFillAt[key]
+	tradeKey := cdfTradeKey{venueID: event.VenueID, tradeID: fill.TradeID}
+	trade, tradeExists := r.trades[tradeKey]
+	tradeSequence := r.tradeGlobal[tradeKey]
+	if actualSequence == 0 || actualSequence >= terminal.terminalGlobalSeq || actualAt == 0 ||
+		fill.Timestamp != actualAt || actualAt > terminal.terminalAt || actualSequence >= event.GlobalSequence ||
+		!tradeExists || tradeSequence == 0 || !(tradeSequence < actualSequence) ||
+		trade.Price != fill.Price || trade.Qty != fill.Qty || trade.Side != oppositeCDFSide(fill.Side) ||
+		trade.MakerOrderID != fill.OrderID || trade.TakerOrderID == 0 || trade.TakerOrderID == fill.OrderID {
+		return nil
+	}
+	return terminal
+}
+
+func (r *CDFActivationAudit) processCDFFill(
+	event Event,
+	states map[cdfParticipantKey]*cdfSupplierState,
+	observed map[cdfFillKey]cdfFillEvidence,
+	actualEvidence ...map[cdfFillKey]cdfOrderFillEvidence,
+) {
+	var actual map[cdfFillKey]cdfOrderFillEvidence
+	if len(actualEvidence) > 0 {
+		actual = actualEvidence[0]
+	}
 	var fill cdfFillEvidence
 	if err := decodeRequiredJSON(event.Raw(), &fill,
 		"role", "client_id", "symbol", "order_id", "trade_id", "timestamp", "side", "price", "qty",
@@ -2971,15 +3028,20 @@ func (r *CDFActivationAudit) processCDFFill(event Event, states map[cdfParticipa
 		return
 	}
 	localQuoteHasFill := state.liveQuoteOrderID != 0
+	localQuoteFromTerminal := false
+	localQuoteOrderID := state.liveQuoteOrderID
+	localQuoteSide := state.liveQuoteSide
+	localQuotePrice := state.liveQuotePrice
+	localQuoteQty := state.liveQuoteQty
 	localQuoteWillClose := false
 	localQuoteQtyBefore := int64(0)
 	localQuoteRemaining := int64(0)
 	if localQuoteHasFill {
-		localQuoteQtyBefore = state.liveQuoteQty
-		localQuoteRemaining = state.liveQuoteQty
-		if state.liveQuoteOrderID != fill.OrderID || state.liveQuoteSide != fill.Side ||
-			state.liveQuotePrice != fill.Price || fill.Qty > state.liveQuoteQty ||
-			fill.IsFull != (fill.Qty == state.liveQuoteQty) {
+		localQuoteQtyBefore = localQuoteQty
+		localQuoteRemaining = localQuoteQty
+		if localQuoteOrderID != fill.OrderID || localQuoteSide != fill.Side ||
+			localQuotePrice != fill.Price || fill.Qty > localQuoteQty ||
+			fill.IsFull != (fill.Qty == localQuoteQty) {
 			r.addEventCheck(event, state, "CDF supplier fill does not match the supplier's delayed local quote state")
 			return
 		}
@@ -2989,21 +3051,62 @@ func (r *CDFActivationAudit) processCDFFill(event Event, states map[cdfParticipa
 		}
 	} else if r.strictMechanics {
 		failure := "CDF supplier fill has no locally acknowledged live quote"
-		if terminal := r.terminalOrders[cdfOrderKey{venueID: event.VenueID, clientID: event.ClientID, orderID: fill.OrderID}]; terminal != nil &&
-			(terminal.terminalState == "cancelled" || terminal.terminalState == "forced_cancelled") {
-			failure = "CDF supplier fill arrived after the local quote was terminally cancelled"
+		if terminal := r.queuedCDFLocalQuote(event, fill, actual); terminal != nil {
+			localQuoteFromTerminal = true
+			localQuoteHasFill = terminal.localQuoteWasLive
+			localQuoteOrderID = fill.OrderID
+			localQuoteSide = terminal.localQuoteSide
+			localQuotePrice = terminal.localQuotePrice
+			localQuoteQty = terminal.localQuoteQty
+			localQuoteQtyBefore = localQuoteQty
+			localQuoteRemaining = localQuoteQty
+			if localQuoteHasFill && localQuoteOrderID == fill.OrderID && localQuoteSide == fill.Side &&
+				localQuotePrice == fill.Price && fill.Qty <= localQuoteQty &&
+				fill.IsFull == (fill.Qty == localQuoteQty) {
+				localQuoteWillClose = fill.IsFull
+				if !localQuoteWillClose {
+					localQuoteRemaining -= fill.Qty
+				}
+			} else {
+				localQuoteHasFill = false
+			}
+			if localQuoteFromTerminal && localQuoteHasFill {
+				terminal := r.terminalOrders[cdfOrderKey{venueID: event.VenueID, clientID: event.ClientID, orderID: fill.OrderID}]
+				if terminal == nil || localQuoteRemaining < terminal.remainingQty {
+					localQuoteHasFill = false
+				}
+			}
 		}
-		r.addEventCheck(event, state, failure)
-		return
+		if !localQuoteHasFill {
+			if terminal := r.terminalOrders[cdfOrderKey{venueID: event.VenueID, clientID: event.ClientID, orderID: fill.OrderID}]; terminal != nil &&
+				(terminal.terminalState == "cancelled" || terminal.terminalState == "forced_cancelled") {
+				failure = "CDF supplier fill arrived after the local quote was terminally cancelled"
+			}
+			r.addEventCheck(event, state, failure)
+			return
+		}
 	}
 	state.fillBaseDelta = updatedBase
 	state.fillQuoteDelta = updatedQuote
 	if localQuoteHasFill {
 		if localQuoteWillClose {
-			clearCDFLiveQuote(state)
+			if !localQuoteFromTerminal {
+				clearCDFLiveQuote(state)
+			}
 			localQuoteRemaining = 0
-		} else {
+		} else if !localQuoteFromTerminal {
 			state.liveQuoteQty = localQuoteRemaining
+		}
+		if localQuoteFromTerminal {
+			terminal := r.terminalOrders[cdfOrderKey{venueID: event.VenueID, clientID: event.ClientID, orderID: fill.OrderID}]
+			if terminal != nil {
+				terminal.localQuoteQty = localQuoteRemaining
+				if localQuoteWillClose {
+					terminal.localQuoteWasLive = false
+					terminal.localQuoteSide = ""
+					terminal.localQuotePrice = 0
+				}
+			}
 		}
 	}
 	observed[key] = fill
@@ -3379,6 +3482,10 @@ func (r *CDFActivationAudit) processCDFOrderFill(event Event, states map[cdfPart
 		r.actualFillGlobal = make(map[cdfFillKey]uint64)
 	}
 	r.actualFillGlobal[key] = event.GlobalSequence
+	if r.actualFillAt == nil {
+		r.actualFillAt = make(map[cdfFillKey]int64)
+	}
+	r.actualFillAt[key] = event.SimTS
 	state.exchangeBaseDelta = updatedBase
 	state.exchangeQuoteDelta = updatedQuote
 	order.remainingQty = expectedRemaining
@@ -3461,6 +3568,9 @@ func (r *CDFActivationAudit) processCDFCancelled(
 			r.addEventCheck(event, state, "forced CDF cancellation has an invalid or overflowing quote lifetime")
 		}
 		order.terminalState = "forced_cancelled"
+		if r.strictMechanics && !captureCDFTerminalLocalQuote(order, state, cancelled.OrderID, event) {
+			r.addEventCheck(event, state, "CDF forced cancellation does not preserve a coherent local quote remainder")
+		}
 		clearCDFLiveQuote(state)
 		r.rememberCDFTerminalOrder(orderKey, order)
 		delete(orders, orderKey)
@@ -3487,6 +3597,9 @@ func (r *CDFActivationAudit) processCDFCancelled(
 	withdrawal.closed = true
 	delete(orders, orderKey)
 	order.terminalState = "cancelled"
+	if r.strictMechanics && !captureCDFTerminalLocalQuote(order, state, cancelled.OrderID, event) {
+		r.addEventCheck(event, state, "CDF cancellation does not preserve a coherent local quote remainder")
+	}
 	clearCDFLiveQuote(state)
 	r.rememberCDFTerminalOrder(orderKey, order)
 	r.forgetCDFLiveOrder(cdfParticipantKey{event.VenueID, event.ClientID}, orderKey)
@@ -3602,6 +3715,23 @@ func clearCDFLiveQuote(state *cdfSupplierState) {
 	state.liveQuoteSide = ""
 	state.liveQuotePrice = 0
 	state.liveQuoteQty = 0
+}
+
+func captureCDFTerminalLocalQuote(order *cdfOrderState, state *cdfSupplierState, orderID uint64, event Event) bool {
+	if order == nil {
+		return false
+	}
+	order.terminalAt = event.SimTS
+	order.terminalGlobalSeq = event.GlobalSequence
+	if state == nil || state.liveQuoteOrderID != orderID || state.liveQuoteSide != order.side ||
+		state.liveQuotePrice != order.price || state.liveQuoteQty < order.remainingQty {
+		return false
+	}
+	order.localQuoteWasLive = true
+	order.localQuoteSide = state.liveQuoteSide
+	order.localQuotePrice = state.liveQuotePrice
+	order.localQuoteQty = state.liveQuoteQty
+	return true
 }
 
 func (r *CDFActivationAudit) recordCDFOrderClosure(state *cdfSupplierState, order *cdfOrderState, closedAt int64, terminalKind string) bool {
@@ -4056,6 +4186,22 @@ func (r *CDFActivationAudit) reconcileCDFFills(
 		if (!r.strictMechanics || tradeMatches) && producerOrderingValid {
 			if !r.attributeCDFSupplierFill(state, fill) {
 				r.addCheck(CDFActivationCheck{VenueID: key.venueID, Role: state.audit.Role, ClientID: key.clientID, Failure: "supplier volume attribution overflows"})
+			}
+		}
+	}
+	if r.strictMechanics {
+		for key, order := range r.terminalOrders {
+			if order == nil || (order.terminalState != "cancelled" && order.terminalState != "forced_cancelled") || !order.localQuoteWasLive {
+				continue
+			}
+			if order.localQuoteQty != order.remainingQty {
+				state := states[cdfParticipantKey{key.venueID, key.clientID}]
+				role := ""
+				if state != nil {
+					role = state.audit.Role
+				}
+				r.addCheck(CDFActivationCheck{VenueID: key.venueID, Role: role, ClientID: key.clientID,
+					Failure: fmt.Sprintf("terminal CDF quote remainder %d disagrees with exchange cancellation remainder %d", order.localQuoteQty, order.remainingQty)})
 			}
 		}
 	}

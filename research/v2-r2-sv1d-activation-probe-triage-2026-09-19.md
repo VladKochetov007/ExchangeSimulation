@@ -361,3 +361,95 @@ or consumed. No development cell is authorized by this note; the next gate is
 the final docs-inclusive independent review, pinned Go 1.27 rebuild, fresh
 finite-cgroup capacity preflight, and only then the registered seed-659
 development-only activation probe.
+
+## Queued supplier-fill reconstruction finding — candidate `971267d`
+
+The exact scientific parent examined for this finding is
+`971267d6bfac030e9fb1acb3468b369f863d39a2`, with tree
+`1e3a2183eaf9bac8566d68f45fa607f1d3af85a0`. The retained treatment evidence
+is the immutable seed-659 activation namespace at
+`/home/vlad/external-scratch/sv1d-activation-971267d-20260919-cgroup8g/`.
+No simulation, development cell, holdout, or historical result was changed.
+
+### Finding and intended invariant
+
+The strict analyzer originally treated the global frame sequence as both the
+ordering of exchange state and the ordering of actor-local quote state. That
+conflates two different facts. Public snapshots, `Trade`, exchange
+`OrderFill`, and exchange terminal quantities are reconstructed in global
+frame order. A supplier fill is emitted by `LogEvidenceOnly` when the actor
+handles the exchange response, while its payload timestamp is the exchange
+execution timestamp. The exchange can therefore publish a fill and then a
+cancellation before the actor receives either response, while the actor still
+processes the queued fill against its live local quote.
+
+The required invariant is therefore:
+
+```text
+public/exchange reconstruction: global frame order
+actor queued-fill exception: exact Trade < exchange OrderFill < supplier fill,
+                              execution timestamp at or before cancellation,
+                              and preserved local quote remainder >= the
+                              exchange cancellation remainder
+```
+
+A supplier fill remains invalid when it has no active quote or provable
+terminal quote snapshot, has no exact exchange fill, fails the producer order,
+has mismatched economics, or would reduce the preserved local remainder below
+the exchange remainder. The historical rejection of a genuinely late or
+unanchored fill remains in force.
+
+### Reproduction and independent adjudication
+
+Independent Luna xhigh reviewer Franklin inspected the exact source and raw
+evidence. The source-level ordering is:
+
+- `exchange/settlement.go` enqueues the fill notification before the exchange
+  `OrderFill` publication;
+- `exchange/order_handling.go` publishes cancellation before its response is
+  delivered to the actor;
+- `actor/events.go` defines fill `Timestamp` as exchange execution time, not
+  actor receipt time;
+- `simulations/multivenue/cdf_liquidity_supplier.go` validates the live local
+  quote before emitting supplier fill evidence; and
+- `simulations/multivenue/sim.go` records that evidence through
+  `LogEvidenceOnly(fill.Timestamp, ...)`.
+
+The retained central-venue example has `Trade` global sequence `4764`,
+exchange `OrderFill` `4766`, exchange `OrderCancelled` `5346`, and supplier
+fill evidence `5359`; the supplier payload timestamp is earlier than the
+cancellation timestamp. The reviewer classified the issue as an
+**ANALYZER BUG, REACHABLE IN THE REGISTERED SV1D ACTIVATION PROBE**, with high
+confidence. Immutable evidence is sufficient, so a simulator rerun is not
+permitted or necessary. The historical R2 experiments are unaffected because
+the finite CDF roster was off in those configurations.
+
+The correction preserves global ordering for public and exchange state. On
+cancellation it retains the actor-visible local quote remainder. A later
+supplier fill may use that snapshot only after exact exchange-fill, trade,
+timestamp, and producer-order checks. Terminal reconciliation requires the
+preserved local remainder to agree with the exchange cancellation remainder
+after all observed queued fills.
+
+The focused regression
+`TestCDFQueuedSupplierFillAfterExchangeCancellationUsesLocalQuoteSnapshot`
+proves the accepted queued race; the existing
+`TestCDFDelayedSupplierFillAfterCancellationFailsClosed` and
+`TestCDFSupplierFillWithoutLocalQuoteFailsClosed` continue to prove rejection
+of unanchored/late paths. The full `analysis` package passes after the
+correction. A diagnostic replay of the immutable treatment using the corrected
+analyzer (`cdf-queued-rescore-971267d-diagnostic3.json`) reports:
+
+- `evidence_valid=true` and zero strict checks;
+- 1,791 decisions, 539 accepted orders, 523 fills, and 525 withdrawals;
+- supplier volume share `0.11359795214583537`;
+- `one_sided_restoration_count=0`, therefore
+  `activation_satisfied=false`; and
+- `anti_cheating_satisfied=true`.
+
+This is not yet the official successor score: the old `INVALID_EVIDENCE`
+artifacts remain untouched. The code/docs successor requires a clean full
+mechanical gate, fresh independent review of the post-fix exact commit, clean
+provenance-pinned analyzer rebuild, and then a separately named rescore of the
+retained evidence. No 24-hour development cell, freeze, or holdout is
+authorized by this finding.
