@@ -1,3 +1,20 @@
+# Current operational pointer — 2026-09-19 (activation contract repair successor)
+
+The `85c927d` scheduled-risk successor passed its source review, clean Go 1.27
+rebuild, and finite-cgroup seed-977 capacity preflight. The subsequent
+authorized seed-659 tri-arm completed simulation and rendering for treatment,
+mode-off, and no-roster, but strict extraction failed closed: the analyzer did
+not model the activation runner's `cell`/identity fields, and the mode-off
+registered roster lacked explicit false one-sided-quoting fields. No arm was
+scientifically valid and no directional score was issued.
+
+The current successor repair is documented in
+`research/v2-r2-sv1d-activation-contract-repair-2026-09-19.md`. It is a
+contract-only correction with no economic retuning. Because analyzer source
+and a registered config changed, the next gate is fresh full verification,
+independent review of the exact candidate, a new pinned bundle/capacity gate,
+and only then a new development-only seed-659 probe. Holdouts remain untouched.
+
 # Current operational pointer — 2026-09-19 (scheduled-risk recovery successor)
 
 The C5 seed-659 producer/risk gate is superseded only by successor source

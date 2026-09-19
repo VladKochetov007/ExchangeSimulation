@@ -1170,25 +1170,39 @@ type cdfRenderedEvidenceAttestation struct {
 }
 
 type cdfRunStatus struct {
-	SchemaVersion          int      `json:"schema_version"`
-	Contract               string   `json:"contract"`
-	ExitStatus             int      `json:"exit_status"`
-	CompletionVerified     bool     `json:"completion_verified"`
-	SimulatedHorizon       string   `json:"simulated_horizon"`
-	SimulationStartNano    int64    `json:"simulation_start_nano"`
-	SimulationEndNano      int64    `json:"simulation_end_nano"`
-	RunMetadataSHA256      string   `json:"run_metadata_sha256"`
-	ManifestSHA256         string   `json:"manifest_sha256"`
-	GreeksSHA256           string   `json:"greeks_sha256"`
-	LatencySHA256          string   `json:"latency_sha256"`
-	CheckpointsSHA256      string   `json:"checkpoints_sha256"`
-	EvidenceManifestSHA    string   `json:"evidence_manifest_sha256"`
-	BinaryAttestationSHA   string   `json:"binary_evidence_attestation_sha256"`
-	MarketDataEvidenceSHA  string   `json:"market_data_evidence_sha256,omitempty"`
-	MarketDataSchedulesSHA string   `json:"market_data_schedules_sha256,omitempty"`
-	MarketDataReceiptsSHA  string   `json:"market_data_receipts_sha256,omitempty"`
-	MarketDataDecisionsSHA string   `json:"market_data_decisions_sha256,omitempty"`
-	CompletionSentinels    []string `json:"completion_sentinels"`
+	SchemaVersion            int      `json:"schema_version"`
+	Contract                 string   `json:"contract"`
+	Cell                     string   `json:"cell"`
+	ExperimentID             string   `json:"experiment_id"`
+	ConfigExperimentID       string   `json:"config_experiment_id"`
+	HypothesisID             string   `json:"hypothesis_id"`
+	ScientificResultEligible bool     `json:"scientific_result_eligible"`
+	ExitStatus               int      `json:"exit_status"`
+	CompletionVerified       bool     `json:"completion_verified"`
+	SimulatedHorizon         string   `json:"simulated_horizon"`
+	SimulationStartNano      int64    `json:"simulation_start_nano"`
+	SimulationEndNano        int64    `json:"simulation_end_nano"`
+	RunMetadataSHA256        string   `json:"run_metadata_sha256"`
+	ManifestSHA256           string   `json:"manifest_sha256"`
+	GreeksSHA256             string   `json:"greeks_sha256"`
+	LatencySHA256            string   `json:"latency_sha256"`
+	CheckpointsSHA256        string   `json:"checkpoints_sha256"`
+	EvidenceManifestSHA      string   `json:"evidence_manifest_sha256"`
+	BinaryAttestationSHA     string   `json:"binary_evidence_attestation_sha256"`
+	MarketDataEvidenceSHA    string   `json:"market_data_evidence_sha256,omitempty"`
+	MarketDataSchedulesSHA   string   `json:"market_data_schedules_sha256,omitempty"`
+	MarketDataReceiptsSHA    string   `json:"market_data_receipts_sha256,omitempty"`
+	MarketDataDecisionsSHA   string   `json:"market_data_decisions_sha256,omitempty"`
+	CompletionSentinels      []string `json:"completion_sentinels"`
+}
+
+var cdfStrictRunStatusRequiredFields = []string{
+	"schema_version", "contract", "cell", "experiment_id", "config_experiment_id", "hypothesis_id",
+	"scientific_result_eligible", "exit_status", "completion_verified", "simulated_horizon",
+	"simulation_start_nano", "simulation_end_nano", "run_metadata_sha256", "manifest_sha256",
+	"greeks_sha256", "latency_sha256", "checkpoints_sha256", "evidence_manifest_sha256",
+	"binary_evidence_attestation_sha256", "market_data_evidence_sha256", "market_data_schedules_sha256",
+	"market_data_receipts_sha256", "market_data_decisions_sha256", "completion_sentinels",
 }
 
 type cdfGreeksSidecar struct {
@@ -1263,15 +1277,12 @@ func validateCDFCompletionArtifacts(dir string, metadata cdfActivationMetadata, 
 		return fmt.Errorf("cdf activation: read run status: %w", err)
 	}
 	var status cdfRunStatus
-	if err := decodeSV1DJSONWithRequiredFields(raw, &status,
-		"schema_version", "contract", "exit_status", "completion_verified", "simulated_horizon",
-		"simulation_start_nano", "simulation_end_nano", "run_metadata_sha256", "manifest_sha256",
-		"greeks_sha256", "latency_sha256", "checkpoints_sha256", "evidence_manifest_sha256",
-		"binary_evidence_attestation_sha256", "market_data_evidence_sha256", "market_data_schedules_sha256",
-		"market_data_receipts_sha256", "market_data_decisions_sha256", "completion_sentinels"); err != nil {
+	if err := decodeSV1DJSONWithRequiredFields(raw, &status, cdfStrictRunStatusRequiredFields...); err != nil {
 		return fmt.Errorf("cdf activation: decode run status: %w", err)
 	}
-	if status.SchemaVersion != 1 || status.Contract != "v2-r2-sv1d-arm-status-v2" || status.ExitStatus != 0 || !status.CompletionVerified || status.SimulatedHorizon != metadata.SimulatedHorizon ||
+	if status.SchemaVersion != 1 || status.Contract != "v2-r2-sv1d-arm-status-v2" || status.Cell != metadata.Cell || status.ExperimentID != metadata.ExperimentID ||
+		status.ConfigExperimentID != metadata.ConfigExperimentID || status.HypothesisID != metadata.HypothesisID || status.ScientificResultEligible ||
+		status.ExitStatus != 0 || !status.CompletionVerified || status.SimulatedHorizon != metadata.SimulatedHorizon ||
 		status.SimulationStartNano != metadata.SimulationStartNano || status.SimulationEndNano != metadata.SimulationEndNano {
 		return fmt.Errorf("cdf activation: run status does not attest a complete registered horizon")
 	}

@@ -82,7 +82,7 @@ jq -e '
 		"cdf_elastic_supplier_3", "cdf_elastic_supplier_4"
 	] and
 	(.elastic_liquidity_suppliers | map(.decision_phase_offset // 0)) == [0, 500000000, 1000000000, 1500000000] and
-	all(.elastic_liquidity_suppliers[]; (.quote_on_one_sided_local_book // false) == false) and
+	all(.elastic_liquidity_suppliers[]; has("quote_on_one_sided_local_book") and .quote_on_one_sided_local_book == false) and
 	.market_data_receipt_roles == ["cdf_elastic_supplier", "liability_hedger"] and
 	.record_elastic_liquidity_supplier_decisions == true
 ' "$mode_off" >/dev/null || fail "mode-off arm contract failed"

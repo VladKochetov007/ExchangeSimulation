@@ -229,6 +229,33 @@ func TestAuditCDFLiquidityActivationAcceptsCompleteRegisteredFixture(t *testing.
 	}
 }
 
+func TestCDFStrictRunStatusAcceptsActivationRunnerIdentityFields(t *testing.T) {
+	digest := strings.Repeat("a", sha256.Size*2)
+	raw, err := json.Marshal(map[string]any{
+		"schema_version": 1, "contract": "v2-r2-sv1d-arm-status-v2", "cell": "treatment",
+		"experiment_id":        "v2-r2-sv1d-activation-659-treatment",
+		"config_experiment_id": "v2-r2-sv1d-activation-659-treatment",
+		"hypothesis_id":        "V2-R2-SV1D-ONE-SIDED-ELASTIC-LIQUIDITY", "scientific_result_eligible": false,
+		"exit_status": 0, "completion_verified": true, "simulated_horizon": "5m",
+		"simulation_start_nano": int64(1_735_689_600_000_000_000), "simulation_end_nano": int64(1_735_689_900_000_000_000),
+		"run_metadata_sha256": digest, "manifest_sha256": digest, "greeks_sha256": digest, "latency_sha256": digest,
+		"checkpoints_sha256": digest, "evidence_manifest_sha256": digest, "binary_evidence_attestation_sha256": digest,
+		"market_data_evidence_sha256": digest, "market_data_schedules_sha256": digest,
+		"market_data_receipts_sha256": digest, "market_data_decisions_sha256": digest,
+		"completion_sentinels": []string{"greeks.json", "latency.json"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var status cdfRunStatus
+	if err := decodeSV1DJSONWithRequiredFields(raw, &status, cdfStrictRunStatusRequiredFields...); err != nil {
+		t.Fatalf("activation runner status was rejected: %v", err)
+	}
+	if status.Cell != "treatment" || status.ExperimentID != status.ConfigExperimentID || status.ScientificResultEligible {
+		t.Fatalf("decoded status identity = %+v", status)
+	}
+}
+
 func TestAuditCDFLiquidityActivationFailsClosedOnContractMutations(t *testing.T) {
 	tests := []struct {
 		name           string
@@ -867,7 +894,9 @@ func rewriteStrictCDFCompletionIdentity(t *testing.T, dir string, contract CDFAc
 	}
 	writeCDFFixtureFile(t, filepath.Join(dir, "evidence-manifest.json"), append(evidenceManifestRaw, '\n'))
 	status := cdfRunStatus{
-		SchemaVersion: 1, Contract: "v2-r2-sv1d-arm-status-v2", ExitStatus: 0, CompletionVerified: true, CompletionSentinels: []string{"greeks.json", "latency.json"}, SimulatedHorizon: contract.Horizon,
+		SchemaVersion: 1, Contract: "v2-r2-sv1d-arm-status-v2", Cell: metadata.Cell, ExperimentID: metadata.ExperimentID, ConfigExperimentID: metadata.ConfigExperimentID,
+		HypothesisID: metadata.HypothesisID, ScientificResultEligible: false, ExitStatus: 0, CompletionVerified: true,
+		CompletionSentinels: []string{"greeks.json", "latency.json"}, SimulatedHorizon: contract.Horizon,
 		SimulationStartNano: contract.SimulationStartNano, SimulationEndNano: contract.SimulationEndNano,
 		RunMetadataSHA256:      mustCDFFileHash(t, filepath.Join(dir, "run-metadata.json")),
 		ManifestSHA256:         mustCDFFileHash(t, filepath.Join(dir, "manifest.json")),
@@ -1269,7 +1298,7 @@ func writeCDFActivationIdentity(t *testing.T, dir string, config cdfActivationCo
 	writeCDFFixtureFile(t, filepath.Join(dir, "run-config.json"), configRaw)
 	configDigest := sha256.Sum256(configRaw)
 	metadata := cdfActivationMetadata{
-		SchemaVersion: 2, RunnerContract: "v2-r2-sv1d-activation-runner-v2", ProbeID: "v2-r2-sv1d-activation-659",
+		SchemaVersion: 2, RunnerContract: "v2-r2-sv1d-activation-runner-v2", ProbeID: "v2-r2-sv1d-activation-659", Cell: "fixture",
 		Arm: "fixture", ExperimentID: config.ExperimentID, TreeRevision: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		Seed: config.Seed, SimulatedHorizon: contract.Horizon,
 		SimulationStartNano: contract.SimulationStartNano, SimulationEndNano: contract.SimulationEndNano,
