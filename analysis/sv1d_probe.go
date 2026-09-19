@@ -317,6 +317,7 @@ type sv1dActivationArmMetadata struct {
 	RunnerContract            string   `json:"runner_contract"`
 	ProbeID                   string   `json:"probe_id"`
 	Arm                       string   `json:"arm"`
+	Cell                      string   `json:"cell"`
 	ExperimentID              string   `json:"experiment_id"`
 	ConfigExperimentID        string   `json:"config_experiment_id"`
 	HypothesisID              string   `json:"hypothesis_id"`
@@ -350,6 +351,25 @@ type sv1dActivationArmMetadata struct {
 	Holdout                   bool     `json:"holdout"`
 	Command                   []string `json:"command"`
 	RawLogPolicy              string   `json:"raw_log_policy"`
+}
+
+var sv1dStrictActivationArmMetadataRequiredFields = []string{
+	"schema_version", "runner_contract", "probe_id", "arm", "cell", "experiment_id", "config_experiment_id",
+	"hypothesis_id", "seed", "simulated_horizon", "simulation_start_nano", "simulation_end_nano",
+	"config_sha256", "binary_sha256", "git_revision", "tree_revision", "binary_path",
+	"binary_go_version", "binary_goos", "binary_goarch", "binary_goamd64", "analyzer_sha256",
+	"renderer_sha256", "runner_sha256", "review_attestation_sha256", "review_report_sha256",
+	"capacity_attestation_sha256", "capacity_records_sha256", "trusted_review_key_sha256", "log_mode",
+	"evidence_format", "evidence_schema_epoch", "gomaxprocs", "gomemlimit", "output_dir", "holdout",
+	"command", "raw_log_policy",
+}
+
+func decodeSV1DActivationArmMetadata(raw []byte) (sv1dActivationArmMetadata, error) {
+	var metadata sv1dActivationArmMetadata
+	if err := decodeStrictSV1DCapacityJSON(raw, &metadata, sv1dStrictActivationArmMetadataRequiredFields...); err != nil {
+		return sv1dActivationArmMetadata{}, err
+	}
+	return metadata, nil
 }
 
 func validateSV1DStrictExpectedProvenance(expected CDFExpectedProvenance) error {
@@ -685,21 +705,13 @@ func validateSV1DActivationArmProvenance(evidenceDir, renderedDir string, spec S
 	if err != nil {
 		return fmt.Errorf("read SV1D arm run metadata: %w", err)
 	}
-	var armMetadata sv1dActivationArmMetadata
-	if err := decodeStrictSV1DCapacityJSON(raw, &armMetadata,
-		"schema_version", "runner_contract", "probe_id", "arm", "experiment_id", "config_experiment_id",
-		"hypothesis_id", "seed", "simulated_horizon", "simulation_start_nano", "simulation_end_nano",
-		"config_sha256", "binary_sha256", "git_revision", "tree_revision", "binary_path",
-		"binary_go_version", "binary_goos", "binary_goarch", "binary_goamd64", "analyzer_sha256",
-		"renderer_sha256", "runner_sha256", "review_attestation_sha256", "review_report_sha256",
-		"capacity_attestation_sha256", "capacity_records_sha256", "trusted_review_key_sha256", "log_mode",
-		"evidence_format", "evidence_schema_epoch", "gomaxprocs", "gomemlimit", "output_dir", "holdout",
-		"command", "raw_log_policy"); err != nil {
+	armMetadata, err := decodeSV1DActivationArmMetadata(raw)
+	if err != nil {
 		return fmt.Errorf("decode SV1D arm run metadata: %w", err)
 	}
 	expectedCommand := []string{"multivenue", "-config", "run-config.json", "-duration", "5m", "-log-mode", "full", "-evidence-format", "evstream_v3"}
 	if armMetadata.SchemaVersion != 2 || armMetadata.RunnerContract != sv1dActivationRunnerContract || armMetadata.ProbeID != "v2-r2-sv1d-activation-659" ||
-		armMetadata.Arm != spec.Name || armMetadata.ExperimentID != spec.ExperimentID || armMetadata.ConfigExperimentID != spec.ExperimentID ||
+		armMetadata.Arm != spec.Name || armMetadata.Cell != spec.Name || armMetadata.ExperimentID != spec.ExperimentID || armMetadata.ConfigExperimentID != spec.ExperimentID ||
 		armMetadata.HypothesisID != spec.HypothesisID || armMetadata.Seed != options.Contract.Seed || armMetadata.SimulatedHorizon != options.Contract.Horizon ||
 		armMetadata.SimulationStartNano != options.Contract.SimulationStartNano || armMetadata.SimulationEndNano != options.Contract.SimulationEndNano ||
 		armMetadata.ConfigSHA256 != spec.ConfigSHA256 || armMetadata.BinarySHA256 != expected.BinarySHA256 || armMetadata.GitRevision != expected.SourceRevision ||

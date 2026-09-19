@@ -95,6 +95,16 @@ tree. A new Go 1.27 pinned bundle and capacity-bound review package are
 required before rerunning seed 659. The next seed-659 result remains
 development-only and cannot authorize dev cells, freeze, or holdouts by itself.
 
+The fresh Luna review of `19c3727` then found a second, shared-provenance
+schema omission: the strict SV1D arm decoder used by the actual probe path
+still lacked `cell` and rejects unknown fields, even though the CDF decoder and
+runner now agreed. No world or capacity measurement was run under that
+candidate. The successor below adds `cell` to the shared arm metadata decoder,
+requires it, binds it to the registered arm name, and adds a runner-shaped
+decoder regression covering presence and omission. This is another
+analyzer/provenance contract correction only; it does not alter the participant,
+market, evidence, or development boundary.
+
 ## Preserved gates
 
 * `85c927d` review, build, capacity artifacts, and activation artifacts remain
