@@ -147,6 +147,19 @@ The machine summary records exit status and SHA-256 for the retained
 validation logs. `make test`, vet, race, JSON parsing, and path-policy checks
 are all passing at the repaired candidate.
 
+## Independent integration review
+
+An independent read-only Luna xhigh review of candidate
+`27afde1da9a438e9b52ac58ba2bae2ef8c422ee7` completed with **ACCEPT**. Its
+bounded scope checked ancestry, deferred-branch separation, the 46-worktree
+inventory and dirty preservation, closeout boundaries, validation identity,
+and publication instructions. It found no lost change, dangerous conflict
+resolution, or inflated scientific claim. The review did not approve a market
+study, a freeze, or empirical realism; it accepted only this repository
+consolidation scope. The final machine summary records the verdict without
+inventing a report digest because the reviewer returned a session result
+rather than a persisted artifact.
+
 These checks validate source integration only. They do not rerun a market
 world, inspect holdout outputs, authorize a campaign, or transfer an old
 review verdict to a changed scientific claim.

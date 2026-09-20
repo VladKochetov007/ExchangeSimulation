@@ -122,6 +122,15 @@
     "research_runs_started": false,
     "holdout_outputs_inspected": false
   },
+  "independent_review": {
+    "execution": "COMPLETED",
+    "reviewer": "independent Luna xhigh read-only agent",
+    "verdict": "ACCEPT",
+    "target_commit": "27afde1da9a438e9b52ac58ba2bae2ef8c422ee7",
+    "scope": "repository consolidation only: ancestry, branch separation, inventory/preservation, scientific boundary, validation identity, and publication safety",
+    "scientific_campaign_authorized": false,
+    "report_artifact": "session result; no persisted report digest"
+  },
   "publication": {
     "status": "PENDING",
     "main_after": null,
