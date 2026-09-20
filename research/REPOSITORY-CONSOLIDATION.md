@@ -50,7 +50,8 @@ Recoverability artifacts are private and intentionally not pushed:
 - tracked dirty patch from `cdf-order-debug-971267d`:
   `cdf-order-debug-971267d-working-tree.patch`, SHA-256
   `3d72b9d46e7a92d6f3a30cf7a393e50a265b009e369ab2e76d4698b07f12cff0`;
-- untracked analyzer files from `/tmp/cdf-analysis-side.JACU0e/source` were
+- untracked analyzer files from the system-temporary checkout
+  `<system-temp-root>/cdf-analysis-side.JACU0e/source` were
   copied without modification, with hashes recorded in the machine summary.
 
 The bundle covers Git history only. It is not a backup of working-tree files,
@@ -68,18 +69,18 @@ The important non-clean or inaccessible entries were:
 | path | state | preserved contribution |
 |---|---|---|
 | `/home/vlad/external-scratch/cdf-order-debug-971267d` | exists, detached at `971267d`, tracked `analysis/cdf_activation.go` modified | patch archived; proposed `SimTS` ordering change remains unresolved and unapplied |
-| `/tmp/cdf-analysis-side.JACU0e/source` | exists, detached at `fb965a0`, two relevant files untracked | both files archived by hash; older analyzer variant remains historical/unresolved |
-| `/tmp/exchange-sim-baseline-09d9f18` | missing/prunable, HEAD `09d9f18` | commit retained by archival ref; no working files or evidence claimed |
-| `/tmp/tmp.TIemh2AcJU/src` | missing/prunable, HEAD `39c4554` | commit retained by archival ref; no working files or evidence claimed |
-| `/tmp/v2-clean-build-648d408.7anPfo/src` | missing/prunable, HEAD `648d408` | commit retained by archival ref; no working files or evidence claimed |
-| `/tmp/v2-clean-build-678ca4d.1C0WNR/src` | missing/prunable, HEAD `678ca4d` | commit retained by archival ref; no working files or evidence claimed |
-| `/tmp/v2-clean-build-95e5083.eVYYTK/src` | missing/prunable, HEAD `95e5083` | commit retained by archival ref; no working files or evidence claimed |
-| `/tmp/v2-clean-build-bounded.hP4MWL/src` | missing/prunable, HEAD `45cd4c9` | commit retained by archival ref; no working files or evidence claimed |
-| `/tmp/v2-clean-build-final.rSiTof/src` | missing/prunable, HEAD `2fa7fbe` | commit retained by archival ref; no working files or evidence claimed |
-| `/tmp/v2-clean-build-retry.YlW3dN/src` | missing/prunable, HEAD `7b7bedc` | commit retained by archival ref; no working files or evidence claimed |
-| `/tmp/v2-clean-build-streaming.EgLzVf/src` | missing/prunable, HEAD `79afc70` | commit retained by archival ref; no working files or evidence claimed |
-| `/tmp/v2-clean-build.CBOwdx/src` | missing/prunable, HEAD `bfd03ea` | commit retained by archival ref; no working files or evidence claimed |
-| `/tmp/v2-r4-build-16a5e91` | missing/prunable, HEAD `16a5e91` | commit retained by archival ref; no working files or evidence claimed |
+| `<system-temp-root>/cdf-analysis-side.JACU0e/source` | exists, detached at `fb965a0`, two relevant files untracked | both files archived by hash; older analyzer variant remains historical/unresolved |
+| `<system-temp-root>/exchange-sim-baseline-09d9f18` | missing/prunable, HEAD `09d9f18` | commit retained by archival ref; no working files or evidence claimed |
+| `<system-temp-root>/TIemh2AcJU/src` | missing/prunable, HEAD `39c4554` | commit retained by archival ref; no working files or evidence claimed |
+| `<system-temp-root>/v2-clean-build-648d408.7anPfo/src` | missing/prunable, HEAD `648d408` | commit retained by archival ref; no working files or evidence claimed |
+| `<system-temp-root>/v2-clean-build-678ca4d.1C0WNR/src` | missing/prunable, HEAD `678ca4d` | commit retained by archival ref; no working files or evidence claimed |
+| `<system-temp-root>/v2-clean-build-95e5083.eVYYTK/src` | missing/prunable, HEAD `95e5083` | commit retained by archival ref; no working files or evidence claimed |
+| `<system-temp-root>/v2-clean-build-bounded.hP4MWL/src` | missing/prunable, HEAD `45cd4c9` | commit retained by archival ref; no working files or evidence claimed |
+| `<system-temp-root>/v2-clean-build-final.rSiTof/src` | missing/prunable, HEAD `2fa7fbe` | commit retained by archival ref; no working files or evidence claimed |
+| `<system-temp-root>/v2-clean-build-retry.YlW3dN/src` | missing/prunable, HEAD `7b7bedc` | commit retained by archival ref; no working files or evidence claimed |
+| `<system-temp-root>/v2-clean-build-streaming.EgLzVf/src` | missing/prunable, HEAD `79afc70` | commit retained by archival ref; no working files or evidence claimed |
+| `<system-temp-root>/v2-clean-build.CBOwdx/src` | missing/prunable, HEAD `bfd03ea` | commit retained by archival ref; no working files or evidence claimed |
+| `<system-temp-root>/v2-r4-build-16a5e91` | missing/prunable, HEAD `16a5e91` | commit retained by archival ref; no working files or evidence claimed |
 
 No existing worktree was reset, cleaned, removed, or pruned. A laptop or
 machine not visible to this Git common directory remains outside the inventory
@@ -151,7 +152,7 @@ all source/research branches remain available; other agents must rebase or
 merge deliberately rather than reset to this pointer.
 
 Optional cleanup candidates, **not removed** by this task, are missing/prunable
-administrative entries under `/tmp`, regenerable build/cache outputs, tracked
+administrative entries under the system-temporary root, regenerable build/cache outputs, tracked
 Python bytecode under `tools/__pycache__`, and old detached worktrees after an
 owner review confirms their archival refs and external artifacts. Protected
 evidence, review bundles, branches, worktrees, and private material were not

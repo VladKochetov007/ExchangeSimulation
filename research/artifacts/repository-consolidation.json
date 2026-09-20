@@ -59,21 +59,21 @@
     {"path":"/home/vlad/external-scratch/sv1d-successor-supplied-971267d-20260919","exists":true,"branch":null,"head":"971267d6bfac030e9fb1acb3468b369f863d39a2","state":"clean-detached","contribution":"historical supplied-source checkout"},
     {"path":"/home/vlad/external-scratch/sv1d-successor-supplied-b466b57-20260919","exists":true,"branch":null,"head":"b466b57fd2bfcbdcb1319a1942ac8370a86d6ba4","state":"clean-detached","contribution":"historical supplied-source checkout"},
     {"path":"/home/vlad/external-scratch/v2-docs-clean-test-8de","exists":true,"branch":null,"head":"8de607ddfb2f48bf13ff008e58892b18906d1eae","state":"clean-detached","contribution":"historical documentation test checkout"},
-    {"path":"/tmp/cdf-analysis-side.JACU0e/source","exists":true,"branch":null,"head":"fb965a001d38a668693ce57b5043450e2abe8bc0","state":"dirty-untracked-source","contribution":"older analyzer/test files archived externally"},
-    {"path":"/tmp/exchange-sim-baseline-09d9f18","exists":false,"branch":null,"head":"09d9f18bd48f69696d97cf70d98748c98d2df7ff","state":"missing-prunable","contribution":"commit retained; working files unavailable"},
-    {"path":"/tmp/sv1c-clean-source-e21","exists":true,"branch":null,"head":"e21bd4169a335a3a5fd573b2018149c0f30a7c19","state":"clean-detached","contribution":"historical SV1C source checkout"},
-    {"path":"/tmp/sv1c-normalizer-clean.MIfm0T/source","exists":true,"branch":null,"head":"c2a752f3bb5d6b38c8ad8ee066ad91bbf355aae0","state":"clean-detached","contribution":"historical normalization checkout"},
-    {"path":"/tmp/tmp.TIemh2AcJU/src","exists":false,"branch":null,"head":"39c45543ee901f50e6a2da74d93adcb7222be1bc","state":"missing-prunable","contribution":"commit retained; working files unavailable"},
-    {"path":"/tmp/tmp.vsRrU8990w/old-source","exists":true,"branch":null,"head":"d2bba43334b1e18aa48f0e6e919b84645d405344","state":"clean-detached","contribution":"historical source checkout"},
-    {"path":"/tmp/v2-clean-build-648d408.7anPfo/src","exists":false,"branch":null,"head":"648d4083648732040bcb9da08a1cc63562f69581","state":"missing-prunable","contribution":"commit retained; working files unavailable"},
-    {"path":"/tmp/v2-clean-build-678ca4d.1C0WNR/src","exists":false,"branch":null,"head":"678ca4de8c3a9ff7bfa1caad4b577a2e950d39e7","state":"missing-prunable","contribution":"commit retained; working files unavailable"},
-    {"path":"/tmp/v2-clean-build-95e5083.eVYYTK/src","exists":false,"branch":null,"head":"95e50837ff6d6f6cdc64ba54284392bd4f1d146a","state":"missing-prunable","contribution":"commit retained; working files unavailable"},
-    {"path":"/tmp/v2-clean-build-bounded.hP4MWL/src","exists":false,"branch":null,"head":"45cd4c93d43315afc340a32eb7695d49d29dd5b7","state":"missing-prunable","contribution":"commit retained; working files unavailable"},
-    {"path":"/tmp/v2-clean-build-final.rSiTof/src","exists":false,"branch":null,"head":"2fa7fbe19f5a591130a2617abb42c7642ef12f89","state":"missing-prunable","contribution":"commit retained; working files unavailable"},
-    {"path":"/tmp/v2-clean-build-retry.YlW3dN/src","exists":false,"branch":null,"head":"7b7bedc3aafcda74e43ec5a6373f724e16ddb7d9","state":"missing-prunable","contribution":"commit retained; working files unavailable"},
-    {"path":"/tmp/v2-clean-build-streaming.EgLzVf/src","exists":false,"branch":null,"head":"79afc70e74aab54eabb84626d8f65bdbc6826124","state":"missing-prunable","contribution":"commit retained; working files unavailable"},
-    {"path":"/tmp/v2-clean-build.CBOwdx/src","exists":false,"branch":null,"head":"bfd03ea8958a71f8305df98a8fb04b8bce61076e","state":"missing-prunable","contribution":"commit retained; working files unavailable"},
-    {"path":"/tmp/v2-r4-build-16a5e91","exists":false,"branch":null,"head":"16a5e91887825f28b853f41e168ab252462acfc0","state":"missing-prunable","contribution":"commit retained; working files unavailable"}
+    {"path":"<system-temp-root>/cdf-analysis-side.JACU0e/source","exists":true,"branch":null,"head":"fb965a001d38a668693ce57b5043450e2abe8bc0","state":"dirty-untracked-source","contribution":"older analyzer/test files archived externally"},
+    {"path":"<system-temp-root>/exchange-sim-baseline-09d9f18","exists":false,"branch":null,"head":"09d9f18bd48f69696d97cf70d98748c98d2df7ff","state":"missing-prunable","contribution":"commit retained; working files unavailable"},
+    {"path":"<system-temp-root>/sv1c-clean-source-e21","exists":true,"branch":null,"head":"e21bd4169a335a3a5fd573b2018149c0f30a7c19","state":"clean-detached","contribution":"historical SV1C source checkout"},
+    {"path":"<system-temp-root>/sv1c-normalizer-clean.MIfm0T/source","exists":true,"branch":null,"head":"c2a752f3bb5d6b38c8ad8ee066ad91bbf355aae0","state":"clean-detached","contribution":"historical normalization checkout"},
+    {"path":"<system-temp-root>/TIemh2AcJU/src","exists":false,"branch":null,"head":"39c45543ee901f50e6a2da74d93adcb7222be1bc","state":"missing-prunable","contribution":"commit retained; working files unavailable"},
+    {"path":"<system-temp-root>/vsRrU8990w/old-source","exists":true,"branch":null,"head":"d2bba43334b1e18aa48f0e6e919b84645d405344","state":"clean-detached","contribution":"historical source checkout"},
+    {"path":"<system-temp-root>/v2-clean-build-648d408.7anPfo/src","exists":false,"branch":null,"head":"648d4083648732040bcb9da08a1cc63562f69581","state":"missing-prunable","contribution":"commit retained; working files unavailable"},
+    {"path":"<system-temp-root>/v2-clean-build-678ca4d.1C0WNR/src","exists":false,"branch":null,"head":"678ca4de8c3a9ff7bfa1caad4b577a2e950d39e7","state":"missing-prunable","contribution":"commit retained; working files unavailable"},
+    {"path":"<system-temp-root>/v2-clean-build-95e5083.eVYYTK/src","exists":false,"branch":null,"head":"95e50837ff6d6f6cdc64ba54284392bd4f1d146a","state":"missing-prunable","contribution":"commit retained; working files unavailable"},
+    {"path":"<system-temp-root>/v2-clean-build-bounded.hP4MWL/src","exists":false,"branch":null,"head":"45cd4c93d43315afc340a32eb7695d49d29dd5b7","state":"missing-prunable","contribution":"commit retained; working files unavailable"},
+    {"path":"<system-temp-root>/v2-clean-build-final.rSiTof/src","exists":false,"branch":null,"head":"2fa7fbe19f5a591130a2617abb42c7642ef12f89","state":"missing-prunable","contribution":"commit retained; working files unavailable"},
+    {"path":"<system-temp-root>/v2-clean-build-retry.YlW3dN/src","exists":false,"branch":null,"head":"7b7bedc3aafcda74e43ec5a6373f724e16ddb7d9","state":"missing-prunable","contribution":"commit retained; working files unavailable"},
+    {"path":"<system-temp-root>/v2-clean-build-streaming.EgLzVf/src","exists":false,"branch":null,"head":"79afc70e74aab54eabb84626d8f65bdbc6826124","state":"missing-prunable","contribution":"commit retained; working files unavailable"},
+    {"path":"<system-temp-root>/v2-clean-build.CBOwdx/src","exists":false,"branch":null,"head":"bfd03ea8958a71f8305df98a8fb04b8bce61076e","state":"missing-prunable","contribution":"commit retained; working files unavailable"},
+    {"path":"<system-temp-root>/v2-r4-build-16a5e91","exists":false,"branch":null,"head":"16a5e91887825f28b853f41e168ab252462acfc0","state":"missing-prunable","contribution":"commit retained; working files unavailable"}
   ],
   "dirty_preservation": {
     "tracked_patch": {
@@ -83,8 +83,8 @@
       "applied_to_main": false
     },
     "untracked_files": [
-      {"source_path":"/tmp/cdf-analysis-side.JACU0e/source/analysis/cdf_activation.go","archive_path":"/home/vlad/external-scratch/repository-consolidation-20260920/cdf-analysis-side-cdf_activation.go","sha256":"5a3ec52961e1a99aef367d00dc7e33bd5826205f7fa7efc7b5c305e9c1a6e574","applied_to_main":false},
-      {"source_path":"/tmp/cdf-analysis-side.JACU0e/source/analysis/cdf_activation_test.go","archive_path":"/home/vlad/external-scratch/repository-consolidation-20260920/cdf-analysis-side-cdf_activation_test.go","sha256":"1250ef33f64b2ba1b8a40622436796f6647a084ba2678cd3e77ba45f00b16c4b","applied_to_main":false}
+      {"source_path":"<system-temp-root>/cdf-analysis-side.JACU0e/source/analysis/cdf_activation.go","archive_path":"/home/vlad/external-scratch/repository-consolidation-20260920/cdf-analysis-side-cdf_activation.go","sha256":"5a3ec52961e1a99aef367d00dc7e33bd5826205f7fa7efc7b5c305e9c1a6e574","applied_to_main":false},
+      {"source_path":"<system-temp-root>/cdf-analysis-side.JACU0e/source/analysis/cdf_activation_test.go","archive_path":"/home/vlad/external-scratch/repository-consolidation-20260920/cdf-analysis-side-cdf_activation_test.go","sha256":"1250ef33f64b2ba1b8a40622436796f6647a084ba2678cd3e77ba45f00b16c4b","applied_to_main":false}
     ]
   },
   "archival_refs": {
@@ -120,7 +120,7 @@
     "force_push": false
   },
   "cleanup_candidates_not_removed": [
-    "/tmp missing/prunable worktree administrative records",
+    "missing/prunable worktree administrative records under the system-temporary root",
     "regenerable build/cache outputs",
     "tracked tools/__pycache__ bytecode",
     "old detached worktrees after owner review"

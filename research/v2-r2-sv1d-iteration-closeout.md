@@ -235,9 +235,10 @@ The authoritative reproduction package is the retained raw namespace plus the
 corrected Go 1.27 analyzer/renderer bundle. No simulator rerun is needed.
 
 ```bash
-bundle=/home/vlad/external-scratch/sv1d-rescore-bundle-8de607d
-raw=/home/vlad/external-scratch/sv1d-activation-971267d-20260919-cgroup8g
-rescore=/home/vlad/external-scratch/sv1d-activation-rescore-8de607d-20260919
+bundle=<private-evidence-root>/sv1d-rescore-bundle-8de607d
+raw=<private-evidence-root>/sv1d-activation-971267d-20260919-cgroup8g
+rescore=<private-evidence-root>/sv1d-activation-rescore-8de607d-20260919
+rescore_output_dir="${RESCORE_OUTPUT_DIR:?set a private scratch directory}"
 
 sha256sum -c "$bundle/review-package/retained-artifact-hashes.txt"
 sha256sum -c "$bundle/review-package/rescore-artifact-hashes.txt"
@@ -250,12 +251,12 @@ rendered=$(mktemp -d)
   -cdf-config-sha256 bfb63ebfb7a1705819aa8a6153aea9a300920fa482d3c8f6de6d4bc564952f1f \
   -cdf-source-revision 971267d6bfac030e9fb1acb3468b369f863d39a2 \
   -cdf-binary-sha256 295b241cf9ef6e98b6699815f09135bf6b4e824143684884188a04f330227168 \
-  "$raw/arms/treatment" > /tmp/sv1d-treatment-rescore.json
+  "$raw/arms/treatment" > "$rescore_output_dir/sv1d-treatment-rescore.json"
 
 jq -e '.result.evidence_valid == true and
         .result.activation_satisfied == false and
         .result.one_sided_restoration_count == 0' \
-  /tmp/sv1d-treatment-rescore.json
+  "$rescore_output_dir/sv1d-treatment-rescore.json"
 rm -rf "$rendered"
 ```
 
