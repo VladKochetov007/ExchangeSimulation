@@ -1,0 +1,97 @@
+{
+  "schema_version": 1,
+  "contract": "v2-r2-sv1d-iteration-closeout-v1",
+  "closeout_task_status": "COMPLETE",
+  "long_term_project_status": "NOT_COMPLETE",
+  "scientific_branch": "autoresearch/ffa-ecology-gen0",
+  "documentation_head_before_closeout": "7cebda1b021f2c16a14092bf9342c5d39b4b9192",
+  "original_run_identity": {
+    "source_revision": "971267d6bfac030e9fb1acb3468b369f863d39a2",
+    "source_tree": "1e3a2183eaf9bac8566d68f45fa607f1d3af85a0",
+    "simulator_sha256": "295b241cf9ef6e98b6699815f09135bf6b4e824143684884188a04f330227168",
+    "config_sha256": "bfb63ebfb7a1705819aa8a6153aea9a300920fa482d3c8f6de6d4bc564952f1f",
+    "evidence_format": "evstream_v3",
+    "evidence_schema_epoch": 4,
+    "log_mode": "full",
+    "seed": 659,
+    "horizon": "5m",
+    "holdout": false,
+    "run_root": "/home/vlad/external-scratch/sv1d-activation-971267d-20260919-cgroup8g",
+    "treatment_events_sha256": "60bc339615102e0cddef21848945243dd2ce70de124f7f063dca7d2bc3db5fc5",
+    "treatment_run_metadata_sha256": "5c1a4460a02fb576c5950991b1a3eb171ee998ec979a3972e94327eff34311ab",
+    "original_treatment_result_sha256": "f85acb9ce54c20063a2decfe5094152f158a7d4af09b85a0669b7fd237e5e73a",
+    "original_score_sha256": "657b0ada569210ad43677890c1aa75af8068592e0d0b39d5fbcc0f8d0e03b63b"
+  },
+  "analysis_identity": {
+    "candidate_commit": "8de607ddfb2f48bf13ff008e58892b18906d1eae",
+    "candidate_tree": "c86f26d564cf798322de3f776dbc0d91dcc78957",
+    "analyzer_sha256": "8e2bed2163647e5908815bee2efb008df6bf165e00ac32da68ce81cffa2717e5",
+    "renderer_sha256": "4439dcf313c065f2104090d5b48222af435a2c7e3bbed3522090c61f5f0d2bf0",
+    "toolchain": "go1.27.0",
+    "rescore_root": "/home/vlad/external-scratch/sv1d-activation-rescore-8de607d-20260919",
+    "treatment_audit_sha256": "dac6d620fb4797d649e57c8b31d881432648f835c79ddddd773053bab7f7eae7",
+    "treatment_rendered_digest": "fdf35d653dbdc8f88f0757e9692011a84fb79209e41e6c28e2aa8c1b53be4d14",
+    "rescore_manifest_sha256": "0976cfaee51f7589da904f655b19db6f81ebd0ccc7e18f728b4bed51576845b71"
+  },
+  "review_scope": {
+    "execution": "COMPLETED",
+    "reviewer": "fresh Luna xhigh",
+    "verdict": "ACCEPT",
+    "review_report_sha256": "9126e7ad1f6dad9e33d3264895a947074af70311b0922ebfd644b9d205d24bc0",
+    "scope": "queued-fill analyzer correction and retained-evidence rescore only",
+    "not_authorized": ["CDF activation", "24h campaign", "freeze", "holdouts"]
+  },
+  "predecessor_status": "NON-VIABLE AT THE 24H MARKET-SURVIVAL GATE",
+  "treatment_evidence_status": "EVIDENCE_VALID",
+  "supplier_trading_activity": {
+    "supplier_count": 12,
+    "decision_count": 1791,
+    "accepted_order_count": 539,
+    "fill_count": 523,
+    "withdrawal_count": 525,
+    "volume_share": 0.11359795214583537,
+    "anti_cheating_satisfied": true
+  },
+  "registered_activation_status": "TREATMENT_NOT_ACTIVATED",
+  "activation_fields": {
+    "evidence_valid": true,
+    "checks_count": 0,
+    "one_sided_decision_count": 4,
+    "one_sided_restoration_count": 0,
+    "activation_satisfied": false,
+    "overall_result_valid": false
+  },
+  "tri_arm_promotion_status": "NOT_ESTABLISHED",
+  "completed_24h_successor_campaign": false,
+  "freeze_authorized": false,
+  "holdouts_consumed": false,
+  "holdouts": ["619", "631", "641"],
+  "bounded_diagnostic": {
+    "public_one_sided_episode_observed": true,
+    "central_ask_only_duration_nano": 2000000000,
+    "central_one_sided_decision_count": 4,
+    "minimum_eligible_observations_per_supplier": 148,
+    "maximum_censored_order_count": 0,
+    "maximum_censored_quote_lifetime_nano": 0,
+    "qualifying_episode_to_order_join": "NOT_DETERMINABLE_FROM_RETAINED_EVIDENCE",
+    "qualifying_restoration_count": 0,
+    "diagnostic_scope": "offline aggregate retained-evidence pass; exploratory and non-promotional"
+  },
+  "historical_impact": {
+    "identified_defect": "queued supplier-fill analyzer reconstruction",
+    "sv1d_probe_reachable": true,
+    "historical_r2_cdf_roster_present": false,
+    "historical_r2_trajectory_impact": "NONE_IDENTIFIED_FOR_THIS_DEFECT",
+    "repository_wide_reanalysis": "NOT_PERFORMED"
+  },
+  "unknowns": [
+    "The retained aggregate audit does not expose the exact denominator joining each one-sided decision to a qualifying public episode.",
+    "It is not determinable whether a qualifying missing-side order was accepted for each observed episode.",
+    "No 24-hour successor outcome exists for this treatment, so market-survival impact is unknown.",
+    "The full V2 ecology remains unfinished and broad emergence claims remain unsupported."
+  ],
+  "next_study_authorized": false,
+  "next_study": "Counterparty composition and capital allocation effects on one existing strategy's capacity, profitability, risk, and impact",
+  "raw_evidence_preserved": true,
+  "old_invalid_score_preserved": true
+}

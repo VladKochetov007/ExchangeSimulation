@@ -1,3 +1,23 @@
+# Current operational pointer — 2026-09-20 (R2/SV1D development-line closeout)
+
+The R2/SV1D development line is now closed at a valid non-activation
+boundary. The predecessor remains `NON-VIABLE AT THE 24H MARKET-SURVIVAL
+GATE`; the corrected retained seed-659 treatment is evidence-valid but
+`TREATMENT_NOT_ACTIVATED` because it reconstructed zero qualifying one-sided
+restorations. This is not a completed 24-hour campaign, freeze, holdout
+validation, or universal negative about finite suppliers.
+
+The authoritative closeout package is:
+
+- `research/v2-r2-sv1d-iteration-closeout.md`
+- `research/artifacts/v2-r2-sv1d-closeout-summary.json`
+- `research/market-ecology-next-study-brief.md` (not authorized to run)
+
+Do not follow older launch instructions below this pointer. Do not launch
+capacity, activation, `dev-607/613/617`, parity, freeze, or holdouts `619/631/641`.
+The long-term V2 market-ecology goal remains unfinished and awaits a separate
+owner decision.
+
 # Current operational pointer — 2026-09-19 (SV1D non-activation closure)
 
 The exact clean scientific HEAD is `8de607d` (tree
