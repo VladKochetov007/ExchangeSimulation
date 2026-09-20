@@ -29,7 +29,7 @@
   },
   "worktree_inventory": [
     {"path":"/home/vlad/ExchangeSimulation","exists":true,"branch":"autoresearch/ffa-ecology-gen0","head":"f507c7ee2b11fd05e1adb9f17fa0a66faf889ea1","state":"clean","contribution":"scientific source checkout"},
-    {"path":"/home/vlad/ExchangeSimulation-integration-20260920","exists":true,"branch":"integration/repository-consolidation-20260920","head":"f507c7ee2b11fd05e1adb9f17fa0a66faf889ea1","state":"clean","contribution":"isolated integration checkout"},
+    {"path":"/home/vlad/ExchangeSimulation-integration-20260920","exists":true,"branch":"integration/repository-consolidation-20260920","head":"24ddb38e15e5eab4048aa2a2fe68c4b5c7a00e3b","state":"clean","contribution":"isolated integration checkout"},
     {"path":"/home/vlad/ExchangeSimulation-r2-sv1","exists":true,"branch":"feature/r2-cdf-survival-successor","head":"1fda96039e684d51e176e0cef2bcff145f2a6c8a","state":"clean","contribution":"historical SV1C line"},
     {"path":"/home/vlad/ExchangeSimulation-r2-sv1-extract-3f","exists":true,"branch":null,"head":"3f73f3043c2cb04f01c9acfa86eed132cfadff11","state":"clean-detached","contribution":"historical extraction checkout"},
     {"path":"/home/vlad/ExchangeSimulation-r2-sv1d","exists":true,"branch":"feature/r2-cdf-survival-successor-sv1d","head":"039f008f1aa9f3a748bf3fac33d0bbb7a2e1892e","state":"clean","contribution":"historical SV1D line"},
@@ -108,8 +108,17 @@
     "next_study_authorized": false
   },
   "validation": {
-    "status": "PENDING",
+    "status": "PASS",
+    "candidate_commit": "24ddb38e15e5eab4048aa2a2fe68c4b5c7a00e3b",
+    "candidate_tree": "3e05847c27070e3ff296125cd2f88811e9acbab7",
     "commands": ["git diff --check", "make test", "go vet ./...", "targeted race tests", "JSON/link consistency", "clean-tree and remote-tip checks"],
+    "git_diff_check": "PASS",
+    "json_parse": "PASS",
+    "tracked_path_policy": "PASS",
+    "make_test": {"exit_status": 0, "log_path": "/home/vlad/external-scratch/repository-consolidation-20260920/make-test-2.log", "log_sha256": "e0444744316e6578b5b20aa96354ceceb45daf4507e470a779dbdfd7be8e4c95"},
+    "go_vet": {"exit_status": 0, "log_path": "/home/vlad/external-scratch/repository-consolidation-20260920/vet.log", "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"},
+    "targeted_race": {"exit_status": 0, "packages": ["./analysis", "./cmd/mvanalyze", "./cmd/prunegate", "./cmd/sv1dprobe", "./cmd/sv1dresource", "./tests"], "log_path": "/home/vlad/external-scratch/repository-consolidation-20260920/race.log", "log_sha256": "4c0a9b478552be5a7c698ea3ce9ca1d003114312ff37dbf103da8530e3244ca0"},
+    "initial_documentation_failure": {"candidate":"d51dec9add152c6a06b5197f23baeacd66c9a81d","cause":"literal system-temporary paths in tracked documentation","resolved_by":"24ddb38e15e5eab4048aa2a2fe68c4b5c7a00e3b"},
     "research_runs_started": false,
     "holdout_outputs_inspected": false
   },

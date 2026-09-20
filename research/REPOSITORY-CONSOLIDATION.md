@@ -127,17 +127,25 @@ navigation layer and a provenance map around the selected development tree.
 
 ## Integration validation
 
-At the documentation checkpoint, validation was intentionally recorded as
-pending so the exact committed candidate could be tested. The final machine
-summary records the actual exit status and commit after the following bounded
-checks:
+The first documentation checkpoint was `d51dec9`. Its full test exposed a
+documentation-only portability defect: literal system-temporary paths in
+tracked research files violated `TestTrackedFilesAvoidSystemTempPaths`. The
+minimal repair is `24ddb38`; it keeps hashes and private archive references,
+but uses configurable/repository-relative placeholders in tracked text. The
+exact repaired candidate then passed the following bounded checks:
 
 - `git diff --check`;
-- `make test` after inspecting its targets;
+- `make test` after inspecting its targets (Go packages, in-memory multivenue
+  determinism fixtures, repository path policy, and all four contract/archive
+  fixture scripts);
 - `go vet ./...`;
 - targeted race tests for analysis, command adapters, and `tests`;
 - JSON/link/schema consistency checks for the new records; and
 - final clean-tree and remote-tip checks.
+
+The machine summary records exit status and SHA-256 for the retained
+validation logs. `make test`, vet, race, JSON parsing, and path-policy checks
+are all passing at the repaired candidate.
 
 These checks validate source integration only. They do not rerun a market
 world, inspect holdout outputs, authorize a campaign, or transfer an old
