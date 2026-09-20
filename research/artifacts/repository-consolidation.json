@@ -1,0 +1,128 @@
+{
+  "schema_version": 1,
+  "contract": "repository-consolidation-development-baseline-v1",
+  "inventory_generated_utc": "2026-09-20",
+  "remote": {
+    "name": "origin",
+    "url": "https://github.com/VladKochetov007/ExchangeSimulation.git",
+    "fetched_with": "git fetch origin --no-prune",
+    "main_before": "ffe1434cfc60b5f79b5289b610d3d5137286f514"
+  },
+  "selected_baseline": {
+    "source_branch": "autoresearch/ffa-ecology-gen0",
+    "source_commit": "f507c7ee2b11fd05e1adb9f17fa0a66faf889ea1",
+    "source_tree": "86c1ef04e06ce9e48494d5462bd1adea262e9498",
+    "integration_branch": "integration/repository-consolidation-20260920",
+    "integration_method": "main ancestor; fast-forward scientific baseline",
+    "main_publication": "PENDING_VALIDATION"
+  },
+  "initial_refs": {
+    "main": "ffe1434cfc60b5f79b5289b610d3d5137286f514",
+    "scientific": "f507c7ee2b11fd05e1adb9f17fa0a66faf889ea1",
+    "sv1c": "1fda96039e684d51e176e0cef2bcff145f2a6c8a",
+    "sv1d": "039f008f1aa9f3a748bf3fac33d0bbb7a2e1892e",
+    "latency_race": "d48e9eeb8fd7d2dbba035571ec499272106bfce3",
+    "performance": "b1847ac40e8b7483e6e8a3f94b3705b4058884b0",
+    "performance_port": "39768dfed4ba4a5134f0c5ccf53351a79a0b1d64",
+    "performance_port_legacy": "899a6113ce0ee68bc28afe903ab985eba8bb047b",
+    "economic_redteam": "e85e16c5e920382e5df9aa050ac5ff9b22b51661"
+  },
+  "worktree_inventory": [
+    {"path":"/home/vlad/ExchangeSimulation","exists":true,"branch":"autoresearch/ffa-ecology-gen0","head":"f507c7ee2b11fd05e1adb9f17fa0a66faf889ea1","state":"clean","contribution":"scientific source checkout"},
+    {"path":"/home/vlad/ExchangeSimulation-integration-20260920","exists":true,"branch":"integration/repository-consolidation-20260920","head":"f507c7ee2b11fd05e1adb9f17fa0a66faf889ea1","state":"clean","contribution":"isolated integration checkout"},
+    {"path":"/home/vlad/ExchangeSimulation-r2-sv1","exists":true,"branch":"feature/r2-cdf-survival-successor","head":"1fda96039e684d51e176e0cef2bcff145f2a6c8a","state":"clean","contribution":"historical SV1C line"},
+    {"path":"/home/vlad/ExchangeSimulation-r2-sv1-extract-3f","exists":true,"branch":null,"head":"3f73f3043c2cb04f01c9acfa86eed132cfadff11","state":"clean-detached","contribution":"historical extraction checkout"},
+    {"path":"/home/vlad/ExchangeSimulation-r2-sv1d","exists":true,"branch":"feature/r2-cdf-survival-successor-sv1d","head":"039f008f1aa9f3a748bf3fac33d0bbb7a2e1892e","state":"clean","contribution":"historical SV1D line"},
+    {"path":"/home/vlad/external-scratch/cdf-order-debug-971267d","exists":true,"branch":null,"head":"971267d6bfac030e9fb1acb3468b369f863d39a2","state":"dirty-tracked-source","contribution":"unresolved event-ordering patch archived externally"},
+    {"path":"/home/vlad/external-scratch/sv1d-c4-staticcheck-base-20260919","exists":true,"branch":null,"head":"447a492718e78a7cc974c2363deee5ae13c2ae6","state":"clean-detached","contribution":"historical review/build checkout"},
+    {"path":"/home/vlad/external-scratch/sv1d-capacity-c3-20260919b/precommit-checkout","exists":true,"branch":null,"head":"73a7e106ab573d25dc2d68753162ce3a568990fb","state":"clean-detached","contribution":"historical precommit checkout"},
+    {"path":"/home/vlad/external-scratch/sv1d-capacity-c3-20260919c/precommit-checkout","exists":true,"branch":null,"head":"069aff84755f1d4e3c59f7f7b5548d34dfd0b6e3","state":"clean-detached","contribution":"historical precommit checkout"},
+    {"path":"/home/vlad/external-scratch/sv1d-capacity-c4-20260919/precommit-checkout","exists":true,"branch":null,"head":"92a808e3aa89ba855d44552d59a64ab575ef9635","state":"clean-detached","contribution":"historical precommit checkout"},
+    {"path":"/home/vlad/external-scratch/sv1d-capacity-c5-20260919/precommit-checkout","exists":true,"branch":null,"head":"3a45dd5203f5505a9825f35b3bc984e57f30f9df","state":"clean-detached","contribution":"historical precommit checkout"},
+    {"path":"/home/vlad/external-scratch/sv1d-capacity-pinned-6cab934-20260919/source-rebuild-checkout","exists":true,"branch":null,"head":"6cab9343c80045a7c13cc6cfa11fbc029536809a","state":"clean-detached","contribution":"historical pinned build checkout"},
+    {"path":"/home/vlad/external-scratch/sv1d-capacity-review-447a492/source-checkout","exists":true,"branch":null,"head":"447a492718e78a7cc974c2363deee5ae13c2ae6a","state":"clean-detached","contribution":"historical review checkout"},
+    {"path":"/home/vlad/external-scratch/sv1d-capacity-review-5015fd0/source-checkout","exists":true,"branch":null,"head":"5015fd00a3720c3bd9312d93ae5635fdbf8647a4","state":"clean-detached","contribution":"historical review checkout"},
+    {"path":"/home/vlad/external-scratch/sv1d-capacity-review-6cab934/source-checkout","exists":true,"branch":null,"head":"6cab9343c80045a7c13cc6cfa11fbc029536809a","state":"clean-detached","contribution":"historical review checkout"},
+    {"path":"/home/vlad/external-scratch/sv1d-docs-test-worktree-20260919","exists":true,"branch":null,"head":"5015fd00a3720c3bd9312d93ae5635fdbf8647a4","state":"clean-detached","contribution":"historical documentation test checkout"},
+    {"path":"/home/vlad/external-scratch/sv1d-rescore-build-8de607d","exists":true,"branch":null,"head":"8de607ddfb2f48bf13ff008e58892b18906d1eae","state":"clean-detached","contribution":"accepted analyzer rescore source checkout"},
+    {"path":"/home/vlad/external-scratch/sv1d-successor-build-85c927d-20260919","exists":true,"branch":null,"head":"85c927d9a087be9108992c56df4994a291d9cd56","state":"clean-detached","contribution":"historical successor build checkout"},
+    {"path":"/home/vlad/external-scratch/sv1d-successor-rebuilt-2192451-20260919","exists":true,"branch":null,"head":"219245143f39217f00c870c49524cd83ea76a354","state":"clean-detached","contribution":"historical rebuild checkout"},
+    {"path":"/home/vlad/external-scratch/sv1d-successor-rebuilt-40c627e-20260919","exists":true,"branch":null,"head":"40c627ec75ea2f6e685091f9bee954df79922be9","state":"clean-detached","contribution":"historical rebuild checkout"},
+    {"path":"/home/vlad/external-scratch/sv1d-successor-rebuilt-4d7f4b7-20260919","exists":true,"branch":null,"head":"4d7f4b710b1df0c5dc8c440eaf4beed6244aa1ad","state":"clean-detached","contribution":"historical rebuild checkout"},
+    {"path":"/home/vlad/external-scratch/sv1d-successor-rebuilt-66555a5-20260919","exists":true,"branch":null,"head":"66555a50348d9cda8af94966bb99c373f702e581","state":"clean-detached","contribution":"historical rebuild checkout"},
+    {"path":"/home/vlad/external-scratch/sv1d-successor-rebuilt-971267d-20260919","exists":true,"branch":null,"head":"971267d6bfac030e9fb1acb3468b369f863d39a2","state":"clean-detached","contribution":"historical rebuild checkout"},
+    {"path":"/home/vlad/external-scratch/sv1d-successor-rebuilt-b466b57-20260919","exists":true,"branch":null,"head":"b466b57fd2bfcbdcb1319a1942ac8370a86d6ba4","state":"clean-detached","contribution":"historical rebuild checkout"},
+    {"path":"/home/vlad/external-scratch/sv1d-successor-supplied-2192451-20260919","exists":true,"branch":null,"head":"219245143f39217f00c870c49524cd83ea76a354","state":"clean-detached","contribution":"historical supplied-source checkout"},
+    {"path":"/home/vlad/external-scratch/sv1d-successor-supplied-40c627e-20260919","exists":true,"branch":null,"head":"40c627ec75ea2f6e685091f9bee954df79922be9","state":"clean-detached","contribution":"historical supplied-source checkout"},
+    {"path":"/home/vlad/external-scratch/sv1d-successor-supplied-4d7f4b7-20260919","exists":true,"branch":null,"head":"4d7f4b710b1df0c5dc8c440eaf4beed6244aa1ad","state":"clean-detached","contribution":"historical supplied-source checkout"},
+    {"path":"/home/vlad/external-scratch/sv1d-successor-supplied-66555a5-20260919","exists":true,"branch":null,"head":"66555a50348d9cda8af94966bb99c373f702e581","state":"clean-detached","contribution":"historical supplied-source checkout"},
+    {"path":"/home/vlad/external-scratch/sv1d-successor-supplied-971267d-20260919","exists":true,"branch":null,"head":"971267d6bfac030e9fb1acb3468b369f863d39a2","state":"clean-detached","contribution":"historical supplied-source checkout"},
+    {"path":"/home/vlad/external-scratch/sv1d-successor-supplied-b466b57-20260919","exists":true,"branch":null,"head":"b466b57fd2bfcbdcb1319a1942ac8370a86d6ba4","state":"clean-detached","contribution":"historical supplied-source checkout"},
+    {"path":"/home/vlad/external-scratch/v2-docs-clean-test-8de","exists":true,"branch":null,"head":"8de607ddfb2f48bf13ff008e58892b18906d1eae","state":"clean-detached","contribution":"historical documentation test checkout"},
+    {"path":"/tmp/cdf-analysis-side.JACU0e/source","exists":true,"branch":null,"head":"fb965a001d38a668693ce57b5043450e2abe8bc0","state":"dirty-untracked-source","contribution":"older analyzer/test files archived externally"},
+    {"path":"/tmp/exchange-sim-baseline-09d9f18","exists":false,"branch":null,"head":"09d9f18bd48f69696d97cf70d98748c98d2df7ff","state":"missing-prunable","contribution":"commit retained; working files unavailable"},
+    {"path":"/tmp/sv1c-clean-source-e21","exists":true,"branch":null,"head":"e21bd4169a335a3a5fd573b2018149c0f30a7c19","state":"clean-detached","contribution":"historical SV1C source checkout"},
+    {"path":"/tmp/sv1c-normalizer-clean.MIfm0T/source","exists":true,"branch":null,"head":"c2a752f3bb5d6b38c8ad8ee066ad91bbf355aae0","state":"clean-detached","contribution":"historical normalization checkout"},
+    {"path":"/tmp/tmp.TIemh2AcJU/src","exists":false,"branch":null,"head":"39c45543ee901f50e6a2da74d93adcb7222be1bc","state":"missing-prunable","contribution":"commit retained; working files unavailable"},
+    {"path":"/tmp/tmp.vsRrU8990w/old-source","exists":true,"branch":null,"head":"d2bba43334b1e18aa48f0e6e919b84645d405344","state":"clean-detached","contribution":"historical source checkout"},
+    {"path":"/tmp/v2-clean-build-648d408.7anPfo/src","exists":false,"branch":null,"head":"648d4083648732040bcb9da08a1cc63562f69581","state":"missing-prunable","contribution":"commit retained; working files unavailable"},
+    {"path":"/tmp/v2-clean-build-678ca4d.1C0WNR/src","exists":false,"branch":null,"head":"678ca4de8c3a9ff7bfa1caad4b577a2e950d39e7","state":"missing-prunable","contribution":"commit retained; working files unavailable"},
+    {"path":"/tmp/v2-clean-build-95e5083.eVYYTK/src","exists":false,"branch":null,"head":"95e50837ff6d6f6cdc64ba54284392bd4f1d146a","state":"missing-prunable","contribution":"commit retained; working files unavailable"},
+    {"path":"/tmp/v2-clean-build-bounded.hP4MWL/src","exists":false,"branch":null,"head":"45cd4c93d43315afc340a32eb7695d49d29dd5b7","state":"missing-prunable","contribution":"commit retained; working files unavailable"},
+    {"path":"/tmp/v2-clean-build-final.rSiTof/src","exists":false,"branch":null,"head":"2fa7fbe19f5a591130a2617abb42c7642ef12f89","state":"missing-prunable","contribution":"commit retained; working files unavailable"},
+    {"path":"/tmp/v2-clean-build-retry.YlW3dN/src","exists":false,"branch":null,"head":"7b7bedc3aafcda74e43ec5a6373f724e16ddb7d9","state":"missing-prunable","contribution":"commit retained; working files unavailable"},
+    {"path":"/tmp/v2-clean-build-streaming.EgLzVf/src","exists":false,"branch":null,"head":"79afc70e74aab54eabb84626d8f65bdbc6826124","state":"missing-prunable","contribution":"commit retained; working files unavailable"},
+    {"path":"/tmp/v2-clean-build.CBOwdx/src","exists":false,"branch":null,"head":"bfd03ea8958a71f8305df98a8fb04b8bce61076e","state":"missing-prunable","contribution":"commit retained; working files unavailable"},
+    {"path":"/tmp/v2-r4-build-16a5e91","exists":false,"branch":null,"head":"16a5e91887825f28b853f41e168ab252462acfc0","state":"missing-prunable","contribution":"commit retained; working files unavailable"}
+  ],
+  "dirty_preservation": {
+    "tracked_patch": {
+      "source_path": "/home/vlad/external-scratch/cdf-order-debug-971267d/analysis/cdf_activation.go",
+      "archive_path": "/home/vlad/external-scratch/repository-consolidation-20260920/cdf-order-debug-971267d-working-tree.patch",
+      "sha256": "3d72b9d46e7a92d6f3a30cf7a393e50a265b009e369ab2e76d4698b07f12cff0",
+      "applied_to_main": false
+    },
+    "untracked_files": [
+      {"source_path":"/tmp/cdf-analysis-side.JACU0e/source/analysis/cdf_activation.go","archive_path":"/home/vlad/external-scratch/repository-consolidation-20260920/cdf-analysis-side-cdf_activation.go","sha256":"5a3ec52961e1a99aef367d00dc7e33bd5826205f7fa7efc7b5c305e9c1a6e574","applied_to_main":false},
+      {"source_path":"/tmp/cdf-analysis-side.JACU0e/source/analysis/cdf_activation_test.go","archive_path":"/home/vlad/external-scratch/repository-consolidation-20260920/cdf-analysis-side-cdf_activation_test.go","sha256":"1250ef33f64b2ba1b8a40622436796f6647a084ba2678cd3e77ba45f00b16c4b","applied_to_main":false}
+    ]
+  },
+  "archival_refs": {
+    "prefix": "refs/archive/repository-consolidation-20260920/",
+    "mapping_path": "/home/vlad/external-scratch/repository-consolidation-20260920/archive-refs.tsv",
+    "bundle_path": "/home/vlad/external-scratch/repository-consolidation-20260920/exchange-simulation-history-20260920.bundle",
+    "bundle_sha256": "b784628e4c732c8649e198473b5ad46fdd80a16d7d752003f6d3a046ca0b15f0",
+    "bundle_verified": true,
+    "bundle_scope": "Git history and selected local/archive refs; not worktree files, ignored evidence, indexes, credentials, or external raw artifacts"
+  },
+  "scientific_boundary": {
+    "r2_sv1d_status": "CLOSED_AT_VALID_NON_ACTIVATION_BOUNDARY",
+    "predecessor_status": "NON-VIABLE AT THE 24H MARKET-SURVIVAL GATE",
+    "retained_trajectory_source": "971267d6bfac030e9fb1acb3468b369f863d39a2",
+    "accepted_rescore_candidate": "8de607ddfb2f48bf13ff008e58892b18906d1eae",
+    "supplier_activity": true,
+    "registered_activation": "TREATMENT_NOT_ACTIVATED",
+    "completed_24h_successor_campaign": false,
+    "freeze_authorized": false,
+    "holdouts_consumed": false,
+    "next_study_authorized": false
+  },
+  "validation": {
+    "status": "PENDING",
+    "commands": ["git diff --check", "make test", "go vet ./...", "targeted race tests", "JSON/link consistency", "clean-tree and remote-tip checks"],
+    "research_runs_started": false,
+    "holdout_outputs_inspected": false
+  },
+  "publication": {
+    "status": "PENDING",
+    "main_after": null,
+    "push": null,
+    "force_push": false
+  },
+  "cleanup_candidates_not_removed": [
+    "/tmp missing/prunable worktree administrative records",
+    "regenerable build/cache outputs",
+    "tracked tools/__pycache__ bytecode",
+    "old detached worktrees after owner review"
+  ]
+}
