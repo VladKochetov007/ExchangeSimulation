@@ -59,7 +59,10 @@ indexes, ignored evidence, credentials, or external raw artifacts.
 
 ## Worktree inventory
 
-All 46 entries returned by `git worktree list --porcelain` were accounted for.
+All 46 entries returned by `git worktree list --porcelain` at the initial
+inventory were accounted for. The controlled publication worktree created
+after that snapshot is also listed in the machine summary as a post-inventory
+administrative checkout.
 The complete machine-readable path, existence, branch/detached state, full
 HEAD, and clean/dirty/prunable status is in
 [`artifacts/repository-consolidation.json`](artifacts/repository-consolidation.json).
@@ -160,6 +163,12 @@ consolidation scope. The final machine summary records the verdict without
 inventing a report digest because the reviewer returned a session result
 rather than a persisted artifact.
 
+A second fresh Luna xhigh confirmation reviewed the exact final pre-publication
+candidate `2bfe8eaf740f71505f7e3f10686b14c95a7b2627` and also returned
+**ACCEPT**. It confirmed that the added review record was documentation-only,
+that validation hashes and scientific boundaries were unchanged, and that no
+campaign was launched.
+
 These checks validate source integration only. They do not rerun a market
 world, inspect holdout outputs, authorize a campaign, or transfer an old
 review verdict to a changed scientific claim.
@@ -171,6 +180,12 @@ Before publication, `origin/main` must still equal the recorded initial
 consolidation descendant and pushed without force. The integration branch and
 all source/research branches remain available; other agents must rebase or
 merge deliberately rather than reset to this pointer.
+
+Publication was completed normally on 2026-09-20: `origin/main` advanced from
+`ffe1434cfc60b5f79b5289b610d3d5137286f514` to the reviewed candidate
+`2bfe8eaf740f71505f7e3f10686b14c95a7b2627`. The follow-up commit containing
+the publication-status record is documentation-only and does not change the
+validated source/configuration baseline.
 
 Optional cleanup candidates, **not removed** by this task, are missing/prunable
 administrative entries under the system-temporary root, regenerable build/cache outputs, tracked

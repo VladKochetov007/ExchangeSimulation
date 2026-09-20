@@ -29,7 +29,8 @@
   },
   "worktree_inventory": [
     {"path":"/home/vlad/ExchangeSimulation","exists":true,"branch":"autoresearch/ffa-ecology-gen0","head":"f507c7ee2b11fd05e1adb9f17fa0a66faf889ea1","state":"clean","contribution":"scientific source checkout"},
-    {"path":"/home/vlad/ExchangeSimulation-integration-20260920","exists":true,"branch":"integration/repository-consolidation-20260920","head":"24ddb38e15e5eab4048aa2a2fe68c4b5c7a00e3b","state":"clean","contribution":"isolated integration checkout"},
+    {"path":"/home/vlad/ExchangeSimulation-integration-20260920","exists":true,"branch":"integration/repository-consolidation-20260920","head":"2bfe8eaf740f71505f7e3f10686b14c95a7b2627","state":"clean","contribution":"isolated integration checkout"},
+    {"path":"/home/vlad/ExchangeSimulation-main-publish-20260920","exists":true,"branch":"main","head":"2bfe8eaf740f71505f7e3f10686b14c95a7b2627","state":"clean-post-inventory","contribution":"controlled main publication checkout"},
     {"path":"/home/vlad/ExchangeSimulation-r2-sv1","exists":true,"branch":"feature/r2-cdf-survival-successor","head":"1fda96039e684d51e176e0cef2bcff145f2a6c8a","state":"clean","contribution":"historical SV1C line"},
     {"path":"/home/vlad/ExchangeSimulation-r2-sv1-extract-3f","exists":true,"branch":null,"head":"3f73f3043c2cb04f01c9acfa86eed132cfadff11","state":"clean-detached","contribution":"historical extraction checkout"},
     {"path":"/home/vlad/ExchangeSimulation-r2-sv1d","exists":true,"branch":"feature/r2-cdf-survival-successor-sv1d","head":"039f008f1aa9f3a748bf3fac33d0bbb7a2e1892e","state":"clean","contribution":"historical SV1D line"},
@@ -129,12 +130,15 @@
     "target_commit": "27afde1da9a438e9b52ac58ba2bae2ef8c422ee7",
     "scope": "repository consolidation only: ancestry, branch separation, inventory/preservation, scientific boundary, validation identity, and publication safety",
     "scientific_campaign_authorized": false,
-    "report_artifact": "session result; no persisted report digest"
+    "report_artifact": "session result; no persisted report digest",
+    "final_confirmation": {"execution":"COMPLETED","reviewer":"fresh independent Luna xhigh read-only agent","verdict":"ACCEPT","target_commit":"2bfe8eaf740f71505f7e3f10686b14c95a7b2627","scope":"documentation-only review-record delta and final pre-publication boundary"}
   },
   "publication": {
-    "status": "PENDING",
-    "main_after": null,
-    "push": null,
+    "status": "PUBLISHED",
+    "published_commit": "2bfe8eaf740f71505f7e3f10686b14c95a7b2627",
+    "published_from": "ffe1434cfc60b5f79b5289b610d3d5137286f514",
+    "remote_main_verified_after_push": "2bfe8eaf740f71505f7e3f10686b14c95a7b2627",
+    "push": "normal fast-forward; origin main updated without force",
     "force_push": false
   },
   "cleanup_candidates_not_removed": [
