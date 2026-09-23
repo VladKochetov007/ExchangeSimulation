@@ -23,22 +23,49 @@ response map, not a scientific freeze or empirical validation.
 |---|---|---|
 | 1 | [ME-000](ideas/ME-000/report.md) | CLOSED: F1/F2 mechanical readiness accepted at `b25223a` |
 | 2 | [ME-001](ideas/ME-001/report.md) | REPORT: finite development screen complete; no confirmation or new run authorized |
-| 3 | ME-002–ME-007 | separately chosen timing, instruction, allocation or arbitrage question |
-| 4 | ME-008–ME-010 | payoff readiness, selected ensemble or named derivative child |
-| 5 | ME-011–ME-012 | restricted games and explicit capital dynamics after reliable payoffs |
+| 3 | [ME-002](ideas/ME-002/idea.md), [ME-003](ideas/ME-003/idea.md) | proposed timing/instruction readiness; no implementation or run authorized |
+| 4 | [ME-005](ideas/ME-005/idea.md), [ME-007](ideas/ME-007/idea.md) | proposed executable-arbitrage readiness, with mechanical gates first |
+| 5 | ME-004/006/008–010 | deferred allocation, interaction, payoff or derivative questions |
+| 6 | ME-011–ME-012 | restricted games and explicit capital dynamics after reliable payoffs |
 
 This is dependency order, not a run queue. ME-010 is a planning umbrella and needs
 a named child protocol; an umbrella cannot authorize a combined derivative campaign.
-The ME-001 plan remains one ABC/USD venue, immediate execution, three quantities
-and three compositions, three proposed seeds, 27 worlds plus two controls.
-Its economic object is execution quantity capacity. The source-grounded
-[readiness packet](../NEXT-STUDY-READINESS-PACKET.md) owns the two prerequisites.
+The completed ME-001 protocol used one ABC/USD venue, immediate execution,
+three quantities, three compositions and three development seeds. Its object
+was execution quantity/cost, not capital profitability. The source-grounded
+[readiness packet](../NEXT-STUDY-READINESS-PACKET.md) identified the two
+mechanical prerequisites that ME-000 closed before this screen.
+
+## Current synthesis and resume point
+
+ME-001's fixed initial endowments and class-replacement intervention changed
+the delivered local ask book, then the immediate buyer's fill and marked
+target cost. Both replacement arms separated five-level ask depth in the
+registered direction; the shortfall signs varied by target size. Fifteen of
+27 cells passed the joint full-completion/≤10 bp mandate; at 5 ABC, none of
+the three arms did. This is a reviewed **simulation-internal development**
+response map, not a capital-capacity or empirical result. In particular, the
+low marked cost of unfilled C−/5-ABC obligations is not an executable fill.
+The causal object bundles actor class, indexed clocks, fee roles and IDs.
+
+Read the exact [report](ideas/ME-001/report.md), [machine result](ideas/ME-001/result.json)
+and [scoped reviews](reviews/me001-result-20260923.md) before reusing a claim.
+Execution source was `13c02d5` (Go 1.27.0); the later Go aggregate was
+`16d5a50`. External raw evidence remains at
+`/home/vlad/ExchangeSimulation-me001-development-13c02d5`, about 153 MiB
+at the first closeout check; this path is not a remote backup. The 29-run
+batch is complete and its authorization exhausted. Next action is an owner
+choice between a separately designed confirmation of the bounded ME-001
+claim and one of the four proposed readiness cards above. No new worlds,
+freeze or holdouts follow automatically. The first four follow-ups are the
+active small queue; other registry entries are longer-term candidates, not
+parallel tasks to launch tonight.
 
 ## Historical map (HISTORY, never new-main results)
 
 | Records | Relevant IDs | Preserved interpretation |
 |---|---|---|
-| [executionlab studies](../executionlab-2026-08-15.md) | ME-000/001/003 | historical immediate/TWAP software and cost evidence; new composition matrix unrun |
+| [executionlab studies](../executionlab-2026-08-15.md) | ME-000/001/003 | historical immediate/TWAP software and cost evidence; distinct from the completed new ME-001 matrix |
 | [V2-2b informed maker/router](../v2-2b-price-discovery-smoke-results.md) | ME-005/006 | quote-mediated screen supported; router residual-edge endpoint falsified; decomposition mixed/incomplete |
 | [no-arbitrage audit](../no-arbitrage-audit.md) | ME-007 | historical omniscient quote diagnostic with corrected scanner; not executable participant profit |
 | [P1 size response](../v2-3-inventory-size-p1-results.md), [P2 rebalance](../v2-3-inventory-rebalance-p2-results.md) | ME-008 | activation/integrity screens; no stability or profitability inference |

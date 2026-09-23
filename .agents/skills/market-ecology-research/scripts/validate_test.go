@@ -38,11 +38,6 @@ func TestRepositoryMetadata(t *testing.T) {
 	if len(registry.Studies) < 13 || len(registry.Policies) < 24 {
 		t.Fatal("initial queue or catalogue missing")
 	}
-	for _, study := range registry.Studies {
-		if study.Authorization.Prepare || study.Authorization.Run {
-			t.Fatalf("authoring fixture cannot authorize study %s", study.ID)
-		}
-	}
 }
 
 func TestRegistryMutations(t *testing.T) {
@@ -55,7 +50,7 @@ func TestRegistryMutations(t *testing.T) {
 		"path escape":           func(r *Registry) { r.Studies[0].Idea = "../outside.md" },
 		"unsupported status":    func(r *Registry) { r.Studies[0].Stage = "VALIDATED_FOREVER" },
 		"unsupported claim":     func(r *Registry) { r.Studies[0].ClaimType = "REALISM_CERTIFIED" },
-		"run without protocol":  func(r *Registry) { r.Studies[0].Authorization.Run = true },
+		"run without protocol":  func(r *Registry) { r.Studies[0].Protocol = nil; r.Studies[0].Authorization.Run = true },
 		"unknown source status": func(r *Registry) { r.Policies[0].SourceStatus = "PROFITABLE" },
 		"empty source claim":    func(r *Registry) { r.Policies[0].Sources = nil },
 	}

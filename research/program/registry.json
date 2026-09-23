@@ -22,7 +22,7 @@
         "run": false,
         "basis": "Owner 2026-09-23 overnight goal authorized only the F1/F2 readiness fixes and synthetic fixtures; no economic ME-000 run."
       },
-      "next_action": "Read the scoped accepted ME-000 report, then prospectively lock and review ME-001 before any economic world."
+      "next_action": "Closed readiness gate; retain its accepted scope and use the completed ME-001 report for the next owner decision."
     },
     {
       "id": "ME-001",
@@ -51,7 +51,7 @@
       "id": "ME-002",
       "title": "Identical-policy deployment assignment",
       "claim_type": "CAUSAL",
-      "stage": "INTAKE",
+      "stage": "PLAN",
       "idea": "research/program/ideas/ME-002/idea.md",
       "protocol": null,
       "report": null,
@@ -69,13 +69,13 @@
         "run": false,
         "basis": "Owner skill-authoring task only. Study implementation and execution require separate authorization."
       },
-      "next_action": "Design a fixed-profile swap and realized-time evidence fixture; do not add it to ME-001."
+      "next_action": "Proposed five-profile immediate-policy screen only: first specify separate logical network/compute paths and verify exact realized-time/clock fixtures; no implementation or run authorized."
     },
     {
       "id": "ME-003",
       "title": "Execution-instruction contrast",
       "claim_type": "CAUSAL",
-      "stage": "INTAKE",
+      "stage": "PLAN",
       "idea": "research/program/ideas/ME-003/idea.md",
       "protocol": null,
       "report": null,
@@ -94,7 +94,7 @@
         "run": false,
         "basis": "Owner skill-authoring task only. Study implementation and execution require separate authorization."
       },
-      "next_action": "Choose one supported IOC/FOK/GTC/passive contrast after execution evidence readiness."
+      "next_action": "Proposed IOC-versus-FOK limit-instruction contrast only: first bind parent instruction/provenance and independently reconstruct full/partial/rejected outcomes; no implementation or run authorized."
     },
     {
       "id": "ME-004",
@@ -124,7 +124,7 @@
       "id": "ME-005",
       "title": "Prefunded two-venue executable arbitrage",
       "claim_type": "CAUSAL",
-      "stage": "INTAKE",
+      "stage": "PLAN",
       "idea": "research/program/ideas/ME-005/idea.md",
       "protocol": null,
       "report": null,
@@ -141,7 +141,7 @@
         "run": false,
         "basis": "Owner skill-authoring task only. Study implementation and execution require separate authorization."
       },
-      "next_action": "Specify static positive/negative edge and one-leg failure fixtures before any endogenous protocol."
+      "next_action": "Proposed two-venue screen only after isolating the currently three-endpoint router, static edge/failure fixtures and costed residual treatment; no implementation or run authorized."
     },
     {
       "id": "ME-006",
@@ -170,7 +170,7 @@
       "id": "ME-007",
       "title": "Three-asset executable conversion",
       "claim_type": "MECHANICAL",
-      "stage": "INTAKE",
+      "stage": "PLAN",
       "idea": "research/program/ideas/ME-007/idea.md",
       "protocol": null,
       "report": null,
@@ -186,7 +186,7 @@
         "run": false,
         "basis": "Owner skill-authoring task only. Study implementation and execution require separate authorization."
       },
-      "next_action": "Design directional/unit/rounding fixtures and identify missing full-depth accounting."
+      "next_action": "Proposed mechanical stage: two directions, fee-asset/depth/rounding and partial-leg evidence fixtures before any endogenous screen; no implementation or run authorized."
     },
     {
       "id": "ME-008",

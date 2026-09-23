@@ -5,7 +5,7 @@
 How does fixed-resource participant replacement change admissible immediate execution quantity and shortfall?
 
 Strongest intended claim: **CAUSAL** (proposed, not established).
-One ABC/USD venue; immediate buy; 2/10, 4/8, 6/6 maker/taker compositions and 0.5/2/5 ABC targets. Three proposed seeds, 27 economic worlds plus two controls. No seeds reserved.
+One ABC/USD venue; immediate buy; 2/10, 4/8, 6/6 maker/taker compositions and 0.5/2/5 ABC targets. Three development seeds (`1009/1013/1019`) were prospectively locked and the 27 economic worlds plus two controls completed. No holdout seeds were used.
 
 Authorization and current stage: [authoritative registry](../../registry.json).
 ME-000 readiness is closed. The owner-authorized finite development batch is
