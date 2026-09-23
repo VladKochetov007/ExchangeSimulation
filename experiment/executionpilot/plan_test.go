@@ -11,7 +11,7 @@ func fixtureIdentity() Identity {
 	return Identity{
 		SourceCommit: strings.Repeat("a", 40), SourceTree: strings.Repeat("b", 40),
 		SimulatorSHA256: strings.Repeat("c", 64), AnalyzerSHA256: strings.Repeat("d", 64),
-		Toolchain: "go1.27.0", EvidenceSchemaID: "execution-pilot-v1",
+		Toolchain: RequiredToolchain, EvidenceSchemaID: EvidenceSchemaID,
 	}
 }
 
@@ -107,6 +107,7 @@ func TestPlanRejectsMalformedInput(t *testing.T) {
 		bytes.Replace(raw, []byte(`"maker_count":2`), []byte(`"maker_count":-2`), 1),
 		bytes.Replace(raw, []byte(`"source_tree":"`), []byte(`"source_tree":"bad`), 1),
 		bytes.Replace(raw, []byte(`"schema_version":1`), []byte(`"schema_version":1,"surprise":true`), 1),
+		bytes.Replace(raw, []byte(`"seed":1009`), []byte(`"seed":1009,"seed":1009`), 1),
 		append(append([]byte(nil), raw...), []byte(`{}`)...),
 	} {
 		plan, _, decodeErr := DecodePlan(malformed)

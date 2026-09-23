@@ -12,6 +12,17 @@ import (
 )
 
 func RuntimeIdentity(repositoryDir, analyzerBinary, evidenceSchema string) (Identity, error) {
+	binaryPath, err := os.Executable()
+	if err != nil {
+		return Identity{}, fmt.Errorf("execution pilot: resolve simulator binary: %w", err)
+	}
+	return ToolIdentity(repositoryDir, binaryPath, analyzerBinary, evidenceSchema)
+}
+
+// ToolIdentity binds both binaries to a clean source checkout. The caller must
+// additionally verify that the binary it is currently executing is the named
+// simulator or analyzer, as appropriate for its command.
+func ToolIdentity(repositoryDir, simulatorBinary, analyzerBinary, evidenceSchema string) (Identity, error) {
 	build, ok := debug.ReadBuildInfo()
 	if !ok || build.GoVersion == "" {
 		return Identity{}, fmt.Errorf("execution pilot: missing simulator build metadata")
@@ -39,11 +50,7 @@ func RuntimeIdentity(repositoryDir, analyzerBinary, evidenceSchema string) (Iden
 	if err != nil {
 		return Identity{}, err
 	}
-	binaryPath, err := os.Executable()
-	if err != nil {
-		return Identity{}, fmt.Errorf("execution pilot: resolve simulator binary: %w", err)
-	}
-	simulatorDigest, err := fileSHA256(binaryPath)
+	simulatorDigest, err := fileSHA256(simulatorBinary)
 	if err != nil {
 		return Identity{}, fmt.Errorf("execution pilot: hash simulator binary: %w", err)
 	}

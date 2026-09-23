@@ -1176,6 +1176,24 @@ func (e *DefaultExchange) TwoSidedMidPrice(symbol string) (int64, bool) {
 	return price, true
 }
 
+type TopLevel struct {
+	Price    int64 `json:"price"`
+	TotalQty int64 `json:"total_qty"`
+}
+
+// TwoSidedTopOfBook returns one atomic, read-only venue observation. TotalQty
+// is not a promise that the whole quantity is executable by a given client.
+func (e *DefaultExchange) TwoSidedTopOfBook(symbol string) (bid, ask TopLevel, ok bool) {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	book := e.Books[symbol]
+	if book == nil || book.Bids.Best == nil || book.Asks.Best == nil {
+		return TopLevel{}, TopLevel{}, false
+	}
+	return TopLevel{Price: book.Bids.Best.Price, TotalQty: book.Bids.Best.TotalQty},
+		TopLevel{Price: book.Asks.Best.Price, TotalQty: book.Asks.Best.TotalQty}, true
+}
+
 func (e *DefaultExchange) ListInstruments(baseFilter, quoteFilter string) []Instrument {
 	e.mu.RLock()
 	defer e.mu.RUnlock()

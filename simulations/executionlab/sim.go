@@ -120,6 +120,7 @@ type Sim struct {
 	mounts   []*simulation.Mount
 	actors   []actor.Actor
 	contract WorldContract
+	observe  func(EvidenceObservation)
 }
 
 func (s *Sim) WorldContract() WorldContract { return s.contract.clone() }
@@ -141,6 +142,10 @@ func NewSim(cfg SimConfig) (*Sim, error) {
 	if err := cfg.normalize(); err != nil {
 		return nil, err
 	}
+	runnerContract := RunnerContract{
+		Iterations: int(cfg.Duration / time.Millisecond), Step: time.Millisecond,
+		DeterministicIngress: true, DeterministicPhases: true,
+	}
 	clock := simulation.NewSimulatedClock(0)
 	scheduler := simulation.NewEventScheduler(clock)
 	clock.SetScheduler(scheduler)
@@ -148,12 +153,17 @@ func NewSim(cfg SimConfig) (*Sim, error) {
 	ex := exchange.NewExchangeWithConfig(exchange.ExchangeConfig{
 		Clock:                clock,
 		TickerFactory:        timers,
-		DeterministicIngress: true,
-		DeterministicPhases:  true,
+		DeterministicIngress: runnerContract.DeterministicIngress,
+		DeterministicPhases:  runnerContract.DeterministicPhases,
 	})
+	instrument := InstrumentContract{
+		Symbol: cfg.Parent.Symbol, BaseAsset: "ABC", QuoteAsset: cfg.Parent.QuoteAsset,
+		BasePrecision: basePrecision, QuotePrecision: quotePrecision,
+		TickSize: priceTick, LotSize: basePrecision / 100,
+	}
 	ex.AddInstrument(exchange.NewSpotInstrument(
-		cfg.Parent.Symbol, "ABC", cfg.Parent.QuoteAsset, basePrecision, quotePrecision,
-		priceTick, basePrecision/100,
+		instrument.Symbol, instrument.BaseAsset, instrument.QuoteAsset,
+		instrument.BasePrecision, instrument.QuotePrecision, instrument.TickSize, instrument.LotSize,
 	))
 
 	fee := &exchange.PercentageFee{MakerBps: 0, TakerBps: 5, InQuote: true}
@@ -165,16 +175,9 @@ func NewSim(cfg SimConfig) (*Sim, error) {
 	contract := WorldContract{
 		SchemaVersion: 1,
 		Config:        cfg,
-		Instrument: InstrumentContract{
-			Symbol: cfg.Parent.Symbol, BaseAsset: "ABC", QuoteAsset: cfg.Parent.QuoteAsset,
-			BasePrecision: basePrecision, QuotePrecision: quotePrecision,
-			TickSize: priceTick, LotSize: basePrecision / 100,
-		},
-		Bootstrap: bootstrapPrice,
-		Runner: RunnerContract{
-			Iterations: int(cfg.Duration / time.Millisecond), Step: time.Millisecond,
-			DeterministicIngress: true, DeterministicPhases: true,
-		},
+		Instrument:    instrument,
+		Bootstrap:     bootstrapPrice,
+		Runner:        runnerContract,
 	}
 	addAccount := func(id uint64, role string, feeModel *exchange.PercentageFee) {
 		contract.Accounts = append(contract.Accounts, AccountContract{
@@ -225,8 +228,11 @@ func NewSim(cfg SimConfig) (*Sim, error) {
 		contract.Noise = append(contract.Noise, NoiseContract{
 			ClientID: clientID, Symbol: cfg.Parent.Symbol,
 			TargetQty:    noiseConfig.TargetQtys[cfg.Parent.Symbol],
-			TakeInterval: noiseConfig.TakeInterval, Seed: noiseConfig.Seed,
-			Latency: cfg.BackgroundLatency,
+			TakeInterval: noiseConfig.TakeInterval, DecisionPhaseOffset: noiseConfig.DecisionPhaseOffset,
+			Seed: noiseConfig.Seed, Latency: cfg.BackgroundLatency,
+			ImbalanceCoupling: noiseConfig.ImbalanceCoupling,
+			ExciteAlpha:       noiseConfig.ExciteAlpha, ExciteBetaPerSec: noiseConfig.ExciteBetaPerSec,
+			SizeParetoAlpha: noiseConfig.SizeParetoAlpha, SizeCapMultiple: noiseConfig.SizeCapMultiple,
 		})
 		noise.SetTickerFactory(timers)
 		actors = append(actors, noise)
@@ -259,9 +265,9 @@ func NewSim(cfg SimConfig) (*Sim, error) {
 	}
 
 	runner := simulation.NewRunner(clock, simulation.RunnerConfig{
-		Iterations:          int(cfg.Duration / time.Millisecond),
-		Step:                time.Millisecond,
-		DeterministicPhases: true,
+		Iterations:          runnerContract.Iterations,
+		Step:                runnerContract.Step,
+		DeterministicPhases: runnerContract.DeterministicPhases,
 	})
 	runner.AddIdler(timers)
 	for _, mount := range mounts {
@@ -294,6 +300,14 @@ func (s *Sim) RunMany(ctx context.Context) ([]ExecutionReport, error) {
 		// fixed point and before venue shutdown. The value is therefore a
 		// terminal exchange observation, not a delayed actor market-data view.
 		terminalMid, _ = s.exchange.TwoSidedMidPrice(s.Parent.cfg.Symbol)
+		if s.observe != nil {
+			s.exchange.LogAllBalances()
+			bid, ask, valid := s.exchange.TwoSidedTopOfBook(s.Parent.cfg.Symbol)
+			s.observe(EvidenceObservation{
+				Timestamp: s.clock.NowUnixNano(), Source: "exchange", Name: "terminal_book",
+				Payload: TerminalBook{Symbol: s.Parent.cfg.Symbol, Bid: bid, Ask: ask, Valid: valid},
+			})
+		}
 	})
 	if err := s.Runner.Run(ctx); err != nil {
 		return nil, err

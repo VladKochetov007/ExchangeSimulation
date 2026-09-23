@@ -1,0 +1,93 @@
+package executionlab
+
+import (
+	"exchange_sim/actor"
+	"exchange_sim/exchange"
+)
+
+// EvidenceObservation is emitted at a causal boundary, without feeding any
+// value back into a participant. Payload must be copied by the receiver before
+// the callback returns if it needs to retain it.
+type EvidenceObservation struct {
+	Timestamp int64
+	ClientID  uint64
+	Source    string
+	Name      string
+	Payload   any
+}
+
+type evidenceLogger struct {
+	observe func(EvidenceObservation)
+}
+
+func (l evidenceLogger) LogEvent(timestamp int64, clientID uint64, name string, payload any) {
+	l.observe(EvidenceObservation{timestamp, clientID, "exchange", name, payload})
+}
+
+// SetEvidenceObserver must be called before Run. The observer is write-only:
+// it may retain evidence, but must not call into the exchange or alter actors.
+func (s *Sim) SetEvidenceObserver(observe func(EvidenceObservation)) {
+	s.observe = observe
+	if observe == nil {
+		s.exchange.SetLogger(s.Parent.cfg.Symbol, nil)
+		s.exchange.SetLogger("_global", nil)
+		for _, parent := range s.Parents {
+			parent.observe = nil
+			parent.observationTime = nil
+			parent.SetOrderDecisionObserver(nil)
+		}
+		return
+	}
+	logger := evidenceLogger{observe: observe}
+	s.exchange.SetLogger(s.Parent.cfg.Symbol, logger)
+	s.exchange.SetLogger("_global", logger)
+	for _, parent := range s.Parents {
+		parent.observe = observe
+		parent.observationTime = s.clock.NowUnixNano
+		clientID := parent.ID()
+		parent.SetOrderDecisionObserver(func(request exchange.Request) {
+			observe(EvidenceObservation{
+				Timestamp: s.clock.NowUnixNano(), ClientID: clientID,
+				Source: "actor", Name: "order_send", Payload: request,
+			})
+		})
+	}
+}
+
+func (a *executionAgent) observeReceipt(event *actor.Event) {
+	if a.observe == nil {
+		return
+	}
+	name := ""
+	switch event.Type {
+	case actor.EventBookSnapshot:
+		name = "book_snapshot_receipt"
+	case actor.EventOrderAccepted:
+		name = "order_accepted_receipt"
+	case actor.EventOrderRejected:
+		name = "order_rejected_receipt"
+	case actor.EventOrderPartialFill, actor.EventOrderFilled:
+		name = "order_fill_receipt"
+	case actor.EventOrderCancelled:
+		name = "order_cancelled_receipt"
+	}
+	if name != "" {
+		a.observe(EvidenceObservation{
+			Timestamp: a.observationTime(),
+			ClientID:  a.ID(), Source: "actor", Name: name, Payload: event.Data,
+		})
+	}
+}
+
+type DecisionTick struct {
+	BestBid        int64 `json:"best_bid"`
+	BestAsk        int64 `json:"best_ask"`
+	AlreadyDecided bool  `json:"already_decided"`
+}
+
+type TerminalBook struct {
+	Symbol string            `json:"symbol"`
+	Bid    exchange.TopLevel `json:"bid"`
+	Ask    exchange.TopLevel `json:"ask"`
+	Valid  bool              `json:"valid"`
+}

@@ -28,15 +28,22 @@ type MakerContract struct {
 	ClientID              uint64          `json:"client_id"`
 	Config                feesim.MMConfig `json:"config"`
 	RealizedLevelCadences []time.Duration `json:"realized_level_cadences_nanos"`
+	Latency               time.Duration   `json:"latency_nanos"`
 }
 
 type NoiseContract struct {
-	ClientID     uint64        `json:"client_id"`
-	Symbol       string        `json:"symbol"`
-	TargetQty    int64         `json:"target_qty"`
-	TakeInterval time.Duration `json:"take_interval_nanos"`
-	Seed         int64         `json:"seed"`
-	Latency      time.Duration `json:"latency_nanos"`
+	ClientID            uint64        `json:"client_id"`
+	Symbol              string        `json:"symbol"`
+	TargetQty           int64         `json:"target_qty"`
+	TakeInterval        time.Duration `json:"take_interval_nanos"`
+	DecisionPhaseOffset time.Duration `json:"decision_phase_offset_nanos"`
+	Seed                int64         `json:"seed"`
+	Latency             time.Duration `json:"latency_nanos"`
+	ImbalanceCoupling   float64       `json:"imbalance_coupling"`
+	ExciteAlpha         float64       `json:"excite_alpha"`
+	ExciteBetaPerSec    float64       `json:"excite_beta_per_sec"`
+	SizeParetoAlpha     float64       `json:"size_pareto_alpha"`
+	SizeCapMultiple     float64       `json:"size_cap_multiple"`
 }
 
 type ParentContract struct {

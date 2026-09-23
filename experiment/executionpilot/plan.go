@@ -14,6 +14,7 @@ import (
 )
 
 const PlanSchemaVersion = 1
+const RequiredToolchain = "go1.27.0"
 
 type Cell struct {
 	MakerCount       int   `json:"maker_count"`
@@ -71,7 +72,7 @@ func memberInt64(value int64, choices ...int64) bool {
 func ValidateIdentity(identity Identity) error {
 	if !hexDigest(identity.SourceCommit, 20) || !hexDigest(identity.SourceTree, 20) ||
 		!hexDigest(identity.SimulatorSHA256, 32) || !hexDigest(identity.AnalyzerSHA256, 32) ||
-		strings.TrimSpace(identity.Toolchain) == "" || strings.TrimSpace(identity.EvidenceSchemaID) == "" {
+		identity.Toolchain != RequiredToolchain || identity.EvidenceSchemaID != EvidenceSchemaID {
 		return fmt.Errorf("execution pilot: incomplete source, binary, toolchain or evidence identity")
 	}
 	return nil
@@ -168,6 +169,9 @@ func planDigest(plan LockedPlan) (string, error) {
 
 func DecodePlan(raw []byte) (LockedPlan, string, error) {
 	var plan LockedPlan
+	if err := rejectDuplicateJSONKeys(raw); err != nil {
+		return LockedPlan{}, "", err
+	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&plan); err != nil {

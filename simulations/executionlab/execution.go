@@ -109,7 +109,9 @@ type ExecutionReport struct {
 
 type executionAgent struct {
 	*actor.BaseActor
-	cfg ParentOrderConfig
+	cfg             ParentOrderConfig
+	observe         func(EvidenceObservation)
+	observationTime func() int64
 
 	bestBid int64
 	bestAsk int64
@@ -149,6 +151,7 @@ func (a *executionAgent) Start(ctx context.Context) error {
 }
 
 func (a *executionAgent) HandleEvent(_ context.Context, event *actor.Event) {
+	a.observeReceipt(event)
 	switch event.Type {
 	case actor.EventBookSnapshot:
 		snapshot := event.Data.(actor.BookSnapshotEvent)
@@ -183,6 +186,12 @@ func (a *executionAgent) HandleEvent(_ context.Context, event *actor.Event) {
 
 func (a *executionAgent) onTick(t time.Time) {
 	now := t.UnixNano()
+	if a.observe != nil {
+		a.observe(EvidenceObservation{
+			Timestamp: now, ClientID: a.ID(), Source: "actor", Name: "decision_tick",
+			Payload: DecisionTick{BestBid: a.bestBid, BestAsk: a.bestAsk, AlreadyDecided: a.decided},
+		})
+	}
 	if !a.decided {
 		if now < a.cfg.DecisionAfter.Nanoseconds() || a.bestBid <= 0 || a.bestAsk <= 0 {
 			return
