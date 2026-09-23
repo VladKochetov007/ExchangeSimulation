@@ -173,16 +173,23 @@ func AnalyzeRun(repositoryDir, simulatorBinary, planPath, outputDir string) (Rec
 }
 
 type actorSummary struct {
-	TargetQty            int64   `json:"TargetQty"`
-	FilledQty            int64   `json:"FilledQty"`
-	DecisionAt           int64   `json:"DecisionAt"`
-	DecisionMid          int64   `json:"DecisionMid"`
-	Notional             int64   `json:"Notional"`
-	QuoteFees            int64   `json:"QuoteFees"`
-	TerminalMid          int64   `json:"TerminalMid"`
-	TargetShortfallValid bool    `json:"TargetShortfallValid"`
-	TargetShortfall      int64   `json:"TargetShortfall"`
-	TargetShortfallBps   float64 `json:"TargetShortfallBps"`
+	Policy               string            `json:"Policy"`
+	Side                 string            `json:"Side"`
+	TargetQty            int64             `json:"TargetQty"`
+	FilledQty            int64             `json:"FilledQty"`
+	UnfilledQty          int64             `json:"UnfilledQty"`
+	SubmittedChildren    int               `json:"SubmittedChildren"`
+	RejectedChildren     int               `json:"RejectedChildren"`
+	TerminalCancels      int               `json:"TerminalCancels"`
+	Children             []json.RawMessage `json:"Children"`
+	DecisionAt           int64             `json:"DecisionAt"`
+	DecisionMid          int64             `json:"DecisionMid"`
+	Notional             int64             `json:"Notional"`
+	QuoteFees            int64             `json:"QuoteFees"`
+	TerminalMid          int64             `json:"TerminalMid"`
+	TargetShortfallValid bool              `json:"TargetShortfallValid"`
+	TargetShortfall      int64             `json:"TargetShortfall"`
+	TargetShortfallBps   float64           `json:"TargetShortfallBps"`
 }
 
 func compareActorReport(outcome ReconstructedOutcome, report actorSummary) error {

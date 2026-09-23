@@ -35,3 +35,27 @@ These are test/readiness claims only. A clean exact candidate, full test/race
 and static checks, prospective review, pinned binaries and finite resource
 preflight remain ahead of ME-002 development execution. A rejection is not
 converted to acceptance by this ledger.
+
+## Technical-control failure after first acceptance
+
+A new Sol-6 medium reviewer substantively **ACCEPTED `7c7b7e6` for prospective
+ME-002 development only**, subject to the remaining gates. Clean full tests,
+`go vet ./...` and targeted race checks passed. Pinned Go 1.27.0 binaries from
+clean `7c7b7e6` had hashes `ffbe8f3d…e9a1` (simulator) and `2c45f5eb…eca58`
+(analyzer). The two authorized F/F quantity-0.5, seed-12001 technical controls
+at `GOMAXPROCS=1/7` produced byte-identical 4.9 MB evidence files (SHA-256
+`6493d699…2c5e1`, canonical hash `3361f126…ddb40c`, 17,858 frames). Their
+observed wall times were 0.40/0.32 seconds, peak RSS 40,832/32,128 KiB, and
+both simulator processes exited zero. Exact artifacts remain under
+`/home/vlad/ExchangeSimulation-me002-development-7c7b7e6/`.
+
+The analyzer then exited nonzero before creating either result: `json: cannot
+unmarshal string into Go struct field ExecutionReport.Side of type types.Side`.
+This is an **analyzer-wire defect**, not an economic result or a failed
+determinism comparison. The 7c7 controls are retained as an incomplete
+analysis attempt; they are not silently promoted. A successor correction
+decodes a strict projection of the actor-report wire format, cross-checks the
+independent replay, and has a fixture using the actual JSON serialization.
+Because executable analyzer code changed, a new pinned candidate/review and
+fresh controls are required before the 24 economic worlds. The existing 7c7
+acceptance does not authorize its successor.

@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 
 	"exchange_sim/simulations/executionlab"
 )
@@ -150,31 +151,45 @@ func AnalyzeLatencyRun(repositoryDir, simulatorBinary, planPath, outputDir strin
 	if err != nil {
 		return ReconstructedOutcome{}, RunManifest{}, err
 	}
-	if err := ValidateStrictJSON(actorRaw); err != nil {
+	actorReport, err := decodeLatencyActorReport(actorRaw)
+	if err != nil {
 		return ReconstructedOutcome{}, RunManifest{}, err
 	}
-	var actorReport executionlab.ExecutionReport
-	actorDecoder := json.NewDecoder(bytes.NewReader(actorRaw))
-	actorDecoder.DisallowUnknownFields()
-	if err := actorDecoder.Decode(&actorReport); err != nil {
+	if err := compareActorReport(outcome, actorReport); err != nil {
 		return ReconstructedOutcome{}, RunManifest{}, err
 	}
-	if err := compareActorReport(outcome, actorSummary{
-		TargetQty: actorReport.TargetQty, FilledQty: actorReport.FilledQty,
-		DecisionAt: actorReport.DecisionAt, DecisionMid: actorReport.DecisionMid,
-		Notional: actorReport.Notional, QuoteFees: actorReport.QuoteFees,
-		TerminalMid: actorReport.TerminalMid, TargetShortfallValid: actorReport.TargetShortfallValid,
-		TargetShortfall: actorReport.TargetShortfall, TargetShortfallBps: actorReport.TargetShortfallBps,
-	}); err != nil {
-		return ReconstructedOutcome{}, RunManifest{}, err
-	}
-	if actorReport.UnfilledQty != outcome.UnfilledQty ||
+	if actorReport.Policy != string(executionlab.Immediate) || actorReport.Side != "BUY" ||
+		actorReport.UnfilledQty != outcome.UnfilledQty || len(actorReport.Children) != actorReport.SubmittedChildren ||
 		actorReport.SubmittedChildren != boolCount(outcome.OrderSentAt != 0) ||
 		actorReport.RejectedChildren != boolCount(outcome.Status == OutcomeRejected) ||
 		actorReport.TerminalCancels != boolCount(outcome.CancelledResidual > 0 && outcome.Status != OutcomeRejected) {
 		return ReconstructedOutcome{}, RunManifest{}, errors.New("latency pilot: actor order lifecycle differs from event reconstruction")
 	}
 	return outcome, manifest, nil
+}
+
+func decodeLatencyActorReport(raw []byte) (actorSummary, error) {
+	if err := ValidateStrictJSON(raw); err != nil {
+		return actorSummary{}, err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return actorSummary{}, err
+	}
+	typeOfReport := reflect.TypeOf(executionlab.ExecutionReport{})
+	if len(fields) != typeOfReport.NumField() {
+		return actorSummary{}, errors.New("latency pilot: actor report has missing or extra fields")
+	}
+	for index := 0; index < typeOfReport.NumField(); index++ {
+		if _, present := fields[typeOfReport.Field(index).Name]; !present {
+			return actorSummary{}, errors.New("latency pilot: actor report lacks declared field")
+		}
+	}
+	var report actorSummary
+	if err := json.Unmarshal(raw, &report); err != nil {
+		return actorSummary{}, err
+	}
+	return report, nil
 }
 
 func boolCount(condition bool) int {
