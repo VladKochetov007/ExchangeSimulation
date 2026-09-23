@@ -47,9 +47,10 @@ type NoiseContract struct {
 }
 
 type ParentContract struct {
-	ClientID uint64            `json:"client_id"`
-	Config   ParentOrderConfig `json:"config"`
-	Latency  time.Duration     `json:"latency_nanos"`
+	ClientID   uint64            `json:"client_id"`
+	Config     ParentOrderConfig `json:"config"`
+	Latency    time.Duration     `json:"latency_nanos"`
+	Deployment *ParentDeployment `json:"deployment,omitempty"`
 }
 
 type RunnerContract struct {
@@ -86,5 +87,15 @@ func (c WorldContract) clone() WorldContract {
 	}
 	c.Noise = append([]NoiseContract(nil), c.Noise...)
 	c.Parents = append([]ParentContract(nil), c.Parents...)
+	for index := range c.Parents {
+		if c.Parents[index].Deployment != nil {
+			copyOfDeployment := *c.Parents[index].Deployment
+			c.Parents[index].Deployment = &copyOfDeployment
+		}
+	}
+	if c.Config.ParentDeployment != nil {
+		copyOfDeployment := *c.Config.ParentDeployment
+		c.Config.ParentDeployment = &copyOfDeployment
+	}
 	return c
 }

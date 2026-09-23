@@ -31,6 +31,7 @@ type ReconstructedOutcome struct {
 	DeliveredSnapshotAt    int64         `json:"delivered_snapshot_at"`
 	PublishedSnapshotAt    int64         `json:"published_snapshot_at"`
 	DeliveredSnapshotSeq   uint64        `json:"delivered_snapshot_seq"`
+	ProcessedSnapshotAt    int64         `json:"processed_snapshot_at,omitempty"`
 	LatestMessageAt        int64         `json:"latest_message_at"`
 	LatestMessageSeq       uint64        `json:"latest_message_seq"`
 	LatestMessageTwoSided  bool          `json:"latest_message_two_sided"`
@@ -89,9 +90,15 @@ type analysisContract struct {
 		} `json:"fee"`
 	} `json:"accounts"`
 	Parents []struct {
-		ClientID uint64 `json:"client_id"`
-		Latency  int64  `json:"latency_nanos"`
-		Config   struct {
+		ClientID   uint64 `json:"client_id"`
+		Latency    int64  `json:"latency_nanos"`
+		Deployment *struct {
+			MarketDataLatency int64 `json:"market_data_latency_nanos"`
+			RequestLatency    int64 `json:"request_latency_nanos"`
+			ResponseLatency   int64 `json:"response_latency_nanos"`
+			ProcessingDelay   int64 `json:"processing_delay_nanos"`
+		} `json:"deployment,omitempty"`
+		Config struct {
 			Symbol        string `json:"Symbol"`
 			Side          string `json:"Side"`
 			TargetQty     int64  `json:"TargetQty"`
@@ -238,6 +245,7 @@ type reconstructionState struct {
 	lastSnapshot          snapshotWire
 	lastReceipt           int64
 	lastSnapshotEventSeq  uint64
+	lastProcessedAt       int64
 	latestMessage         snapshotWire
 	latestReceipt         int64
 	latestMessageEventSeq uint64
@@ -263,7 +271,20 @@ type reconstructionState struct {
 	publicationOutcomes   map[uint64]publicationOutcomeWire
 	deliveredSnapshots    map[uint64]bool
 	lastDeliveredSeq      uint64
+	lastProcessedSeq      uint64
+	pendingProcessing     map[uint64]pendingReconstructionSnapshot
+	processingDelay       int64
+	marketDataLatency     int64
+	requestLatency        int64
+	responseLatency       int64
+	latencyEvidence       bool
 	cancelReceiptCount    int
+}
+
+type pendingReconstructionSnapshot struct {
+	snapshot        snapshotWire
+	receivedAt      int64
+	receiptEventSeq uint64
 }
 
 func Reconstruct(input io.Reader, evidence EvidenceIdentity, plan LockedPlan) (ReconstructedOutcome, error) {
@@ -271,13 +292,73 @@ func Reconstruct(input io.Reader, evidence EvidenceIdentity, plan LockedPlan) (R
 	if err != nil {
 		return ReconstructedOutcome{}, err
 	}
+	state := newReconstructionState(contract, clientID, plan.Cell.TargetQty)
+	if err := WalkEvidence(input, evidence, state.consume); err != nil {
+		return ReconstructedOutcome{}, err
+	}
+	if err := state.finish(); err != nil {
+		return ReconstructedOutcome{}, err
+	}
+	return state.result, nil
+}
+
+// ReconstructLatency independently replays the versioned deployment evidence.
+// Callers must bind effectiveWorld to a verified, pinned plan before invoking it.
+func ReconstructLatency(input io.Reader, evidence EvidenceIdentity, effectiveWorld json.RawMessage, targetQty int64) (ReconstructedOutcome, error) {
+	var contract analysisContract
+	if err := json.Unmarshal(effectiveWorld, &contract); err != nil {
+		return ReconstructedOutcome{}, fmt.Errorf("latency pilot: decode effective world: %w", err)
+	}
+	if len(contract.Parents) != 1 || contract.Parents[0].Deployment == nil || contract.Parents[0].Latency != 0 ||
+		contract.Parents[0].Config.TargetQty != targetQty || targetQty <= 0 || contract.Parents[0].Config.Side != "BUY" ||
+		contract.Parents[0].Config.Symbol != contract.Instrument.Symbol || contract.Instrument.BasePrecision <= 0 ||
+		contract.Runner.Iterations != 4000 || contract.Runner.Step != 1_000_000 ||
+		contract.Parents[0].Config.PollInterval != 1_000_000 || contract.Parents[0].Config.DecisionAfter != 1_000_000_000 ||
+		!contract.Config.RecordSnapshotProjectionEvidence {
+		return ReconstructedOutcome{}, errors.New("latency pilot: unsupported or inconsistent focal contract")
+	}
+	deployment := contract.Parents[0].Deployment
+	if deployment.MarketDataLatency < 0 || deployment.RequestLatency < 0 || deployment.ResponseLatency < 0 || deployment.ProcessingDelay < 0 {
+		return ReconstructedOutcome{}, errors.New("latency pilot: negative deployment component")
+	}
+	clientID := contract.Parents[0].ClientID
+	accountFound := false
+	for _, account := range contract.Accounts {
+		if account.ClientID == clientID && account.Role == "parent" {
+			accountFound = account.InitialBalances[contract.Instrument.BaseAsset] > 0 && account.InitialBalances[contract.Instrument.QuoteAsset] > 0 &&
+				account.Fee.InQuote && account.Fee.TakerBps == 5 && account.Fee.MakerBps == 0
+		}
+	}
+	if !accountFound {
+		return ReconstructedOutcome{}, errors.New("latency pilot: focal account or fee contract missing")
+	}
+	state := newReconstructionState(contract, clientID, targetQty)
+	state.marketDataLatency = deployment.MarketDataLatency
+	state.requestLatency = deployment.RequestLatency
+	state.responseLatency = deployment.ResponseLatency
+	state.processingDelay = deployment.ProcessingDelay
+	state.latencyEvidence = true
+	if err := WalkLatencyEvidence(input, evidence, state.consume); err != nil {
+		return ReconstructedOutcome{}, err
+	}
+	if err := state.finish(); err != nil {
+		return ReconstructedOutcome{}, err
+	}
+	return state.result, nil
+}
+
+func newReconstructionState(contract analysisContract, clientID uint64, targetQty int64) *reconstructionState {
 	state := &reconstructionState{
 		contract: contract, clientID: clientID,
-		result:   ReconstructedOutcome{ClientID: clientID, TargetQty: plan.Cell.TargetQty},
+		result:   ReconstructedOutcome{ClientID: clientID, TargetQty: targetQty},
 		balances: map[string]int64{}, fillByTrade: map[uint64]fillWire{},
 		tradeByID: map[uint64]tradeWire{}, receipts: map[uint64]bool{},
 		publications:        map[uint64]publishedSnapshot{},
 		publicationOutcomes: map[uint64]publicationOutcomeWire{}, deliveredSnapshots: map[uint64]bool{},
+		pendingProcessing: map[uint64]pendingReconstructionSnapshot{},
+		marketDataLatency: contract.Parents[0].Latency,
+		requestLatency:    contract.Parents[0].Latency,
+		responseLatency:   contract.Parents[0].Latency,
 	}
 	for _, account := range contract.Accounts {
 		if account.ClientID == clientID {
@@ -289,13 +370,7 @@ func Reconstruct(input io.Reader, evidence EvidenceIdentity, plan LockedPlan) (R
 			state.result.InitialUSD = account.InitialBalances[contract.Instrument.QuoteAsset]
 		}
 	}
-	if err := WalkEvidence(input, evidence, state.consume); err != nil {
-		return ReconstructedOutcome{}, err
-	}
-	if err := state.finish(); err != nil {
-		return ReconstructedOutcome{}, err
-	}
-	return state.result, nil
+	return state
 }
 
 func decodePayload[T any](raw json.RawMessage) (T, error) {
@@ -353,7 +428,7 @@ func (s *reconstructionState) consumeActor(event RecordedEvent) error {
 		if !published || snapshot.SeqNum <= s.lastDeliveredSeq ||
 			!accounted || outcome.Status != "enqueued" ||
 			snapshot.Timestamp != publication.Timestamp ||
-			event.Timestamp != publication.Timestamp+s.contract.Parents[0].Latency ||
+			event.Timestamp != publication.Timestamp+s.marketDataLatency ||
 			!reflect.DeepEqual(snapshot.Snapshot.Bids, publication.Payload.PublicBids) ||
 			!reflect.DeepEqual(snapshot.Snapshot.Asks, publication.Payload.PublicAsks) {
 			return errors.New("execution pilot: local snapshot lacks matching prior venue publication or delivery latency")
@@ -361,8 +436,51 @@ func (s *reconstructionState) consumeActor(event RecordedEvent) error {
 		s.lastDeliveredSeq = snapshot.SeqNum
 		s.deliveredSnapshots[snapshot.SeqNum] = true
 		s.latestMessage, s.latestReceipt, s.latestMessageEventSeq = snapshot, event.Timestamp, event.Sequence
-		if len(snapshot.Snapshot.Bids) != 0 && len(snapshot.Snapshot.Asks) != 0 {
+		if s.processingDelay > 0 {
+			s.pendingProcessing[snapshot.SeqNum] = pendingReconstructionSnapshot{snapshot, event.Timestamp, event.Sequence}
+		} else if len(snapshot.Snapshot.Bids) != 0 && len(snapshot.Snapshot.Asks) != 0 {
 			s.lastSnapshot, s.lastReceipt, s.lastSnapshotEventSeq = snapshot, event.Timestamp, event.Sequence
+			if s.latencyEvidence {
+				s.lastProcessedAt = event.Timestamp
+			}
+		}
+	case "snapshot_processing_complete":
+		if !s.latencyEvidence || s.processingDelay == 0 {
+			return errors.New("latency pilot: unexpected processing completion")
+		}
+		processed, err := decodePayload[struct {
+			SeqNum      uint64 `json:"seq_num"`
+			ReceivedAt  int64  `json:"received_at"`
+			ProcessedAt int64  `json:"processed_at"`
+			BestBid     int64  `json:"best_bid"`
+			BestAsk     int64  `json:"best_ask"`
+			TwoSided    bool   `json:"two_sided"`
+		}](event.Payload)
+		if err != nil {
+			return err
+		}
+		pending, exists := s.pendingProcessing[processed.SeqNum]
+		if !exists || processed.SeqNum <= s.lastProcessedSeq || processed.ReceivedAt != pending.receivedAt ||
+			processed.ProcessedAt != event.Timestamp || event.Timestamp < pending.receivedAt+s.processingDelay ||
+			event.Timestamp%s.contract.Runner.Step != 0 ||
+			processed.TwoSided != (len(pending.snapshot.Snapshot.Bids) != 0 && len(pending.snapshot.Snapshot.Asks) != 0) {
+			return errors.New("latency pilot: unmatched, misordered or premature processing completion")
+		}
+		if event.Timestamp-s.contract.Runner.Step >= pending.receivedAt+s.processingDelay {
+			return errors.New("latency pilot: processing completion skipped an eligible poll")
+		}
+		bid, ask := int64(0), int64(0)
+		if processed.TwoSided {
+			bid, ask = pending.snapshot.Snapshot.Bids[0].Price, pending.snapshot.Snapshot.Asks[0].Price
+		}
+		if processed.BestBid != bid || processed.BestAsk != ask {
+			return errors.New("latency pilot: processed quote differs from received snapshot")
+		}
+		delete(s.pendingProcessing, processed.SeqNum)
+		s.lastProcessedSeq = processed.SeqNum
+		if processed.TwoSided {
+			s.lastSnapshot, s.lastReceipt, s.lastSnapshotEventSeq = pending.snapshot, pending.receivedAt, pending.receiptEventSeq
+			s.lastProcessedAt = event.Timestamp
 		}
 	case "decision_tick":
 		if event.Timestamp != (s.decisionTicks+1)*s.contract.Runner.Step {
@@ -397,7 +515,7 @@ func (s *reconstructionState) consumeActor(event RecordedEvent) error {
 			return err
 		}
 		if !s.wasAccepted || s.responded || response.RequestID != s.result.RequestID || response.OrderID != s.result.OrderID ||
-			event.Timestamp != s.result.VenueArrivalAt+s.contract.Parents[0].Latency {
+			event.Timestamp != s.result.VenueArrivalAt+s.responseLatency {
 			return errors.New("execution pilot: unmatched or duplicate acceptance receipt")
 		}
 		s.responded = true
@@ -410,7 +528,7 @@ func (s *reconstructionState) consumeActor(event RecordedEvent) error {
 			return err
 		}
 		if !s.wasRejected || s.responded || response.RequestID != s.result.RequestID || response.Reason != s.result.RejectReason ||
-			event.Timestamp != s.result.VenueArrivalAt+s.contract.Parents[0].Latency {
+			event.Timestamp != s.result.VenueArrivalAt+s.responseLatency {
 			return errors.New("execution pilot: unmatched or duplicate rejection receipt")
 		}
 		s.responded = true
@@ -420,7 +538,7 @@ func (s *reconstructionState) consumeActor(event RecordedEvent) error {
 			return err
 		}
 		original, ok := s.fillByTrade[fill.TradeID]
-		if !ok || s.receipts[fill.TradeID] || event.Timestamp != original.Timestamp+s.contract.Parents[0].Latency ||
+		if !ok || s.receipts[fill.TradeID] || event.Timestamp != original.Timestamp+s.responseLatency ||
 			fill.OrderID != original.OrderID || fill.Qty != original.Qty || fill.Price != original.Price ||
 			fill.FeeAmount != original.FeeAmount || fill.FeeAsset != original.FeeAsset ||
 			fill.Timestamp != original.Timestamp {
@@ -441,7 +559,7 @@ func (s *reconstructionState) consumeActor(event RecordedEvent) error {
 		}
 		if !s.wasCancelled || s.cancelReceiptCount != 0 || cancel.OrderID != s.result.OrderID || cancel.RequestID != 0 ||
 			cancel.RemainingQty != s.result.CancelledResidual ||
-			event.Timestamp != s.cancelledAt+s.contract.Parents[0].Latency {
+			event.Timestamp != s.cancelledAt+s.responseLatency {
 			return errors.New("execution pilot: cancellation receipt mismatch")
 		}
 		s.cancelReceiptCount++
@@ -505,6 +623,7 @@ func (s *reconstructionState) consumeSend(event RecordedEvent) error {
 	s.result.DeliveredSnapshotAt = s.lastReceipt
 	s.result.PublishedSnapshotAt = s.lastSnapshot.Timestamp
 	s.result.DeliveredSnapshotSeq = s.lastSnapshot.SeqNum
+	s.result.ProcessedSnapshotAt = s.lastProcessedAt
 	s.result.LatestMessageAt = s.latestReceipt
 	s.result.LatestMessageSeq = s.latestMessage.SeqNum
 	s.result.LatestMessageTwoSided = len(s.latestMessage.Snapshot.Bids) != 0 && len(s.latestMessage.Snapshot.Asks) != 0
@@ -642,7 +761,7 @@ func (s *reconstructionState) consumeExchange(event RecordedEvent) error {
 			accepted.OrderID == 0 || accepted.Qty != s.result.TargetQty || accepted.Side != "BUY" || accepted.Type != "MARKET" ||
 			accepted.Price != 0 || accepted.FilledQty != 0 || accepted.TimeInForce != "GTC" ||
 			accepted.Visibility != "NORMAL" || accepted.PostOnly ||
-			event.Timestamp != s.result.OrderSentAt+s.contract.Parents[0].Latency {
+			event.Timestamp != s.result.OrderSentAt+s.requestLatency {
 			return errors.New("execution pilot: accepted order does not match focal intent")
 		}
 		if accepted.Timestamp != event.Timestamp {
@@ -659,7 +778,7 @@ func (s *reconstructionState) consumeExchange(event RecordedEvent) error {
 			rejected.Qty != s.result.TargetQty || rejected.Symbol != s.contract.Instrument.Symbol ||
 			rejected.Side != "BUY" || rejected.Type != "MARKET" || rejected.Price != 0 ||
 			rejected.TimeInForce != "GTC" || rejected.PostOnly ||
-			event.Timestamp != s.result.OrderSentAt+s.contract.Parents[0].Latency {
+			event.Timestamp != s.result.OrderSentAt+s.requestLatency {
 			return errors.New("execution pilot: rejected order does not match focal intent")
 		}
 		s.acceptedSeen, s.wasRejected = true, true
@@ -789,7 +908,7 @@ func (s *reconstructionState) finish() error {
 			return errors.New("execution pilot: unaccounted focal snapshot publication")
 		}
 		if outcome.Status == "enqueued" &&
-			publication.Timestamp+s.contract.Parents[0].Latency <= int64(s.contract.Runner.Iterations)*s.contract.Runner.Step &&
+			publication.Timestamp+s.marketDataLatency <= int64(s.contract.Runner.Iterations)*s.contract.Runner.Step &&
 			!s.deliveredSnapshots[sequence] {
 			return errors.New("execution pilot: enqueued focal snapshot has no actor receipt")
 		}
@@ -801,6 +920,13 @@ func (s *reconstructionState) finish() error {
 	}
 	if s.decisionTicks != int64(s.contract.Runner.Iterations) {
 		return errors.New("execution pilot: incomplete focal decision clock evidence")
+	}
+	if s.processingDelay > 0 {
+		for _, pending := range s.pendingProcessing {
+			if pending.receivedAt+s.processingDelay <= int64(s.contract.Runner.Iterations)*s.contract.Runner.Step {
+				return errors.New("latency pilot: missing due processing completion")
+			}
+		}
 	}
 	if !s.terminalSeen || !s.result.BalanceSnapshotSeen {
 		return errors.New("execution pilot: missing terminal venue or ledger evidence")

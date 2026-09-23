@@ -16,8 +16,10 @@ import (
 )
 
 const (
-	EvidenceSchemaID    = "execution-pilot-opaque-v3"
-	evidenceSchemaEpoch = 0x4d450003
+	EvidenceSchemaID           = "execution-pilot-opaque-v3"
+	evidenceSchemaEpoch        = 0x4d450003
+	LatencyEvidenceSchemaID    = "latency-pilot-opaque-v1"
+	latencyEvidenceSchemaEpoch = 0x4d450004
 )
 
 type evidenceEnvelope struct {
@@ -36,14 +38,21 @@ type EvidenceIdentity struct {
 type Recorder struct {
 	mu       sync.Mutex
 	writer   *evstream.Writer
+	schemaID string
 	firstErr error
 	finished bool
 }
 
 func NewRecorder(output io.Writer) *Recorder {
-	return &Recorder{writer: evstream.NewWriter(output, evstream.WriterOptions{
-		SchemaEpoch: evidenceSchemaEpoch,
-	})}
+	return newRecorder(output, EvidenceSchemaID, evidenceSchemaEpoch)
+}
+
+func NewLatencyRecorder(output io.Writer) *Recorder {
+	return newRecorder(output, LatencyEvidenceSchemaID, latencyEvidenceSchemaEpoch)
+}
+
+func newRecorder(output io.Writer, schemaID string, epoch uint32) *Recorder {
+	return &Recorder{schemaID: schemaID, writer: evstream.NewWriter(output, evstream.WriterOptions{SchemaEpoch: epoch})}
 }
 
 // Record is safe at exchange and actor callback boundaries. It serializes
@@ -84,7 +93,7 @@ func (r *Recorder) Finish() (EvidenceIdentity, error) {
 	}
 	hash := r.writer.ExecutionHash()
 	return EvidenceIdentity{
-		SchemaID: EvidenceSchemaID, ExecutionHash: hex.EncodeToString(hash[:]),
+		SchemaID: r.schemaID, ExecutionHash: hex.EncodeToString(hash[:]),
 		FrameCount: r.writer.Count(),
 	}, nil
 }
@@ -100,14 +109,22 @@ type RecordedEvent struct {
 }
 
 func WalkEvidence(input io.Reader, expected EvidenceIdentity, visit func(RecordedEvent) error) error {
-	if expected.SchemaID != EvidenceSchemaID || !hexDigest(expected.ExecutionHash, sha256.Size) || expected.FrameCount == 0 {
+	return walkEvidence(input, expected, EvidenceSchemaID, evidenceSchemaEpoch, visit)
+}
+
+func WalkLatencyEvidence(input io.Reader, expected EvidenceIdentity, visit func(RecordedEvent) error) error {
+	return walkEvidence(input, expected, LatencyEvidenceSchemaID, latencyEvidenceSchemaEpoch, visit)
+}
+
+func walkEvidence(input io.Reader, expected EvidenceIdentity, schemaID string, epoch uint32, visit func(RecordedEvent) error) error {
+	if expected.SchemaID != schemaID || !hexDigest(expected.ExecutionHash, sha256.Size) || expected.FrameCount == 0 {
 		return errors.New("execution pilot: invalid expected evidence identity")
 	}
 	reader, err := evstream.NewReader(input, evstream.ReaderOptions{VerifyHash: true})
 	if err != nil {
 		return err
 	}
-	if reader.SchemaEpoch() != evidenceSchemaEpoch {
+	if reader.SchemaEpoch() != epoch {
 		return errors.New("execution pilot: evidence schema epoch mismatch")
 	}
 	err = reader.Range(func(frame evstream.Frame) error {

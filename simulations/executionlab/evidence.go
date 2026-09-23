@@ -40,7 +40,6 @@ func (s *Sim) SetEvidenceObserver(observe func(EvidenceObservation)) {
 		s.exchange.MDPublisher.SetPublicationObserver(s.Parent.ID(), nil)
 		for _, parent := range s.Parents {
 			parent.observe = nil
-			parent.observationTime = nil
 			parent.SetOrderDecisionObserver(nil)
 		}
 		return
@@ -100,6 +99,15 @@ type DecisionTick struct {
 	BestBid        int64 `json:"best_bid"`
 	BestAsk        int64 `json:"best_ask"`
 	AlreadyDecided bool  `json:"already_decided"`
+}
+
+type SnapshotProcessingComplete struct {
+	SeqNum      uint64 `json:"seq_num"`
+	ReceivedAt  int64  `json:"received_at"`
+	ProcessedAt int64  `json:"processed_at"`
+	BestBid     int64  `json:"best_bid"`
+	BestAsk     int64  `json:"best_ask"`
+	TwoSided    bool   `json:"two_sided"`
 }
 
 type TerminalBook struct {

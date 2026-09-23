@@ -23,12 +23,15 @@ const (
 // except Parent.Policy. The endogenous paths may diverge after the parent
 // executes; that divergence is the treatment effect, not a seed mismatch.
 type SimConfig struct {
-	Seed                             int64
-	Duration                         time.Duration
-	MMCount                          int
-	NoiseTraderCount                 int
-	BackgroundLatency                time.Duration
-	ExecutionLatency                 time.Duration
+	Seed              int64
+	Duration          time.Duration
+	MMCount           int
+	NoiseTraderCount  int
+	BackgroundLatency time.Duration
+	ExecutionLatency  time.Duration
+	// ParentDeployment is an explicit directed transport/actor-processing
+	// assignment. Nil preserves the legacy symmetric ExecutionLatency path.
+	ParentDeployment                 *ParentDeployment
 	RecordSnapshotProjectionEvidence bool
 	// ParentCount schedules independent parent-order clients using the same
 	// policy and deterministic side schedule. One preserves the original
@@ -39,6 +42,13 @@ type SimConfig struct {
 	// a simultaneous, inseparable parent-order burst.
 	ParentInterval time.Duration
 	Parent         ParentOrderConfig
+}
+
+type ParentDeployment struct {
+	MarketDataLatency time.Duration `json:"market_data_latency_nanos"`
+	RequestLatency    time.Duration `json:"request_latency_nanos"`
+	ResponseLatency   time.Duration `json:"response_latency_nanos"`
+	ProcessingDelay   time.Duration `json:"processing_delay_nanos"`
 }
 
 func DefaultSimConfig(policy Policy) SimConfig {
@@ -94,6 +104,13 @@ func (c *SimConfig) normalize() error {
 	if c.BackgroundLatency < 0 || c.ExecutionLatency < 0 {
 		return fmt.Errorf("executionlab: latency must be non-negative")
 	}
+	if c.ParentDeployment != nil {
+		deployment := c.ParentDeployment
+		if c.ExecutionLatency != 0 || deployment.MarketDataLatency < 0 || deployment.RequestLatency < 0 ||
+			deployment.ResponseLatency < 0 || deployment.ProcessingDelay < 0 {
+			return fmt.Errorf("executionlab: explicit parent deployment requires zero legacy latency and non-negative components")
+		}
+	}
 	if err := c.Parent.validate(); err != nil {
 		return err
 	}
@@ -105,7 +122,11 @@ func (c *SimConfig) normalize() error {
 	// Constant latency gives this experiment a finite causal horizon. A
 	// log-normal tail has no finite drain bound and would turn unprocessed
 	// children at shutdown into fabricated execution failures.
-	minimumDuration := lastChild + c.ExecutionLatency + c.ExecutionLatency + 2*c.Parent.PollInterval
+	requestLatency, responseLatency, processingDelay := c.ExecutionLatency, c.ExecutionLatency, time.Duration(0)
+	if c.ParentDeployment != nil {
+		requestLatency, responseLatency, processingDelay = c.ParentDeployment.RequestLatency, c.ParentDeployment.ResponseLatency, c.ParentDeployment.ProcessingDelay
+	}
+	minimumDuration := lastChild + processingDelay + requestLatency + responseLatency + 2*c.Parent.PollInterval
 	if c.Duration < minimumDuration {
 		return fmt.Errorf("executionlab: duration %s ends before final child can arrive and be observed (%s)", c.Duration, minimumDuration)
 	}
@@ -136,6 +157,18 @@ func newLatencyMount(ex *exchange.Exchange, scheduler *simulation.EventScheduler
 		MarketData: simulation.NewConstantLatency(delay),
 		Scheduler:  scheduler,
 		Clock:      clock,
+	})
+}
+
+func newDirectedLatencyMount(ex *exchange.Exchange, scheduler *simulation.EventScheduler, clock *simulation.SimulatedClock, deployment ParentDeployment) *simulation.Mount {
+	if deployment.MarketDataLatency == 0 && deployment.RequestLatency == 0 && deployment.ResponseLatency == 0 {
+		return simulation.NewMount(ex, simulation.LatencyConfig{})
+	}
+	return simulation.NewMount(ex, simulation.LatencyConfig{
+		Request:    simulation.NewConstantLatency(deployment.RequestLatency),
+		Response:   simulation.NewConstantLatency(deployment.ResponseLatency),
+		MarketData: simulation.NewConstantLatency(deployment.MarketDataLatency),
+		Scheduler:  scheduler, Clock: clock,
 	})
 }
 
@@ -242,7 +275,12 @@ func NewSim(cfg SimConfig) (*Sim, error) {
 	parents := make([]*executionAgent, 0, cfg.ParentCount)
 	for i := 0; i < cfg.ParentCount; i++ {
 		clientID++
-		executionMount := newLatencyMount(ex, scheduler, clock, cfg.ExecutionLatency)
+		var executionMount *simulation.Mount
+		if cfg.ParentDeployment != nil {
+			executionMount = newDirectedLatencyMount(ex, scheduler, clock, *cfg.ParentDeployment)
+		} else {
+			executionMount = newLatencyMount(ex, scheduler, clock, cfg.ExecutionLatency)
+		}
 		mounts = append(mounts, executionMount)
 		parentCfg := cfg.Parent
 		parentCfg.DecisionAfter += time.Duration(i) * cfg.ParentInterval
@@ -258,9 +296,14 @@ func NewSim(cfg SimConfig) (*Sim, error) {
 			return nil, err
 		}
 		parent.SetTickerFactory(timers)
+		parent.observationTime = clock.NowUnixNano
+		if cfg.ParentDeployment != nil {
+			parent.processingDelay = cfg.ParentDeployment.ProcessingDelay
+		}
 		addAccount(clientID, "parent", fee)
 		contract.Parents = append(contract.Parents, ParentContract{
 			ClientID: clientID, Config: parentCfg, Latency: cfg.ExecutionLatency,
+			Deployment: cfg.ParentDeployment,
 		})
 		parents = append(parents, parent)
 		actors = append(actors, parent)

@@ -113,8 +113,10 @@ type executionAgent struct {
 	observe         func(EvidenceObservation)
 	observationTime func() int64
 
-	bestBid int64
-	bestAsk int64
+	bestBid          int64
+	bestAsk          int64
+	processingDelay  time.Duration
+	pendingSnapshots []pendingProcessingSnapshot
 
 	decided      bool
 	nextSliceAt  int64
@@ -123,6 +125,15 @@ type executionAgent struct {
 	byRequest    map[uint64]int
 	byOrder      map[uint64]int
 	report       ExecutionReport
+}
+
+type pendingProcessingSnapshot struct {
+	sequence   uint64
+	receivedAt int64
+	readyAt    int64
+	bestBid    int64
+	bestAsk    int64
+	twoSided   bool
 }
 
 func newExecutionAgent(id uint64, gateway actor.Gateway, cfg ParentOrderConfig) (*executionAgent, error) {
@@ -155,11 +166,27 @@ func (a *executionAgent) HandleEvent(_ context.Context, event *actor.Event) {
 	switch event.Type {
 	case actor.EventBookSnapshot:
 		snapshot := event.Data.(actor.BookSnapshotEvent)
-		if snapshot.Symbol != a.cfg.Symbol || len(snapshot.Snapshot.Bids) == 0 || len(snapshot.Snapshot.Asks) == 0 {
+		if snapshot.Symbol != a.cfg.Symbol || snapshot.Snapshot == nil {
 			return
 		}
-		a.bestBid = snapshot.Snapshot.Bids[0].Price
-		a.bestAsk = snapshot.Snapshot.Asks[0].Price
+		twoSided := len(snapshot.Snapshot.Bids) != 0 && len(snapshot.Snapshot.Asks) != 0
+		if a.processingDelay == 0 {
+			if twoSided {
+				a.bestBid = snapshot.Snapshot.Bids[0].Price
+				a.bestAsk = snapshot.Snapshot.Asks[0].Price
+			}
+			return
+		}
+		receivedAt := a.observationTime()
+		pending := pendingProcessingSnapshot{
+			sequence: snapshot.SeqNum, receivedAt: receivedAt,
+			readyAt: receivedAt + int64(a.processingDelay), twoSided: twoSided,
+		}
+		if twoSided {
+			pending.bestBid = snapshot.Snapshot.Bids[0].Price
+			pending.bestAsk = snapshot.Snapshot.Asks[0].Price
+		}
+		a.pendingSnapshots = append(a.pendingSnapshots, pending)
 	case actor.EventOrderAccepted:
 		accepted := event.Data.(actor.OrderAcceptedEvent)
 		if child, ok := a.byRequest[accepted.RequestID]; ok {
@@ -186,6 +213,7 @@ func (a *executionAgent) HandleEvent(_ context.Context, event *actor.Event) {
 
 func (a *executionAgent) onTick(t time.Time) {
 	now := t.UnixNano()
+	a.processDueSnapshots(now)
 	if a.observe != nil {
 		a.observe(EvidenceObservation{
 			Timestamp: now, ClientID: a.ID(), Source: "actor", Name: "decision_tick",
@@ -205,6 +233,27 @@ func (a *executionAgent) onTick(t time.Time) {
 	if a.cfg.Policy == TWAP && a.sentSlices < a.cfg.SliceCount && now >= a.nextSliceAt {
 		a.sendNext(now)
 	}
+}
+
+func (a *executionAgent) processDueSnapshots(now int64) {
+	processed := 0
+	for processed < len(a.pendingSnapshots) && a.pendingSnapshots[processed].readyAt <= now {
+		snapshot := a.pendingSnapshots[processed]
+		if snapshot.twoSided {
+			a.bestBid, a.bestAsk = snapshot.bestBid, snapshot.bestAsk
+		}
+		if a.observe != nil {
+			a.observe(EvidenceObservation{
+				Timestamp: now, ClientID: a.ID(), Source: "actor", Name: "snapshot_processing_complete",
+				Payload: SnapshotProcessingComplete{
+					SeqNum: snapshot.sequence, ReceivedAt: snapshot.receivedAt, ProcessedAt: now,
+					BestBid: snapshot.bestBid, BestAsk: snapshot.bestAsk, TwoSided: snapshot.twoSided,
+				},
+			})
+		}
+		processed++
+	}
+	a.pendingSnapshots = a.pendingSnapshots[processed:]
 }
 
 func (a *executionAgent) sendNext(now int64) {

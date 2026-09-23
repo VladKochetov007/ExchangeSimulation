@@ -67,6 +67,54 @@ func TestTWAPReportDeterministicAcrossGOMAXPROCS(t *testing.T) {
 	}
 }
 
+func TestExplicitDeploymentKeepsLegacyZeroProcessingEconomics(t *testing.T) {
+	legacyConfig := DefaultSimConfig(Immediate)
+	legacy, err := NewSim(legacyConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacyReport, err := legacy.Run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	directedConfig := legacyConfig
+	directedConfig.ExecutionLatency = 0
+	directedConfig.ParentDeployment = &ParentDeployment{
+		MarketDataLatency: time.Millisecond, RequestLatency: time.Millisecond,
+		ResponseLatency: time.Millisecond,
+	}
+	directed, err := NewSim(directedConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	directedReport, err := directed.Run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(legacyReport, directedReport) {
+		t.Fatalf("explicit zero-processing deployment changed old economics:\nlegacy=%#v\ndirected=%#v", legacyReport, directedReport)
+	}
+}
+
+func TestExplicitDeploymentRejectsConflictingOrNegativeLatencies(t *testing.T) {
+	for _, deployment := range []ParentDeployment{
+		{MarketDataLatency: -time.Millisecond}, {RequestLatency: -time.Millisecond},
+		{ResponseLatency: -time.Millisecond}, {ProcessingDelay: -time.Millisecond},
+	} {
+		config := DefaultSimConfig(Immediate)
+		config.ExecutionLatency = 0
+		config.ParentDeployment = &deployment
+		if _, err := NewSim(config); err == nil {
+			t.Fatalf("accepted negative deployment %#v", deployment)
+		}
+	}
+	config := DefaultSimConfig(Immediate)
+	config.ParentDeployment = &ParentDeployment{MarketDataLatency: time.Millisecond}
+	if _, err := NewSim(config); err == nil {
+		t.Fatal("accepted ambiguous legacy and explicit focal latency")
+	}
+}
+
 func TestStaggeredParentReportsAreDeterministicAndAlternating(t *testing.T) {
 	config := DefaultSimConfig(TWAP)
 	config.ParentCount = 4
