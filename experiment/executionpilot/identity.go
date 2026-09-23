@@ -63,7 +63,7 @@ func ToolIdentity(repositoryDir, simulatorBinary, analyzerBinary, evidenceSchema
 		SimulatorSHA256: simulatorDigest, AnalyzerSHA256: analyzerDigest,
 		Toolchain: build.GoVersion, EvidenceSchemaID: evidenceSchema,
 	}
-	if err := ValidateIdentity(identity); err != nil {
+	if err := ValidateIdentityForSchema(identity, evidenceSchema); err != nil {
 		return Identity{}, err
 	}
 	return identity, nil

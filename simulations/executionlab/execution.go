@@ -113,10 +113,11 @@ type executionAgent struct {
 	observe         func(EvidenceObservation)
 	observationTime func() int64
 
-	bestBid          int64
-	bestAsk          int64
-	processingDelay  time.Duration
-	pendingSnapshots []pendingProcessingSnapshot
+	bestBid                  int64
+	bestAsk                  int64
+	processingDelay          time.Duration
+	emitProcessingCompletion bool
+	pendingSnapshots         []pendingProcessingSnapshot
 
 	decided      bool
 	nextSliceAt  int64
@@ -174,6 +175,15 @@ func (a *executionAgent) HandleEvent(_ context.Context, event *actor.Event) {
 			if twoSided {
 				a.bestBid = snapshot.Snapshot.Bids[0].Price
 				a.bestAsk = snapshot.Snapshot.Asks[0].Price
+			}
+			if a.emitProcessingCompletion && a.observe != nil {
+				processed := SnapshotProcessingComplete{SeqNum: snapshot.SeqNum, ReceivedAt: a.observationTime(),
+					ProcessedAt: a.observationTime(), TwoSided: twoSided}
+				if twoSided {
+					processed.BestBid, processed.BestAsk = a.bestBid, a.bestAsk
+				}
+				a.observe(EvidenceObservation{Timestamp: processed.ProcessedAt, ClientID: a.ID(), Source: "actor",
+					Name: "snapshot_processing_complete", Payload: processed})
 			}
 			return
 		}

@@ -70,9 +70,13 @@ func memberInt64(value int64, choices ...int64) bool {
 }
 
 func ValidateIdentity(identity Identity) error {
+	return ValidateIdentityForSchema(identity, EvidenceSchemaID)
+}
+
+func ValidateIdentityForSchema(identity Identity, schemaID string) error {
 	if !hexDigest(identity.SourceCommit, 20) || !hexDigest(identity.SourceTree, 20) ||
 		!hexDigest(identity.SimulatorSHA256, 32) || !hexDigest(identity.AnalyzerSHA256, 32) ||
-		identity.Toolchain != RequiredToolchain || identity.EvidenceSchemaID != EvidenceSchemaID {
+		identity.Toolchain != RequiredToolchain || identity.EvidenceSchemaID != schemaID {
 		return fmt.Errorf("execution pilot: incomplete source, binary, toolchain or evidence identity")
 	}
 	return nil

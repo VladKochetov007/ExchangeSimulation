@@ -23,50 +23,71 @@ const (
 )
 
 type ReconstructedOutcome struct {
-	Status                 OutcomeStatus `json:"status"`
-	ClientID               uint64        `json:"client_id"`
-	TargetQty              int64         `json:"target_qty"`
-	DecisionAt             int64         `json:"decision_at"`
-	DecisionMid            int64         `json:"decision_mid"`
-	DeliveredSnapshotAt    int64         `json:"delivered_snapshot_at"`
-	PublishedSnapshotAt    int64         `json:"published_snapshot_at"`
-	DeliveredSnapshotSeq   uint64        `json:"delivered_snapshot_seq"`
-	ProcessedSnapshotAt    int64         `json:"processed_snapshot_at,omitempty"`
-	LatestMessageAt        int64         `json:"latest_message_at"`
-	LatestMessageSeq       uint64        `json:"latest_message_seq"`
-	LatestMessageTwoSided  bool          `json:"latest_message_two_sided"`
-	RetainedAfterOneSided  bool          `json:"retained_after_one_sided"`
-	DeliveredTouchAskQty   int64         `json:"delivered_touch_ask_qty"`
-	DeliveredFiveAskQty    int64         `json:"delivered_five_ask_qty"`
-	DeliveredSpread        int64         `json:"delivered_spread"`
-	MechanicalSweepQty     int64         `json:"mechanical_sweep_qty"`
-	MechanicalSweepCost    int64         `json:"mechanical_sweep_cost"`
-	RequestID              uint64        `json:"request_id"`
-	OrderID                uint64        `json:"order_id"`
-	OrderSentAt            int64         `json:"order_sent_at"`
-	VenueArrivalAt         int64         `json:"venue_arrival_at"`
-	RejectReason           string        `json:"reject_reason,omitempty"`
-	FilledQty              int64         `json:"filled_qty"`
-	UnfilledQty            int64         `json:"unfilled_qty"`
-	FirstVenueFillAt       int64         `json:"first_venue_fill_at"`
-	LastVenueFillAt        int64         `json:"last_venue_fill_at"`
-	FillCount              int           `json:"fill_count"`
-	Notional               int64         `json:"notional"`
-	QuoteFees              int64         `json:"quote_fees"`
-	CancelledResidual      int64         `json:"cancelled_residual"`
-	CancelReason           string        `json:"cancel_reason,omitempty"`
-	TerminalMid            int64         `json:"terminal_mid"`
-	TerminalMarkAvailable  bool          `json:"terminal_mark_available"`
-	FilledShortfall        int64         `json:"filled_shortfall"`
-	FilledShortfallBps     float64       `json:"filled_shortfall_bps"`
-	TargetShortfall        int64         `json:"target_shortfall"`
-	TargetShortfallBps     float64       `json:"target_shortfall_bps"`
-	TargetShortfallDefined bool          `json:"target_shortfall_defined"`
-	InitialABC             int64         `json:"initial_abc"`
-	InitialUSD             int64         `json:"initial_usd"`
-	TerminalABC            int64         `json:"terminal_abc"`
-	TerminalUSD            int64         `json:"terminal_usd"`
-	BalanceSnapshotSeen    bool          `json:"balance_snapshot_seen"`
+	Status                 OutcomeStatus  `json:"status"`
+	ClientID               uint64         `json:"client_id"`
+	TargetQty              int64          `json:"target_qty"`
+	DecisionAt             int64          `json:"decision_at"`
+	DecisionMid            int64          `json:"decision_mid"`
+	DeliveredSnapshotAt    int64          `json:"delivered_snapshot_at"`
+	PublishedSnapshotAt    int64          `json:"published_snapshot_at"`
+	DeliveredSnapshotSeq   uint64         `json:"delivered_snapshot_seq"`
+	ProcessedSnapshotAt    int64          `json:"processed_snapshot_at,omitempty"`
+	LatestMessageAt        int64          `json:"latest_message_at"`
+	LatestMessageSeq       uint64         `json:"latest_message_seq"`
+	LatestMessageTwoSided  bool           `json:"latest_message_two_sided"`
+	RetainedAfterOneSided  bool           `json:"retained_after_one_sided"`
+	DeliveredTouchAskQty   int64          `json:"delivered_touch_ask_qty"`
+	DeliveredFiveAskQty    int64          `json:"delivered_five_ask_qty"`
+	DeliveredSpread        int64          `json:"delivered_spread"`
+	MechanicalSweepQty     int64          `json:"mechanical_sweep_qty"`
+	MechanicalSweepCost    int64          `json:"mechanical_sweep_cost"`
+	RequestID              uint64         `json:"request_id"`
+	OrderID                uint64         `json:"order_id"`
+	OrderSentAt            int64          `json:"order_sent_at"`
+	VenueArrivalAt         int64          `json:"venue_arrival_at"`
+	RejectReason           string         `json:"reject_reason,omitempty"`
+	FilledQty              int64          `json:"filled_qty"`
+	UnfilledQty            int64          `json:"unfilled_qty"`
+	FirstVenueFillAt       int64          `json:"first_venue_fill_at"`
+	LastVenueFillAt        int64          `json:"last_venue_fill_at"`
+	FillCount              int            `json:"fill_count"`
+	Notional               int64          `json:"notional"`
+	QuoteFees              int64          `json:"quote_fees"`
+	CancelledResidual      int64          `json:"cancelled_residual"`
+	CancelReason           string         `json:"cancel_reason,omitempty"`
+	TerminalMid            int64          `json:"terminal_mid"`
+	TerminalMarkAvailable  bool           `json:"terminal_mark_available"`
+	FilledShortfall        int64          `json:"filled_shortfall"`
+	FilledShortfallBps     float64        `json:"filled_shortfall_bps"`
+	TargetShortfall        int64          `json:"target_shortfall"`
+	TargetShortfallBps     float64        `json:"target_shortfall_bps"`
+	TargetShortfallDefined bool           `json:"target_shortfall_defined"`
+	InitialABC             int64          `json:"initial_abc"`
+	InitialUSD             int64          `json:"initial_usd"`
+	TerminalABC            int64          `json:"terminal_abc"`
+	TerminalUSD            int64          `json:"terminal_usd"`
+	BalanceSnapshotSeen    bool           `json:"balance_snapshot_seen"`
+	LatencyFunnel          *LatencyFunnel `json:"latency_funnel,omitempty"`
+}
+
+// LatencyFunnel counts sampled public snapshots, not continuous executable
+// venue opportunities. Qualifying means the published ask curve displayed
+// enough quantity for the target at publication time; it does not imply
+// that quantity remained available when a delayed order arrived.
+type LatencyFunnel struct {
+	Published                     int `json:"published"`
+	Enqueued                      int `json:"enqueued"`
+	NotEnqueued                   int `json:"not_enqueued"`
+	Received                      int `json:"received"`
+	Processed                     int `json:"processed"`
+	ReceivedUnprocessed           int `json:"received_unprocessed"`
+	ProcessedNotSelected          int `json:"processed_not_selected"`
+	QualifyingPublished           int `json:"qualifying_published"`
+	QualifyingEnqueued            int `json:"qualifying_enqueued"`
+	QualifyingReceived            int `json:"qualifying_received"`
+	QualifyingProcessed           int `json:"qualifying_processed"`
+	QualifyingReceivedUnprocessed int `json:"qualifying_received_unprocessed"`
+	QualifyingSelected            int `json:"qualifying_selected"`
 }
 
 type analysisContract struct {
@@ -270,6 +291,7 @@ type reconstructionState struct {
 	publications          map[uint64]publishedSnapshot
 	publicationOutcomes   map[uint64]publicationOutcomeWire
 	deliveredSnapshots    map[uint64]bool
+	processedSnapshots    map[uint64]bool
 	lastDeliveredSeq      uint64
 	lastProcessedSeq      uint64
 	pendingProcessing     map[uint64]pendingReconstructionSnapshot
@@ -355,10 +377,11 @@ func newReconstructionState(contract analysisContract, clientID uint64, targetQt
 		tradeByID: map[uint64]tradeWire{}, receipts: map[uint64]bool{},
 		publications:        map[uint64]publishedSnapshot{},
 		publicationOutcomes: map[uint64]publicationOutcomeWire{}, deliveredSnapshots: map[uint64]bool{},
-		pendingProcessing: map[uint64]pendingReconstructionSnapshot{},
-		marketDataLatency: contract.Parents[0].Latency,
-		requestLatency:    contract.Parents[0].Latency,
-		responseLatency:   contract.Parents[0].Latency,
+		processedSnapshots: map[uint64]bool{},
+		pendingProcessing:  map[uint64]pendingReconstructionSnapshot{},
+		marketDataLatency:  contract.Parents[0].Latency,
+		requestLatency:     contract.Parents[0].Latency,
+		responseLatency:    contract.Parents[0].Latency,
 	}
 	for _, account := range contract.Accounts {
 		if account.ClientID == clientID {
@@ -436,16 +459,13 @@ func (s *reconstructionState) consumeActor(event RecordedEvent) error {
 		s.lastDeliveredSeq = snapshot.SeqNum
 		s.deliveredSnapshots[snapshot.SeqNum] = true
 		s.latestMessage, s.latestReceipt, s.latestMessageEventSeq = snapshot, event.Timestamp, event.Sequence
-		if s.processingDelay > 0 {
+		if s.latencyEvidence {
 			s.pendingProcessing[snapshot.SeqNum] = pendingReconstructionSnapshot{snapshot, event.Timestamp, event.Sequence}
 		} else if len(snapshot.Snapshot.Bids) != 0 && len(snapshot.Snapshot.Asks) != 0 {
 			s.lastSnapshot, s.lastReceipt, s.lastSnapshotEventSeq = snapshot, event.Timestamp, event.Sequence
-			if s.latencyEvidence {
-				s.lastProcessedAt = event.Timestamp
-			}
 		}
 	case "snapshot_processing_complete":
-		if !s.latencyEvidence || s.processingDelay == 0 {
+		if !s.latencyEvidence {
 			return errors.New("latency pilot: unexpected processing completion")
 		}
 		processed, err := decodePayload[struct {
@@ -462,11 +482,14 @@ func (s *reconstructionState) consumeActor(event RecordedEvent) error {
 		pending, exists := s.pendingProcessing[processed.SeqNum]
 		if !exists || processed.SeqNum <= s.lastProcessedSeq || processed.ReceivedAt != pending.receivedAt ||
 			processed.ProcessedAt != event.Timestamp || event.Timestamp < pending.receivedAt+s.processingDelay ||
-			event.Timestamp%s.contract.Runner.Step != 0 ||
 			processed.TwoSided != (len(pending.snapshot.Snapshot.Bids) != 0 && len(pending.snapshot.Snapshot.Asks) != 0) {
 			return errors.New("latency pilot: unmatched, misordered or premature processing completion")
 		}
-		if event.Timestamp-s.contract.Runner.Step >= pending.receivedAt+s.processingDelay {
+		if s.processingDelay == 0 && event.Timestamp != pending.receivedAt {
+			return errors.New("latency pilot: zero-delay processing was not immediate")
+		}
+		if s.processingDelay > 0 && (event.Timestamp%s.contract.Runner.Step != 0 ||
+			event.Timestamp-s.contract.Runner.Step >= pending.receivedAt+s.processingDelay) {
 			return errors.New("latency pilot: processing completion skipped an eligible poll")
 		}
 		bid, ask := int64(0), int64(0)
@@ -478,11 +501,19 @@ func (s *reconstructionState) consumeActor(event RecordedEvent) error {
 		}
 		delete(s.pendingProcessing, processed.SeqNum)
 		s.lastProcessedSeq = processed.SeqNum
+		s.processedSnapshots[processed.SeqNum] = true
 		if processed.TwoSided {
 			s.lastSnapshot, s.lastReceipt, s.lastSnapshotEventSeq = pending.snapshot, pending.receivedAt, pending.receiptEventSeq
 			s.lastProcessedAt = event.Timestamp
 		}
 	case "decision_tick":
+		if s.latencyEvidence {
+			for _, pending := range s.pendingProcessing {
+				if pending.receivedAt+s.processingDelay <= event.Timestamp {
+					return errors.New("latency pilot: due snapshot was not processed before decision tick")
+				}
+			}
+		}
 		if event.Timestamp != (s.decisionTicks+1)*s.contract.Runner.Step {
 			return errors.New("execution pilot: missing, duplicate or misphased focal decision tick")
 		}
@@ -921,7 +952,7 @@ func (s *reconstructionState) finish() error {
 	if s.decisionTicks != int64(s.contract.Runner.Iterations) {
 		return errors.New("execution pilot: incomplete focal decision clock evidence")
 	}
-	if s.processingDelay > 0 {
+	if s.latencyEvidence {
 		for _, pending := range s.pendingProcessing {
 			if pending.receivedAt+s.processingDelay <= int64(s.contract.Runner.Iterations)*s.contract.Runner.Step {
 				return errors.New("latency pilot: missing due processing completion")
@@ -931,12 +962,20 @@ func (s *reconstructionState) finish() error {
 	if !s.terminalSeen || !s.result.BalanceSnapshotSeen {
 		return errors.New("execution pilot: missing terminal venue or ledger evidence")
 	}
+	if s.latencyEvidence {
+		if err := s.finishLatencyFunnel(); err != nil {
+			return err
+		}
+	}
 	if !s.wasSent {
 		if s.eligibleTick != 0 {
 			return errors.New("execution pilot: immediate policy omitted order despite eligible local opportunity")
 		}
 		if s.ledgerABC != 0 || s.ledgerUSD != 0 {
 			return errors.New("execution pilot: focal ledger changed without an order")
+		}
+		if s.latencyEvidence {
+			s.result.UnfilledQty = s.result.TargetQty
 		}
 		s.result.Status = OutcomeNoObservedOpportunity
 		return nil
@@ -982,6 +1021,76 @@ func (s *reconstructionState) finish() error {
 		s.result.Status = OutcomePartiallyFilled
 	}
 	return s.finishArithmetic()
+}
+
+func (s *reconstructionState) finishLatencyFunnel() error {
+	funnel := &LatencyFunnel{}
+	for sequence, publication := range s.publications {
+		funnel.Published++
+		qualifying, err := s.qualifyingPublication(publication.Payload)
+		if err != nil {
+			return err
+		}
+		if qualifying {
+			funnel.QualifyingPublished++
+		}
+		outcome := s.publicationOutcomes[sequence]
+		if outcome.Status == "enqueued" {
+			funnel.Enqueued++
+			if qualifying {
+				funnel.QualifyingEnqueued++
+			}
+		} else {
+			funnel.NotEnqueued++
+		}
+		if s.deliveredSnapshots[sequence] {
+			funnel.Received++
+			if qualifying {
+				funnel.QualifyingReceived++
+			}
+			if !s.processedSnapshots[sequence] {
+				funnel.ReceivedUnprocessed++
+				if qualifying {
+					funnel.QualifyingReceivedUnprocessed++
+				}
+			}
+		}
+		if s.processedSnapshots[sequence] {
+			funnel.Processed++
+			if qualifying {
+				funnel.QualifyingProcessed++
+			}
+			if sequence != s.result.DeliveredSnapshotSeq {
+				funnel.ProcessedNotSelected++
+			}
+		}
+		if sequence == s.result.DeliveredSnapshotSeq && qualifying {
+			funnel.QualifyingSelected++
+		}
+	}
+	s.result.LatencyFunnel = funnel
+	return nil
+}
+
+func (s *reconstructionState) qualifyingPublication(publication publicationWire) (bool, error) {
+	if len(publication.PublicBids) == 0 || len(publication.PublicAsks) == 0 {
+		return false, nil
+	}
+	if publication.PublicBids[0].Price <= 0 || publication.PublicAsks[0].Price <= 0 ||
+		publication.PublicBids[0].Price > publication.PublicAsks[0].Price {
+		return false, nil
+	}
+	var depth int64
+	for _, level := range publication.PublicAsks {
+		if level.Price <= 0 || level.VisibleQty < 0 || !addSafe(depth, level.VisibleQty) {
+			return false, errors.New("latency pilot: malformed published ask depth")
+		}
+		depth += level.VisibleQty
+		if depth >= s.result.TargetQty {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (s *reconstructionState) finishArithmetic() error {

@@ -124,6 +124,34 @@ func TestLatencyProcessingEvidenceFailsClosed(t *testing.T) {
 	}
 }
 
+func TestLatencyZeroProcessingCompletionIsRequired(t *testing.T) {
+	raw, identity, world, _ := latencyFixture(t, time.Millisecond, 0)
+	var changed bytes.Buffer
+	recorder := NewLatencyRecorder(&changed)
+	removed := false
+	if err := WalkLatencyEvidence(bytes.NewReader(raw), identity, func(event RecordedEvent) error {
+		if event.Name == "snapshot_processing_complete" && !removed {
+			removed = true
+			return nil
+		}
+		recorder.Record(executionlab.EvidenceObservation{Timestamp: event.Timestamp, ClientID: event.ClientID,
+			Source: event.Source, Name: event.Name, Route: event.Route, Payload: event.Payload})
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !removed {
+		t.Fatal("fixture has no processing completion")
+	}
+	changedIdentity, err := recorder.Finish()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReconstructLatency(bytes.NewReader(changed.Bytes()), changedIdentity, world, 500_000_000); err == nil {
+		t.Fatal("zero-delay arm accepted missing processing completion")
+	}
+}
+
 func TestLatencyEvidenceReconstructsFourDirectedDeployments(t *testing.T) {
 	for _, test := range []struct {
 		name                string
@@ -146,6 +174,14 @@ func TestLatencyEvidenceReconstructsFourDirectedDeployments(t *testing.T) {
 			}
 			if test.processing > 0 && outcome.ProcessedSnapshotAt < outcome.DeliveredSnapshotAt+int64(test.processing) {
 				t.Fatalf("processed snapshot earlier than configured actor delay: %+v", outcome)
+			}
+			funnel := outcome.LatencyFunnel
+			if funnel == nil || funnel.Published == 0 || funnel.Published != funnel.Enqueued+funnel.NotEnqueued ||
+				funnel.Processed > funnel.Received || funnel.Received > funnel.Enqueued ||
+				funnel.ReceivedUnprocessed != funnel.Received-funnel.Processed ||
+				funnel.QualifyingProcessed > funnel.QualifyingReceived || funnel.QualifyingReceived > funnel.QualifyingEnqueued ||
+				funnel.QualifyingEnqueued > funnel.QualifyingPublished {
+				t.Fatalf("invalid reconstructed opportunity funnel: %+v", funnel)
 			}
 		})
 	}

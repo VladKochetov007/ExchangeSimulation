@@ -299,6 +299,7 @@ func NewSim(cfg SimConfig) (*Sim, error) {
 		parent.observationTime = clock.NowUnixNano
 		if cfg.ParentDeployment != nil {
 			parent.processingDelay = cfg.ParentDeployment.ProcessingDelay
+			parent.emitProcessingCompletion = true
 		}
 		addAccount(clientID, "parent", fee)
 		contract.Parents = append(contract.Parents, ParentContract{

@@ -20,6 +20,10 @@ func rejectDuplicateJSONKeys(raw []byte) error {
 	return nil
 }
 
+// ValidateStrictJSON rejects duplicate object keys and trailing content before
+// another experiment package decodes a pinned plan or manifest.
+func ValidateStrictJSON(raw []byte) error { return rejectDuplicateJSONKeys(raw) }
+
 func walkJSONValue(decoder *json.Decoder) error {
 	token, err := decoder.Token()
 	if err != nil {
