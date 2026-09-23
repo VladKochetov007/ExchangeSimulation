@@ -61,13 +61,18 @@ capital, seeds, fee assignments and their own transport remain unchanged.
 
 Response delay is recorded separately and is not part of the pre-execution
 effective-action-latency formula. `effective_action_latency` is the actual
-selected public-message publication-to-order-arrival interval, decomposed
-into inbound delivery, actor processing, poll wait and outbound delivery.
-Report it divided by a clearly labelled *observed snapshot opportunity
-duration* only when such a duration is complete and measurable. The configured
-processing-delay/1-ms decision-period ratio is 0 or 120; also report realized
-values. Do not imply that these components sum to the same number when the
-actor used a different, older selected snapshot.
+**selected public-message publication-to-order-arrival interval**, decomposed
+into inbound delivery, actor processing, processing-to-decision wait, and
+outbound delivery. Processing-to-decision wait includes both the next eligible
+poll and the fixed 1-second earliest-decision gate; it must **not** be labelled
+pure CPU time or pure poll wait. The selected snapshot identity is retained.
+For a qualifying published-depth episode, infer only its sampled start/end
+from consecutive venue public snapshots. Treat missing left or right boundary
+as censored and leave the duration ratio undefined. For a complete sampled
+episode, report publication-to-arrival delay divided by this explicitly
+snapshot-observed duration. Neither number is a continuous executable quote
+lifetime. The configured processing-delay/1-ms decision-period ratio is 0 or
+120; also report realized values.
 
 ## Fixed matrix, seeds, outcomes and contrasts
 
@@ -124,7 +129,9 @@ same-ID assignment and independent processing of multiple queued snapshots.
 Confirm that both delayed responses and all due processing work drain before
 the four-second terminal hook. No wall-clock sleep may represent model delay.
 
-Use a new versioned evidence schema for the actor-processing event. The
+Use a new versioned evidence schema for the actor-processing event. Even the
+zero-delay arms emit a completion event at receipt time; the historical ME-001
+v3 stream does not acquire this event. The
 analyzer must independently join the exchange publication and publisher
 delivery status to focal receipt, processing completion and policy tick;
 then request ID, venue admission, exchange-time fills, delayed responses,

@@ -6,6 +6,7 @@ import (
 
 	"exchange_sim/actor"
 	"exchange_sim/exchange"
+	"exchange_sim/simulation"
 )
 
 func TestSnapshotProcessingIsDelayedOrderedAndOneSidedDoesNotEraseQuote(t *testing.T) {
@@ -51,5 +52,64 @@ func TestSnapshotProcessingIsDelayedOrderedAndOneSidedDoesNotEraseQuote(t *testi
 		completions[1].SeqNum != 2 || completions[1].ProcessedAt != 230_000_000 ||
 		completions[2].SeqNum != 3 || completions[2].TwoSided || completions[2].ProcessedAt != 240_000_000 {
 		t.Fatalf("processing completion evidence = %#v", completions)
+	}
+}
+
+func TestSlowDirectedRequestCannotFillWithdrawnDisplayedAsk(t *testing.T) {
+	clock := simulation.NewSimulatedClock(0)
+	scheduler := simulation.NewEventScheduler(clock)
+	clock.SetScheduler(scheduler)
+	venue := exchange.NewExchangeWithConfig(exchange.ExchangeConfig{Clock: clock, DeterministicIngress: true, DeterministicPhases: true})
+	venue.AddInstrument(exchange.NewSpotInstrument("ABC/USD", "ABC", "USD", 1, 1, 1, 1))
+	venue.ConnectNewClient(1, map[string]int64{"ABC": 10, "USD": 1000}, &exchange.FixedFee{})
+	ask := venue.PlaceOrder(1, &exchange.OrderRequest{RequestID: 1, Symbol: "ABC/USD", Side: exchange.Sell,
+		Type: exchange.LimitOrder, Price: 101, Qty: 1, TimeInForce: exchange.GTC, Visibility: exchange.Normal})
+	if !ask.Success {
+		t.Fatalf("fixture ask rejected: %+v", ask)
+	}
+	if bid := venue.PlaceOrder(1, &exchange.OrderRequest{RequestID: 2, Symbol: "ABC/USD", Side: exchange.Buy,
+		Type: exchange.LimitOrder, Price: 99, Qty: 1, TimeInForce: exchange.GTC, Visibility: exchange.Normal}); !bid.Success {
+		t.Fatalf("fixture bid rejected: %+v", bid)
+	}
+	link := newDirectedLatencyMount(venue, scheduler, clock, ParentDeployment{
+		MarketDataLatency: 90 * time.Millisecond, RequestLatency: 90 * time.Millisecond, ResponseLatency: 90 * time.Millisecond})
+	buyer := link.ConnectNewClient(13, map[string]int64{"ABC": 0, "USD": 1000}, &exchange.FixedFee{})
+	defer func() {
+		if stoppable, ok := buyer.(interface{ Stop() }); ok {
+			stoppable.Stop()
+		}
+	}()
+	clock.Advance(time.Second)
+	if _, _, ok := venue.TwoSidedTopOfBook("ABC/USD"); !ok {
+		t.Fatal("displayed two-sided quote absent at send")
+	}
+	buyer.Send(exchange.Request{Type: exchange.ReqPlaceOrder, OrderReq: &exchange.OrderRequest{
+		RequestID: 3, Symbol: "ABC/USD", Side: exchange.Buy, Type: exchange.Market,
+		Qty: 1, TimeInForce: exchange.GTC, Visibility: exchange.Normal}})
+	clock.Advance(50 * time.Millisecond)
+	if cancel := venue.CancelOrder(1, &exchange.CancelRequest{RequestID: 4, OrderID: ask.Data.(uint64)}); !cancel.Success {
+		t.Fatalf("fixture ask cancellation failed: %+v", cancel)
+	}
+	clock.Advance(39 * time.Millisecond)
+	select {
+	case <-venue.Gateways[13].RequestCh:
+		t.Fatal("slow request arrived before configured 90ms")
+	default:
+	}
+	clock.Advance(time.Millisecond)
+	var delivered exchange.Request
+	select {
+	case delivered = <-venue.Gateways[13].RequestCh:
+	default:
+		t.Fatal("slow request did not arrive at 90ms")
+	}
+	if clock.NowUnixNano() != int64(time.Second+90*time.Millisecond) {
+		t.Fatal("wrong logical arrival timestamp")
+	}
+	if response := venue.PlaceOrder(13, delivered.OrderReq); !response.Success {
+		t.Fatalf("empty-book market request unexpectedly rejected: %+v", response)
+	}
+	if venue.Clients[13].Balances["ABC"] != 0 {
+		t.Fatal("slow request filled a quote withdrawn before venue arrival")
 	}
 }

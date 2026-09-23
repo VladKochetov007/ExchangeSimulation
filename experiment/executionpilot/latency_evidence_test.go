@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"reflect"
 	"testing"
 	"time"
 
@@ -152,6 +153,95 @@ func TestLatencyZeroProcessingCompletionIsRequired(t *testing.T) {
 	}
 }
 
+func TestLatencyEvidenceMutationMatrixFailsClosed(t *testing.T) {
+	raw, identity, world, _ := latencyFixture(t, time.Millisecond, 120*time.Millisecond)
+	var original []RecordedEvent
+	if err := WalkLatencyEvidence(bytes.NewReader(raw), identity, func(event RecordedEvent) error {
+		original = append(original, event)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	mutations := []struct {
+		name, source, eventName, field string
+		change                         any
+		operation                      string
+	}{
+		{"duplicate_processing", "actor", "snapshot_processing_complete", "", nil, "duplicate"},
+		{"processing_after_tick", "actor", "snapshot_processing_complete", "", nil, "after_tick"},
+		{"request_identity", "actor", "order_send", "OrderReq.RequestID", float64(999999), "field"},
+		{"response_identity", "actor", "order_accepted_receipt", "request_id", float64(999999), "field"},
+		{"late_fill_receipt", "actor", "order_fill_receipt", "timestamp", float64(1_000_000), "add_to_field"},
+		{"fee", "exchange", "OrderFill", "fee_amount", float64(999999), "field"},
+		{"ledger", "exchange", "balance_change", "client_id", float64(999999), "field"},
+		{"terminal_mark", "exchange", "terminal_book", "valid", false, "field"},
+	}
+	for _, mutation := range mutations {
+		t.Run(mutation.name, func(t *testing.T) {
+			events := append([]RecordedEvent(nil), original...)
+			position := -1
+			for index, event := range events {
+				if event.Source == mutation.source && event.Name == mutation.eventName &&
+					(event.ClientID == 13 || mutation.eventName == "terminal_book") {
+					position = index
+					break
+				}
+			}
+			if position < 0 {
+				t.Fatalf("fixture lacks %s/%s", mutation.source, mutation.eventName)
+			}
+			switch mutation.operation {
+			case "duplicate":
+				events = append(events[:position+1], append([]RecordedEvent{events[position]}, events[position+1:]...)...)
+			case "after_tick":
+				completion := events[position]
+				tickPosition := -1
+				for index := position + 1; index < len(events); index++ {
+					if events[index].Source == "actor" && events[index].Name == "decision_tick" && events[index].Timestamp == completion.Timestamp {
+						tickPosition = index
+						break
+					}
+				}
+				if tickPosition < 0 {
+					t.Fatal("no same-timestamp decision tick after processing")
+				}
+				copy(events[position:tickPosition], events[position+1:tickPosition+1])
+				events[tickPosition] = completion
+			case "field", "add_to_field":
+				var payload map[string]any
+				if err := json.Unmarshal(events[position].Payload, &payload); err != nil {
+					t.Fatal(err)
+				}
+				if mutation.field == "OrderReq.RequestID" {
+					payload["OrderReq"].(map[string]any)["request_id"] = mutation.change
+				} else if mutation.operation == "add_to_field" {
+					payload[mutation.field] = payload[mutation.field].(float64) + mutation.change.(float64)
+				} else {
+					payload[mutation.field] = mutation.change
+				}
+				var err error
+				events[position].Payload, err = json.Marshal(payload)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			var changed bytes.Buffer
+			recorder := NewLatencyRecorder(&changed)
+			for _, event := range events {
+				recorder.Record(executionlab.EvidenceObservation{Timestamp: event.Timestamp, ClientID: event.ClientID,
+					Source: event.Source, Name: event.Name, Route: event.Route, Payload: event.Payload})
+			}
+			changedIdentity, err := recorder.Finish()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := ReconstructLatency(bytes.NewReader(changed.Bytes()), changedIdentity, world, 500_000_000); err == nil {
+				t.Fatal("validly rehashed evidence mutation passed independent replay")
+			}
+		})
+	}
+}
+
 func TestLatencyEvidenceReconstructsFourDirectedDeployments(t *testing.T) {
 	for _, test := range []struct {
 		name                string
@@ -175,6 +265,20 @@ func TestLatencyEvidenceReconstructsFourDirectedDeployments(t *testing.T) {
 			if test.processing > 0 && outcome.ProcessedSnapshotAt < outcome.DeliveredSnapshotAt+int64(test.processing) {
 				t.Fatalf("processed snapshot earlier than configured actor delay: %+v", outcome)
 			}
+			timing := outcome.ActionTiming
+			if timing == nil || timing.PublicationToReceiptNanos != int64(test.network) ||
+				timing.ReceiptToProcessingNanos < int64(test.processing) ||
+				timing.DecisionToVenueArrivalNanos != int64(test.network) ||
+				timing.AdmissionResponseNanos != int64(test.network) ||
+				timing.PublicationToVenueArrivalNanos != timing.PublicationToReceiptNanos+timing.ReceiptToProcessingNanos+
+					timing.ProcessingToDecisionNanos+timing.DecisionToVenueArrivalNanos {
+				t.Fatalf("invalid independently reconstructed action timing: %+v", timing)
+			}
+			if opportunity := outcome.SelectedOpportunity; opportunity == nil || opportunity.SelectedSnapshotSeq != outcome.DeliveredSnapshotSeq ||
+				opportunity.Complete && (opportunity.ActionDelayOverDuration == nil || opportunity.DurationNanos <= 0) ||
+				!opportunity.Complete && opportunity.ActionDelayOverDuration != nil {
+				t.Fatalf("invalid observed opportunity/censoring result: %+v", opportunity)
+			}
 			funnel := outcome.LatencyFunnel
 			if funnel == nil || funnel.Published == 0 || funnel.Published != funnel.Enqueued+funnel.NotEnqueued ||
 				funnel.Processed > funnel.Received || funnel.Received > funnel.Enqueued ||
@@ -184,5 +288,33 @@ func TestLatencyEvidenceReconstructsFourDirectedDeployments(t *testing.T) {
 				t.Fatalf("invalid reconstructed opportunity funnel: %+v", funnel)
 			}
 		})
+	}
+}
+
+func TestLatencyEvidenceObserverDoesNotAlterEconomics(t *testing.T) {
+	for _, network := range []time.Duration{time.Millisecond, 90 * time.Millisecond} {
+		for _, processing := range []time.Duration{0, 120 * time.Millisecond} {
+			_, _, _, instrumentedReport := latencyFixture(t, network, processing)
+			config := executionlab.DefaultSimConfig(executionlab.Immediate)
+			config.Seed = 42
+			config.ExecutionLatency = 0
+			config.RecordSnapshotProjectionEvidence = true
+			config.Parent.TargetQty = 500_000_000
+			config.ParentDeployment = &executionlab.ParentDeployment{
+				MarketDataLatency: network, RequestLatency: network,
+				ResponseLatency: network, ProcessingDelay: processing,
+			}
+			unobserved, err := executionlab.NewSim(config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			report, err := unobserved.Run(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(report, instrumentedReport) {
+				t.Fatalf("evidence changed economic outcome at network=%s processing=%s: %+v versus %+v", network, processing, report, instrumentedReport)
+			}
+		}
 	}
 }

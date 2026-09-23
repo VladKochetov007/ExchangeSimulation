@@ -37,6 +37,9 @@ type SimConfig struct {
 	// policy and deterministic side schedule. One preserves the original
 	// single-parent experiment.
 	ParentCount int
+	// ParentClientID overrides the first parent's account ID for controlled
+	// identity-swap fixtures. Zero uses the next sequential ID.
+	ParentClientID uint64
 	// ParentInterval separates consecutive parent decisions. It is required
 	// when ParentCount is greater than one so a study cannot accidentally send
 	// a simultaneous, inseparable parent-order burst.
@@ -94,6 +97,12 @@ func (c *SimConfig) normalize() error {
 	}
 	if c.ParentCount < 1 {
 		return fmt.Errorf("executionlab: parent count must be positive")
+	}
+	if c.ParentClientID != 0 && c.ParentClientID <= uint64(c.MMCount+c.NoiseTraderCount) {
+		return fmt.Errorf("executionlab: parent client ID must not collide with a background account")
+	}
+	if c.ParentClientID > ^uint64(0)-uint64(c.ParentCount-1) {
+		return fmt.Errorf("executionlab: parent client ID range overflows")
 	}
 	if c.MMCount < 0 || c.NoiseTraderCount < 0 {
 		return fmt.Errorf("executionlab: background account counts must be non-negative")
@@ -275,6 +284,9 @@ func NewSim(cfg SimConfig) (*Sim, error) {
 	parents := make([]*executionAgent, 0, cfg.ParentCount)
 	for i := 0; i < cfg.ParentCount; i++ {
 		clientID++
+		if i == 0 && cfg.ParentClientID != 0 {
+			clientID = cfg.ParentClientID
+		}
 		var executionMount *simulation.Mount
 		if cfg.ParentDeployment != nil {
 			executionMount = newDirectedLatencyMount(ex, scheduler, clock, *cfg.ParentDeployment)

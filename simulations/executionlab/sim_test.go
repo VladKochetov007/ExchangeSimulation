@@ -96,6 +96,35 @@ func TestExplicitDeploymentKeepsLegacyZeroProcessingEconomics(t *testing.T) {
 	}
 }
 
+func TestRetainedC0SeedEconomicsSurviveExplicitDeployment(t *testing.T) {
+	legacyConfig := DefaultSimConfig(Immediate)
+	legacyConfig.Seed = 1009
+	legacyConfig.Parent.TargetQty = 500_000_000
+	legacy, err := NewSim(legacyConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacyReport, err := legacy.Run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	directedConfig := legacyConfig
+	directedConfig.ExecutionLatency = 0
+	directedConfig.ParentDeployment = &ParentDeployment{MarketDataLatency: time.Millisecond,
+		RequestLatency: time.Millisecond, ResponseLatency: time.Millisecond}
+	directed, err := NewSim(directedConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	directedReport, err := directed.Run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(legacyReport, directedReport) {
+		t.Fatalf("retained C0 seed changed under equivalent deployment:\nlegacy=%#v\ndirected=%#v", legacyReport, directedReport)
+	}
+}
+
 func TestExplicitDeploymentRejectsConflictingOrNegativeLatencies(t *testing.T) {
 	for _, deployment := range []ParentDeployment{
 		{MarketDataLatency: -time.Millisecond}, {RequestLatency: -time.Millisecond},
@@ -112,6 +141,37 @@ func TestExplicitDeploymentRejectsConflictingOrNegativeLatencies(t *testing.T) {
 	config.ParentDeployment = &ParentDeployment{MarketDataLatency: time.Millisecond}
 	if _, err := NewSim(config); err == nil {
 		t.Fatal("accepted ambiguous legacy and explicit focal latency")
+	}
+}
+
+func TestFocalDeploymentFollowsAssignmentNotClientID(t *testing.T) {
+	for _, delay := range []time.Duration{time.Millisecond, 90 * time.Millisecond} {
+		var reports []ExecutionReport
+		for _, clientID := range []uint64{13, 14} {
+			config := DefaultSimConfig(Immediate)
+			config.Seed = 42
+			config.ParentClientID = clientID
+			config.ExecutionLatency = 0
+			config.ParentDeployment = &ParentDeployment{
+				MarketDataLatency: delay, RequestLatency: delay, ResponseLatency: delay,
+				ProcessingDelay: 120 * time.Millisecond,
+			}
+			world, err := NewSim(config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if world.Parent.ID() != clientID {
+				t.Fatalf("assigned ID=%d got %d", clientID, world.Parent.ID())
+			}
+			report, err := world.Run(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			reports = append(reports, report)
+		}
+		if !reflect.DeepEqual(reports[0], reports[1]) {
+			t.Fatalf("identical policy/deployment differs when client ID changes at %s: %#v versus %#v", delay, reports[0], reports[1])
+		}
 	}
 }
 

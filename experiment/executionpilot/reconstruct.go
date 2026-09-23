@@ -7,6 +7,7 @@ import (
 	"io"
 	"math"
 	"reflect"
+	"sort"
 
 	"exchange_sim/exchange"
 	"exchange_sim/types"
@@ -23,51 +24,74 @@ const (
 )
 
 type ReconstructedOutcome struct {
-	Status                 OutcomeStatus  `json:"status"`
-	ClientID               uint64         `json:"client_id"`
-	TargetQty              int64          `json:"target_qty"`
-	DecisionAt             int64          `json:"decision_at"`
-	DecisionMid            int64          `json:"decision_mid"`
-	DeliveredSnapshotAt    int64          `json:"delivered_snapshot_at"`
-	PublishedSnapshotAt    int64          `json:"published_snapshot_at"`
-	DeliveredSnapshotSeq   uint64         `json:"delivered_snapshot_seq"`
-	ProcessedSnapshotAt    int64          `json:"processed_snapshot_at,omitempty"`
-	LatestMessageAt        int64          `json:"latest_message_at"`
-	LatestMessageSeq       uint64         `json:"latest_message_seq"`
-	LatestMessageTwoSided  bool           `json:"latest_message_two_sided"`
-	RetainedAfterOneSided  bool           `json:"retained_after_one_sided"`
-	DeliveredTouchAskQty   int64          `json:"delivered_touch_ask_qty"`
-	DeliveredFiveAskQty    int64          `json:"delivered_five_ask_qty"`
-	DeliveredSpread        int64          `json:"delivered_spread"`
-	MechanicalSweepQty     int64          `json:"mechanical_sweep_qty"`
-	MechanicalSweepCost    int64          `json:"mechanical_sweep_cost"`
-	RequestID              uint64         `json:"request_id"`
-	OrderID                uint64         `json:"order_id"`
-	OrderSentAt            int64          `json:"order_sent_at"`
-	VenueArrivalAt         int64          `json:"venue_arrival_at"`
-	RejectReason           string         `json:"reject_reason,omitempty"`
-	FilledQty              int64          `json:"filled_qty"`
-	UnfilledQty            int64          `json:"unfilled_qty"`
-	FirstVenueFillAt       int64          `json:"first_venue_fill_at"`
-	LastVenueFillAt        int64          `json:"last_venue_fill_at"`
-	FillCount              int            `json:"fill_count"`
-	Notional               int64          `json:"notional"`
-	QuoteFees              int64          `json:"quote_fees"`
-	CancelledResidual      int64          `json:"cancelled_residual"`
-	CancelReason           string         `json:"cancel_reason,omitempty"`
-	TerminalMid            int64          `json:"terminal_mid"`
-	TerminalMarkAvailable  bool           `json:"terminal_mark_available"`
-	FilledShortfall        int64          `json:"filled_shortfall"`
-	FilledShortfallBps     float64        `json:"filled_shortfall_bps"`
-	TargetShortfall        int64          `json:"target_shortfall"`
-	TargetShortfallBps     float64        `json:"target_shortfall_bps"`
-	TargetShortfallDefined bool           `json:"target_shortfall_defined"`
-	InitialABC             int64          `json:"initial_abc"`
-	InitialUSD             int64          `json:"initial_usd"`
-	TerminalABC            int64          `json:"terminal_abc"`
-	TerminalUSD            int64          `json:"terminal_usd"`
-	BalanceSnapshotSeen    bool           `json:"balance_snapshot_seen"`
-	LatencyFunnel          *LatencyFunnel `json:"latency_funnel,omitempty"`
+	Status                 OutcomeStatus        `json:"status"`
+	ClientID               uint64               `json:"client_id"`
+	TargetQty              int64                `json:"target_qty"`
+	DecisionAt             int64                `json:"decision_at"`
+	DecisionMid            int64                `json:"decision_mid"`
+	DeliveredSnapshotAt    int64                `json:"delivered_snapshot_at"`
+	PublishedSnapshotAt    int64                `json:"published_snapshot_at"`
+	DeliveredSnapshotSeq   uint64               `json:"delivered_snapshot_seq"`
+	ProcessedSnapshotAt    int64                `json:"processed_snapshot_at,omitempty"`
+	LatestMessageAt        int64                `json:"latest_message_at"`
+	LatestMessageSeq       uint64               `json:"latest_message_seq"`
+	LatestMessageTwoSided  bool                 `json:"latest_message_two_sided"`
+	RetainedAfterOneSided  bool                 `json:"retained_after_one_sided"`
+	DeliveredTouchAskQty   int64                `json:"delivered_touch_ask_qty"`
+	DeliveredFiveAskQty    int64                `json:"delivered_five_ask_qty"`
+	DeliveredSpread        int64                `json:"delivered_spread"`
+	MechanicalSweepQty     int64                `json:"mechanical_sweep_qty"`
+	MechanicalSweepCost    int64                `json:"mechanical_sweep_cost"`
+	RequestID              uint64               `json:"request_id"`
+	OrderID                uint64               `json:"order_id"`
+	OrderSentAt            int64                `json:"order_sent_at"`
+	VenueArrivalAt         int64                `json:"venue_arrival_at"`
+	RejectReason           string               `json:"reject_reason,omitempty"`
+	FilledQty              int64                `json:"filled_qty"`
+	UnfilledQty            int64                `json:"unfilled_qty"`
+	FirstVenueFillAt       int64                `json:"first_venue_fill_at"`
+	LastVenueFillAt        int64                `json:"last_venue_fill_at"`
+	FillCount              int                  `json:"fill_count"`
+	Notional               int64                `json:"notional"`
+	QuoteFees              int64                `json:"quote_fees"`
+	CancelledResidual      int64                `json:"cancelled_residual"`
+	CancelReason           string               `json:"cancel_reason,omitempty"`
+	TerminalMid            int64                `json:"terminal_mid"`
+	TerminalMarkAvailable  bool                 `json:"terminal_mark_available"`
+	FilledShortfall        int64                `json:"filled_shortfall"`
+	FilledShortfallBps     float64              `json:"filled_shortfall_bps"`
+	TargetShortfall        int64                `json:"target_shortfall"`
+	TargetShortfallBps     float64              `json:"target_shortfall_bps"`
+	TargetShortfallDefined bool                 `json:"target_shortfall_defined"`
+	InitialABC             int64                `json:"initial_abc"`
+	InitialUSD             int64                `json:"initial_usd"`
+	TerminalABC            int64                `json:"terminal_abc"`
+	TerminalUSD            int64                `json:"terminal_usd"`
+	BalanceSnapshotSeen    bool                 `json:"balance_snapshot_seen"`
+	LatencyFunnel          *LatencyFunnel       `json:"latency_funnel,omitempty"`
+	ActionTiming           *ActionTiming        `json:"action_timing,omitempty"`
+	SelectedOpportunity    *ObservedOpportunity `json:"selected_opportunity,omitempty"`
+}
+
+type ActionTiming struct {
+	PublicationToReceiptNanos      int64 `json:"publication_to_receipt_nanos"`
+	ReceiptToProcessingNanos       int64 `json:"receipt_to_processing_nanos"`
+	ProcessingToDecisionNanos      int64 `json:"processing_to_decision_nanos"`
+	DecisionToVenueArrivalNanos    int64 `json:"decision_to_venue_arrival_nanos"`
+	PublicationToVenueArrivalNanos int64 `json:"publication_to_venue_arrival_nanos"`
+	AdmissionResponseNanos         int64 `json:"admission_response_nanos"`
+}
+
+type ObservedOpportunity struct {
+	SelectedSnapshotSeq     uint64   `json:"selected_snapshot_seq"`
+	QualifyingAtPublication bool     `json:"qualifying_at_publication"`
+	StartAt                 int64    `json:"start_at,omitempty"`
+	EndAt                   int64    `json:"end_at,omitempty"`
+	DurationNanos           int64    `json:"duration_nanos,omitempty"`
+	Complete                bool     `json:"complete"`
+	LeftCensored            bool     `json:"left_censored"`
+	RightCensored           bool     `json:"right_censored"`
+	ActionDelayOverDuration *float64 `json:"action_delay_over_duration,omitempty"`
 }
 
 // LatencyFunnel counts sampled public snapshots, not continuous executable
@@ -279,6 +303,7 @@ type reconstructionState struct {
 	terminalSeen          bool
 	acceptedSeen          bool
 	responded             bool
+	admissionReceiptAt    int64
 	balances              map[string]int64
 	fillByTrade           map[uint64]fillWire
 	tradeByID             map[uint64]tradeWire
@@ -550,6 +575,7 @@ func (s *reconstructionState) consumeActor(event RecordedEvent) error {
 			return errors.New("execution pilot: unmatched or duplicate acceptance receipt")
 		}
 		s.responded = true
+		s.admissionReceiptAt = event.Timestamp
 	case "order_rejected_receipt":
 		response, err := decodePayload[struct {
 			RequestID uint64 `json:"request_id"`
@@ -563,6 +589,7 @@ func (s *reconstructionState) consumeActor(event RecordedEvent) error {
 			return errors.New("execution pilot: unmatched or duplicate rejection receipt")
 		}
 		s.responded = true
+		s.admissionReceiptAt = event.Timestamp
 	case "order_fill_receipt":
 		fill, err := decodePayload[fillWire](event.Payload)
 		if err != nil {
@@ -992,6 +1019,11 @@ func (s *reconstructionState) finish() error {
 		}
 		s.result.Status = OutcomeRejected
 		s.result.UnfilledQty = s.result.TargetQty
+		if s.latencyEvidence {
+			if err := s.finishActionTiming(); err != nil {
+				return err
+			}
+		}
 		return s.finishArithmetic()
 	}
 	if s.result.FilledQty > s.result.TargetQty || s.result.FilledQty < 0 ||
@@ -1019,6 +1051,11 @@ func (s *reconstructionState) finish() error {
 		s.result.Status = OutcomeFullyFilled
 	default:
 		s.result.Status = OutcomePartiallyFilled
+	}
+	if s.latencyEvidence {
+		if err := s.finishActionTiming(); err != nil {
+			return err
+		}
 	}
 	return s.finishArithmetic()
 }
@@ -1076,21 +1113,102 @@ func (s *reconstructionState) qualifyingPublication(publication publicationWire)
 	if len(publication.PublicBids) == 0 || len(publication.PublicAsks) == 0 {
 		return false, nil
 	}
-	if publication.PublicBids[0].Price <= 0 || publication.PublicAsks[0].Price <= 0 ||
-		publication.PublicBids[0].Price > publication.PublicAsks[0].Price {
-		return false, nil
+	for index, level := range publication.PublicBids {
+		if level.Price <= 0 || level.VisibleQty < 0 ||
+			(index > 0 && level.Price > publication.PublicBids[index-1].Price) {
+			return false, errors.New("latency pilot: malformed published bid curve")
+		}
+	}
+	if publication.PublicBids[0].Price > publication.PublicAsks[0].Price {
+		return false, errors.New("latency pilot: crossed published spot book")
 	}
 	var depth int64
-	for _, level := range publication.PublicAsks {
-		if level.Price <= 0 || level.VisibleQty < 0 || !addSafe(depth, level.VisibleQty) {
+	for index, level := range publication.PublicAsks {
+		if level.Price <= 0 || level.VisibleQty < 0 || !addSafe(depth, level.VisibleQty) ||
+			(index > 0 && level.Price < publication.PublicAsks[index-1].Price) {
 			return false, errors.New("latency pilot: malformed published ask depth")
 		}
 		depth += level.VisibleQty
-		if depth >= s.result.TargetQty {
-			return true, nil
+	}
+	return depth >= s.result.TargetQty, nil
+}
+
+func (s *reconstructionState) finishActionTiming() error {
+	result := &s.result
+	if result.DeliveredSnapshotSeq == 0 || result.ProcessedSnapshotAt < result.DeliveredSnapshotAt ||
+		result.DecisionAt < result.ProcessedSnapshotAt || result.VenueArrivalAt < result.DecisionAt ||
+		s.admissionReceiptAt < result.VenueArrivalAt || result.DeliveredSnapshotAt < result.PublishedSnapshotAt {
+		return errors.New("latency pilot: incomplete or noncausal selected action timing")
+	}
+	result.ActionTiming = &ActionTiming{
+		PublicationToReceiptNanos:      result.DeliveredSnapshotAt - result.PublishedSnapshotAt,
+		ReceiptToProcessingNanos:       result.ProcessedSnapshotAt - result.DeliveredSnapshotAt,
+		ProcessingToDecisionNanos:      result.DecisionAt - result.ProcessedSnapshotAt,
+		DecisionToVenueArrivalNanos:    result.VenueArrivalAt - result.DecisionAt,
+		PublicationToVenueArrivalNanos: result.VenueArrivalAt - result.PublishedSnapshotAt,
+		AdmissionResponseNanos:         s.admissionReceiptAt - result.VenueArrivalAt,
+	}
+	if result.ActionTiming.PublicationToReceiptNanos != s.marketDataLatency ||
+		result.ActionTiming.ReceiptToProcessingNanos < s.processingDelay ||
+		result.ActionTiming.DecisionToVenueArrivalNanos != s.requestLatency ||
+		result.ActionTiming.AdmissionResponseNanos != s.responseLatency {
+		return errors.New("latency pilot: selected action timing differs from pinned deployment")
+	}
+	sequences := make([]uint64, 0, len(s.publications))
+	for sequence := range s.publications {
+		sequences = append(sequences, sequence)
+	}
+	sort.Slice(sequences, func(i, j int) bool { return sequences[i] < sequences[j] })
+	selectedIndex := -1
+	qualifies := make([]bool, len(sequences))
+	var priorPublicationAt int64
+	for index, sequence := range sequences {
+		publicationAt := s.publications[sequence].Timestamp
+		if index > 0 && publicationAt < priorPublicationAt {
+			return errors.New("latency pilot: public snapshot sequence contradicts publication time")
+		}
+		priorPublicationAt = publicationAt
+		var err error
+		qualifies[index], err = s.qualifyingPublication(s.publications[sequence].Payload)
+		if err != nil {
+			return err
+		}
+		if sequence == result.DeliveredSnapshotSeq {
+			selectedIndex = index
 		}
 	}
-	return false, nil
+	if selectedIndex < 0 {
+		return errors.New("latency pilot: selected public snapshot absent")
+	}
+	opportunity := &ObservedOpportunity{SelectedSnapshotSeq: result.DeliveredSnapshotSeq, QualifyingAtPublication: qualifies[selectedIndex]}
+	if qualifies[selectedIndex] {
+		start := selectedIndex
+		for start > 0 && qualifies[start-1] {
+			start--
+		}
+		opportunity.StartAt = s.publications[sequences[start]].Timestamp
+		opportunity.LeftCensored = start == 0
+		end := selectedIndex + 1
+		for end < len(sequences) && qualifies[end] {
+			end++
+		}
+		if end == len(sequences) {
+			opportunity.RightCensored = true
+		} else {
+			opportunity.EndAt = s.publications[sequences[end]].Timestamp
+			opportunity.DurationNanos = opportunity.EndAt - opportunity.StartAt
+			if opportunity.DurationNanos <= 0 {
+				return errors.New("latency pilot: nonpositive sampled opportunity duration")
+			}
+			if !opportunity.LeftCensored {
+				opportunity.Complete = true
+				ratio := float64(result.ActionTiming.PublicationToVenueArrivalNanos) / float64(opportunity.DurationNanos)
+				opportunity.ActionDelayOverDuration = &ratio
+			}
+		}
+	}
+	result.SelectedOpportunity = opportunity
+	return nil
 }
 
 func (s *reconstructionState) finishArithmetic() error {
