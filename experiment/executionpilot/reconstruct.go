@@ -297,6 +297,18 @@ func decodePayload[T any](raw json.RawMessage) (T, error) {
 	return value, nil
 }
 
+func requireEventField(raw json.RawMessage, field string) error {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return err
+	}
+	value, present := fields[field]
+	if !present || string(value) == "null" {
+		return fmt.Errorf("execution pilot: required event field %s is absent", field)
+	}
+	return nil
+}
+
 func (s *reconstructionState) consume(event RecordedEvent) error {
 	if event.Timestamp < s.lastEventTS || event.Timestamp < 0 || event.Timestamp > int64(s.contract.Runner.Iterations)*s.contract.Runner.Step {
 		return errors.New("execution pilot: nonmonotone or out-of-horizon evidence time")
@@ -398,14 +410,18 @@ func (s *reconstructionState) consumeActor(event RecordedEvent) error {
 		}
 		s.receipts[fill.TradeID] = true
 	case "order_cancelled_receipt":
+		if err := requireEventField(event.Payload, "request_id"); err != nil {
+			return err
+		}
 		cancel, err := decodePayload[struct {
 			OrderID      uint64 `json:"order_id"`
+			RequestID    uint64 `json:"request_id"`
 			RemainingQty int64  `json:"remaining_qty"`
 		}](event.Payload)
 		if err != nil {
 			return err
 		}
-		if !s.wasCancelled || s.cancelReceiptCount != 0 || cancel.OrderID != s.result.OrderID ||
+		if !s.wasCancelled || s.cancelReceiptCount != 0 || cancel.OrderID != s.result.OrderID || cancel.RequestID != 0 ||
 			cancel.RemainingQty != s.result.CancelledResidual ||
 			event.Timestamp != s.cancelledAt+s.contract.Parents[0].Latency {
 			return errors.New("execution pilot: cancellation receipt mismatch")
@@ -634,15 +650,20 @@ func (s *reconstructionState) consumeExchange(event RecordedEvent) error {
 		}
 		s.result.LastVenueFillAt = event.Timestamp
 	case "OrderCancelled":
+		if err := requireEventField(event.Payload, "request_id"); err != nil {
+			return err
+		}
 		cancel, err := decodePayload[struct {
 			OrderID      uint64 `json:"order_id"`
+			RequestID    uint64 `json:"request_id"`
 			RemainingQty int64  `json:"remaining_qty"`
 			Reason       string `json:"reason"`
 		}](event.Payload)
 		if err != nil {
 			return err
 		}
-		if !s.wasAccepted || s.wasCancelled || cancel.OrderID != s.result.OrderID || cancel.RemainingQty <= 0 || cancel.Reason != "NO_LIQUIDITY" {
+		if !s.wasAccepted || s.wasCancelled || cancel.OrderID != s.result.OrderID ||
+			cancel.RequestID != s.result.RequestID || cancel.RemainingQty <= 0 || cancel.Reason != "NO_LIQUIDITY" {
 			return errors.New("execution pilot: unmatched focal cancellation")
 		}
 		s.wasCancelled = true

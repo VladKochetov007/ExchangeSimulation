@@ -176,6 +176,53 @@ func TestPartialFillFixtureReconstructsCancellation(t *testing.T) {
 			}
 		})
 	}
+	for _, mutation := range []struct {
+		name          string
+		source        string
+		event         string
+		removeRequest bool
+	}{
+		{name: "wrong venue cancellation request", source: "exchange", event: "OrderCancelled"},
+		{name: "wrong forced cancellation receipt request", source: "actor", event: "order_cancelled_receipt"},
+		{name: "missing venue cancellation request", source: "exchange", event: "OrderCancelled", removeRequest: true},
+		{name: "missing forced cancellation receipt request", source: "actor", event: "order_cancelled_receipt", removeRequest: true},
+	} {
+		t.Run(mutation.name, func(t *testing.T) {
+			var changed bytes.Buffer
+			changedRecorder := NewRecorder(&changed)
+			changedRequest := false
+			if err := WalkEvidence(bytes.NewReader(output.Bytes()), identity, func(event RecordedEvent) error {
+				payload := any(event.Payload)
+				if event.ClientID == 13 && event.Source == mutation.source && event.Name == mutation.event {
+					changedRequest = true
+					var fields map[string]any
+					if err := json.Unmarshal(event.Payload, &fields); err != nil {
+						return err
+					}
+					if mutation.removeRequest {
+						delete(fields, "request_id")
+					} else {
+						fields["request_id"] = uint64(999_999)
+					}
+					payload = fields
+				}
+				changedRecorder.Record(executionlab.EvidenceObservation{
+					Timestamp: event.Timestamp, ClientID: event.ClientID,
+					Source: event.Source, Name: event.Name, Route: event.Route, Payload: payload,
+				})
+				return nil
+			}); err != nil || !changedRequest {
+				t.Fatalf("cancellation request rewrite failed: changed=%t err=%v", changedRequest, err)
+			}
+			changedIdentity, err := changedRecorder.Finish()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := Reconstruct(bytes.NewReader(changed.Bytes()), changedIdentity, plan); err == nil {
+				t.Fatal("rehashed wrong cancellation request ID accepted")
+			}
+		})
+	}
 	var unmarked bytes.Buffer
 	unmarkedRecorder := NewRecorder(&unmarked)
 	if err := WalkEvidence(bytes.NewReader(output.Bytes()), identity, func(event RecordedEvent) error {
@@ -353,7 +400,7 @@ func TestAcceptedZeroFillAfterFacingDepthDisappears(t *testing.T) {
 				RequestID: 2, OrderID: 412,
 			})
 			emit(timestamp, 13, "actor", "order_cancelled_receipt", actor.OrderCancelledEvent{
-				RequestID: 2, OrderID: 412, RemainingQty: cell.TargetQty,
+				OrderID: 412, RemainingQty: cell.TargetQty,
 			})
 		}
 		tick := executionlab.DecisionTick{AlreadyDecided: timestamp > 1_000_000_000}
