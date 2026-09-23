@@ -184,8 +184,13 @@ type actorSummary struct {
 	Children             []json.RawMessage `json:"Children"`
 	DecisionAt           int64             `json:"DecisionAt"`
 	DecisionMid          int64             `json:"DecisionMid"`
+	FirstVenueFillAt     int64             `json:"FirstVenueFillAt"`
+	LastVenueFillAt      int64             `json:"LastVenueFillAt"`
 	Notional             int64             `json:"Notional"`
 	QuoteFees            int64             `json:"QuoteFees"`
+	UnpricedFeeCount     int               `json:"UnpricedFeeCount"`
+	Shortfall            int64             `json:"Shortfall"`
+	ShortfallBps         float64           `json:"ShortfallBps"`
 	TerminalMid          int64             `json:"TerminalMid"`
 	TargetShortfallValid bool              `json:"TargetShortfallValid"`
 	TargetShortfall      int64             `json:"TargetShortfall"`

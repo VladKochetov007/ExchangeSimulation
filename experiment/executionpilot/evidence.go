@@ -16,10 +16,12 @@ import (
 )
 
 const (
-	EvidenceSchemaID           = "execution-pilot-opaque-v3"
-	evidenceSchemaEpoch        = 0x4d450003
-	LatencyEvidenceSchemaID    = "latency-pilot-opaque-v1"
-	latencyEvidenceSchemaEpoch = 0x4d450004
+	EvidenceSchemaID               = "execution-pilot-opaque-v3"
+	evidenceSchemaEpoch            = 0x4d450003
+	LatencyEvidenceSchemaID        = "latency-pilot-opaque-v1"
+	latencyEvidenceSchemaEpoch     = 0x4d450004
+	InstructionEvidenceSchemaID    = "instruction-pilot-opaque-v1"
+	instructionEvidenceSchemaEpoch = 0x4d450005
 )
 
 type evidenceEnvelope struct {
@@ -49,6 +51,10 @@ func NewRecorder(output io.Writer) *Recorder {
 
 func NewLatencyRecorder(output io.Writer) *Recorder {
 	return newRecorder(output, LatencyEvidenceSchemaID, latencyEvidenceSchemaEpoch)
+}
+
+func NewInstructionRecorder(output io.Writer) *Recorder {
+	return newRecorder(output, InstructionEvidenceSchemaID, instructionEvidenceSchemaEpoch)
 }
 
 func newRecorder(output io.Writer, schemaID string, epoch uint32) *Recorder {
@@ -114,6 +120,10 @@ func WalkEvidence(input io.Reader, expected EvidenceIdentity, visit func(Recorde
 
 func WalkLatencyEvidence(input io.Reader, expected EvidenceIdentity, visit func(RecordedEvent) error) error {
 	return walkEvidence(input, expected, LatencyEvidenceSchemaID, latencyEvidenceSchemaEpoch, visit)
+}
+
+func WalkInstructionEvidence(input io.Reader, expected EvidenceIdentity, visit func(RecordedEvent) error) error {
+	return walkEvidence(input, expected, InstructionEvidenceSchemaID, instructionEvidenceSchemaEpoch, visit)
 }
 
 func walkEvidence(input io.Reader, expected EvidenceIdentity, schemaID string, epoch uint32, visit func(RecordedEvent) error) error {

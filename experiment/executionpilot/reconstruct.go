@@ -39,6 +39,7 @@ type ReconstructedOutcome struct {
 	RetainedAfterOneSided  bool                 `json:"retained_after_one_sided"`
 	DeliveredTouchAskQty   int64                `json:"delivered_touch_ask_qty"`
 	DeliveredFiveAskQty    int64                `json:"delivered_five_ask_qty"`
+	CapBoundedAskQty       *int64               `json:"cap_bounded_ask_qty,omitempty"`
 	DeliveredSpread        int64                `json:"delivered_spread"`
 	MechanicalSweepQty     int64                `json:"mechanical_sweep_qty"`
 	MechanicalSweepCost    int64                `json:"mechanical_sweep_cost"`
@@ -149,6 +150,11 @@ type analysisContract struct {
 			TargetQty     int64  `json:"TargetQty"`
 			DecisionAfter int64  `json:"DecisionAfter"`
 			PollInterval  int64  `json:"PollInterval"`
+			Instruction   *struct {
+				OrderType   string `json:"order_type"`
+				TimeInForce string `json:"time_in_force"`
+				LimitPrice  int64  `json:"limit_price"`
+			} `json:"instruction,omitempty"`
 		} `json:"config"`
 	} `json:"parents"`
 	Runner struct {
@@ -325,6 +331,10 @@ type reconstructionState struct {
 	requestLatency        int64
 	responseLatency       int64
 	latencyEvidence       bool
+	instructionEvidence   bool
+	expectedOrderType     string
+	expectedTimeInForce   string
+	expectedLimitPrice    int64
 	cancelReceiptCount    int
 }
 
@@ -394,6 +404,53 @@ func ReconstructLatency(input io.Reader, evidence EvidenceIdentity, effectiveWor
 	return state.result, nil
 }
 
+// ReconstructInstruction uses the locked effective world, rather than the
+// actor report, to identify the expected limit instruction and its cap.
+func ReconstructInstruction(input io.Reader, evidence EvidenceIdentity, effectiveWorld json.RawMessage, targetQty int64) (ReconstructedOutcome, error) {
+	var contract analysisContract
+	if err := json.Unmarshal(effectiveWorld, &contract); err != nil {
+		return ReconstructedOutcome{}, fmt.Errorf("instruction pilot: decode effective world: %w", err)
+	}
+	if len(contract.Parents) != 1 {
+		return ReconstructedOutcome{}, errors.New("instruction pilot: requires one focal parent")
+	}
+	parent := contract.Parents[0]
+	if parent.Deployment != nil || parent.Latency != 1_000_000 || parent.Config.Instruction == nil ||
+		parent.Config.Instruction.OrderType != "LIMIT" ||
+		(parent.Config.Instruction.TimeInForce != "IOC" && parent.Config.Instruction.TimeInForce != "FOK") ||
+		parent.Config.Instruction.LimitPrice <= 0 ||
+		parent.Config.TargetQty != targetQty || targetQty <= 0 ||
+		parent.Config.Side != "BUY" || parent.Config.Symbol != contract.Instrument.Symbol ||
+		contract.Instrument.BasePrecision <= 0 || contract.Runner.Iterations != 4000 ||
+		contract.Runner.Step != 1_000_000 || parent.Config.PollInterval != 1_000_000 ||
+		parent.Config.DecisionAfter != 1_000_000_000 || !contract.Config.RecordSnapshotProjectionEvidence {
+		return ReconstructedOutcome{}, errors.New("instruction pilot: unsupported or inconsistent focal contract")
+	}
+	accountFound := false
+	for _, account := range contract.Accounts {
+		if account.ClientID == parent.ClientID && account.Role == "parent" {
+			accountFound = account.InitialBalances[contract.Instrument.BaseAsset] > 0 &&
+				account.InitialBalances[contract.Instrument.QuoteAsset] > 0 &&
+				account.Fee.InQuote && account.Fee.TakerBps == 5 && account.Fee.MakerBps == 0
+		}
+	}
+	if !accountFound {
+		return ReconstructedOutcome{}, errors.New("instruction pilot: focal account or fee contract missing")
+	}
+	state := newReconstructionState(contract, parent.ClientID, targetQty)
+	state.instructionEvidence = true
+	state.expectedOrderType = parent.Config.Instruction.OrderType
+	state.expectedTimeInForce = parent.Config.Instruction.TimeInForce
+	state.expectedLimitPrice = parent.Config.Instruction.LimitPrice
+	if err := WalkInstructionEvidence(input, evidence, state.consume); err != nil {
+		return ReconstructedOutcome{}, err
+	}
+	if err := state.finish(); err != nil {
+		return ReconstructedOutcome{}, err
+	}
+	return state.result, nil
+}
+
 func newReconstructionState(contract analysisContract, clientID uint64, targetQty int64) *reconstructionState {
 	state := &reconstructionState{
 		contract: contract, clientID: clientID,
@@ -402,11 +459,13 @@ func newReconstructionState(contract analysisContract, clientID uint64, targetQt
 		tradeByID: map[uint64]tradeWire{}, receipts: map[uint64]bool{},
 		publications:        map[uint64]publishedSnapshot{},
 		publicationOutcomes: map[uint64]publicationOutcomeWire{}, deliveredSnapshots: map[uint64]bool{},
-		processedSnapshots: map[uint64]bool{},
-		pendingProcessing:  map[uint64]pendingReconstructionSnapshot{},
-		marketDataLatency:  contract.Parents[0].Latency,
-		requestLatency:     contract.Parents[0].Latency,
-		responseLatency:    contract.Parents[0].Latency,
+		processedSnapshots:  map[uint64]bool{},
+		pendingProcessing:   map[uint64]pendingReconstructionSnapshot{},
+		marketDataLatency:   contract.Parents[0].Latency,
+		requestLatency:      contract.Parents[0].Latency,
+		responseLatency:     contract.Parents[0].Latency,
+		expectedOrderType:   "MARKET",
+		expectedTimeInForce: "GTC",
 	}
 	for _, account := range contract.Accounts {
 		if account.ClientID == clientID {
@@ -663,9 +722,9 @@ func (s *reconstructionState) consumeSend(event RecordedEvent) error {
 	}
 	if s.wasSent || event.Timestamp != s.eligibleTick || request.Type != "place_order" ||
 		request.OrderReq.RequestID == 0 || request.OrderReq.Symbol != s.contract.Instrument.Symbol ||
-		request.OrderReq.Side != "BUY" || request.OrderReq.Type != "MARKET" ||
-		request.OrderReq.Qty != s.result.TargetQty || request.OrderReq.Price != 0 ||
-		request.OrderReq.TimeInForce != "GTC" || request.OrderReq.Visibility != "NORMAL" ||
+		request.OrderReq.Side != "BUY" || request.OrderReq.Type != s.expectedOrderType ||
+		request.OrderReq.Qty != s.result.TargetQty || request.OrderReq.Price != s.expectedLimitPrice ||
+		request.OrderReq.TimeInForce != s.expectedTimeInForce || request.OrderReq.Visibility != "NORMAL" ||
 		request.OrderReq.PostOnly || request.OrderReq.ReduceOnly {
 		return errors.New("execution pilot: focal order send does not match eligible decision and locked contract")
 	}
@@ -709,6 +768,22 @@ func (s *reconstructionState) consumeSend(event RecordedEvent) error {
 		}
 		s.result.MechanicalSweepQty += quantity
 		s.result.MechanicalSweepCost += notional
+	}
+	if s.instructionEvidence {
+		var capBoundedQty int64
+		for index, level := range s.lastSnapshot.Snapshot.Asks {
+			if level.Price <= 0 || level.VisibleQty < 0 ||
+				(index > 0 && level.Price < s.lastSnapshot.Snapshot.Asks[index-1].Price) {
+				return errors.New("instruction pilot: malformed selected ask curve")
+			}
+			if level.Price <= s.expectedLimitPrice {
+				if !addSafe(capBoundedQty, level.VisibleQty) {
+					return errors.New("instruction pilot: cap-bounded ask quantity overflow")
+				}
+				capBoundedQty += level.VisibleQty
+			}
+		}
+		s.result.CapBoundedAskQty = &capBoundedQty
 	}
 	return nil
 }
@@ -816,8 +891,8 @@ func (s *reconstructionState) consumeExchange(event RecordedEvent) error {
 			return err
 		}
 		if !s.wasSent || s.acceptedSeen || accepted.RequestID != s.result.RequestID || accepted.ClientID != s.clientID ||
-			accepted.OrderID == 0 || accepted.Qty != s.result.TargetQty || accepted.Side != "BUY" || accepted.Type != "MARKET" ||
-			accepted.Price != 0 || accepted.FilledQty != 0 || accepted.TimeInForce != "GTC" ||
+			accepted.OrderID == 0 || accepted.Qty != s.result.TargetQty || accepted.Side != "BUY" || accepted.Type != s.expectedOrderType ||
+			accepted.Price != s.expectedLimitPrice || accepted.FilledQty != 0 || accepted.TimeInForce != s.expectedTimeInForce ||
 			accepted.Visibility != "NORMAL" || accepted.PostOnly ||
 			event.Timestamp != s.result.OrderSentAt+s.requestLatency {
 			return errors.New("execution pilot: accepted order does not match focal intent")
@@ -834,8 +909,8 @@ func (s *reconstructionState) consumeExchange(event RecordedEvent) error {
 		}
 		if !s.wasSent || s.acceptedSeen || rejected.RequestID != s.result.RequestID || rejected.Error == "" ||
 			rejected.Qty != s.result.TargetQty || rejected.Symbol != s.contract.Instrument.Symbol ||
-			rejected.Side != "BUY" || rejected.Type != "MARKET" || rejected.Price != 0 ||
-			rejected.TimeInForce != "GTC" || rejected.PostOnly ||
+			rejected.Side != "BUY" || rejected.Type != s.expectedOrderType || rejected.Price != s.expectedLimitPrice ||
+			rejected.TimeInForce != s.expectedTimeInForce || rejected.PostOnly ||
 			event.Timestamp != s.result.OrderSentAt+s.requestLatency {
 			return errors.New("execution pilot: rejected order does not match focal intent")
 		}
@@ -886,7 +961,8 @@ func (s *reconstructionState) consumeExchange(event RecordedEvent) error {
 			return err
 		}
 		if !s.wasAccepted || s.wasCancelled || cancel.OrderID != s.result.OrderID ||
-			cancel.RequestID != s.result.RequestID || cancel.RemainingQty <= 0 || cancel.Reason != "NO_LIQUIDITY" {
+			cancel.RequestID != s.result.RequestID || cancel.RemainingQty <= 0 ||
+			cancel.Reason != s.expectedCancelReason() {
 			return errors.New("execution pilot: unmatched focal cancellation")
 		}
 		s.wasCancelled = true
@@ -903,6 +979,13 @@ func (s *reconstructionState) consumeExchange(event RecordedEvent) error {
 
 func addSafe(left, right int64) bool {
 	return (right >= 0 && left <= math.MaxInt64-right) || (right < 0 && left >= math.MinInt64-right)
+}
+
+func (s *reconstructionState) expectedCancelReason() string {
+	if s.instructionEvidence && s.expectedTimeInForce == "IOC" {
+		return "IOC_EXPIRED"
+	}
+	return "NO_LIQUIDITY"
 }
 
 func (s *reconstructionState) consumeBalanceChange(event RecordedEvent) error {
@@ -948,6 +1031,11 @@ func (s *reconstructionState) consumeBalanceSnapshot(event RecordedEvent) error 
 		if seen[balance.Asset] || balance.Borrowed != 0 || !addSafe(balance.Free, balance.Locked) ||
 			balance.Free+balance.Locked != s.balances[balance.Asset] {
 			return errors.New("execution pilot: terminal balance differs from replayed ledger")
+		}
+		if s.instructionEvidence &&
+			(balance.Asset == s.contract.Instrument.BaseAsset || balance.Asset == s.contract.Instrument.QuoteAsset) &&
+			balance.Locked != 0 {
+			return errors.New("instruction pilot: terminal focal reservation was not released")
 		}
 		seen[balance.Asset] = true
 	}
@@ -1001,7 +1089,7 @@ func (s *reconstructionState) finish() error {
 		if s.ledgerABC != 0 || s.ledgerUSD != 0 {
 			return errors.New("execution pilot: focal ledger changed without an order")
 		}
-		if s.latencyEvidence {
+		if s.latencyEvidence || s.instructionEvidence {
 			s.result.UnfilledQty = s.result.TargetQty
 		}
 		s.result.Status = OutcomeNoObservedOpportunity
@@ -1029,6 +1117,10 @@ func (s *reconstructionState) finish() error {
 	if s.result.FilledQty > s.result.TargetQty || s.result.FilledQty < 0 ||
 		s.result.FilledQty+s.result.CancelledResidual != s.result.TargetQty {
 		return errors.New("execution pilot: admitted quantity does not equal fills plus terminal residual")
+	}
+	if s.instructionEvidence && s.expectedTimeInForce == "FOK" &&
+		(s.result.FilledQty != s.result.TargetQty || s.wasCancelled) {
+		return errors.New("instruction pilot: accepted FOK was not fully filled")
 	}
 	for tradeID, fill := range s.fillByTrade {
 		trade, exists := s.tradeByID[tradeID]
