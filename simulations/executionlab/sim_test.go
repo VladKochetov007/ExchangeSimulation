@@ -120,6 +120,61 @@ func TestTWAPRejectsInsufficientDrainHorizon(t *testing.T) {
 	}
 }
 
+func TestWorldContractCapturesConstructedParticipants(t *testing.T) {
+	for _, counts := range [][2]int{{2, 10}, {4, 8}, {6, 6}} {
+		cfg := DefaultSimConfig(Immediate)
+		cfg.MMCount, cfg.NoiseTraderCount = counts[0], counts[1]
+		sim, err := NewSim(cfg)
+		if err != nil {
+			t.Fatalf("NewSim(%v): %v", counts, err)
+		}
+		contract := sim.WorldContract()
+		if contract.Config.MMCount != counts[0] || contract.Config.NoiseTraderCount != counts[1] ||
+			len(contract.Accounts) != 13 || len(contract.Makers) != counts[0] ||
+			len(contract.Noise) != counts[1] || len(contract.Parents) != 1 {
+			t.Fatalf("wrong roster for %v: %#v", counts, contract)
+		}
+		if contract.Parents[0].ClientID != 13 || contract.Parents[0].Config.TargetQty != cfg.Parent.TargetQty ||
+			contract.Instrument.Symbol != "ABC/USD" || contract.Runner.Iterations != 4000 {
+			t.Fatalf("wrong parent/instrument/runner for %v: %#v", counts, contract)
+		}
+		for i, maker := range contract.Makers {
+			if maker.ClientID != uint64(i+1) || len(maker.RealizedLevelCadences) != 5 ||
+				maker.RealizedLevelCadences[0] != time.Duration(10+i)*time.Millisecond {
+				t.Fatalf("wrong maker cadence for %v maker %d: %#v", counts, i, maker)
+			}
+		}
+		for i, noise := range contract.Noise {
+			if noise.ClientID != uint64(counts[0]+i+1) || noise.Seed != cfg.Seed+int64(i)+1 ||
+				noise.Latency != cfg.BackgroundLatency {
+				t.Fatalf("wrong taker for %v index %d: %#v", counts, i, noise)
+			}
+		}
+		if contract.Accounts[12].InitialBalances["ABC"] != 100_000*basePrecision ||
+			contract.Accounts[12].Fee.TakerBps != 5 || !contract.Accounts[12].Fee.InQuote {
+			t.Fatalf("wrong focal account for %v: %#v", counts, contract.Accounts[12])
+		}
+		contract.Accounts[0].InitialBalances["ABC"] = 1
+		contract.Makers[0].RealizedLevelCadences[0] = 1
+		again := sim.WorldContract()
+		if again.Accounts[0].InitialBalances["ABC"] != 100_000*basePrecision ||
+			again.Makers[0].RealizedLevelCadences[0] == 1 {
+			t.Fatal("caller mutated retained contract")
+		}
+	}
+}
+
+func TestNewSimRejectsNegativeRoster(t *testing.T) {
+	for _, cfg := range []SimConfig{
+		func() SimConfig { c := DefaultSimConfig(Immediate); c.MMCount = -1; return c }(),
+		func() SimConfig { c := DefaultSimConfig(Immediate); c.NoiseTraderCount = -1; return c }(),
+	} {
+		if _, err := NewSim(cfg); err == nil {
+			t.Fatalf("negative roster accepted: %#v", cfg)
+		}
+	}
+}
+
 func TestExecutionShortfallUsesFilledReferenceAndQuoteFees(t *testing.T) {
 	cfg := DefaultSimConfig(Immediate).Parent
 	gateway := exchange.NewClientGateway(1)

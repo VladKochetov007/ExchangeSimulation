@@ -84,6 +84,9 @@ func (c *SimConfig) normalize() error {
 	if c.ParentCount < 1 {
 		return fmt.Errorf("executionlab: parent count must be positive")
 	}
+	if c.MMCount < 0 || c.NoiseTraderCount < 0 {
+		return fmt.Errorf("executionlab: background account counts must be non-negative")
+	}
 	if c.ParentCount > 1 && c.ParentInterval <= 0 {
 		return fmt.Errorf("executionlab: parent interval must be positive when parent count exceeds one")
 	}
@@ -116,7 +119,10 @@ type Sim struct {
 	clock    *simulation.SimulatedClock
 	mounts   []*simulation.Mount
 	actors   []actor.Actor
+	contract WorldContract
 }
+
+func (s *Sim) WorldContract() WorldContract { return s.contract.clone() }
 
 func newLatencyMount(ex *exchange.Exchange, scheduler *simulation.EventScheduler, clock *simulation.SimulatedClock, delay time.Duration) *simulation.Mount {
 	if delay == 0 {
@@ -156,6 +162,25 @@ func NewSim(cfg SimConfig) (*Sim, error) {
 		"ABC": 100_000 * basePrecision,
 		"USD": 100_000_000 * quotePrecision,
 	}
+	contract := WorldContract{
+		SchemaVersion: 1,
+		Config:        cfg,
+		Instrument: InstrumentContract{
+			Symbol: cfg.Parent.Symbol, BaseAsset: "ABC", QuoteAsset: cfg.Parent.QuoteAsset,
+			BasePrecision: basePrecision, QuotePrecision: quotePrecision,
+			TickSize: priceTick, LotSize: basePrecision / 100,
+		},
+		Bootstrap: bootstrapPrice,
+		Runner: RunnerContract{
+			Iterations: int(cfg.Duration / time.Millisecond), Step: time.Millisecond,
+			DeterministicIngress: true, DeterministicPhases: true,
+		},
+	}
+	addAccount := func(id uint64, role string, feeModel *exchange.PercentageFee) {
+		contract.Accounts = append(contract.Accounts, AccountContract{
+			ClientID: id, Role: role, InitialBalances: balances, Fee: *feeModel,
+		})
+	}
 
 	directMount := simulation.NewMount(ex, simulation.LatencyConfig{})
 	mounts := []*simulation.Mount{directMount}
@@ -164,7 +189,7 @@ func NewSim(cfg SimConfig) (*Sim, error) {
 	for i := 0; i < cfg.MMCount; i++ {
 		clientID++
 		gateway := directMount.ConnectNewClient(clientID, balances, mmFee)
-		mm := feesim.NewMarketMaker(clientID, gateway, feesim.MMConfig{
+		makerConfig := feesim.MMConfig{
 			Symbol:         cfg.Parent.Symbol,
 			BootstrapPrice: bootstrapPrice,
 			Levels:         5,
@@ -174,6 +199,12 @@ func NewSim(cfg SimConfig) (*Sim, error) {
 			MidPriceMode:   feesim.MidFromWeightedMid,
 			BaseInterval:   10*time.Millisecond + time.Duration(i)*time.Millisecond,
 			MaxInterval:    30*time.Millisecond + time.Duration(i)*time.Millisecond,
+		}
+		mm := feesim.NewMarketMaker(clientID, gateway, makerConfig)
+		addAccount(clientID, "maker", mmFee)
+		contract.Makers = append(contract.Makers, MakerContract{
+			ClientID: clientID, Config: makerConfig,
+			RealizedLevelCadences: mm.RealizedLevelCadences(),
 		})
 		mm.SetTickerFactory(timers)
 		actors = append(actors, mm)
@@ -183,11 +214,19 @@ func NewSim(cfg SimConfig) (*Sim, error) {
 		mount := newLatencyMount(ex, scheduler, clock, cfg.BackgroundLatency)
 		mounts = append(mounts, mount)
 		gateway := mount.ConnectNewClient(clientID, balances, fee)
-		noise := feesim.NewRandomTaker(clientID, gateway, feesim.TakerConfig{
+		noiseConfig := feesim.TakerConfig{
 			Symbols:      []string{cfg.Parent.Symbol},
 			TargetQtys:   map[string]int64{cfg.Parent.Symbol: basePrecision / 20},
 			TakeInterval: 25 * time.Millisecond,
 			Seed:         cfg.Seed + int64(i) + 1,
+		}
+		noise := feesim.NewRandomTaker(clientID, gateway, noiseConfig)
+		addAccount(clientID, "random_taker", fee)
+		contract.Noise = append(contract.Noise, NoiseContract{
+			ClientID: clientID, Symbol: cfg.Parent.Symbol,
+			TargetQty:    noiseConfig.TargetQtys[cfg.Parent.Symbol],
+			TakeInterval: noiseConfig.TakeInterval, Seed: noiseConfig.Seed,
+			Latency: cfg.BackgroundLatency,
 		})
 		noise.SetTickerFactory(timers)
 		actors = append(actors, noise)
@@ -211,6 +250,10 @@ func NewSim(cfg SimConfig) (*Sim, error) {
 			return nil, err
 		}
 		parent.SetTickerFactory(timers)
+		addAccount(clientID, "parent", fee)
+		contract.Parents = append(contract.Parents, ParentContract{
+			ClientID: clientID, Config: parentCfg, Latency: cfg.ExecutionLatency,
+		})
 		parents = append(parents, parent)
 		actors = append(actors, parent)
 	}
@@ -229,7 +272,7 @@ func NewSim(cfg SimConfig) (*Sim, error) {
 	}
 	return &Sim{
 		Runner: runner, Parent: parents[0], Parents: parents,
-		exchange: ex, clock: clock, mounts: mounts, actors: actors,
+		exchange: ex, clock: clock, mounts: mounts, actors: actors, contract: contract.clone(),
 	}, nil
 }
 
