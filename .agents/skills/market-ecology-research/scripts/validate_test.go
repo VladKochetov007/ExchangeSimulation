@@ -114,6 +114,31 @@ func TestValidNoTradeAndUnavailableReview(t *testing.T) {
 	}
 }
 
+func TestMechanicalOnlyCausalBoundary(t *testing.T) {
+	result := templateResult(t)
+	result.ProcessStatus = "COMPLETED"
+	result.EvidenceValidity = "VALID"
+	result.ScientificVerdict = "MECHANICAL_ONLY"
+	result.Claims = []Claim{{ID: "C1", Type: "MECHANICAL", Text: "synthetic arithmetic", EvidenceIDs: []string{"E1"}, Limitations: []string{"not a market result"}}}
+	result.Evidence = []Evidence{{ID: "E1", Kind: "fixture", Location: "synthetic", Identity: "synthetic-v1"}}
+	for key := range result.Identities {
+		identity := "synthetic-" + key
+		result.Identities[key] = &identity
+	}
+	for _, verdict := range strings.Fields("NOT_ASSESSED NOT_APPLICABLE") {
+		result.CausalVerdict = verdict
+		if err := validateResult(result); err != nil {
+			t.Fatalf("valid mechanical-only result: %v", err)
+		}
+	}
+	for _, verdict := range strings.Fields("SUPPORTED NOT_SUPPORTED INCONCLUSIVE NOT_IDENTIFIED") {
+		result.CausalVerdict = verdict
+		if err := validateResult(result); err == nil || !strings.Contains(err.Error(), "mechanical-only") {
+			t.Fatalf("causal verdict %s did not fail at the mechanical-only boundary: %v", verdict, err)
+		}
+	}
+}
+
 func TestStrictDecode(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join(projectRoot(t), skillPath, "assets/result-template.json"))
 	if err != nil {

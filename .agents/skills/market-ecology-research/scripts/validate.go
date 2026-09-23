@@ -338,6 +338,9 @@ func validateResult(result Result) error {
 	if member(result.CausalVerdict, "SUPPORTED NOT_SUPPORTED INCONCLUSIVE NOT_IDENTIFIED") && (result.ScientificVerdict == "NOT_ISSUED" || result.EvidenceValidity != "VALID") {
 		return fmt.Errorf("causal verdict without valid scientific result")
 	}
+	if result.ScientificVerdict == "MECHANICAL_ONLY" && !member(result.CausalVerdict, "NOT_ASSESSED NOT_APPLICABLE") {
+		return fmt.Errorf("mechanical-only result cannot issue a causal verdict")
+	}
 	if result.ScientificVerdict != "NOT_ISSUED" {
 		if len(result.Claims) == 0 {
 			return fmt.Errorf("verdict without evidence-linked claims")

@@ -60,6 +60,8 @@ A status record is never an authorization grant; consult the owner instruction.
 A result with missing/invalid evidence cannot issue an economic verdict.
 An issued scientific verdict requires evidence-linked claims and complete identities.
 Assess causal effects separately even when mechanical or descriptive evidence is valid.
+MECHANICAL_ONLY limits the entire result to mechanics: causal_verdict must be
+NOT_ASSESSED or NOT_APPLICABLE, not a substantive causal finding (including a null).
 An accepted review requires COMPLETED execution and a substantive scope/reference.
 Every claim has id, type, text, evidence_ids and limitations.
 Every evidence entry has id, kind, location and identity.
