@@ -160,6 +160,15 @@ type publishedSnapshot struct {
 	Payload   publicationWire
 }
 
+type publicationOutcomeWire struct {
+	ClientID  uint64 `json:"client_id"`
+	Symbol    string `json:"symbol"`
+	Type      int    `json:"type"`
+	Sequence  uint64 `json:"sequence"`
+	Timestamp int64  `json:"timestamp"`
+	Status    string `json:"status"`
+}
+
 type orderWire struct {
 	RequestID   uint64 `json:"request_id"`
 	OrderID     uint64 `json:"order_id"`
@@ -251,6 +260,8 @@ type reconstructionState struct {
 	lastEventTS           int64
 	decisionTicks         int64
 	publications          map[uint64]publishedSnapshot
+	publicationOutcomes   map[uint64]publicationOutcomeWire
+	deliveredSnapshots    map[uint64]bool
 	lastDeliveredSeq      uint64
 	cancelReceiptCount    int
 }
@@ -265,7 +276,8 @@ func Reconstruct(input io.Reader, evidence EvidenceIdentity, plan LockedPlan) (R
 		result:   ReconstructedOutcome{ClientID: clientID, TargetQty: plan.Cell.TargetQty},
 		balances: map[string]int64{}, fillByTrade: map[uint64]fillWire{},
 		tradeByID: map[uint64]tradeWire{}, receipts: map[uint64]bool{},
-		publications: map[uint64]publishedSnapshot{},
+		publications:        map[uint64]publishedSnapshot{},
+		publicationOutcomes: map[uint64]publicationOutcomeWire{}, deliveredSnapshots: map[uint64]bool{},
 	}
 	for _, account := range contract.Accounts {
 		if account.ClientID == clientID {
@@ -317,6 +329,9 @@ func (s *reconstructionState) consume(event RecordedEvent) error {
 	if event.Source == "actor" && event.ClientID == s.clientID {
 		return s.consumeActor(event)
 	}
+	if event.Source == "transport" && event.ClientID == s.clientID {
+		return s.consumeTransport(event)
+	}
 	if event.Source == "exchange" {
 		return s.consumeExchange(event)
 	}
@@ -334,7 +349,9 @@ func (s *reconstructionState) consumeActor(event RecordedEvent) error {
 			return errors.New("execution pilot: invalid delivered snapshot identity or time")
 		}
 		publication, published := s.publications[snapshot.SeqNum]
+		outcome, accounted := s.publicationOutcomes[snapshot.SeqNum]
 		if !published || snapshot.SeqNum <= s.lastDeliveredSeq ||
+			!accounted || outcome.Status != "enqueued" ||
 			snapshot.Timestamp != publication.Timestamp ||
 			event.Timestamp != publication.Timestamp+s.contract.Parents[0].Latency ||
 			!reflect.DeepEqual(snapshot.Snapshot.Bids, publication.Payload.PublicBids) ||
@@ -342,6 +359,7 @@ func (s *reconstructionState) consumeActor(event RecordedEvent) error {
 			return errors.New("execution pilot: local snapshot lacks matching prior venue publication or delivery latency")
 		}
 		s.lastDeliveredSeq = snapshot.SeqNum
+		s.deliveredSnapshots[snapshot.SeqNum] = true
 		s.latestMessage, s.latestReceipt, s.latestMessageEventSeq = snapshot, event.Timestamp, event.Sequence
 		if len(snapshot.Snapshot.Bids) != 0 && len(snapshot.Snapshot.Asks) != 0 {
 			s.lastSnapshot, s.lastReceipt, s.lastSnapshotEventSeq = snapshot, event.Timestamp, event.Sequence
@@ -428,6 +446,34 @@ func (s *reconstructionState) consumeActor(event RecordedEvent) error {
 		}
 		s.cancelReceiptCount++
 	}
+	return nil
+}
+
+func (s *reconstructionState) consumeTransport(event RecordedEvent) error {
+	if event.Name != "snapshot_publish_outcome" {
+		return nil
+	}
+	if err := requireEventField(event.Payload, "type"); err != nil {
+		return err
+	}
+	outcome, err := decodePayload[publicationOutcomeWire](event.Payload)
+	if err != nil {
+		return err
+	}
+	if event.Route != s.contract.Instrument.Symbol || outcome.Symbol != event.Route ||
+		outcome.ClientID != s.clientID || outcome.Sequence == 0 || outcome.Timestamp != event.Timestamp ||
+		outcome.Type != int(exchange.MDSnapshot) {
+		return errors.New("execution pilot: invalid focal snapshot publication outcome identity")
+	}
+	switch outcome.Status {
+	case "enqueued", "dropped", "not_subscribed", "not_interested", "gateway_stopped":
+	default:
+		return errors.New("execution pilot: unknown snapshot publication outcome")
+	}
+	if _, exists := s.publicationOutcomes[outcome.Sequence]; exists {
+		return errors.New("execution pilot: duplicate focal snapshot publication outcome")
+	}
+	s.publicationOutcomes[outcome.Sequence] = outcome
 	return nil
 }
 
@@ -737,6 +783,22 @@ func (s *reconstructionState) consumeBalanceSnapshot(event RecordedEvent) error 
 }
 
 func (s *reconstructionState) finish() error {
+	for sequence, publication := range s.publications {
+		outcome, present := s.publicationOutcomes[sequence]
+		if !present || outcome.Timestamp != publication.Timestamp {
+			return errors.New("execution pilot: unaccounted focal snapshot publication")
+		}
+		if outcome.Status == "enqueued" &&
+			publication.Timestamp+s.contract.Parents[0].Latency <= int64(s.contract.Runner.Iterations)*s.contract.Runner.Step &&
+			!s.deliveredSnapshots[sequence] {
+			return errors.New("execution pilot: enqueued focal snapshot has no actor receipt")
+		}
+	}
+	for sequence := range s.publicationOutcomes {
+		if _, published := s.publications[sequence]; !published {
+			return errors.New("execution pilot: focal delivery outcome lacks venue publication")
+		}
+	}
 	if s.decisionTicks != int64(s.contract.Runner.Iterations) {
 		return errors.New("execution pilot: incomplete focal decision clock evidence")
 	}

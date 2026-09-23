@@ -16,8 +16,8 @@ import (
 )
 
 const (
-	EvidenceSchemaID    = "execution-pilot-opaque-v2"
-	evidenceSchemaEpoch = 0x4d450002
+	EvidenceSchemaID    = "execution-pilot-opaque-v3"
+	evidenceSchemaEpoch = 0x4d450003
 )
 
 type evidenceEnvelope struct {

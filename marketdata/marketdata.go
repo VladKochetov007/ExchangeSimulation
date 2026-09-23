@@ -35,6 +35,25 @@ type Subscriber interface {
 	IsRunning() bool
 }
 
+type PublicationStatus string
+
+const (
+	PublicationEnqueued       PublicationStatus = "enqueued"
+	PublicationDropped        PublicationStatus = "dropped"
+	PublicationNotSubscribed  PublicationStatus = "not_subscribed"
+	PublicationNotInterested  PublicationStatus = "not_interested"
+	PublicationGatewayStopped PublicationStatus = "gateway_stopped"
+)
+
+type PublicationOutcome struct {
+	ClientID  uint64            `json:"client_id"`
+	Symbol    string            `json:"symbol"`
+	Type      etypes.MDType     `json:"type"`
+	Sequence  uint64            `json:"sequence"`
+	Timestamp int64             `json:"timestamp"`
+	Status    PublicationStatus `json:"status"`
+}
+
 // MDPublisher fans out market data to subscribed gateways.
 type MDPublisher struct {
 	Subscriptions map[string]map[uint64]*etypes.Subscription
@@ -42,9 +61,10 @@ type MDPublisher struct {
 	// different sessions subscribed to different symbols; a client-wide
 	// gateway mapping would redirect every existing symbol to the last
 	// subscriber gateway.
-	gateways map[string]map[uint64]Subscriber
-	mu       sync.Mutex
-	seqNum   uint64
+	gateways             map[string]map[uint64]Subscriber
+	mu                   sync.Mutex
+	seqNum               uint64
+	publicationObservers map[uint64]func(PublicationOutcome)
 }
 
 func NewMDPublisher() *MDPublisher {
@@ -52,6 +72,19 @@ func NewMDPublisher() *MDPublisher {
 		Subscriptions: make(map[string]map[uint64]*etypes.Subscription),
 		gateways:      make(map[string]map[uint64]Subscriber),
 	}
+}
+
+func (p *MDPublisher) SetPublicationObserver(clientID uint64, observe func(PublicationOutcome)) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if observe == nil {
+		delete(p.publicationObservers, clientID)
+		return
+	}
+	if p.publicationObservers == nil {
+		p.publicationObservers = make(map[uint64]func(PublicationOutcome))
+	}
+	p.publicationObservers[clientID] = observe
 }
 
 func (p *MDPublisher) Subscribe(clientID uint64, symbol string, types []etypes.MDType, gateway Subscriber) {
@@ -172,35 +205,72 @@ func (p *MDPublisher) Publish(symbol string, mdType etypes.MDType, data any, tim
 		clientIDs = append(clientIDs, clientID)
 	}
 	slices.Sort(clientIDs)
+	var observedStatus map[uint64]PublicationStatus
+	if len(p.publicationObservers) != 0 {
+		observedStatus = make(map[uint64]PublicationStatus, len(p.publicationObservers))
+	}
+	recordStatus := func(clientID uint64, status PublicationStatus) {
+		if _, observed := p.publicationObservers[clientID]; observed {
+			observedStatus[clientID] = status
+		}
+	}
 
 	for _, clientID := range clientIDs {
 		sub := subs[clientID]
 		if !containsMDType(sub.Types, mdType) {
+			recordStatus(clientID, PublicationNotInterested)
 			continue
 		}
 		gateway := p.gateways[symbol][clientID]
-		if gateway != nil {
-			if !gateway.IsRunning() {
-				continue
-			}
-			msgCopy := &etypes.MarketDataMsg{
-				Type:      mdType,
-				Symbol:    symbol,
-				SeqNum:    seqNum,
-				Timestamp: timestamp,
-				Data:      cloneMarketDataData(data),
-			}
-			select {
-			case gateway.MarketDataChan() <- msgCopy:
-			default:
-				// Buffer full (or gateway closed): the message is dropped but its
-				// seqNum was already consumed, so a lagging subscriber sees a gap.
-				// Known limitation — consumers should treat a seq gap as a signal
-				// to re-request a snapshot.
-			}
+		if gateway == nil || !gateway.IsRunning() {
+			recordStatus(clientID, PublicationGatewayStopped)
+			continue
+		}
+		msgCopy := &etypes.MarketDataMsg{
+			Type:      mdType,
+			Symbol:    symbol,
+			SeqNum:    seqNum,
+			Timestamp: timestamp,
+			Data:      cloneMarketDataData(data),
+		}
+		select {
+		case gateway.MarketDataChan() <- msgCopy:
+			recordStatus(clientID, PublicationEnqueued)
+		default:
+			recordStatus(clientID, PublicationDropped)
+			// Buffer full (or gateway closed): the message is dropped but its
+			// seqNum was already consumed, so a lagging subscriber sees a gap.
+			// Known limitation — consumers should treat a seq gap as a signal
+			// to re-request a snapshot.
 		}
 	}
+	type callback struct {
+		observe func(PublicationOutcome)
+		outcome PublicationOutcome
+	}
+	callbacks := make([]callback, 0, len(p.publicationObservers))
+	observerIDs := make([]uint64, 0, len(p.publicationObservers))
+	for clientID := range p.publicationObservers {
+		observerIDs = append(observerIDs, clientID)
+	}
+	slices.Sort(observerIDs)
+	for _, clientID := range observerIDs {
+		status, present := observedStatus[clientID]
+		if !present {
+			status = PublicationNotSubscribed
+		}
+		callbacks = append(callbacks, callback{
+			observe: p.publicationObservers[clientID],
+			outcome: PublicationOutcome{
+				ClientID: clientID, Symbol: symbol, Type: mdType,
+				Sequence: seqNum, Timestamp: timestamp, Status: status,
+			},
+		})
+	}
 	p.mu.Unlock()
+	for _, callback := range callbacks {
+		callback.observe(callback.outcome)
+	}
 	return seqNum
 }
 

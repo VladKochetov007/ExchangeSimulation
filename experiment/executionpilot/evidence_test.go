@@ -37,6 +37,7 @@ func TestEvidenceFixtureHasIndependentCausalBoundaries(t *testing.T) {
 	}
 	for _, name := range []string{
 		"actor/book_snapshot_receipt", "actor/decision_tick", "actor/order_send",
+		"transport/snapshot_publish_outcome",
 		"exchange/OrderAccepted", "exchange/OrderFill", "exchange/balance_change",
 		"exchange/terminal_book",
 	} {
@@ -296,6 +297,11 @@ func TestNoTradeIsNotEvidenceFailure(t *testing.T) {
 					bids := []exchange.PriceLevel{{Price: 4_999_000_000, VisibleQty: 100_000_000}}
 					asks := []exchange.PriceLevel{{Price: 5_001_000_000, VisibleQty: 100_000_000}}
 					recorder.Record(executionlab.EvidenceObservation{
+						Timestamp: 499_000_000, ClientID: 13, Source: "transport", Name: "snapshot_publish_outcome", Route: "ABC/USD",
+						Payload: map[string]any{"client_id": 13, "symbol": "ABC/USD", "type": 0,
+							"sequence": 1, "timestamp": 499_000_000, "status": "enqueued"},
+					})
+					recorder.Record(executionlab.EvidenceObservation{
 						Timestamp: 499_000_000, Source: "exchange", Name: "BookSnapshot", Route: "ABC/USD",
 						Payload: map[string]any{"source_sequence": uint64(1), "public_bids": bids, "public_asks": asks},
 					})
@@ -354,7 +360,7 @@ func TestAcceptedZeroFillAfterFacingDepthDisappears(t *testing.T) {
 	recorder := NewRecorder(&stream)
 	emit := func(timestamp int64, clientID uint64, source, name string, payload any) {
 		route := ""
-		if source == "exchange" {
+		if source == "exchange" || source == "transport" {
 			route = "ABC/USD"
 			if name == "balance_snapshot" {
 				route = "_global"
@@ -370,6 +376,10 @@ func TestAcceptedZeroFillAfterFacingDepthDisappears(t *testing.T) {
 		timestamp := tickIndex * 1_000_000
 		switch timestamp {
 		case 500_000_000:
+			emit(499_000_000, 13, "transport", "snapshot_publish_outcome", map[string]any{
+				"client_id": 13, "symbol": "ABC/USD", "type": 0, "sequence": 1,
+				"timestamp": 499_000_000, "status": "enqueued",
+			})
 			emit(499_000_000, 0, "exchange", "BookSnapshot", map[string]any{
 				"source_sequence": uint64(1), "public_bids": bids, "public_asks": asks,
 			})
@@ -377,12 +387,29 @@ func TestAcceptedZeroFillAfterFacingDepthDisappears(t *testing.T) {
 				Symbol: "ABC/USD", Timestamp: 499_000_000, SeqNum: 1,
 				Snapshot: &exchange.BookSnapshot{Bids: bids, Asks: asks},
 			})
-		case 999_000_000:
-			emit(998_000_000, 0, "exchange", "BookSnapshot", map[string]any{
-				"source_sequence": uint64(2), "public_bids": bids, "public_asks": []exchange.PriceLevel(nil),
+		case 600_000_000:
+			deeperAsks := []exchange.PriceLevel{{Price: asks[0].Price, VisibleQty: 200_000_000}}
+			emit(599_000_000, 13, "transport", "snapshot_publish_outcome", map[string]any{
+				"client_id": 13, "symbol": "ABC/USD", "type": 0, "sequence": 2,
+				"timestamp": 599_000_000, "status": "enqueued",
+			})
+			emit(599_000_000, 0, "exchange", "BookSnapshot", map[string]any{
+				"source_sequence": uint64(2), "public_bids": bids, "public_asks": deeperAsks,
 			})
 			emit(timestamp, 13, "actor", "book_snapshot_receipt", actor.BookSnapshotEvent{
-				Symbol: "ABC/USD", Timestamp: 998_000_000, SeqNum: 2,
+				Symbol: "ABC/USD", Timestamp: 599_000_000, SeqNum: 2,
+				Snapshot: &exchange.BookSnapshot{Bids: bids, Asks: deeperAsks},
+			})
+		case 999_000_000:
+			emit(998_000_000, 13, "transport", "snapshot_publish_outcome", map[string]any{
+				"client_id": 13, "symbol": "ABC/USD", "type": 0, "sequence": 3,
+				"timestamp": 998_000_000, "status": "enqueued",
+			})
+			emit(998_000_000, 0, "exchange", "BookSnapshot", map[string]any{
+				"source_sequence": uint64(3), "public_bids": bids, "public_asks": []exchange.PriceLevel(nil),
+			})
+			emit(timestamp, 13, "actor", "book_snapshot_receipt", actor.BookSnapshotEvent{
+				Symbol: "ABC/USD", Timestamp: 998_000_000, SeqNum: 3,
 				Snapshot: &exchange.BookSnapshot{Bids: bids, Asks: nil},
 			})
 		case 1_001_000_000:
@@ -438,8 +465,60 @@ func TestAcceptedZeroFillAfterFacingDepthDisappears(t *testing.T) {
 		t.Fatal(err)
 	}
 	if outcome.Status != OutcomeAcceptedUnfilled || outcome.FilledQty != 0 || outcome.CancelledResidual != cell.TargetQty ||
-		!outcome.TargetShortfallDefined || !outcome.RetainedAfterOneSided || outcome.LatestMessageTwoSided {
+		!outcome.TargetShortfallDefined || !outcome.RetainedAfterOneSided || outcome.LatestMessageTwoSided ||
+		outcome.DeliveredTouchAskQty != 200_000_000 {
 		t.Fatalf("zero-fill accepted request misclassified: %+v", outcome)
+	}
+	for _, explicitlyDropped := range []bool{false, true} {
+		name := "missing focal receipt"
+		if explicitlyDropped {
+			name = "explicit transport drop"
+		}
+		t.Run(name, func(t *testing.T) {
+			var changed bytes.Buffer
+			changedRecorder := NewRecorder(&changed)
+			if err := WalkEvidence(bytes.NewReader(stream.Bytes()), identity, func(event RecordedEvent) error {
+				payload := any(event.Payload)
+				if event.ClientID == 13 && event.Source == "actor" && event.Name == "book_snapshot_receipt" {
+					var receipt actor.BookSnapshotEvent
+					if err := json.Unmarshal(event.Payload, &receipt); err != nil {
+						return err
+					}
+					if receipt.SeqNum == 2 {
+						return nil
+					}
+				}
+				if explicitlyDropped && event.Source == "transport" && event.Name == "snapshot_publish_outcome" {
+					var fields map[string]any
+					if err := json.Unmarshal(event.Payload, &fields); err != nil {
+						return err
+					}
+					if fields["sequence"] == float64(2) {
+						fields["status"] = "dropped"
+						payload = fields
+					}
+				}
+				changedRecorder.Record(executionlab.EvidenceObservation{
+					Timestamp: event.Timestamp, ClientID: event.ClientID,
+					Source: event.Source, Name: event.Name, Route: event.Route, Payload: payload,
+				})
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			changedIdentity, err := changedRecorder.Finish()
+			if err != nil {
+				t.Fatal(err)
+			}
+			changedOutcome, err := Reconstruct(bytes.NewReader(changed.Bytes()), changedIdentity, plan)
+			if explicitlyDropped {
+				if err != nil || changedOutcome.DeliveredTouchAskQty != 100_000_000 {
+					t.Fatalf("explicit drop should retain older local depth: outcome=%+v err=%v", changedOutcome, err)
+				}
+			} else if err == nil {
+				t.Fatal("rehashed missing depth-changing focal receipt was accepted")
+			}
+		})
 	}
 	var rejectedStream bytes.Buffer
 	rejectedRecorder := NewRecorder(&rejectedStream)
@@ -516,6 +595,8 @@ func TestEvidenceMutationsFailClosed(t *testing.T) {
 	}{
 		{name: "intent quantity", source: "actor", event: "order_send", field: "OrderReq", value: "invalid"},
 		{name: "missing order intent", source: "actor", event: "order_send", remove: true},
+		{name: "missing focal publication outcome", source: "transport", event: "snapshot_publish_outcome", remove: true},
+		{name: "unknown focal publication outcome", source: "transport", event: "snapshot_publish_outcome", field: "status", value: "unknown"},
 		{name: "unpublished snapshot sequence", source: "actor", event: "book_snapshot_receipt", field: "SeqNum", value: uint64(999_999)},
 		{name: "altered delivered depth", source: "actor", event: "book_snapshot_receipt", field: "Snapshot", value: map[string]any{
 			"bids": []exchange.PriceLevel{{Price: 1, VisibleQty: 1}}, "asks": []exchange.PriceLevel{{Price: 2, VisibleQty: 1}},

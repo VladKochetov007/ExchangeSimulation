@@ -3,6 +3,7 @@ package executionlab
 import (
 	"exchange_sim/actor"
 	"exchange_sim/exchange"
+	"exchange_sim/marketdata"
 )
 
 // EvidenceObservation is emitted at a causal boundary, without feeding any
@@ -36,6 +37,7 @@ func (s *Sim) SetEvidenceObserver(observe func(EvidenceObservation)) {
 	if observe == nil {
 		s.exchange.SetLogger(s.Parent.cfg.Symbol, nil)
 		s.exchange.SetLogger("_global", nil)
+		s.exchange.MDPublisher.SetPublicationObserver(s.Parent.ID(), nil)
 		for _, parent := range s.Parents {
 			parent.observe = nil
 			parent.observationTime = nil
@@ -45,6 +47,17 @@ func (s *Sim) SetEvidenceObserver(observe func(EvidenceObservation)) {
 	}
 	s.exchange.SetLogger(s.Parent.cfg.Symbol, evidenceLogger{observe: observe, route: s.Parent.cfg.Symbol})
 	s.exchange.SetLogger("_global", evidenceLogger{observe: observe, route: "_global"})
+	if s.contract.Config.RecordSnapshotProjectionEvidence {
+		s.exchange.MDPublisher.SetPublicationObserver(s.Parent.ID(), func(outcome marketdata.PublicationOutcome) {
+			if outcome.Type != exchange.MDSnapshot || outcome.Symbol != s.Parent.cfg.Symbol {
+				return
+			}
+			observe(EvidenceObservation{
+				Timestamp: outcome.Timestamp, ClientID: outcome.ClientID,
+				Source: "transport", Name: "snapshot_publish_outcome", Route: outcome.Symbol, Payload: outcome,
+			})
+		})
+	}
 	for _, parent := range s.Parents {
 		parent.observe = observe
 		parent.observationTime = s.clock.NowUnixNano
