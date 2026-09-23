@@ -1,0 +1,6 @@
+interface:
+  display_name: "Market Ecology Research"
+  short_description: "Bounded market studies with reproducible evidence"
+  default_prompt: "Use $market-ecology-research in PLAN mode for a named study and its authorized scope."
+policy:
+  allow_implicit_invocation: false
