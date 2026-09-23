@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "study_id": "ME-000",
+  "stage": "CLOSED",
+  "process_status": "COMPLETED",
+  "evidence_validity": "VALID",
+  "opportunity_presence": "NOT_APPLICABLE",
+  "policy_activity": "NOT_APPLICABLE",
+  "registered_activation": "NOT_APPLICABLE",
+  "scientific_verdict": "MECHANICAL_ONLY",
+  "causal_verdict": "NOT_APPLICABLE",
+  "empirical_comparison": "NOT_PERFORMED",
+  "reasons": [
+    "VALID refers only to mechanical fixture and mutation evidence; no ME-001 economic world was run.",
+    "Opportunity, policy activity and activation are not estimands of this readiness closeout."
+  ],
+  "identities": {
+    "source": "b25223a4593a9e5129bab27cdbd5f2f8be146bcf",
+    "configuration": "executionpilot locked effective-world fixture contracts at b25223a",
+    "run": "synthetic go test fixture suite at b25223a; no economic world",
+    "analyzer": "experiment/executionpilot.Reconstruct at b25223a",
+    "protocol": "research/program/ideas/ME-000/idea.md at b25223a; owner overnight authorization 2026-09-23",
+    "skill_commit": "f2cca325fa552766e23f83c3204bfa8f83f9e241",
+    "skill_tree": "d1ff061a7d98b9e003d7ac4166d1f7434f54eb17"
+  },
+  "authorization": {
+    "prepare": true,
+    "run": false,
+    "basis": "Owner Market Ecology Research overnight goal authorized ME-000 F1/F2 fixes and synthetic fixtures, but not economic execution before ME-001 preregistration."
+  },
+  "review": {
+    "execution": "COMPLETED",
+    "verdict": "ACCEPT",
+    "scope": "ME-000 F1/F2 mechanical readiness at exact b25223a only",
+    "reference": "research/program/reviews/me000-readiness-20260923.md"
+  },
+  "claims": [
+    {
+      "id": "ME000-M1",
+      "type": "MECHANICAL",
+      "text": "The fixed immediate-buy pilot's effective world and focal event-to-outcome path pass independent fixture reconstruction and fail-closed mutation tests at b25223a.",
+      "evidence_ids": ["ME000-E1", "ME000-E2"],
+      "limitations": ["No ME-001 economic world or fresh-process matrix control was assessed."]
+    }
+  ],
+  "evidence": [
+    {
+      "id": "ME000-E1",
+      "kind": "synthetic_tests",
+      "location": "experiment/executionpilot/evidence_test.go",
+      "identity": "b25223a; clean make test, vet and targeted race exited 0"
+    },
+    {
+      "id": "ME000-E2",
+      "kind": "independent_review",
+      "location": "research/program/reviews/me000-readiness-20260923.md",
+      "identity": "Sol-6 medium read-only review of b25223a; COMPLETED/ACCEPT"
+    }
+  ]
+}

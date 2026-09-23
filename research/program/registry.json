@@ -6,11 +6,11 @@
       "id": "ME-000",
       "title": "Immediate-execution pilot readiness",
       "claim_type": "MECHANICAL",
-      "stage": "PLAN",
+      "stage": "CLOSED",
       "idea": "research/program/ideas/ME-000/idea.md",
       "protocol": null,
-      "report": null,
-      "result": null,
+      "report": "research/program/ideas/ME-000/report.md",
+      "result": "research/program/ideas/ME-000/result.json",
       "dependencies": [],
       "policy_ids": [
         "S01",
@@ -18,11 +18,11 @@
         "S06"
       ],
       "authorization": {
-        "prepare": false,
+        "prepare": true,
         "run": false,
-        "basis": "Owner skill-authoring task only. Study implementation and execution require separate authorization."
+        "basis": "Owner 2026-09-23 overnight goal authorized only the F1/F2 readiness fixes and synthetic fixtures; no economic ME-000 run."
       },
-      "next_action": "Complete F1 and F2 only after separate owner implementation authorization."
+      "next_action": "Read the scoped accepted ME-000 report, then prospectively lock and review ME-001 before any economic world."
     },
     {
       "id": "ME-001",
