@@ -19,6 +19,7 @@ Instrument/venue and information constraints follow the scope above; fields not
 specified here are open design work, never permission to invent effective defaults.
 
 Source/test starting points:
+
 - [simulations/executionlab/sim.go](../../../../simulations/executionlab/sim.go)
 - [simulations/executionlab/execution.go](../../../../simulations/executionlab/execution.go)
 - [simulations/feesim/mm.go](../../../../simulations/feesim/mm.go)

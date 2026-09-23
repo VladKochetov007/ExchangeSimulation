@@ -1,0 +1,47 @@
+Independent skill mock review A — 2026-09-23
+Reviewer: fresh Luna xhigh agent 01a0cfa1-7f0c-7993-9ef9-350abe043e10 (Boole).
+Target: e307bca132aa1b3caabe0055f6d1d6f64d1cba87; bounded follow-up 8b08780.
+Scope: A1–A5 synthetic cases; mechanics/evidence/timing guidance and ME-000 tasks.
+The response below is preserved with trailing whitespace trimmed. Absolute links identify the review
+checkout, not portable reproduction paths. This is a skill review, not a market result.
+
+**Evaluation execution: COMPLETED.**
+**Verdict for pinned candidate `e307bca132aa1b3caabe0055f6d1d6f64d1cba87`: ACCEPT_WITH_REQUIRED_CHANGES.**
+
+### Mock cases A1–A5
+
+1. **A1 — Existing pilot:** No. ME-001 tests execution-scale admissibility and target shortfall across size and composition. It has no maker-profit endpoint or capital intervention; focal cash is fixed and nonbinding. It cannot identify a profitable capital limit. The draft says the 10 bp mandate is an execution threshold, not a capital-capacity measure ([pilot draft](/home/vlad/ExchangeSimulation-market-ecology-skill/research/market-ecology-capacity-pilot-protocol-DRAFT.md:103), [readiness packet](/home/vlad/ExchangeSimulation-market-ecology-skill/research/NEXT-STUDY-READINESS-PACKET.md:140)). There is no authorization to run or alter the pilot.
+
+2. **A2 — Static route:** Report a **$2.80 net mechanical gain** for this completed fixture: $103 − $100 − $0.10 − $0.10. Label it a static, known-state route result—not discovered alpha, natural opportunity incidence, or evidence across generated markets ([evidence and formulas](/home/vlad/ExchangeSimulation-market-ecology-skill/.agents/skills/market-ecology-research/references/evidence-and-formulas.md:49)).
+
+3. **A3 — Two timelines:** The ordering is valid if identities and quantities reconcile. An exchange fill at time 11 can be received after a cancellation at time 15 when the cancellation’s exchange time is 12 and the fill arrives at time 16. Verify the accepted request/order linkage, T3’s linkage to O7, admitted quantity, fill quantity and fee, cancellation residual, and no duplicate or overrun. For full admission, the check is 5 = 2 + 3; receipt order alone does not invalidate the fill ([evidence and formulas](/home/vlad/ExchangeSimulation-market-ecology-skill/.agents/skills/market-ecology-research/references/evidence-and-formulas.md:60)).
+
+4. **A4 — Deployment change:** The fixture shows no difference in eligible callback or send time at that cadence; it does not establish that latency is generally irrelevant. The next planning action is to specify a bounded comparison at neighboring callback phases or clock resolutions and record configured and realized timing through receipt, decision, send, and match. Execution still needs prospective authorization ([latency and clocks](/home/vlad/ExchangeSimulation-market-ecology-skill/.agents/skills/market-ecology-research/references/latency-and-clocks.md:12)).
+
+5. **A5 — Signed statistic:** `ln(1 / -2) = ln(-0.5)` is undefined over the real numbers. Report the statistic as unavailable with that reason; do not impute zero or change admitted price semantics. Any replacement statistic for signed prices needs to be specified prospectively ([evidence and formulas](/home/vlad/ExchangeSimulation-market-ecology-skill/.agents/skills/market-ecology-research/references/evidence-and-formulas.md:41)).
+
+### Finding and follow-up
+
+ME-000’s F1/F2 proposals align with the skill’s configuration, independent-reconstruction, and evidence guidance. I found one concrete record-contract contradiction in `e307`: the skill says to record causal verdict separately ([SKILL.md](/home/vlad/ExchangeSimulation-market-ecology-skill/.agents/skills/market-ecology-research/SKILL.md:65)), but that commit’s result template, typed `Result`, and validator exposed only `scientific_verdict`. This left the CAUSAL ME-001 claim without a separate causal-verdict field.
+
+The follow-up is commit `8b08780aca9c3241bcd4e6eea0e6f8d953fad96a`, parent `e307bca…`, subject `fix: separate causal verdict in research result records`. Its four-file diff adds `causal_verdict` to the template, typed validator schema and reporting contract, plus a validator test rejecting a causal verdict without a valid scientific result ([updated result contract](/home/vlad/ExchangeSimulation-market-ecology-skill/.agents/skills/market-ecology-research/references/statistics-and-reporting.md:39), [updated validator](/home/vlad/ExchangeSimulation-market-ecology-skill/.agents/skills/market-ecology-research/scripts/validate.go:67)). **That change addresses the required finding on static inspection; it does not change the verdict for the pinned `e307` candidate.**
+
+At the start, HEAD matched `e307`; it later advanced to `8b08780…`, so I used `git show` against the pinned commit for the original assessment. At the last status check, the shared worktree also showed modifications to ME idea cards; I left them untouched.
+
+No simulations, seed reservations, raw or reserved outcome inspections, market suites, or validator tests were performed. I did not verify runtime skill-selector loading. The AGENTS-named anti-ai-alop and tmux skills were not found in the inspected local skill locations.
+
+Follow-up response, same reviewer context, after bounded delta inspection:
+
+**Evaluation execution: COMPLETED. Verdict at HEAD `8b08780aca9c3241bcd4e6eea0e6f8d953fad96a`: ACCEPT.**
+
+No required changes remain in the bounded authoring-artifact scope. The `e307bca` finding was that guidance required a separate causal verdict while its result template and validator lacked that field. The follow-up adds it to the template, typed schema, validator, and reporting contract, with a test for an invalid causal-verdict state. That resolves the finding; it does not change the historical verdict for `e307bca`.
+
+**Assigned mock responses**
+
+- **A1:** No. ME-001 measures execution-scale admissibility and shortfall under fixed cash; it cannot determine maker profitability or a profitable capital limit. Those need a separate question and protocol. ME-001 remains unauthorized to run or amend.
+- **A2:** Net fixture gain is **$2.80**: $103 − $100 − $0.20 in fees. Report only a static mechanical result, not discovered alpha or evidence across markets.
+- **A3:** The sequence is consistent: the two-unit fill matched at exchange time 11, before the three-unit residual canceled at 12, even though the cancellation arrived first. Verify O7/T3/request linkage and quantities; with full admission, 5 = 2 + 3. Receipt order does not invalidate the earlier fill.
+- **A4:** The delay change was masked at this callback cadence; that does not establish general economic irrelevance. Plan a bounded comparison at neighboring phases or resolutions and trace realized timing before seeking authority to run it.
+- **A5:** `ln(1 / -2) = ln(-0.5)` is undefined over the reals. Record it as unavailable with a reason; do not substitute zero or change the admitted price semantics.
+
+The scope was A1–A5; B1–B5 were not evaluated. No simulations, market suites, validator tests, raw or reserved outcome inspections, readiness fixes, or runtime skill-selector checks were performed. This was a single-model static review; no independent reviewer was used. I take your correction that the current unstaged docs are limited to validation-log and blank-line formatting, and leave them untouched.

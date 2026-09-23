@@ -19,6 +19,7 @@ Instrument/venue and information constraints follow the scope above; fields not
 specified here are open design work, never permission to invent effective defaults.
 
 Source/test starting points:
+
 - [simulations/multivenue/router.go](../../../../simulations/multivenue/router.go)
 - [simulations/multivenue/router_test.go](../../../../simulations/multivenue/router_test.go)
 

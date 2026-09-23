@@ -19,6 +19,7 @@ Instrument/venue and information constraints follow the scope above; fields not
 specified here are open design work, never permission to invent effective defaults.
 
 Source/test starting points:
+
 - [simulation/latency.go](../../../../simulation/latency.go)
 - [simulation/gateway.go](../../../../simulation/gateway.go)
 - [simulation/scheduler.go](../../../../simulation/scheduler.go)

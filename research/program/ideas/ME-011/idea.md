@@ -19,6 +19,7 @@ Instrument/venue and information constraints follow the scope above; fields not
 specified here are open design work, never permission to invent effective defaults.
 
 Source/test starting points:
+
 - [analysis/ecology.go](../../../../analysis/ecology.go)
 
 Required measurement/opportunity contract: Objective-compatible payoff, estimated regret and rare-policy response.

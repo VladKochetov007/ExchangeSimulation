@@ -19,6 +19,7 @@ Instrument/venue and information constraints follow the scope above; fields not
 specified here are open design work, never permission to invent effective defaults.
 
 Source/test starting points:
+
 - [simulations/multivenue/funding_carry.go](../../../../simulations/multivenue/funding_carry.go)
 - [simulations/multivenue/dated_term_carry.go](../../../../simulations/multivenue/dated_term_carry.go)
 - [simulations/derivsim/optionmm.go](../../../../simulations/derivsim/optionmm.go)

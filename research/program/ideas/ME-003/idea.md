@@ -19,6 +19,7 @@ Instrument/venue and information constraints follow the scope above; fields not
 specified here are open design work, never permission to invent effective defaults.
 
 Source/test starting points:
+
 - [types/order.go](../../../../types/order.go)
 - [tests/ioc_crossing_test.go](../../../../tests/ioc_crossing_test.go)
 - [simulations/executionlab/execution.go](../../../../simulations/executionlab/execution.go)

@@ -19,6 +19,7 @@ Instrument/venue and information constraints follow the scope above; fields not
 specified here are open design work, never permission to invent effective defaults.
 
 Source/test starting points:
+
 - [matching/prorata.go](../../../../matching/prorata.go)
 - [matching/prorata_test.go](../../../../matching/prorata_test.go)
 - [types/order.go](../../../../types/order.go)

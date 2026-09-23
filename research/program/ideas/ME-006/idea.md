@@ -19,6 +19,7 @@ Instrument/venue and information constraints follow the scope above; fields not
 specified here are open design work, never permission to invent effective defaults.
 
 Source/test starting points:
+
 - [simulations/multivenue/stoikov.go](../../../../simulations/multivenue/stoikov.go)
 - [simulations/multivenue/router.go](../../../../simulations/multivenue/router.go)
 - [simulation/feed_gateway.go](../../../../simulation/feed_gateway.go)

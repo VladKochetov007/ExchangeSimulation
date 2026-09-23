@@ -19,6 +19,7 @@ Instrument/venue and information constraints follow the scope above; fields not
 specified here are open design work, never permission to invent effective defaults.
 
 Source/test starting points:
+
 - [simulations/multivenue/sim.go](../../../../simulations/multivenue/sim.go)
 
 Required measurement/opportunity contract: Population-conditioned objective/risk outcomes with main effects and declared unmeasured interactions.
