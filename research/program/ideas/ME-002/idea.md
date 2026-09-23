@@ -10,7 +10,10 @@ ME-001's 1 ms focal transport and 1 ms decision polling were held fixed, so
 its size-dependent response map is not evidence for or against latency effects.
 
 Authorization and current stage: [authoritative registry](../../registry.json).
-No study execution or readiness implementation is authorized by this card.
+The owner's continuation authorizes bounded readiness and a later prospectively
+locked development screen. This card itself authorizes no world; the current
+[protocol draft](protocol.md) must pass implementation, evidence and review
+gates first.
 
 ## Entities and readiness
 
@@ -78,11 +81,9 @@ deployment adapter outside the policy, exact logical delay and phase fixtures,
 stable actor-specific RNG namespaces, and fail-closed realized-time joins.
 Do not add wall-clock sleeps or city labels.
 
-Smallest **proposed**, unregistered screen: five profiles × two new development
-seeds at one fixed 2-ABC target = at most ten economic worlds, plus two
-fresh-process controls. Four simulated seconds per world is a starting
-horizon only if the slowest path and response fully drain; otherwise amend
-prospectively. Cap a future batch at 15 minutes, 4 GiB peak RSS and 1 GiB
-evidence, with measured preflight before launch. No seeds are assigned and
-this card authorizes **zero** worlds or implementation now. Independent
-mechanics and causal-design review would precede any future run.
+The owner subsequently requested a 2×2 network-versus-processing design,
+holding decision cadence fixed, with both 0.5- and 5-ABC targets. The newer
+[protocol draft](protocol.md) supersedes the earlier five-profile/one-size
+proposal above where they conflict. The four factorial arms, three
+development seeds and finite 24-world budget are prospective, not ME-002
+outcomes. No economic world may start until that draft is locked and reviewed.

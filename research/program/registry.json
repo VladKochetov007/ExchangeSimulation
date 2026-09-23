@@ -53,7 +53,7 @@
       "claim_type": "CAUSAL",
       "stage": "PLAN",
       "idea": "research/program/ideas/ME-002/idea.md",
-      "protocol": null,
+      "protocol": "research/program/ideas/ME-002/protocol.md",
       "report": null,
       "result": null,
       "dependencies": [
@@ -65,11 +65,11 @@
         "S16"
       ],
       "authorization": {
-        "prepare": false,
+        "prepare": true,
         "run": false,
-        "basis": "Owner skill-authoring task only. Study implementation and execution require separate authorization."
+        "basis": "Owner 2026-09-23 continuation authorizes bounded ME-002 readiness and prospective 2x2 development execution after exact implementation, evidence validation and protocol review; the current draft is not yet a locked run plan."
       },
-      "next_action": "Proposed five-profile immediate-policy screen only: first specify separate logical network/compute paths and verify exact realized-time/clock fixtures; no implementation or run authorized."
+      "next_action": "Finish separate logical network/processing deployment, strict timing reconstruction, fixtures and candidate review; then lock the 24-world development matrix before any ME-002 world."
     },
     {
       "id": "ME-003",
