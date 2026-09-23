@@ -487,9 +487,14 @@ outcomes, certified empirical realism, or authorized execution.
 
 The initial findings do not add a third implementation prerequisite. They
 tighten the protocol that F1 must bind and the cases that F2 must reconstruct.
-The corrected draft requires one bounded delta check before it is presented as
-reviewed; a failure of that check remains an unresolved design issue, not an
-execution authorization.
+The causal/statistical reviewer marked all findings `RESOLVED` at
+`dc1fb31332972ae6ca23cd97d27de93050792fe0`. The mechanical reviewer found one
+new wording error there: delayed zero-depth observation does not prove that the
+later request cannot fill. Commit
+`688e1c6834c0c0961fccd27c0fe87f713e1d1261` corrected the claim to make the
+venue-time book determine the request outcome; the same reviewer then marked
+that correction `RESOLVED`. These are design-review outcomes only, not
+implementation acceptance, empirical certification, or execution authority.
 
 ## 18. Readiness decision
 
