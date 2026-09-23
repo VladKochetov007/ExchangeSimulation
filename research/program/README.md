@@ -10,15 +10,19 @@ the merge of `a878dca` and planning tip `febf66b`.
 Current research progress is recorded by each registry entry, not inferred from
 that authoring baseline. [ME-000](ideas/ME-000/report.md) completed its bounded
 mechanical readiness gate at `b25223a`; this is not an ME-001 economic result.
-The owner's 2026-09-23 overnight goal conditionally authorizes ME-001 development
-only after a prospective protocol lock. No ME-002+ study is authorized to run.
+The owner's 2026-09-23 overnight ME-001 development budget is now exhausted:
+[27-cell reviewed report](ideas/ME-001/report.md),
+[machine result](ideas/ME-001/result.json), and
+[review ledger](reviews/me001-result-20260923.md). No further ME-001 world or
+ME-002+ study is authorized to run. This is a simulation-internal development
+response map, not a scientific freeze or empirical validation.
 
 ## Starting queue
 
 | Priority | IDs | Next boundary |
 |---|---|---|
 | 1 | [ME-000](ideas/ME-000/report.md) | CLOSED: F1/F2 mechanical readiness accepted at `b25223a` |
-| 2 | [ME-001](ideas/ME-001/protocol.md) | prospective development lock: review exact committed protocol before any world |
+| 2 | [ME-001](ideas/ME-001/report.md) | REPORT: finite development screen complete; no confirmation or new run authorized |
 | 3 | ME-002–ME-007 | separately chosen timing, instruction, allocation or arbitrage question |
 | 4 | ME-008–ME-010 | payoff readiness, selected ensemble or named derivative child |
 | 5 | ME-011–ME-012 | restricted games and explicit capital dynamics after reliable payoffs |

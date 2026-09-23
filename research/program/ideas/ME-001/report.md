@@ -1,9 +1,9 @@
-# ME-001 — three-seed development screen (review pending)
+# ME-001 — three-seed development screen
 
-Status: **PROVISIONAL DEVELOPMENT RESULT**. The registered 29 executions
-(two technical controls and 27 economic worlds) completed, but independent
-result reviews are not yet dispositioned. This is not a frozen, confirmed,
-empirical or holdout finding.
+Status: **REVIEWED DEVELOPMENT RESULT; CONDITIONAL RESPONSE MAP**. The
+registered 29 executions (two technical controls and 27 economic worlds)
+completed, and both bounded post-result reviews accepted their respective
+scopes. This is not a frozen, confirmed, empirical or holdout finding.
 
 ## 1. Question and bounded conclusion
 
@@ -163,14 +163,14 @@ composition/seed, so depth contrasts repeat across S1–S3 by design.
 Shortfall differences are bp, treatment minus C0. The table gives the
 three-seed median and the observed paired range, not a p-value.
 
-| Arm vs C0 | Target ABC | Median depth Δ ABC | Median IS Δ bp | Paired IS range bp |
-|---|---:|---:|---:|---:|
-| C+ | 0.5 | +2.60411060 | 0 | 0 to 0 |
-| C− | 0.5 | −2.41880459 | +0.552612 | 0 to +1.097892 |
-| C+ | 2 | +2.60411060 | −1.0005 | −1.172777 to −1.0005 |
-| C− | 2 | −2.41880459 | +4.773596 | +4.001999 to +5.099896 |
-| C+ | 5 | +2.60411060 | −3.2016 | −3.2016 to −2.583801 |
-| C− | 5 | −2.41880459 | −7.6883384 | −7.694564 to −7.5025 |
+| Arm vs C0 | Target ABC | Median depth Δ ABC | Paired IS Δ bp: 1009 / 1013 / 1019 | Median IS Δ bp | Paired IS range bp |
+|---|---:|---:|---|---:|---:|
+| C+ | 0.5 | +2.60411060 | 0 / 0 / 0 | 0 | 0 to 0 |
+| C− | 0.5 | −2.41880459 | 0 / +1.097892 / +0.552612 | +0.552612 | 0 to +1.097892 |
+| C+ | 2 | +2.60411060 | −1.0005 / −1.0005 / −1.172777 | −1.0005 | −1.172777 to −1.0005 |
+| C− | 2 | −2.41880459 | +4.002 / +5.099896 / +4.773596 | +4.773596 | +4.002 to +5.099896 |
+| C+ | 5 | +2.60411060 | −3.2016 / −3.2016 / −2.5838008 | −3.2016 | −3.2016 to −2.5838008 |
+| C− | 5 | −2.41880459 | −7.5025 / −7.694564 / −7.6883384 | −7.6883384 | −7.694564 to −7.5025 |
 
 Both opportunity-separation signs satisfy the registered median-depth rule.
 The shortfall prediction is not uniform: C+ is flat at S1 but lower at S2/S3;
@@ -213,11 +213,16 @@ evidence-file and actor-file hashes, the replay implementation, and the four
 partial-fill classifications. It did not execute a new raw replay. It noted
 the control-environment attestation limit above and that the group summary
 does not list every possible class separately, although each actual cell
-does. Reviewer B's causal/statistical interpretation is pending. Until that
-substantive finding is dispositioned, this report is provisional. No review
-approval is inferred from service execution or from green tests.
+does. Post-result Reviewer B (a separate fresh read-only Sol-6 medium
+context) **ACCEPTED** the protocol/report's causal-statistical interpretation
+as a bounded three-seed development screen at report commit `cba9ca4`.
+It confirmed the nine group summaries and six paired medians/ranges against
+the retained surface, while requiring the 18 individual paired differences
+now printed in §8. Neither review certifies empirical transfer or an
+isolated maker-count effect. The [review record](../../reviews/me001-result-20260923.md)
+preserves their exact scope and unperformed checks.
 
-The only next authorized step here is to finish those reviews, publish a
-scope-limited report and separately propose ME-002/003/005/007 readiness
-plans. No holdout, confirmation set, or ME-002+ world is authorized by this
-development result.
+The finite ME-001 development authorization is exhausted. Only documentation,
+claim-limited synthesis and separately proposed ME-002/003/005/007 readiness
+plans remain in this overnight goal. No holdout, confirmation set, or ME-002+
+world is authorized by this development result.

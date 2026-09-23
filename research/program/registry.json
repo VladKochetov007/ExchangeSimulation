@@ -28,11 +28,11 @@
       "id": "ME-001",
       "title": "Immediate-execution quantity/composition screen",
       "claim_type": "CAUSAL",
-      "stage": "PLAN",
+      "stage": "REPORT",
       "idea": "research/program/ideas/ME-001/idea.md",
       "protocol": "research/program/ideas/ME-001/protocol.md",
-      "report": null,
-      "result": null,
+      "report": "research/program/ideas/ME-001/report.md",
+      "result": "research/program/ideas/ME-001/result.json",
       "dependencies": [
         "ME-000"
       ],
@@ -42,10 +42,10 @@
       ],
       "authorization": {
         "prepare": true,
-        "run": true,
-        "basis": "Owner 2026-09-23 overnight goal conditionally authorizes only the prospectively locked 27 ME-001 development worlds plus two controls after ME-000 and protocol review; no holdouts or ME-002+ execution."
+        "run": false,
+        "basis": "Owner 2026-09-23 overnight goal authorized only 27 ME-001 development worlds plus two controls; all 29 were completed and the finite run budget is exhausted. No holdouts or ME-002+ execution."
       },
-      "next_action": "Obtain bounded independent review of the committed ME-001 lock; only if accepted build pinned binaries, run two controls, then the finite development matrix."
+      "next_action": "Retain the reviewed development response map; propose any confirmation or next study only under a separate prospective owner decision."
     },
     {
       "id": "ME-002",

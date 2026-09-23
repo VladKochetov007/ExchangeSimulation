@@ -8,9 +8,10 @@ Strongest intended claim: **CAUSAL** (proposed, not established).
 One ABC/USD venue; immediate buy; 2/10, 4/8, 6/6 maker/taker compositions and 0.5/2/5 ABC targets. Three proposed seeds, 27 economic worlds plus two controls. No seeds reserved.
 
 Authorization and current stage: [authoritative registry](../../registry.json).
-ME-000 readiness is closed. The owner's overnight goal conditionally permits
-development execution only under the [prospective lock](protocol.md) after
-its independent review; this card alone is never a run authorization.
+ME-000 readiness is closed. The owner-authorized finite development batch is
+complete; see the [reviewed report](report.md) and [machine result](result.json).
+The [prospective lock](protocol.md) remains the historical execution contract.
+This card alone is never a run authorization.
 
 ## Entities and readiness
 
@@ -41,8 +42,9 @@ No profitability, capital-capacity, equilibrium or empirical-realism inference. 
 
 ## Tentative design and next action
 
-Review the committed protocol lock, which inherits the merged draft's
-economic matrix and records only explicit prospective amendments.
+The committed protocol lock inherited the merged draft's economic matrix and
+recorded only prospective amendments. No more economic execution is authorized
+by the exhausted development budget.
 Numeric choices remain prospective unless the authoritative draft below specifies
 them. Budget for this authoring task is zero market worlds. Future work needs its
 own protocol, modules/N/A reasons, fixtures, formula domains and owner budget.
