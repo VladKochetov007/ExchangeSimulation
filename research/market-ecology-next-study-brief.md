@@ -1,66 +1,93 @@
-# Next-study design brief — counterparty composition and focal-strategy capacity
+# Next-study design brief — composition-conditioned execution capacity
 
 **Status: NOT AUTHORIZED TO RUN.** This is a bounded design option left by the
 R2/SV1D development-line closeout. It is not an SV1D rescue, a new
 preregistration, a configuration, a seed reservation, or a request to launch
 simulation work.
 
+## Readiness outcome
+
+Source reconstruction on consolidated `main` narrows the generic option in
+this brief to one decision-ready pilot concept. The detailed assessment is
+[`NEXT-STUDY-READINESS-PACKET.md`](NEXT-STUDY-READINESS-PACKET.md) and the
+exact unregistered matrix is
+[`market-ecology-capacity-pilot-protocol-DRAFT.md`](market-ecology-capacity-pilot-protocol-DRAFT.md).
+
+**Current decision: READY AFTER 2 SPECIFIC BOUNDED FIXES.** Those fixes are an
+external canonical config/provenance adapter and independent reconstruction of
+the focal opportunity/execution packet. They are instrumentation and adapter
+work, not authority to change economics or launch worlds.
+
 ## Proposed question
 
-> How do counterparty composition and capital allocation determine the
-> capacity, profitability, risk, and impact of one existing strategy?
+> How does replacement of background adaptive makers by delayed random takers,
+> at fixed account count and nominal endowment, change the economically
+> admissible execution scale and implementation shortfall of one fixed
+> immediate-execution policy?
 
 This is closer to the original market-ecology objective than another attempt to
 make the integrated ecology survive. It asks how an existing participant
 function performs conditionally on the ecology around it, rather than treating
 survival or a realism score as the mechanism target.
 
-## Smallest plausible study
+## Why this focal policy
 
-Use one asset, one or two existing venues, one focal strategy already present
-in the platform, and a small set of already implemented counterparty classes
-with explicit objectives and finite resources. Keep the current R2/SV1D line
-closed. Do not add a larger supplier, add capital to rescue the ecology, or
-reuse the CDF activation predicate.
+The initially attractive post-only Stoikov maker is not isolated enough for a
+first capacity study: its current scale fields also affect other makers/books,
+its endowment is hard-coded, and the harness requires three venues plus the
+derivative population. Treating a family-wide quote-size change as one focal
+maker's capital capacity would be misleading.
 
-Possible development cells would compare a baseline counterparty mix with a
-small number of predeclared composition interventions, such as removal or
-replacement of one existing class. An own-capital intervention would change
-the focal strategy's assigned capital within a declared allocation scheme.
-Adding total capital, changing agent count, and redistributing a fixed pool
-are different interventions and must not be conflated.
+The existing `executionlab` instead supplies one ABC/USD venue, one immediate
+parent policy, an exact target-quantity input, fixed fees/latency, and maker and
+noise counts. Replacing 4-maker/8-noise background accounts with 6/6 or 2/10
+keeps 12 accounts and their nominal aggregate endowment fixed. The focal
+object is therefore **execution-scale capacity**, not profitability or capital
+capacity.
+
+The draft proposes 0.5/2/5 ABC target sizes, three compositions, and three
+candidate development seeds: 27 economic worlds plus two determinism controls.
+The values are proposed, not registered; no seed is reserved and no world may
+run under this brief.
 
 The following should remain fixed across a matched comparison:
 
 - total agent count and, where the question is composition rather than scale,
   total capital;
 - liabilities and endowments outside the declared allocation intervention;
-- participant information, observation delay, latency, and decision cadence;
+- each actor class's information, observation delay, latency, and clock rule;
 - venue rules, matching, fees, risk limits, funding, settlement, and calendar;
 - randomization policy and the focal strategy's code/configuration; and
 - the measurement and terminal-validity contract.
 
+The composition intervention changes which indexed actor instances exist, so
+client IDs and the set of maker refresh phases change with the roster. Those
+are declared parts of replacing a whole participant class, not quantities held
+constant or separately identified in this first pilot.
+
 If fixed-total-capital redistribution is not the question, an additive-capital
 arm must be named as such rather than described as redistribution.
 
-## Endpoints
+## Endpoints and boundary
 
-Proposed primary endpoint: a preregistered **focal strategy capacity frontier**
-— the largest tested focal flow/notional or capital condition that completes
-the declared horizon with valid evidence, strict valuation, and the focal
-strategy's predeclared economic acceptability and risk limits. The frontier
-must be measured over a finite grid chosen before outcomes are seen; it is not
-an optimization against a green score.
+The primary endpoint is all-in target implementation shortfall, with completion
+reported separately and residual quantity valued only by a labelled terminal
+two-sided midpoint. A proposed admissible cell has exact evidence, full
+completion, and target shortfall no greater than a prospective 10 bp all-in
+mandate. The 5 bp configured fee motivates that mandate's scale but is not an
+exact additive component because fee and target-shortfall denominators differ.
+The complete response map is reported; the region may be non-monotone.
 
-Supporting endpoints should include only a small fixed set:
+Supporting endpoints are limited to:
 
-- objective-appropriate focal outcome (net PnL is insufficient when the focal
-  participant is a hedger with liability-reduction utility);
-- drawdown, liquidation/deficit, inventory and financing exposure;
-- executed quantity, fill quality, spread paid/earned, and market impact;
-- counterparty volume/depth share, inventory, PnL, and withdrawal behavior; and
-- ledger conservation and marked-wealth diagnostics kept conceptually
-  separate.
+- filled/unfilled quantity and completion;
+- executed notional, quote fees, filled-only and target shortfall;
+- delivered touch and five-level ask depth at the decision;
+- expected mechanical sweep versus realized fills; and
+- request/fill/cancel timing and terminal mark validity.
+
+The pilot makes no PnL, annualized return, equilibrium, impact-law, or market
+realism claim.
 
 ## Causal interpretation
 
@@ -78,18 +105,15 @@ best-response search is not a global equilibrium result.
 
 ## Development/confirmation boundary and finite budget
 
-If authorized, development should be capped before launch at one short horizon,
-at most three development seeds, one baseline plus a small predeclared set of
-composition/allocation cells, and one independently reviewed extraction pass
-per cell. No holdout seed should be inspected while choosing the interventions.
-The confirmation partition, if any, should be separately preregistered with a
-small number of untouched seeds and a frozen analyzer. A failed activation or
-invalid evidence path stops the cell; it does not license parameter rescue.
+If separately implemented, reviewed, preregistered, and authorized, the pilot
+is capped at 29 executions, four concurrent processes, 15 minutes wall time,
+4 GiB aggregate memory, and 1 GiB retained evidence. The four-second horizon
+serves one immediate decision after a one-second warm-up; it is not evidence of
+long-run stationarity. Three seeds support screening only.
 
-The exact strategy, composition classes, capital grid, acceptability function,
-seed partition, horizon, and multiplicity rule still require prospective
-preregistration and owner authorization. Those unresolved numeric choices are
-why this document is a design brief rather than a locked protocol.
+Any confirmation partition must be separately preregistered on new conditions
+after source/config/analyzer freeze. Invalid evidence licenses only a localized
+repair; a valid null or economic loss is retained and does not license tuning.
 
 ## Guardrails for future interpretation
 
