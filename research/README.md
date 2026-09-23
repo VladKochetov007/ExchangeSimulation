@@ -11,10 +11,14 @@ The [market-ecology program](program/README.md) provides the finite idea registr
 policy catalogue, explicit research-skill invocation and the current resume
 point. On its dedicated research branch, ME-000 readiness was closed and the
 [ME-001 immediate-execution development screen](program/ideas/ME-001/report.md)
-completed 27 economic worlds plus two controls. The outcome is a reviewed,
-simulation-internal response map, not a freeze or empirical claim. Its finite
-run authorization is exhausted; ME-002+ remain planning-only. The R2/SV1D
-closure below remains a separate completed historical boundary.
+completed 27 economic worlds plus two controls. The later
+[ME-002 development screen](program/ideas/ME-002/report.md) completed 24
+economic worlds plus two controls on a separately pinned source, with a
+reviewed mixed-sign network response and processing-order-timing non-activation
+under the fixed decision gate. Both are simulation-internal development maps,
+not a freeze or empirical claim; their finite budgets are exhausted. This
+research branch is not automatically the published `main` baseline. The
+R2/SV1D closure below remains a separate completed historical boundary.
 
 The consolidated code baseline is the former scientific tip
 `f507c7ee2b11fd05e1adb9f17fa0a66faf889ea1`, descended from the published

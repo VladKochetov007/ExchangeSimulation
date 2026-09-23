@@ -13,9 +13,14 @@ mechanical readiness gate at `b25223a`; this is not an ME-001 economic result.
 The owner's 2026-09-23 overnight ME-001 development budget is now exhausted:
 [27-cell reviewed report](ideas/ME-001/report.md),
 [machine result](ideas/ME-001/result.json), and
-[review ledger](reviews/me001-result-20260923.md). No further ME-001 world or
-ME-002+ study is authorized to run. This is a simulation-internal development
-response map, not a scientific freeze or empirical validation.
+[review ledger](reviews/me001-result-20260923.md). The later bounded
+[ME-002 network × processing screen](ideas/ME-002/report.md) also completed
+24 development cells plus two controls; its finite budget is exhausted.
+Both are simulation-internal development response maps, not a scientific
+freeze or empirical validation. The ME-002 execution source is `e042e68`;
+later report/analysis commits are not new market worlds. This research branch
+descends from completed ME-001 branch `a6afaa9`; check whether it has been
+normally merged before treating these documents as published `main` state.
 
 ## Starting queue
 
@@ -23,7 +28,7 @@ response map, not a scientific freeze or empirical validation.
 |---|---|---|
 | 1 | [ME-000](ideas/ME-000/report.md) | CLOSED: F1/F2 mechanical readiness accepted at `b25223a` |
 | 2 | [ME-001](ideas/ME-001/report.md) | REPORT: finite development screen complete; no confirmation or new run authorized |
-| 3 | [ME-002](ideas/ME-002/idea.md), [ME-003](ideas/ME-003/idea.md) | proposed timing/instruction readiness; no implementation or run authorized |
+| 3 | [ME-002](ideas/ME-002/report.md), [ME-003](ideas/ME-003/idea.md) | ME-002 REPORT: finite reviewed development screen complete; ME-003 instruction readiness is the next conditional task |
 | 4 | [ME-005](ideas/ME-005/idea.md), [ME-007](ideas/ME-007/idea.md) | proposed executable-arbitrage readiness, with mechanical gates first |
 | 5 | ME-004/006/008–010 | deferred allocation, interaction, payoff or derivative questions |
 | 6 | ME-011–ME-012 | restricted games and explicit capital dynamics after reliable payoffs |
@@ -54,12 +59,17 @@ Execution source was `13c02d5` (Go 1.27.0); the later Go aggregate was
 `16d5a50`. External raw evidence remains at
 `/home/vlad/ExchangeSimulation-me001-development-13c02d5`, about 153 MiB
 at the first closeout check; this path is not a remote backup. The 29-run
-batch is complete and its authorization exhausted. Next action is an owner
-choice between a separately designed confirmation of the bounded ME-001
-claim and one of the four proposed readiness cards above. No new worlds,
-freeze or holdouts follow automatically. The first four follow-ups are the
-active small queue; other registry entries are longer-term candidates, not
-parallel tasks to launch tonight.
+batch is complete and its authorization exhausted. The later ME-002 comparison
+held this C0 ecology and immediate policy fixed while varying synthetic
+directed network (1/90 ms) and processing (0/120 ms). All 0.5-ABC worlds
+fully filled; 5-ABC network effects changed sign across three seeds.
+Processing changed selected information but not arrival under the 1-second
+decision gate. Exact values and scope are in the [ME-002 report](ideas/ME-002/report.md),
+[result](ideas/ME-002/result.json), and
+[reviews](reviews/me002-result-20260923.md). This does not authorize ME-001
+confirmation, more ME-002 worlds, freeze or holdouts. The current bounded
+continuation may assess ME-003 readiness prospectively; other queue entries
+are not an automatic run schedule.
 
 ## Historical map (HISTORY, never new-main results)
 

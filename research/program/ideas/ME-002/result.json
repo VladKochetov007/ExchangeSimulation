@@ -1,0 +1,102 @@
+{
+  "schema_version": 1,
+  "study_id": "ME-002",
+  "stage": "REPORT",
+  "process_status": "COMPLETED",
+  "evidence_validity": "VALID",
+  "opportunity_presence": "PRESENT",
+  "policy_activity": "ACTIVE",
+  "registered_activation": "NOT_APPLICABLE",
+  "scientific_verdict": "INCONCLUSIVE",
+  "causal_verdict": "INCONCLUSIVE",
+  "empirical_comparison": "NOT_PERFORMED",
+  "reasons": [
+    "All 24 assigned development cells and two corrected-candidate controls completed; the Go all-assigned aggregator independently replayed and validated every retained economic evidence stream.",
+    "The protocol registered contrasts, not a binary activation threshold. Network delay changed venue arrival in 12/12 matched pairs and filled quantity in 6/12; processing changed selected snapshots in 12/12 but order arrival in 0/12 under the one-second gate.",
+    "At 0.5 ABC all 12 worlds fully filled. At 5 ABC the network-effect signs were negative, negative and positive across three paired seed quartets, so the directional prediction is inconclusive within this development grid.",
+    "Selected public-depth opportunities are sampled proxies; most selected episodes are censored. Presence in some cells does not imply every assigned cell had a complete qualifying episode.",
+    "No confirmation, empirical comparison, geography claim, general processing-latency irrelevance, or new-world authorization follows. Retained manifests do not attest process settings or execution order."
+  ],
+  "identities": {
+    "source": "e042e685dd82ee06d8f2d49c52e8c219a7f58091; tree 6c2d5f6214393d65090d7bfcc4e8663bcf8b28a7",
+    "configuration": "24 canonical typed plans under /home/vlad/ExchangeSimulation-me002-development-e042e68/plans; exact raw and typed digests in latency-surface.json",
+    "run": "26 retained run directories under /home/vlad/ExchangeSimulation-me002-development-e042e68/runs; 24 economic cells plus two corrected-candidate controls",
+    "analyzer": "melatencyanalyze SHA256 b6f35a4fbfc08a8d64d904229af122f7fa13b0baf9bcc4d60ac68fd4778a003d at execution source; all-assigned aggregator 19e5835105fc1c4f3ec30577fe3cbc7219ec8c6c; timing diagnostic ec6045277a53a266d1b443f1d6cf017769df1009",
+    "protocol": "research/program/ideas/ME-002/protocol.md content at e042e685dd82ee06d8f2d49c52e8c219a7f58091; blob eb5222327090bb23339d55467666653a2688acb0; development lock 34d7777",
+    "skill_commit": "a6afaa905b8c2258c175189bd39106d246ebfdb9",
+    "skill_tree": "ee529dd73d061b43717e57d8b7fa832543f0e5a2"
+  },
+  "authorization": {
+    "prepare": true,
+    "run": false,
+    "basis": "Owner 2026-09-23 bounded ME-002 continuation authorized at most 24 development economic cells plus two technical controls after prospective review; all 26 retained executions are complete and that run budget is exhausted. No confirmation or holdout was authorized."
+  },
+  "review": {
+    "execution": "COMPLETED",
+    "verdict": "ACCEPT",
+    "scope": "Independent bounded post-result mechanics/timing/evidence Review A and causal/statistical Review B of the corrected report and retained ME-002 development surface only; prior unavailable attempts are preserved separately",
+    "reference": "research/program/reviews/me002-result-20260923.md"
+  },
+  "claims": [
+    {
+      "id": "ME002-M1",
+      "type": "MECHANICAL",
+      "text": "The corrected-candidate fresh-process controls have byte-identical retained evidence and reconstructed result files; all 24 assigned economic streams completed and passed independent Go raw replay and actor/outcome reconciliation.",
+      "evidence_ids": ["ME002-E1", "ME002-E3", "ME002-E4"],
+      "limitations": ["The retained manifests are not cryptographically signed and do not independently attest GOMAXPROCS, execution order, or absence of earlier attempts."]
+    },
+    {
+      "id": "ME002-D1",
+      "type": "DESCRIPTIVE",
+      "text": "At 0.5 ABC all 12 cells fully filled. At 5 ABC F/F and F/S each fully filled in 2/3 seeds, while S/F and S/S fully filled in 0/3 seeds; all partial cells remain in the all-assigned denominator.",
+      "evidence_ids": ["ME002-E1", "ME002-E2"],
+      "limitations": ["Three development seeds and a four-second world do not establish a general completion probability or sustainable capacity."]
+    },
+    {
+      "id": "ME002-C1",
+      "type": "CAUSAL",
+      "text": "The registered network manipulation changed order arrival in 12/12 matched pairs; its 5-ABC fill-fraction contrasts were -0.013709140, -0.037816292 and +0.034719890 across the three paired seeds, a mixed-sign development response.",
+      "evidence_ids": ["ME002-E1", "ME002-E2", "ME002-E3", "ME002-E5"],
+      "limitations": ["This is a finite synthetic network assignment, not measured geography or a uniform directional latency law."]
+    },
+    {
+      "id": "ME002-C2",
+      "type": "CAUSAL",
+      "text": "The registered processing manipulation changed the selected snapshot in 12/12 matched pairs but changed order arrival and filled quantity in 0/12; the fixed one-second gate absorbed its order-timing channel in this one-shot design.",
+      "evidence_ids": ["ME002-E1", "ME002-E2", "ME002-E3", "ME002-E5"],
+      "limitations": ["Zero observed filled-fraction contrast is not equivalence, processing irrelevance, or proof that a different decision phase would be unaffected."]
+    }
+  ],
+  "evidence": [
+    {
+      "id": "ME002-E1",
+      "kind": "external_verified_surface_and_raw_evidence",
+      "location": "/home/vlad/ExchangeSimulation-me002-development-e042e68/analysis/latency-surface.json",
+      "identity": "SHA256 a4d0effb4d8a7a0123221c7971f45a281cff72a56d8f9346df5d29df8afe3b6f; 24 raw economic streams replayed under execution source e042e68"
+    },
+    {
+      "id": "ME002-E2",
+      "kind": "external_timing_diagnostics",
+      "location": "/home/vlad/ExchangeSimulation-me002-development-e042e68/analysis/latency-diagnostics.json",
+      "identity": "SHA256 c08fc6fec3e9e05cc22ad2e1d4c1eb8cf530b955ced9bd15fd0a492090561d1a; linked surface SHA256 a4d0effb4d8a7a0123221c7971f45a281cff72a56d8f9346df5d29df8afe3b6f"
+    },
+    {
+      "id": "ME002-E3",
+      "kind": "prospective_protocol_and_lock",
+      "location": "research/program/ideas/ME-002/development-lock-2026-09-23.md",
+      "identity": "protocol blob eb5222327090bb23339d55467666653a2688acb0 at execution source e042e685dd82ee06d8f2d49c52e8c219a7f58091"
+    },
+    {
+      "id": "ME002-E4",
+      "kind": "fresh_process_controls",
+      "location": "/home/vlad/ExchangeSimulation-me002-development-e042e68/runs/control-F-F-q0p5-s12001-g1",
+      "identity": "control g1/g7 retained evidence SHA256 6493d699b97de2ef887bbce6372fcca2b570d933d8996b0a7e3b8a1a0be2c5e1; reconstructed result SHA256 a27699b86e055ff55e8ba9fc84ac7cd2ca02bb5baa23f73d8044ebb5c16ba88b"
+    },
+    {
+      "id": "ME002-E5",
+      "kind": "bounded_independent_post_result_reviews",
+      "location": "research/program/reviews/me002-result-20260923.md",
+      "identity": "Review A and B COMPLETED/ACCEPT at their separate mechanics/evidence and causal/statistical development scopes; unavailable attempts preserved"
+    }
+  ]
+}

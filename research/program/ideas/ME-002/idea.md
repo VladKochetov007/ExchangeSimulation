@@ -10,10 +10,12 @@ ME-001's 1 ms focal transport and 1 ms decision polling were held fixed, so
 its size-dependent response map is not evidence for or against latency effects.
 
 Authorization and current stage: [authoritative registry](../../registry.json).
-The owner's continuation authorizes bounded readiness and a later prospectively
-locked development screen. This card itself authorizes no world; the current
-[protocol draft](protocol.md) must pass implementation, evidence and review
-gates first.
+The bounded development screen is complete and independently reviewed; see
+the [report](report.md), [machine result](result.json) and
+[development lock](development-lock-2026-09-23.md). Its 24-cell economic budget
+is exhausted. This card itself authorizes no additional world. The older
+prospective design text below remains historical planning context where it
+differs from the locked protocol.
 
 ## Entities and readiness
 
@@ -83,7 +85,8 @@ Do not add wall-clock sleeps or city labels.
 
 The owner subsequently requested a 2×2 network-versus-processing design,
 holding decision cadence fixed, with both 0.5- and 5-ABC targets. The newer
-[protocol draft](protocol.md) supersedes the earlier five-profile/one-size
+[protocol](protocol.md) supersedes the earlier five-profile/one-size
 proposal above where they conflict. The four factorial arms, three
-development seeds and finite 24-world budget are prospective, not ME-002
-outcomes. No economic world may start until that draft is locked and reviewed.
+development seeds and finite 24-world budget were subsequently locked,
+executed and reported under their exact candidate; this old planning
+paragraph is not a current launch instruction.
