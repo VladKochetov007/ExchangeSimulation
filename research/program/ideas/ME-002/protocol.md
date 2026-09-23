@@ -29,8 +29,8 @@ nominal contrast without separated realized paths is an identification limit.
 ## Why these delays and this ecology
 
 The predecessor [ME-001 report](../ME-001/report.md) is a completed development
-screen, not a confirmation set. A new Go-only profile of its retained C0
-pre-decision evidence is being versioned separately; no ME-002 outcome is used
+screen, not a confirmation set. A [Go-only profile](timing-baseline.md) of its retained C0
+pre-decision evidence was versioned separately; no ME-002 outcome is used
 to choose this design. The source clock steps and focal polls every 1 ms,
 the baseline focal feed/request/response delay is 1 ms each, and the venue’s
 default periodic snapshot interval is 100 ms. In the three retained C0 seeds,
