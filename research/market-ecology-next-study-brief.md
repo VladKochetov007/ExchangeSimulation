@@ -55,10 +55,15 @@ The following should remain fixed across a matched comparison:
 - total agent count and, where the question is composition rather than scale,
   total capital;
 - liabilities and endowments outside the declared allocation intervention;
-- participant information, observation delay, latency, and decision cadence;
+- each actor class's information, observation delay, latency, and clock rule;
 - venue rules, matching, fees, risk limits, funding, settlement, and calendar;
 - randomization policy and the focal strategy's code/configuration; and
 - the measurement and terminal-validity contract.
+
+The composition intervention changes which indexed actor instances exist, so
+client IDs and the set of maker refresh phases change with the roster. Those
+are declared parts of replacing a whole participant class, not quantities held
+constant or separately identified in this first pilot.
 
 If fixed-total-capital redistribution is not the question, an additive-capital
 arm must be named as such rather than described as redistribution.
@@ -68,9 +73,10 @@ arm must be named as such rather than described as redistribution.
 The primary endpoint is all-in target implementation shortfall, with completion
 reported separately and residual quantity valued only by a labelled terminal
 two-sided midpoint. A proposed admissible cell has exact evidence, full
-completion, and target shortfall no greater than 10 bp (5 bp configured fee
-plus a prospective 5 bp execution-cost budget). The complete response map is
-reported; the region may be non-monotone.
+completion, and target shortfall no greater than a prospective 10 bp all-in
+mandate. The 5 bp configured fee motivates that mandate's scale but is not an
+exact additive component because fee and target-shortfall denominators differ.
+The complete response map is reported; the region may be non-monotone.
 
 Supporting endpoints are limited to:
 

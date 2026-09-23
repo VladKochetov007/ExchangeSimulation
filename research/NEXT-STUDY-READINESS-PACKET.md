@@ -1,8 +1,11 @@
 # Next-study readiness packet — composition-conditioned execution capacity
 
-Date: 2026-09-23  
-Status: **DESIGN/READINESS ONLY — NOT AUTHORIZED TO IMPLEMENT OR RUN**  
-Consolidated baseline: `a878dca984911ab379fa5d619efc274ae43736a6`  
+Date: 2026-09-23
+
+Status: **DESIGN/READINESS ONLY — NOT AUTHORIZED TO IMPLEMENT OR RUN**
+
+Consolidated baseline: `a878dca984911ab379fa5d619efc274ae43736a6`
+
 Baseline tree: `36998b0cdcf8b80822500ea0eacdf1ac69ca98d5`
 
 ## Decision in one paragraph
@@ -47,12 +50,22 @@ conditional simulator hypothesis, not a prediction about all real markets.
 
 ### Prospective falsifier and identification failure
 
-- **Economic falsifier:** the depth/opportunity channel is present and ordered
-  as predicted, but paired focal outcomes show no corresponding composition
-  ordering at any tested scale.
+- **Opportunity separation:** for each composition contrast, use the median of
+  the three seed-paired differences in delivered five-level ask depth. The
+  maker-rich channel is separated only when its median difference from C0 is
+  positive; the flow-rich channel is separated only when its median difference
+  from C0 is negative. Zero is not separation. No effect-size threshold is
+  claimed in this screening pilot.
+- **Descriptive economic falsifier:** when one channel is opportunity-separated,
+  all three size-specific target-shortfall contrasts are defined, and none of
+  their median differences has the predicted sign, that directional channel
+  is unsupported by this pilot. For C+ the predicted sign is negative; for C−
+  it is positive. Any mixture is reported as a response map, not forced into a
+  binary verdict.
 - **Identification failure:** delivered pre-decision depth is not measurably
   different across compositions, is unavailable, or cannot be joined to the
-  parent request and exchange fills. This is not an economic null.
+  parent request and exchange fills. A missing eligible opportunity is an
+  assigned-world outcome, not a row to discard, and is not an economic null.
 - **Implementation failure:** config, schedule, quantity, fee, terminal mark,
   or exchange/actor reconciliation fails. This invalidates the cell rather
   than counting as poor strategy performance.
@@ -162,49 +175,42 @@ results. They used the 4-maker/8-noise composition and old source identities.
 
 ## 5. Actor and market contracts
 
-### Focal immediate parent
+The table records current executable behavior, not an idealized economic role.
+Every account receives 100,000 ABC and USD 100,000,000. No actor borrows,
+receives replenishment, or uses margin in this laboratory.
 
-| Dimension | Exact current behavior |
-|---|---|
-| objective | complete a fixed buy target; evaluation is all-in target implementation shortfall |
-| capital | 100,000 ABC and USD 100,000,000; fixed and nonbinding at proposed sizes |
-| debt/financing | no declared financing objective; the one-venue lab does not measure financing cost |
-| observations | delayed public `MDSnapshot` for ABC/USD only |
-| latency | proposed fixed 1 ms request, response, and market-data delay |
-| clock | polls every 1 ms; decides no earlier than simulated 1 s and only with a two-sided snapshot |
-| execution | one market child, no hidden oracle, no direct exchange-book read |
-| fees | 5 bp taker fee in quote currency |
-| constraint | configured `TargetQty`; no resubmission after residual cancellation |
-| entry/exit | enters once; any residual remains unexecuted and is separately terminal-marked for measurement |
+| Dimension | Focal immediate parent | Adaptive background maker | Delayed random taker |
+|---|---|---|---|
+| objective/model role | complete one fixed buy target; evaluated by all-in target implementation shortfall | maintain five bid/ask levels around a weighted public-book midpoint; no explicit utility | create symmetric stochastic liquidity-taking flow; no liability, alpha, or welfare objective |
+| capital, inventory, debt | common initial balances; focal capital is fixed and nonbinding; resulting base/cash position is retained | common initial balances; own-fill inventory is tracked, but executionlab sets inventory skew to zero and has no inventory/risk limit | common initial balances; fills change balances, with no actor-level inventory target or limit |
+| financing | none | none | none |
+| observations | delayed public ABC/USD snapshots | direct public snapshots and trades | delayed public snapshots and trades |
+| latency | 1 ms request, response, and market data | direct mount | 2 ms request, response, and market data |
+| decision clock | polls every 1 ms; decides no earlier than 1 s and only after a positive two-sided snapshot | five deterministic per-level schedules; maker index `i` has base/outer intervals `10+i`/`30+i` ms | 25 ms periodic tick; first tick subscribes and returns |
+| pricing/execution | one market child for `TargetQty`; no direct book read or hidden oracle | ordinary limit orders at $10, $30, $50, $70, and $90 offsets from weighted mid; not post-only | random side and uniform size in `[0.025,0.075)` ABC; caps to delivered facing depth when positive, but an empty facing side still produces a market request that cannot fill |
+| fees | 5 bp taker fee in USD | zero configured fee | 5 bp taker fee in USD |
+| constraints | no resubmission after cancelled residual | fixed 0.25 ABC per level; no configured skew, withdrawal policy, or explicit risk constraint | delivered-depth cap when facing depth is positive; finite balances; no resubmission |
+| entry/exit | one decision after warm-up; residual remains unexecuted and is terminal-marked only for measurement | subscribes on first base tick, refreshes until the fixed horizon, then simulation shutdown | subscribes on first tick, evaluates on later ticks until the fixed horizon, then simulation shutdown |
 
 The terminal midpoint is controller-side evaluation after the final fixed
 point. It is not information available to the actor and must never be fed back
 into its decision.
 
-### Adaptive background maker
-
-The existing `feesim.MarketMaker` has five levels per side, 0.25 ABC per
-level, ten-dollar ticks, weighted-mid anchoring, and deterministic level refresh
-intervals from 10–30 ms. It has zero configured maker fee, a direct mount, the
-same initial ABC/USD balance map as every other executionlab participant, and
-no explicit profit-maximizing utility. It adapts quotes to public book/trade
-events and its own inventory; it is a liquidity mechanism, not an empirically
-calibrated dealer optimum.
-
-### Delayed random taker
-
-Each taker has an independent per-index PRNG stream, sees delayed public book
-and trade events, decides every 25 ms after an initial subscription tick, draws
-buy/sell and a quantity around 0.05 ABC, and bounds the request by delivered
-visible depth. It pays 5 bp taker fees, receives the same nominal initial
-balances, and has no liability or alpha objective. Its activity supplies
-background consumption, not welfare-maximizing end-user demand.
+The maker class is “adaptive” only in its weighted-book midpoint and selective
+level refresh. Because `SkewTicksPerLot` is zero in `executionlab`, its quoted
+mid does not respond to its recorded inventory. Calling this policy an
+inventory-sensitive or economically optimizing dealer would be false. The
+random-taker class supplies background consumption, not welfare-maximizing
+end-user demand.
 
 ### Market
 
 One ABC/USD continuous limit-order book uses deterministic ingress and phase
-ordering. Tick, base precision, matching, actor code, fee schedules, latency,
-and clocks remain fixed across the proposed composition cells. The pilot does
+ordering. Tick, base precision, matching, actor class code, and each class's
+fee and latency schedule remain fixed across proposed cells. Composition adds
+or removes indexed actor instances, so the set of maker refresh phases and
+client IDs changes with the treatment; that is part of the declared class
+replacement rather than a separately identified coefficient. The pilot does
 not activate margin, derivatives, funding, settlement, liquidation, multiple
 venues, or the R2 calendar.
 
@@ -213,8 +219,8 @@ venues, or the R2 calendar.
 ```text
 TargetQty (0.5 / 2 / 5 ABC)
   -> one requested market-child quantity
-  -> admitted order against delivered/resting asks
-  -> fills plus any cancelled residual
+  -> either rejected/unadmitted quantity or admitted order against resting asks
+  -> for admission, fills plus any cancelled residual
   -> executed notional, quote fee, completion ratio
   -> target implementation shortfall using an explicit terminal mark only for residual measurement
 ```
@@ -252,11 +258,12 @@ executed quote notional; and `F` is the sum of quote-denominated fees.
 
 The primary economic acceptability rule proposed for screening is: valid
 evidence, exact quantity/fee reconciliation, full completion, and target
-shortfall no greater than **10 bp**. Ten basis points is a declared execution
-mandate consisting of the unavoidable configured 5 bp taker fee plus a 5 bp
-price/opportunity-cost budget. It is a prospective utility choice, not an
-empirical universal. Every cell is still reported as a complete response map;
-no threshold crossing is hidden.
+shortfall no greater than **10 bp**. Ten basis points is a prospective all-in
+execution mandate, not an empirical universal. The configured 5 bp fee
+motivates its order of magnitude but is not an exact five-plus-five
+decomposition: fees apply to executed notional while the target-shortfall
+denominator uses target reference notional. Every cell is still reported as a
+complete response map; no threshold crossing is hidden.
 
 Allocated capital and utilized capital must be reported separately. In this
 pilot allocated capital is intentionally fixed and nonbinding; utilized quote
@@ -298,7 +305,7 @@ automatically tuned away.
 | maker count → resting depth/replenishment → completion and shortfall | primary hypothesis | quote synchronization, matching priority, or common weighted-mid feedback rather than “liquidity supply” broadly |
 | random-taker count → background consumption → depth at parent arrival | primary hypothesis | more takers also means more fee-paying actors and different actor/client ordering |
 | delayed observations → stale state → depth-bounded random orders | held fixed within each class | class replacement bundles objective, latency, and fee schedule by design |
-| inventory-sensitive maker response → later depth | implemented background mechanism | current executionlab maker has no explicit utility and is not post-only |
+| weighted-book-mid maker response → later depth | implemented background mechanism | executionlab sets inventory skew to zero; the maker has no explicit utility and is not post-only |
 | leverage/margin → stress amplification | excluded | no inference |
 | options/hedging → underlying feedback | excluded | no inference |
 
@@ -353,10 +360,14 @@ foreign-fee, and one-sided-terminal mutations.
 ### F1 — external pilot adapter and immutable provenance
 
 Create an adapter outside the reusable simulation library that accepts the
-full proposed matrix: maker count, noise count, target quantity, seed,
-duration, latencies, policy, endowments, and fee schedule. It must validate the
-fixed 12-account background roster and equal nominal aggregate endowment,
-write exact config/source/toolchain identities, and refuse output reuse.
+variable matrix fields: maker count, noise count, target quantity, seed,
+duration, latencies, and policy. It must bind and emit the compiled endowment
+and fee constants, validate the fixed 12-account background roster and equal
+nominal aggregate endowment, write exact config/source/toolchain identities,
+and refuse output reuse. Because endowments and fees are currently hard-coded
+inside `NewSim`, either the adapter must reject any value other than those
+constants or a separately reviewed, default-preserving `SimConfig` seam must
+expose them; duplicating unchecked constants in the adapter is not acceptable.
 
 Acceptance test: all 27 draft cells render distinct canonical plans; changing
 only output path does not change the plan digest; changing an economic field
@@ -366,15 +377,20 @@ startup.
 ### F2 — independent execution/opportunity evidence contract
 
 Persist a canonical decision-to-exchange packet sufficient to reconstruct the
-delivered depth, feasibility, request, admission, fills, fees, cancellation,
-terminal mark, completion, and both shortfall measures without calling actor
-report code. Add exact differential tests against `ExecutionReport`,
-fresh-process determinism/evidence-neutrality checks, and adversarial mutation
-tests. Preserve the existing policy and matching semantics.
+delivered depth, feasibility, requested quantity, rejected/unadmitted quantity,
+admitted quantity, fills, fees, cancelled residual, terminal mark, completion,
+and both shortfall measures without calling actor report code. A rejected
+request has no order or cancellation and must not be forced through the
+accepted-order quantity identity. Add exact differential tests against
+`ExecutionReport`, fresh-process determinism/evidence-neutrality checks, and
+adversarial mutation tests, including empty-facing-depth submission. Preserve
+the existing policy and matching semantics.
 
-Acceptance test: independent reconstruction equals the report on complete and
-partial fixtures; every listed mutation fails closed; evidence on/off leaves
-the economic execution digest unchanged.
+Acceptance test: independent reconstruction equals the report on complete,
+partial, fully rejected, and zero-facing-depth fixtures; accepted quantities
+reconcile to fills plus cancelled residual, rejected quantities reconcile to
+requests with no admitted order, every listed mutation fails closed, and
+evidence on/off leaves the economic execution digest unchanged.
 
 These are instrumentation/adapter fixes. They do not authorize a population,
 parameter, threshold, policy, or run.
@@ -457,7 +473,25 @@ calendar periodicity, and strategic equilibrium are distinct objects.
 | composition changes execution-scale capacity | hypothesis only | valid ordered opportunity with no outcome change, or opposite robust result | untested |
 | pilot transfers to real markets | no compatible participant-labelled data | prospective empirical comparison | unsupported |
 
-## 17. Readiness decision
+## 17. Independent bounded reviews
+
+Two fresh Luna-xhigh read-only reviewers inspected exact initial draft commit
+`0440e26628f2bfe0f0b4a2ce0d1c35d3e80546bb` against the named source paths.
+Neither reviewer edited files, ran simulations or tests, inspected protected
+outcomes, certified empirical realism, or authorized execution.
+
+| review | execution | initial verdict | required changes incorporated here |
+|---|---|---|---|
+| economic/mechanical execution-to-payoff path | `COMPLETED` | `ACCEPT_WITH_REQUIRED_CHANGES` | describe the configured maker rather than latent inventory-skew features; bind rounded per-index cadences and actual quote offsets; separate rejected from admitted/cancelled quantities; treat 10 bp as an all-in mandate; label residual valuation horizon-specific |
+| causal identification/statistical scope | `COMPLETED` | `ACCEPT_WITH_REQUIRED_CHANGES` | define all-assigned-world reporting and when a paired contrast is undefined; declare clock/client-ID changes part of the bundled treatment; make the directional screening falsifier explicit |
+
+The initial findings do not add a third implementation prerequisite. They
+tighten the protocol that F1 must bind and the cases that F2 must reconstruct.
+The corrected draft requires one bounded delta check before it is presented as
+reviewed; a failure of that check remains an unresolved design issue, not an
+execution authorization.
+
+## 18. Readiness decision
 
 **READY AFTER 2 SPECIFIC BOUNDED FIXES**
 
