@@ -23,12 +23,13 @@ const (
 // except Parent.Policy. The endogenous paths may diverge after the parent
 // executes; that divergence is the treatment effect, not a seed mismatch.
 type SimConfig struct {
-	Seed              int64
-	Duration          time.Duration
-	MMCount           int
-	NoiseTraderCount  int
-	BackgroundLatency time.Duration
-	ExecutionLatency  time.Duration
+	Seed                             int64
+	Duration                         time.Duration
+	MMCount                          int
+	NoiseTraderCount                 int
+	BackgroundLatency                time.Duration
+	ExecutionLatency                 time.Duration
+	RecordSnapshotProjectionEvidence bool
 	// ParentCount schedules independent parent-order clients using the same
 	// policy and deterministic side schedule. One preserves the original
 	// single-parent experiment.
@@ -151,10 +152,11 @@ func NewSim(cfg SimConfig) (*Sim, error) {
 	clock.SetScheduler(scheduler)
 	timers := simulation.NewSimTimerFactory(scheduler)
 	ex := exchange.NewExchangeWithConfig(exchange.ExchangeConfig{
-		Clock:                clock,
-		TickerFactory:        timers,
-		DeterministicIngress: runnerContract.DeterministicIngress,
-		DeterministicPhases:  runnerContract.DeterministicPhases,
+		Clock:                            clock,
+		TickerFactory:                    timers,
+		DeterministicIngress:             runnerContract.DeterministicIngress,
+		DeterministicPhases:              runnerContract.DeterministicPhases,
+		RecordSnapshotProjectionEvidence: cfg.RecordSnapshotProjectionEvidence,
 	})
 	instrument := InstrumentContract{
 		Symbol: cfg.Parent.Symbol, BaseAsset: "ABC", QuoteAsset: cfg.Parent.QuoteAsset,
@@ -304,7 +306,7 @@ func (s *Sim) RunMany(ctx context.Context) ([]ExecutionReport, error) {
 			s.exchange.LogAllBalances()
 			bid, ask, valid := s.exchange.TwoSidedTopOfBook(s.Parent.cfg.Symbol)
 			s.observe(EvidenceObservation{
-				Timestamp: s.clock.NowUnixNano(), Source: "exchange", Name: "terminal_book",
+				Timestamp: s.clock.NowUnixNano(), Source: "exchange", Name: "terminal_book", Route: s.Parent.cfg.Symbol,
 				Payload: TerminalBook{Symbol: s.Parent.cfg.Symbol, Bid: bid, Ask: ask, Valid: valid},
 			})
 		}

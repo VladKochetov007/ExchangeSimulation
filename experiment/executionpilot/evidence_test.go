@@ -114,13 +114,13 @@ func TestPartialFillFixtureReconstructsCancellation(t *testing.T) {
 		}
 		reorderedRecorder.Record(executionlab.EvidenceObservation{
 			Timestamp: event.Timestamp, ClientID: event.ClientID,
-			Source: event.Source, Name: event.Name, Payload: event.Payload,
+			Source: event.Source, Name: event.Name, Route: event.Route, Payload: event.Payload,
 		})
 		if event.ClientID == 13 && event.Source == "actor" && event.Name == "order_cancelled_receipt" {
 			for _, fill := range delayedReceipts {
 				reorderedRecorder.Record(executionlab.EvidenceObservation{
 					Timestamp: cancellationReceiptAt, ClientID: fill.ClientID,
-					Source: fill.Source, Name: fill.Name, Payload: fill.Payload,
+					Source: fill.Source, Name: fill.Name, Route: fill.Route, Payload: fill.Payload,
 				})
 			}
 		}
@@ -139,6 +139,43 @@ func TestPartialFillFixtureReconstructsCancellation(t *testing.T) {
 	if delayedOutcome.Status != outcome.Status || delayedOutcome.FilledQty != outcome.FilledQty {
 		t.Fatalf("queued earlier fills after cancellation changed execution: %+v", delayedOutcome)
 	}
+	for _, mutation := range []struct {
+		name      string
+		duplicate bool
+	}{
+		{name: "missing cancellation receipt"},
+		{name: "duplicate cancellation receipt", duplicate: true},
+	} {
+		t.Run(mutation.name, func(t *testing.T) {
+			var changed bytes.Buffer
+			changedRecorder := NewRecorder(&changed)
+			changedReceipt := false
+			if err := WalkEvidence(bytes.NewReader(output.Bytes()), identity, func(event RecordedEvent) error {
+				observation := executionlab.EvidenceObservation{
+					Timestamp: event.Timestamp, ClientID: event.ClientID,
+					Source: event.Source, Name: event.Name, Route: event.Route, Payload: event.Payload,
+				}
+				if event.ClientID == 13 && event.Source == "actor" && event.Name == "order_cancelled_receipt" {
+					changedReceipt = true
+					if !mutation.duplicate {
+						return nil
+					}
+					changedRecorder.Record(observation)
+				}
+				changedRecorder.Record(observation)
+				return nil
+			}); err != nil || !changedReceipt {
+				t.Fatalf("cancellation rewrite failed: changed=%t err=%v", changedReceipt, err)
+			}
+			changedIdentity, err := changedRecorder.Finish()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := Reconstruct(bytes.NewReader(changed.Bytes()), changedIdentity, plan); err == nil {
+				t.Fatal("rehashed missing or duplicate cancellation receipt accepted")
+			}
+		})
+	}
 	var unmarked bytes.Buffer
 	unmarkedRecorder := NewRecorder(&unmarked)
 	if err := WalkEvidence(bytes.NewReader(output.Bytes()), identity, func(event RecordedEvent) error {
@@ -148,7 +185,7 @@ func TestPartialFillFixtureReconstructsCancellation(t *testing.T) {
 		}
 		unmarkedRecorder.Record(executionlab.EvidenceObservation{
 			Timestamp: event.Timestamp, ClientID: event.ClientID,
-			Source: event.Source, Name: event.Name, Payload: payload,
+			Source: event.Source, Name: event.Name, Route: event.Route, Payload: payload,
 		})
 		return nil
 	}); err != nil {
@@ -206,34 +243,40 @@ func TestNoTradeIsNotEvidenceFailure(t *testing.T) {
 		t.Run(caseName, func(t *testing.T) {
 			var stream bytes.Buffer
 			recorder := NewRecorder(&stream)
-			if caseName == "observed but inactive" {
-				recorder.Record(executionlab.EvidenceObservation{
-					Timestamp: 500_000_000, ClientID: 13, Source: "actor", Name: "book_snapshot_receipt",
-					Payload: actor.BookSnapshotEvent{
-						Symbol: "ABC/USD", Timestamp: 499_000_000, SeqNum: 1,
-						Snapshot: &exchange.BookSnapshot{
-							Bids: []exchange.PriceLevel{{Price: 4_999_000_000, VisibleQty: 100_000_000}},
-							Asks: []exchange.PriceLevel{{Price: 5_001_000_000, VisibleQty: 100_000_000}},
+			for tickIndex := int64(1); tickIndex <= 4000; tickIndex++ {
+				timestamp := tickIndex * 1_000_000
+				if caseName == "observed but inactive" && timestamp == 500_000_000 {
+					bids := []exchange.PriceLevel{{Price: 4_999_000_000, VisibleQty: 100_000_000}}
+					asks := []exchange.PriceLevel{{Price: 5_001_000_000, VisibleQty: 100_000_000}}
+					recorder.Record(executionlab.EvidenceObservation{
+						Timestamp: 499_000_000, Source: "exchange", Name: "BookSnapshot", Route: "ABC/USD",
+						Payload: map[string]any{"source_sequence": uint64(1), "public_bids": bids, "public_asks": asks},
+					})
+					recorder.Record(executionlab.EvidenceObservation{
+						Timestamp: 500_000_000, ClientID: 13, Source: "actor", Name: "book_snapshot_receipt",
+						Payload: actor.BookSnapshotEvent{
+							Symbol: "ABC/USD", Timestamp: 499_000_000, SeqNum: 1,
+							Snapshot: &exchange.BookSnapshot{Bids: bids, Asks: asks},
 						},
-					},
+					})
+				}
+				tick := executionlab.DecisionTick{}
+				if caseName == "observed but inactive" && timestamp >= 500_000_000 {
+					tick.BestBid, tick.BestAsk = 4_999_000_000, 5_001_000_000
+				}
+				recorder.Record(executionlab.EvidenceObservation{
+					Timestamp: timestamp, ClientID: 13, Source: "actor", Name: "decision_tick", Payload: tick,
 				})
 			}
-			tick := executionlab.DecisionTick{}
-			if caseName == "observed but inactive" {
-				tick.BestBid, tick.BestAsk = 4_999_000_000, 5_001_000_000
-			}
 			recorder.Record(executionlab.EvidenceObservation{
-				Timestamp: 1_000_000_000, ClientID: 13, Source: "actor", Name: "decision_tick", Payload: tick,
-			})
-			recorder.Record(executionlab.EvidenceObservation{
-				Timestamp: 4_000_000_000, ClientID: 13, Source: "exchange", Name: "balance_snapshot",
+				Timestamp: 4_000_000_000, ClientID: 13, Source: "exchange", Name: "balance_snapshot", Route: "_global",
 				Payload: exchange.BalanceSnapshot{ClientID: 13, SpotBalances: []exchange.AssetBalance{
 					{Asset: "ABC", Free: 100_000 * 100_000_000},
 					{Asset: "USD", Free: 100_000_000 * 100_000},
 				}},
 			})
 			recorder.Record(executionlab.EvidenceObservation{
-				Timestamp: 4_000_000_000, Source: "exchange", Name: "terminal_book",
+				Timestamp: 4_000_000_000, Source: "exchange", Name: "terminal_book", Route: "ABC/USD",
 				Payload: executionlab.TerminalBook{Symbol: "ABC/USD", Valid: false},
 			})
 			identity, err := recorder.Finish()
@@ -241,15 +284,14 @@ func TestNoTradeIsNotEvidenceFailure(t *testing.T) {
 				t.Fatal(err)
 			}
 			outcome, err := Reconstruct(bytes.NewReader(stream.Bytes()), identity, plan)
-			if err != nil {
-				t.Fatal(err)
-			}
-			expected := OutcomeNoObservedOpportunity
 			if caseName == "observed but inactive" {
-				expected = OutcomeOpportunityNoAction
+				if err == nil {
+					t.Fatal("omitted immediate send after eligible tick was accepted")
+				}
+				return
 			}
-			if outcome.Status != expected {
-				t.Fatalf("status=%s expected=%s", outcome.Status, expected)
+			if err != nil || outcome.Status != OutcomeNoObservedOpportunity {
+				t.Fatalf("complete no-opportunity clock misclassified: status=%s err=%v", outcome.Status, err)
 			}
 		})
 	}
@@ -264,49 +306,71 @@ func TestAcceptedZeroFillAfterFacingDepthDisappears(t *testing.T) {
 	var stream bytes.Buffer
 	recorder := NewRecorder(&stream)
 	emit := func(timestamp int64, clientID uint64, source, name string, payload any) {
+		route := ""
+		if source == "exchange" {
+			route = "ABC/USD"
+			if name == "balance_snapshot" {
+				route = "_global"
+			}
+		}
 		recorder.Record(executionlab.EvidenceObservation{
-			Timestamp: timestamp, ClientID: clientID, Source: source, Name: name, Payload: payload,
+			Timestamp: timestamp, ClientID: clientID, Source: source, Name: name, Route: route, Payload: payload,
 		})
 	}
-	emit(500_000_000, 13, "actor", "book_snapshot_receipt", actor.BookSnapshotEvent{
-		Symbol: "ABC/USD", Timestamp: 499_000_000, SeqNum: 1,
-		Snapshot: &exchange.BookSnapshot{
-			Bids: []exchange.PriceLevel{{Price: 4_999_000_000, VisibleQty: 100_000_000}},
-			Asks: []exchange.PriceLevel{{Price: 5_001_000_000, VisibleQty: 100_000_000}},
-		},
-	})
-	emit(999_000_000, 13, "actor", "book_snapshot_receipt", actor.BookSnapshotEvent{
-		Symbol: "ABC/USD", Timestamp: 998_000_000, SeqNum: 2,
-		Snapshot: &exchange.BookSnapshot{
-			Bids: []exchange.PriceLevel{{Price: 4_999_000_000, VisibleQty: 100_000_000}},
-			Asks: nil,
-		},
-	})
-	emit(1_000_000_000, 13, "actor", "decision_tick", executionlab.DecisionTick{
-		BestBid: 4_999_000_000, BestAsk: 5_001_000_000,
-	})
-	emit(1_000_000_000, 13, "actor", "order_send", exchange.Request{
-		Type: exchange.ReqPlaceOrder,
-		OrderReq: &exchange.OrderRequest{
-			RequestID: 2, Side: exchange.Buy, Type: exchange.Market,
-			Qty: 200_000_000, Symbol: "ABC/USD",
-		},
-	})
-	emit(1_001_000_000, 13, "exchange", "OrderAccepted", map[string]any{
-		"request_id": uint64(2), "order_id": uint64(412), "client_id": uint64(13),
-		"side": "BUY", "type": "MARKET", "qty": int64(200_000_000), "timestamp": int64(1_001_000_000),
-		"time_in_force": "GTC", "visibility": "NORMAL",
-	})
-	emit(1_001_000_000, 13, "exchange", "OrderCancelled", map[string]any{
-		"request_id": uint64(2), "order_id": uint64(412),
-		"remaining_qty": int64(200_000_000), "reason": "NO_LIQUIDITY",
-	})
-	emit(1_002_000_000, 13, "actor", "order_accepted_receipt", actor.OrderAcceptedEvent{
-		RequestID: 2, OrderID: 412,
-	})
-	emit(1_002_000_000, 13, "actor", "order_cancelled_receipt", actor.OrderCancelledEvent{
-		RequestID: 2, OrderID: 412, RemainingQty: 200_000_000,
-	})
+	bids := []exchange.PriceLevel{{Price: 4_999_000_000, VisibleQty: 100_000_000}}
+	asks := []exchange.PriceLevel{{Price: 5_001_000_000, VisibleQty: 100_000_000}}
+	for tickIndex := int64(1); tickIndex <= 4000; tickIndex++ {
+		timestamp := tickIndex * 1_000_000
+		switch timestamp {
+		case 500_000_000:
+			emit(499_000_000, 0, "exchange", "BookSnapshot", map[string]any{
+				"source_sequence": uint64(1), "public_bids": bids, "public_asks": asks,
+			})
+			emit(timestamp, 13, "actor", "book_snapshot_receipt", actor.BookSnapshotEvent{
+				Symbol: "ABC/USD", Timestamp: 499_000_000, SeqNum: 1,
+				Snapshot: &exchange.BookSnapshot{Bids: bids, Asks: asks},
+			})
+		case 999_000_000:
+			emit(998_000_000, 0, "exchange", "BookSnapshot", map[string]any{
+				"source_sequence": uint64(2), "public_bids": bids, "public_asks": []exchange.PriceLevel(nil),
+			})
+			emit(timestamp, 13, "actor", "book_snapshot_receipt", actor.BookSnapshotEvent{
+				Symbol: "ABC/USD", Timestamp: 998_000_000, SeqNum: 2,
+				Snapshot: &exchange.BookSnapshot{Bids: bids, Asks: nil},
+			})
+		case 1_001_000_000:
+			emit(timestamp, 13, "exchange", "OrderAccepted", map[string]any{
+				"request_id": uint64(2), "order_id": uint64(412), "client_id": uint64(13),
+				"side": "BUY", "type": "MARKET", "qty": cell.TargetQty, "timestamp": timestamp,
+				"time_in_force": "GTC", "visibility": "NORMAL",
+			})
+			emit(timestamp, 13, "exchange", "OrderCancelled", map[string]any{
+				"request_id": uint64(2), "order_id": uint64(412),
+				"remaining_qty": cell.TargetQty, "reason": "NO_LIQUIDITY",
+			})
+		case 1_002_000_000:
+			emit(timestamp, 13, "actor", "order_accepted_receipt", actor.OrderAcceptedEvent{
+				RequestID: 2, OrderID: 412,
+			})
+			emit(timestamp, 13, "actor", "order_cancelled_receipt", actor.OrderCancelledEvent{
+				RequestID: 2, OrderID: 412, RemainingQty: cell.TargetQty,
+			})
+		}
+		tick := executionlab.DecisionTick{AlreadyDecided: timestamp > 1_000_000_000}
+		if timestamp >= 500_000_000 {
+			tick.BestBid, tick.BestAsk = bids[0].Price, asks[0].Price
+		}
+		emit(timestamp, 13, "actor", "decision_tick", tick)
+		if timestamp == 1_000_000_000 {
+			emit(timestamp, 13, "actor", "order_send", exchange.Request{
+				Type: exchange.ReqPlaceOrder,
+				OrderReq: &exchange.OrderRequest{
+					RequestID: 2, Side: exchange.Buy, Type: exchange.Market,
+					Qty: cell.TargetQty, Symbol: "ABC/USD",
+				},
+			})
+		}
+	}
 	emit(4_000_000_000, 13, "exchange", "balance_snapshot", exchange.BalanceSnapshot{
 		ClientID: 13, SpotBalances: []exchange.AssetBalance{
 			{Asset: "ABC", Free: 100_000 * 100_000_000},
@@ -351,7 +415,7 @@ func TestAcceptedZeroFillAfterFacingDepthDisappears(t *testing.T) {
 		}
 		rejectedRecorder.Record(executionlab.EvidenceObservation{
 			Timestamp: event.Timestamp, ClientID: event.ClientID,
-			Source: event.Source, Name: name, Payload: payload,
+			Source: event.Source, Name: name, Route: event.Route, Payload: payload,
 		})
 		return nil
 	}); err != nil {
@@ -394,15 +458,25 @@ func TestEvidenceMutationsFailClosed(t *testing.T) {
 		t.Fatal("truncated evidence accepted")
 	}
 	for _, mutation := range []struct {
-		name       string
-		source     string
-		event      string
-		field      string
-		value      any
-		remove     bool
-		atDecision bool
+		name           string
+		source         string
+		event          string
+		field          string
+		value          any
+		remove         bool
+		atDecision     bool
+		timestampDelta int64
 	}{
 		{name: "intent quantity", source: "actor", event: "order_send", field: "OrderReq", value: "invalid"},
+		{name: "missing order intent", source: "actor", event: "order_send", remove: true},
+		{name: "unpublished snapshot sequence", source: "actor", event: "book_snapshot_receipt", field: "SeqNum", value: uint64(999_999)},
+		{name: "altered delivered depth", source: "actor", event: "book_snapshot_receipt", field: "Snapshot", value: map[string]any{
+			"bids": []exchange.PriceLevel{{Price: 1, VisibleQty: 1}}, "asks": []exchange.PriceLevel{{Price: 2, VisibleQty: 1}},
+		}},
+		{name: "delayed market data", source: "actor", event: "book_snapshot_receipt", timestampDelta: 1_000_000},
+		{name: "delayed venue arrival", source: "exchange", event: "OrderAccepted", timestampDelta: 1_000_000},
+		{name: "delayed admission receipt", source: "actor", event: "order_accepted_receipt", timestampDelta: 1_000_000},
+		{name: "delayed fill receipt", source: "actor", event: "order_fill_receipt", timestampDelta: 1_000_000},
 		{name: "venue fill price", source: "exchange", event: "OrderFill", field: "price", value: int64(1)},
 		{name: "unanchored receipt time", source: "actor", event: "order_fill_receipt", field: "timestamp", value: int64(1_999_000_000)},
 		{name: "ledger delta", source: "exchange", event: "balance_change", field: "changes", value: "invalid"},
@@ -422,20 +496,24 @@ func TestEvidenceMutationsFailClosed(t *testing.T) {
 					if mutation.remove {
 						return nil
 					}
-					var value map[string]any
-					if err := json.Unmarshal(event.Payload, &value); err != nil {
-						return err
+					if mutation.timestampDelta != 0 {
+						event.Timestamp += mutation.timestampDelta
+					} else {
+						var value map[string]any
+						if err := json.Unmarshal(event.Payload, &value); err != nil {
+							return err
+						}
+						value[mutation.field] = mutation.value
+						encoded, err := json.Marshal(value)
+						if err != nil {
+							return err
+						}
+						event.Payload = encoded
 					}
-					value[mutation.field] = mutation.value
-					encoded, err := json.Marshal(value)
-					if err != nil {
-						return err
-					}
-					event.Payload = encoded
 				}
 				mutated.Record(executionlab.EvidenceObservation{
 					Timestamp: event.Timestamp, ClientID: event.ClientID,
-					Source: event.Source, Name: event.Name, Payload: event.Payload,
+					Source: event.Source, Name: event.Name, Route: event.Route, Payload: event.Payload,
 				})
 				return nil
 			})

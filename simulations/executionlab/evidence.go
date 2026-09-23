@@ -13,15 +13,20 @@ type EvidenceObservation struct {
 	ClientID  uint64
 	Source    string
 	Name      string
+	Route     string
 	Payload   any
 }
 
 type evidenceLogger struct {
 	observe func(EvidenceObservation)
+	route   string
 }
 
 func (l evidenceLogger) LogEvent(timestamp int64, clientID uint64, name string, payload any) {
-	l.observe(EvidenceObservation{timestamp, clientID, "exchange", name, payload})
+	l.observe(EvidenceObservation{
+		Timestamp: timestamp, ClientID: clientID, Source: "exchange",
+		Name: name, Route: l.route, Payload: payload,
+	})
 }
 
 // SetEvidenceObserver must be called before Run. The observer is write-only:
@@ -38,9 +43,8 @@ func (s *Sim) SetEvidenceObserver(observe func(EvidenceObservation)) {
 		}
 		return
 	}
-	logger := evidenceLogger{observe: observe}
-	s.exchange.SetLogger(s.Parent.cfg.Symbol, logger)
-	s.exchange.SetLogger("_global", logger)
+	s.exchange.SetLogger(s.Parent.cfg.Symbol, evidenceLogger{observe: observe, route: s.Parent.cfg.Symbol})
+	s.exchange.SetLogger("_global", evidenceLogger{observe: observe, route: "_global"})
 	for _, parent := range s.Parents {
 		parent.observe = observe
 		parent.observationTime = s.clock.NowUnixNano

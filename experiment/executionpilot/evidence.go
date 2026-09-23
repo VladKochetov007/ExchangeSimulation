@@ -16,13 +16,14 @@ import (
 )
 
 const (
-	EvidenceSchemaID    = "execution-pilot-opaque-v1"
-	evidenceSchemaEpoch = 0x4d450001
+	EvidenceSchemaID    = "execution-pilot-opaque-v2"
+	evidenceSchemaEpoch = 0x4d450002
 )
 
 type evidenceEnvelope struct {
 	Source  string          `json:"source"`
 	Name    string          `json:"name"`
+	Route   string          `json:"route,omitempty"`
 	Payload json.RawMessage `json:"payload"`
 }
 
@@ -62,7 +63,7 @@ func (r *Recorder) Record(observation executionlab.EvidenceObservation) {
 		r.firstErr = fmt.Errorf("execution pilot: encode %s: %w", observation.Name, err)
 		return
 	}
-	envelope := evidenceEnvelope{Source: observation.Source, Name: observation.Name, Payload: payload}
+	envelope := evidenceEnvelope{Source: observation.Source, Name: observation.Name, Route: observation.Route, Payload: payload}
 	if err := r.writer.AppendInterning(observation.Timestamp, observation.ClientID, 0, exchange.OpaqueJSON{Value: envelope}); err != nil {
 		r.firstErr = fmt.Errorf("execution pilot: append %s: %w", observation.Name, err)
 	}
@@ -94,6 +95,7 @@ type RecordedEvent struct {
 	ClientID  uint64
 	Source    string
 	Name      string
+	Route     string
 	Payload   json.RawMessage
 }
 
@@ -134,7 +136,7 @@ func WalkEvidence(input io.Reader, expected EvidenceIdentity, visit func(Recorde
 		return visit(RecordedEvent{
 			Sequence: frame.Header.Seq, Timestamp: frame.Header.SimTS,
 			ClientID: frame.Header.ClientID, Source: envelope.Source,
-			Name: envelope.Name, Payload: envelope.Payload,
+			Name: envelope.Name, Route: envelope.Route, Payload: envelope.Payload,
 		})
 	})
 	if err != nil {

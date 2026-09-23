@@ -94,6 +94,7 @@ func NewWorld(cell Cell) (*executionlab.Sim, error) {
 	config.Seed = cell.Seed
 	config.MMCount = cell.MakerCount
 	config.NoiseTraderCount = cell.RandomTakerCount
+	config.RecordSnapshotProjectionEvidence = true
 	config.Parent.TargetQty = cell.TargetQty
 	return executionlab.NewSim(config)
 }

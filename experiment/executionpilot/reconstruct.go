@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"reflect"
 
 	"exchange_sim/exchange"
 	"exchange_sim/types"
@@ -15,7 +16,6 @@ type OutcomeStatus string
 
 const (
 	OutcomeNoObservedOpportunity OutcomeStatus = "NO_OBSERVED_OPPORTUNITY"
-	OutcomeOpportunityNoAction   OutcomeStatus = "OPPORTUNITY_NO_ACTION"
 	OutcomeRejected              OutcomeStatus = "REJECTED"
 	OutcomeAcceptedUnfilled      OutcomeStatus = "ACCEPTED_UNFILLED"
 	OutcomePartiallyFilled       OutcomeStatus = "PARTIALLY_FILLED"
@@ -69,6 +69,9 @@ type ReconstructedOutcome struct {
 }
 
 type analysisContract struct {
+	Config struct {
+		RecordSnapshotProjectionEvidence bool `json:"RecordSnapshotProjectionEvidence"`
+	} `json:"config"`
 	Instrument struct {
 		Symbol        string `json:"symbol"`
 		BaseAsset     string `json:"base_asset"`
@@ -87,11 +90,13 @@ type analysisContract struct {
 	} `json:"accounts"`
 	Parents []struct {
 		ClientID uint64 `json:"client_id"`
+		Latency  int64  `json:"latency_nanos"`
 		Config   struct {
 			Symbol        string `json:"Symbol"`
 			Side          string `json:"Side"`
 			TargetQty     int64  `json:"TargetQty"`
 			DecisionAfter int64  `json:"DecisionAfter"`
+			PollInterval  int64  `json:"PollInterval"`
 		} `json:"config"`
 	} `json:"parents"`
 	Runner struct {
@@ -113,7 +118,10 @@ func analysisInputs(plan LockedPlan) (analysisContract, uint64, error) {
 		contract.Instrument.BasePrecision <= 0 || contract.Parents[0].Config.Side != "BUY" ||
 		contract.Parents[0].Config.TargetQty != plan.Cell.TargetQty ||
 		contract.Parents[0].Config.Symbol != contract.Instrument.Symbol ||
-		contract.Runner.Iterations != 4000 || contract.Runner.Step != 1_000_000 {
+		contract.Runner.Iterations != 4000 || contract.Runner.Step != 1_000_000 ||
+		contract.Parents[0].Config.PollInterval != 1_000_000 ||
+		contract.Parents[0].Config.DecisionAfter != 1_000_000_000 ||
+		contract.Parents[0].Latency != 1_000_000 || !contract.Config.RecordSnapshotProjectionEvidence {
 		return contract, 0, errors.New("execution pilot: unsupported or inconsistent focal contract")
 	}
 	clientID := contract.Parents[0].ClientID
@@ -139,6 +147,17 @@ type snapshotWire struct {
 		Bids []exchange.PriceLevel `json:"bids"`
 		Asks []exchange.PriceLevel `json:"asks"`
 	} `json:"Snapshot"`
+}
+
+type publicationWire struct {
+	SourceSequence uint64                `json:"source_sequence"`
+	PublicBids     []exchange.PriceLevel `json:"public_bids"`
+	PublicAsks     []exchange.PriceLevel `json:"public_asks"`
+}
+
+type publishedSnapshot struct {
+	Timestamp int64
+	Payload   publicationWire
 }
 
 type orderWire struct {
@@ -230,6 +249,10 @@ type reconstructionState struct {
 	ledgerUSD             int64
 	feeBps                int64
 	lastEventTS           int64
+	decisionTicks         int64
+	publications          map[uint64]publishedSnapshot
+	lastDeliveredSeq      uint64
+	cancelReceiptCount    int
 }
 
 func Reconstruct(input io.Reader, evidence EvidenceIdentity, plan LockedPlan) (ReconstructedOutcome, error) {
@@ -242,6 +265,7 @@ func Reconstruct(input io.Reader, evidence EvidenceIdentity, plan LockedPlan) (R
 		result:   ReconstructedOutcome{ClientID: clientID, TargetQty: plan.Cell.TargetQty},
 		balances: map[string]int64{}, fillByTrade: map[uint64]fillWire{},
 		tradeByID: map[uint64]tradeWire{}, receipts: map[uint64]bool{},
+		publications: map[uint64]publishedSnapshot{},
 	}
 	for _, account := range contract.Accounts {
 		if account.ClientID == clientID {
@@ -297,11 +321,24 @@ func (s *reconstructionState) consumeActor(event RecordedEvent) error {
 		if snapshot.Symbol != s.contract.Instrument.Symbol || snapshot.Timestamp > event.Timestamp || snapshot.Snapshot == nil {
 			return errors.New("execution pilot: invalid delivered snapshot identity or time")
 		}
+		publication, published := s.publications[snapshot.SeqNum]
+		if !published || snapshot.SeqNum <= s.lastDeliveredSeq ||
+			snapshot.Timestamp != publication.Timestamp ||
+			event.Timestamp != publication.Timestamp+s.contract.Parents[0].Latency ||
+			!reflect.DeepEqual(snapshot.Snapshot.Bids, publication.Payload.PublicBids) ||
+			!reflect.DeepEqual(snapshot.Snapshot.Asks, publication.Payload.PublicAsks) {
+			return errors.New("execution pilot: local snapshot lacks matching prior venue publication or delivery latency")
+		}
+		s.lastDeliveredSeq = snapshot.SeqNum
 		s.latestMessage, s.latestReceipt, s.latestMessageEventSeq = snapshot, event.Timestamp, event.Sequence
 		if len(snapshot.Snapshot.Bids) != 0 && len(snapshot.Snapshot.Asks) != 0 {
 			s.lastSnapshot, s.lastReceipt, s.lastSnapshotEventSeq = snapshot, event.Timestamp, event.Sequence
 		}
 	case "decision_tick":
+		if event.Timestamp != (s.decisionTicks+1)*s.contract.Runner.Step {
+			return errors.New("execution pilot: missing, duplicate or misphased focal decision tick")
+		}
+		s.decisionTicks++
 		tick, err := decodePayload[struct {
 			BestBid        int64 `json:"best_bid"`
 			BestAsk        int64 `json:"best_ask"`
@@ -329,7 +366,8 @@ func (s *reconstructionState) consumeActor(event RecordedEvent) error {
 		if err != nil {
 			return err
 		}
-		if !s.wasAccepted || s.responded || response.RequestID != s.result.RequestID || response.OrderID != s.result.OrderID || event.Timestamp < s.result.VenueArrivalAt {
+		if !s.wasAccepted || s.responded || response.RequestID != s.result.RequestID || response.OrderID != s.result.OrderID ||
+			event.Timestamp != s.result.VenueArrivalAt+s.contract.Parents[0].Latency {
 			return errors.New("execution pilot: unmatched or duplicate acceptance receipt")
 		}
 		s.responded = true
@@ -341,7 +379,8 @@ func (s *reconstructionState) consumeActor(event RecordedEvent) error {
 		if err != nil {
 			return err
 		}
-		if !s.wasRejected || s.responded || response.RequestID != s.result.RequestID || response.Reason != s.result.RejectReason || event.Timestamp < s.result.VenueArrivalAt {
+		if !s.wasRejected || s.responded || response.RequestID != s.result.RequestID || response.Reason != s.result.RejectReason ||
+			event.Timestamp != s.result.VenueArrivalAt+s.contract.Parents[0].Latency {
 			return errors.New("execution pilot: unmatched or duplicate rejection receipt")
 		}
 		s.responded = true
@@ -351,7 +390,7 @@ func (s *reconstructionState) consumeActor(event RecordedEvent) error {
 			return err
 		}
 		original, ok := s.fillByTrade[fill.TradeID]
-		if !ok || s.receipts[fill.TradeID] || event.Timestamp < fill.Timestamp ||
+		if !ok || s.receipts[fill.TradeID] || event.Timestamp != original.Timestamp+s.contract.Parents[0].Latency ||
 			fill.OrderID != original.OrderID || fill.Qty != original.Qty || fill.Price != original.Price ||
 			fill.FeeAmount != original.FeeAmount || fill.FeeAsset != original.FeeAsset ||
 			fill.Timestamp != original.Timestamp {
@@ -366,9 +405,12 @@ func (s *reconstructionState) consumeActor(event RecordedEvent) error {
 		if err != nil {
 			return err
 		}
-		if !s.wasCancelled || cancel.OrderID != s.result.OrderID || cancel.RemainingQty != s.result.CancelledResidual || event.Timestamp < s.cancelledAt {
+		if !s.wasCancelled || s.cancelReceiptCount != 0 || cancel.OrderID != s.result.OrderID ||
+			cancel.RemainingQty != s.result.CancelledResidual ||
+			event.Timestamp != s.cancelledAt+s.contract.Parents[0].Latency {
 			return errors.New("execution pilot: cancellation receipt mismatch")
 		}
+		s.cancelReceiptCount++
 	}
 	return nil
 }
@@ -433,7 +475,35 @@ func (s *reconstructionState) consumeSend(event RecordedEvent) error {
 }
 
 func (s *reconstructionState) consumeExchange(event RecordedEvent) error {
+	if event.Name == "BookSnapshot" {
+		if event.Route != s.contract.Instrument.Symbol {
+			return errors.New("execution pilot: venue snapshot routed from wrong symbol")
+		}
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(event.Payload, &fields); err != nil {
+			return err
+		}
+		for _, key := range []string{"source_sequence", "public_bids", "public_asks"} {
+			if _, present := fields[key]; !present {
+				return errors.New("execution pilot: venue snapshot lacks public projection identity")
+			}
+		}
+		publication, err := decodePayload[publicationWire](event.Payload)
+		if err != nil {
+			return err
+		}
+		if publication.SourceSequence != 0 {
+			if _, exists := s.publications[publication.SourceSequence]; exists {
+				return errors.New("execution pilot: duplicate venue snapshot sequence")
+			}
+			s.publications[publication.SourceSequence] = publishedSnapshot{Timestamp: event.Timestamp, Payload: publication}
+		}
+		return nil
+	}
 	if event.Name == "Trade" {
+		if event.Route != s.contract.Instrument.Symbol {
+			return errors.New("execution pilot: venue trade routed from wrong symbol")
+		}
 		trade, err := decodePayload[tradeWire](event.Payload)
 		if err != nil {
 			return err
@@ -450,6 +520,9 @@ func (s *reconstructionState) consumeExchange(event RecordedEvent) error {
 		return nil
 	}
 	if event.Name == "terminal_book" {
+		if event.Route != s.contract.Instrument.Symbol {
+			return errors.New("execution pilot: terminal book routed from wrong symbol")
+		}
 		if !s.result.BalanceSnapshotSeen || event.Timestamp != int64(s.contract.Runner.Iterations)*s.contract.Runner.Step {
 			return errors.New("execution pilot: terminal book is not at shutdown after ledger snapshot")
 		}
@@ -487,6 +560,16 @@ func (s *reconstructionState) consumeExchange(event RecordedEvent) error {
 	if event.ClientID != s.clientID {
 		return nil
 	}
+	if event.Name == "balance_snapshot" {
+		if event.Route != "_global" {
+			return errors.New("execution pilot: terminal balance snapshot routed incorrectly")
+		}
+	} else if event.Name == "OrderAccepted" || event.Name == "OrderRejected" || event.Name == "OrderFill" ||
+		event.Name == "OrderCancelled" || event.Name == "balance_change" {
+		if event.Route != s.contract.Instrument.Symbol {
+			return errors.New("execution pilot: focal venue event routed from wrong symbol")
+		}
+	}
 	switch event.Name {
 	case "OrderAccepted":
 		accepted, err := decodePayload[orderWire](event.Payload)
@@ -497,7 +580,7 @@ func (s *reconstructionState) consumeExchange(event RecordedEvent) error {
 			accepted.OrderID == 0 || accepted.Qty != s.result.TargetQty || accepted.Side != "BUY" || accepted.Type != "MARKET" ||
 			accepted.Price != 0 || accepted.FilledQty != 0 || accepted.TimeInForce != "GTC" ||
 			accepted.Visibility != "NORMAL" || accepted.PostOnly ||
-			event.Timestamp < s.result.OrderSentAt {
+			event.Timestamp != s.result.OrderSentAt+s.contract.Parents[0].Latency {
 			return errors.New("execution pilot: accepted order does not match focal intent")
 		}
 		if accepted.Timestamp != event.Timestamp {
@@ -513,7 +596,8 @@ func (s *reconstructionState) consumeExchange(event RecordedEvent) error {
 		if !s.wasSent || s.acceptedSeen || rejected.RequestID != s.result.RequestID || rejected.Error == "" ||
 			rejected.Qty != s.result.TargetQty || rejected.Symbol != s.contract.Instrument.Symbol ||
 			rejected.Side != "BUY" || rejected.Type != "MARKET" || rejected.Price != 0 ||
-			rejected.TimeInForce != "GTC" || rejected.PostOnly || event.Timestamp < s.result.OrderSentAt {
+			rejected.TimeInForce != "GTC" || rejected.PostOnly ||
+			event.Timestamp != s.result.OrderSentAt+s.contract.Parents[0].Latency {
 			return errors.New("execution pilot: rejected order does not match focal intent")
 		}
 		s.acceptedSeen, s.wasRejected = true, true
@@ -632,22 +716,27 @@ func (s *reconstructionState) consumeBalanceSnapshot(event RecordedEvent) error 
 }
 
 func (s *reconstructionState) finish() error {
+	if s.decisionTicks != int64(s.contract.Runner.Iterations) {
+		return errors.New("execution pilot: incomplete focal decision clock evidence")
+	}
 	if !s.terminalSeen || !s.result.BalanceSnapshotSeen {
 		return errors.New("execution pilot: missing terminal venue or ledger evidence")
 	}
 	if !s.wasSent {
+		if s.eligibleTick != 0 {
+			return errors.New("execution pilot: immediate policy omitted order despite eligible local opportunity")
+		}
 		if s.ledgerABC != 0 || s.ledgerUSD != 0 {
 			return errors.New("execution pilot: focal ledger changed without an order")
 		}
-		if s.eligibleTick != 0 {
-			s.result.Status = OutcomeOpportunityNoAction
-		} else {
-			s.result.Status = OutcomeNoObservedOpportunity
-		}
+		s.result.Status = OutcomeNoObservedOpportunity
 		return nil
 	}
 	if !s.acceptedSeen || !s.responded || (s.wasAccepted == s.wasRejected) {
 		return errors.New("execution pilot: missing or ambiguous focal admission response")
+	}
+	if s.wasCancelled && s.cancelReceiptCount != 1 || !s.wasCancelled && s.cancelReceiptCount != 0 {
+		return errors.New("execution pilot: missing or extra focal cancellation receipt")
 	}
 	if s.wasRejected {
 		if s.result.FillCount != 0 || s.result.OrderID != 0 || s.wasCancelled || s.ledgerABC != 0 || s.ledgerUSD != 0 {
