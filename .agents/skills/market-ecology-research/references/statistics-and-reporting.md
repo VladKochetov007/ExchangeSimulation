@@ -38,6 +38,7 @@ Source status: IMPLEMENTED, PARTIAL, NOT_IMPLEMENTED or UNVERIFIED; cite scope.
 
 Results contain schema_version, study_id, stage, process_status, evidence_validity,
 opportunity_presence, policy_activity, registered_activation, scientific_verdict,
+causal_verdict,
 empirical_comparison, reasons, identities, authorization, review, claims and evidence.
 Use the supplied result template for exact field names and initial values.
 A status record is never an authorization grant; consult the owner instruction.
@@ -51,11 +52,14 @@ A status record is never an authorization grant; consult the owner instruction.
 | policy_activity | NOT_ASSESSED, ACTIVE, INACTIVE, UNKNOWN, NOT_APPLICABLE |
 | registered_activation | NOT_ASSESSED, SATISFIED, NOT_SATISFIED, UNKNOWN, NOT_APPLICABLE |
 | scientific_verdict | NOT_ISSUED, SUPPORTED, NOT_SUPPORTED, INCONCLUSIVE, IDENTIFICATION_LIMITATION, MECHANICAL_ONLY |
+| causal_verdict | NOT_ASSESSED, SUPPORTED, NOT_SUPPORTED, INCONCLUSIVE, NOT_IDENTIFIED, NOT_APPLICABLE |
 | empirical_comparison | NOT_PERFORMED, COMPATIBLE, MISMATCH, INCONCLUSIVE, NOT_APPLICABLE |
 | review execution | COMPLETED, UNAVAILABLE, FAILED, NOT_REQUESTED |
 | review verdict | ACCEPT, ACCEPT_WITH_REQUIRED_CHANGES, REJECT, NOT_ISSUED |
 
 A result with missing/invalid evidence cannot issue an economic verdict.
+An issued scientific verdict requires evidence-linked claims and complete identities.
+Assess causal effects separately even when mechanical or descriptive evidence is valid.
 An accepted review requires COMPLETED execution and a substantive scope/reference.
 Every claim has id, type, text, evidence_ids and limitations.
 Every evidence entry has id, kind, location and identity.

@@ -8,6 +8,7 @@
   "policy_activity": "NOT_ASSESSED",
   "registered_activation": "NOT_ASSESSED",
   "scientific_verdict": "NOT_ISSUED",
+  "causal_verdict": "NOT_ASSESSED",
   "empirical_comparison": "NOT_PERFORMED",
   "reasons": [
     "Template only. No execution or evidence assessment has occurred. All null identities are unassigned."

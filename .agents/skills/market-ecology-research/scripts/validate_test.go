@@ -80,6 +80,7 @@ func TestResultMutations(t *testing.T) {
 		"substantive review no scope":       func(r *Result) { r.Review.Execution = "COMPLETED"; r.Review.Verdict = "REJECT" },
 		"no run evidence":                   func(r *Result) { r.EvidenceValidity = "VALID" },
 		"unknown enum":                      func(r *Result) { r.PolicyActivity = "PROFITABLE" },
+		"causal verdict without result":     func(r *Result) { r.CausalVerdict = "SUPPORTED" },
 		"missing identity":                  func(r *Result) { delete(r.Identities, "analyzer") },
 		"dangling claim": func(r *Result) {
 			r.ProcessStatus = "COMPLETED"

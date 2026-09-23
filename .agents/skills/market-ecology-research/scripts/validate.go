@@ -74,6 +74,7 @@ type Result struct {
 	PolicyActivity       string             `json:"policy_activity"`
 	RegisteredActivation string             `json:"registered_activation"`
 	ScientificVerdict    string             `json:"scientific_verdict"`
+	CausalVerdict        string             `json:"causal_verdict"`
 	EmpiricalComparison  string             `json:"empirical_comparison"`
 	Reasons              []string           `json:"reasons"`
 	Identities           map[string]*string `json:"identities"`
@@ -305,6 +306,7 @@ func validateResult(result Result) error {
 		{result.PolicyActivity, "NOT_ASSESSED ACTIVE INACTIVE UNKNOWN NOT_APPLICABLE"},
 		{result.RegisteredActivation, "NOT_ASSESSED SATISFIED NOT_SATISFIED UNKNOWN NOT_APPLICABLE"},
 		{result.ScientificVerdict, "NOT_ISSUED SUPPORTED NOT_SUPPORTED INCONCLUSIVE IDENTIFICATION_LIMITATION MECHANICAL_ONLY"},
+		{result.CausalVerdict, "NOT_ASSESSED SUPPORTED NOT_SUPPORTED INCONCLUSIVE NOT_IDENTIFIED NOT_APPLICABLE"},
 		{result.EmpiricalComparison, "NOT_PERFORMED COMPATIBLE MISMATCH INCONCLUSIVE NOT_APPLICABLE"},
 		{result.Review.Execution, "COMPLETED UNAVAILABLE FAILED NOT_REQUESTED"},
 		{result.Review.Verdict, "ACCEPT ACCEPT_WITH_REQUIRED_CHANGES REJECT NOT_ISSUED"},
@@ -332,6 +334,9 @@ func validateResult(result Result) error {
 	}
 	if len(result.Claims) > 0 && (result.EvidenceValidity != "VALID" || result.ProcessStatus != "COMPLETED") {
 		return fmt.Errorf("claims without complete valid evidence")
+	}
+	if member(result.CausalVerdict, "SUPPORTED NOT_SUPPORTED INCONCLUSIVE NOT_IDENTIFIED") && (result.ScientificVerdict == "NOT_ISSUED" || result.EvidenceValidity != "VALID") {
+		return fmt.Errorf("causal verdict without valid scientific result")
 	}
 	if result.ScientificVerdict != "NOT_ISSUED" {
 		if len(result.Claims) == 0 {
