@@ -18,7 +18,7 @@ only after a prospective protocol lock. No ME-002+ study is authorized to run.
 | Priority | IDs | Next boundary |
 |---|---|---|
 | 1 | [ME-000](ideas/ME-000/report.md) | CLOSED: F1/F2 mechanical readiness accepted at `b25223a` |
-| 2 | [ME-001](ideas/ME-001/idea.md) | lock/review the [merged pilot draft](../market-ecology-capacity-pilot-protocol-DRAFT.md) before any development world |
+| 2 | [ME-001](ideas/ME-001/protocol.md) | prospective development lock: review exact committed protocol before any world |
 | 3 | ME-002–ME-007 | separately chosen timing, instruction, allocation or arbitrage question |
 | 4 | ME-008–ME-010 | payoff readiness, selected ensemble or named derivative child |
 | 5 | ME-011–ME-012 | restricted games and explicit capital dynamics after reliable payoffs |

@@ -8,7 +8,9 @@ Strongest intended claim: **CAUSAL** (proposed, not established).
 One ABC/USD venue; immediate buy; 2/10, 4/8, 6/6 maker/taker compositions and 0.5/2/5 ABC targets. Three proposed seeds, 27 economic worlds plus two controls. No seeds reserved.
 
 Authorization and current stage: [authoritative registry](../../registry.json).
-No study execution or readiness implementation is authorized by this card.
+ME-000 readiness is closed. The owner's overnight goal conditionally permits
+development execution only under the [prospective lock](protocol.md) after
+its independent review; this card alone is never a run authorization.
 
 ## Entities and readiness
 
@@ -39,10 +41,11 @@ No profitability, capital-capacity, equilibrium or empirical-realism inference. 
 
 ## Tentative design and next action
 
-After ME-000, prospectively review and obtain owner authorization for the unchanged linked draft.
+Review the committed protocol lock, which inherits the merged draft's
+economic matrix and records only explicit prospective amendments.
 Numeric choices remain prospective unless the authoritative draft below specifies
 them. Budget for this authoring task is zero market worlds. Future work needs its
 own protocol, modules/N/A reasons, fixtures, formula domains and owner budget.
 
-Authoritative protocol: [existing merged DRAFT](../../../../research/market-ecology-capacity-pilot-protocol-DRAFT.md).
-Do not copy or change that matrix while implementing this registry.
+Authoritative protocol: [ME-001 lock](protocol.md), incorporating the
+[merged historical draft](../../../../research/market-ecology-capacity-pilot-protocol-DRAFT.md).

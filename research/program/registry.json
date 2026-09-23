@@ -30,7 +30,7 @@
       "claim_type": "CAUSAL",
       "stage": "PLAN",
       "idea": "research/program/ideas/ME-001/idea.md",
-      "protocol": "research/market-ecology-capacity-pilot-protocol-DRAFT.md",
+      "protocol": "research/program/ideas/ME-001/protocol.md",
       "report": null,
       "result": null,
       "dependencies": [
@@ -41,11 +41,11 @@
         "S06"
       ],
       "authorization": {
-        "prepare": false,
-        "run": false,
-        "basis": "Owner skill-authoring task only. Study implementation and execution require separate authorization."
+        "prepare": true,
+        "run": true,
+        "basis": "Owner 2026-09-23 overnight goal conditionally authorizes only the prospectively locked 27 ME-001 development worlds plus two controls after ME-000 and protocol review; no holdouts or ME-002+ execution."
       },
-      "next_action": "After ME-000, prospectively review and obtain owner authorization for the unchanged linked draft."
+      "next_action": "Obtain bounded independent review of the committed ME-001 lock; only if accepted build pinned binaries, run two controls, then the finite development matrix."
     },
     {
       "id": "ME-002",
