@@ -58,7 +58,8 @@ falsification.
   withdrawal are disabled in this harness;
 - random taker decision interval 25 ms, 0.05 ABC target-size parameter,
   independent actor streams, and positive visible-depth capping; an empty
-  facing side does not suppress the request, which then cannot fill;
+  delivered facing side does not suppress the request, whose fill or rejection
+  depends on the book after request latency when it reaches the venue;
 - focal and noise taker fees 5 bp in USD; maker fee zero;
 - common initial balance per participant: 100,000 ABC and USD 100,000,000;
 - no margin, financing, derivatives, multiple venues, hidden liquidity,
