@@ -320,10 +320,7 @@ func AggregateLatencyRuns(root, repositoryDir, expectedSource string) (LatencySu
 					return LatencySurface{}, errors.New("latency pilot: missing matched arm")
 				}
 			}
-			contrast := LatencyPairedContrast{TargetQty: target, Seed: seed, FastFast: values[0], FastSlow: values[1], SlowFast: values[2], SlowSlow: values[3],
-				NetworkEffect:    ((values[2] + values[3]) - (values[0] + values[1])) / 2,
-				ProcessingEffect: ((values[1] + values[3]) - (values[0] + values[2])) / 2,
-				Interaction:      values[3] - values[2] - values[1] + values[0]}
+			contrast := latencyPairedContrast(target, seed, values)
 			surface.PairedContrasts = append(surface.PairedContrasts, contrast)
 			network = append(network, contrast.NetworkEffect)
 			processing = append(processing, contrast.ProcessingEffect)
@@ -339,6 +336,14 @@ func AggregateLatencyRuns(root, repositoryDir, expectedSource string) (LatencySu
 		}
 	}
 	return surface, nil
+}
+
+func latencyPairedContrast(target, seed int64, values [4]float64) LatencyPairedContrast {
+	return LatencyPairedContrast{TargetQty: target, Seed: seed,
+		FastFast: values[0], FastSlow: values[1], SlowFast: values[2], SlowSlow: values[3],
+		NetworkEffect:    ((values[2] + values[3]) - (values[0] + values[1])) / 2,
+		ProcessingEffect: ((values[1] + values[3]) - (values[0] + values[2])) / 2,
+		Interaction:      values[3] - values[2] - values[1] + values[0]}
 }
 
 func WriteLatencySurface(path string, surface LatencySurface) error {
