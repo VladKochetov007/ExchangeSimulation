@@ -30,10 +30,36 @@ type ParentOrderConfig struct {
 	BasePrecision int64
 	QuoteAsset    string
 	Policy        Policy
+	Instruction   *ChildInstruction `json:"instruction,omitempty"`
 	DecisionAfter time.Duration
 	SliceInterval time.Duration
 	SliceCount    int
 	PollInterval  time.Duration
+}
+
+type ChildInstruction struct {
+	OrderType   exchange.OrderType   `json:"order_type"`
+	TimeInForce exchange.TimeInForce `json:"time_in_force"`
+	LimitPrice  int64                `json:"limit_price"`
+}
+
+func (i ChildInstruction) validate() error {
+	if i.TimeInForce != exchange.GTC && i.TimeInForce != exchange.IOC && i.TimeInForce != exchange.FOK {
+		return fmt.Errorf("executionlab: unsupported time-in-force %d", i.TimeInForce)
+	}
+	switch i.OrderType {
+	case exchange.Market:
+		if i.LimitPrice != 0 {
+			return fmt.Errorf("executionlab: market child cannot have a limit price")
+		}
+	case exchange.LimitOrder:
+		if i.LimitPrice <= 0 {
+			return fmt.Errorf("executionlab: spot limit child requires a positive price")
+		}
+	default:
+		return fmt.Errorf("executionlab: unsupported order type %d", i.OrderType)
+	}
+	return nil
 }
 
 func (c ParentOrderConfig) validate() error {
@@ -48,6 +74,11 @@ func (c ParentOrderConfig) validate() error {
 	}
 	if c.Policy == TWAP && (c.SliceCount < 2 || c.SliceInterval <= 0) {
 		return fmt.Errorf("executionlab: TWAP requires at least two positive-interval slices")
+	}
+	if c.Instruction != nil {
+		if err := c.Instruction.validate(); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -279,7 +310,12 @@ func (a *executionAgent) sendNext(now int64) {
 	if remaining%int64(slicesLeft) != 0 {
 		qty++
 	}
-	requestID := a.SubmitOrder(a.cfg.Symbol, a.cfg.Side, exchange.Market, 0, qty)
+	orderType, timeInForce, price := exchange.Market, exchange.GTC, int64(0)
+	if a.cfg.Instruction != nil {
+		orderType, timeInForce, price = a.cfg.Instruction.OrderType,
+			a.cfg.Instruction.TimeInForce, a.cfg.Instruction.LimitPrice
+	}
+	requestID := a.SubmitOrderWithTimeInForce(a.cfg.Symbol, a.cfg.Side, orderType, price, qty, timeInForce)
 	a.report.Children = append(a.report.Children, ChildReport{
 		RequestID:    requestID,
 		SentAt:       now,

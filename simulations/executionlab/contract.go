@@ -92,10 +92,18 @@ func (c WorldContract) clone() WorldContract {
 			copyOfDeployment := *c.Parents[index].Deployment
 			c.Parents[index].Deployment = &copyOfDeployment
 		}
+		if c.Parents[index].Config.Instruction != nil {
+			copyOfInstruction := *c.Parents[index].Config.Instruction
+			c.Parents[index].Config.Instruction = &copyOfInstruction
+		}
 	}
 	if c.Config.ParentDeployment != nil {
 		copyOfDeployment := *c.Config.ParentDeployment
 		c.Config.ParentDeployment = &copyOfDeployment
+	}
+	if c.Config.Parent.Instruction != nil {
+		copyOfInstruction := *c.Config.Parent.Instruction
+		c.Config.Parent.Instruction = &copyOfInstruction
 	}
 	return c
 }

@@ -185,6 +185,10 @@ func NewSim(cfg SimConfig) (*Sim, error) {
 	if err := cfg.normalize(); err != nil {
 		return nil, err
 	}
+	if cfg.Parent.Instruction != nil {
+		copyOfInstruction := *cfg.Parent.Instruction
+		cfg.Parent.Instruction = &copyOfInstruction
+	}
 	runnerContract := RunnerContract{
 		Iterations: int(cfg.Duration / time.Millisecond), Step: time.Millisecond,
 		DeterministicIngress: true, DeterministicPhases: true,
