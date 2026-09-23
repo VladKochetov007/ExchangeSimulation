@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "study_id": "ME-000",
+  "stage": "PLAN",
+  "process_status": "NOT_RUN",
+  "evidence_validity": "NOT_ASSESSED",
+  "opportunity_presence": "NOT_ASSESSED",
+  "policy_activity": "NOT_ASSESSED",
+  "registered_activation": "NOT_ASSESSED",
+  "scientific_verdict": "NOT_ISSUED",
+  "causal_verdict": "NOT_ASSESSED",
+  "empirical_comparison": "NOT_PERFORMED",
+  "reasons": [
+    "Template only. No execution or evidence assessment has occurred. All null identities are unassigned."
+  ],
+  "identities": {
+    "source": null,
+    "configuration": null,
+    "run": null,
+    "analyzer": null,
+    "protocol": null,
+    "skill_commit": null,
+    "skill_tree": null
+  },
+  "authorization": {
+    "prepare": false,
+    "run": false,
+    "basis": "Template; no owner implementation or execution authority."
+  },
+  "review": {
+    "execution": "NOT_REQUESTED",
+    "verdict": "NOT_ISSUED",
+    "scope": null,
+    "reference": null
+  },
+  "claims": [],
+  "evidence": []
+}

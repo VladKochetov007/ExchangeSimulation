@@ -7,6 +7,12 @@ scientific freeze and it is not a certificate of market realism.
 
 ## Current development state
 
+The [market-ecology program](program/README.md) provides the finite idea registry,
+policy catalogue and explicit research-skill invocation. Its current starting
+point is the merged immediate-execution readiness/pilot draft. Registry entries
+do not authorize implementation or market runs; the R2/SV1D closure below remains
+the completed historical boundary.
+
 The consolidated code baseline is the former scientific tip
 `f507c7ee2b11fd05e1adb9f17fa0a66faf889ea1`, descended from the published
 `main` tip `ffe1434cfc60b5f79b5289b610d3d5137286f514`. The consolidation adds
@@ -112,4 +118,3 @@ The public checkout reproduces source, tests, reports, and compact manifests.
 Private external evidence and review bundles require the recorded local paths
 and access permissions; their absence must not be silently replaced by a new
 run.
-

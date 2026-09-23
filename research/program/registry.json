@@ -1,0 +1,572 @@
+{
+  "schema_version": 1,
+  "baseline_commit": "32d340f188460712d94b43f76f1de1928b013bf0",
+  "studies": [
+    {
+      "id": "ME-000",
+      "title": "Immediate-execution pilot readiness",
+      "claim_type": "MECHANICAL",
+      "stage": "PLAN",
+      "idea": "research/program/ideas/ME-000/idea.md",
+      "protocol": null,
+      "report": null,
+      "result": null,
+      "dependencies": [],
+      "policy_ids": [
+        "S01",
+        "S02",
+        "S06"
+      ],
+      "authorization": {
+        "prepare": false,
+        "run": false,
+        "basis": "Owner skill-authoring task only. Study implementation and execution require separate authorization."
+      },
+      "next_action": "Complete F1 and F2 only after separate owner implementation authorization."
+    },
+    {
+      "id": "ME-001",
+      "title": "Immediate-execution quantity/composition screen",
+      "claim_type": "CAUSAL",
+      "stage": "PLAN",
+      "idea": "research/program/ideas/ME-001/idea.md",
+      "protocol": "research/market-ecology-capacity-pilot-protocol-DRAFT.md",
+      "report": null,
+      "result": null,
+      "dependencies": [
+        "ME-000"
+      ],
+      "policy_ids": [
+        "S01",
+        "S06"
+      ],
+      "authorization": {
+        "prepare": false,
+        "run": false,
+        "basis": "Owner skill-authoring task only. Study implementation and execution require separate authorization."
+      },
+      "next_action": "After ME-000, prospectively review and obtain owner authorization for the unchanged linked draft."
+    },
+    {
+      "id": "ME-002",
+      "title": "Identical-policy deployment assignment",
+      "claim_type": "CAUSAL",
+      "stage": "INTAKE",
+      "idea": "research/program/ideas/ME-002/idea.md",
+      "protocol": null,
+      "report": null,
+      "result": null,
+      "dependencies": [
+        "ME-000"
+      ],
+      "policy_ids": [
+        "S01",
+        "S14",
+        "S16"
+      ],
+      "authorization": {
+        "prepare": false,
+        "run": false,
+        "basis": "Owner skill-authoring task only. Study implementation and execution require separate authorization."
+      },
+      "next_action": "Design a fixed-profile swap and realized-time evidence fixture; do not add it to ME-001."
+    },
+    {
+      "id": "ME-003",
+      "title": "Execution-instruction contrast",
+      "claim_type": "CAUSAL",
+      "stage": "INTAKE",
+      "idea": "research/program/ideas/ME-003/idea.md",
+      "protocol": null,
+      "report": null,
+      "result": null,
+      "dependencies": [
+        "ME-000",
+        "ME-001"
+      ],
+      "policy_ids": [
+        "S01",
+        "S04",
+        "S05"
+      ],
+      "authorization": {
+        "prepare": false,
+        "run": false,
+        "basis": "Owner skill-authoring task only. Study implementation and execution require separate authorization."
+      },
+      "next_action": "Choose one supported IOC/FOK/GTC/passive contrast after execution evidence readiness."
+    },
+    {
+      "id": "ME-004",
+      "title": "Venue allocation at fixed policy",
+      "claim_type": "CAUSAL",
+      "stage": "INTAKE",
+      "idea": "research/program/ideas/ME-004/idea.md",
+      "protocol": null,
+      "report": null,
+      "result": null,
+      "dependencies": [
+        "ME-000",
+        "ME-003"
+      ],
+      "policy_ids": [
+        "S01",
+        "S06"
+      ],
+      "authorization": {
+        "prepare": false,
+        "run": false,
+        "basis": "Owner skill-authoring task only. Study implementation and execution require separate authorization."
+      },
+      "next_action": "Locate exact allocation implementation and minimal rounding/tie fixtures, then propose one contrast."
+    },
+    {
+      "id": "ME-005",
+      "title": "Prefunded two-venue executable arbitrage",
+      "claim_type": "CAUSAL",
+      "stage": "INTAKE",
+      "idea": "research/program/ideas/ME-005/idea.md",
+      "protocol": null,
+      "report": null,
+      "result": null,
+      "dependencies": [
+        "ME-000"
+      ],
+      "policy_ids": [
+        "S14",
+        "S15"
+      ],
+      "authorization": {
+        "prepare": false,
+        "run": false,
+        "basis": "Owner skill-authoring task only. Study implementation and execution require separate authorization."
+      },
+      "next_action": "Specify static positive/negative edge and one-leg failure fixtures before any endogenous protocol."
+    },
+    {
+      "id": "ME-006",
+      "title": "Informed maker by explicit arbitrage 2x2",
+      "claim_type": "CAUSAL",
+      "stage": "INTAKE",
+      "idea": "research/program/ideas/ME-006/idea.md",
+      "protocol": null,
+      "report": null,
+      "result": null,
+      "dependencies": [
+        "ME-005"
+      ],
+      "policy_ids": [
+        "S14",
+        "S16"
+      ],
+      "authorization": {
+        "prepare": false,
+        "run": false,
+        "basis": "Owner skill-authoring task only. Study implementation and execution require separate authorization."
+      },
+      "next_action": "Draft a new, resource-normalized 2x2 only after route/opportunity readiness."
+    },
+    {
+      "id": "ME-007",
+      "title": "Three-asset executable conversion",
+      "claim_type": "MECHANICAL",
+      "stage": "INTAKE",
+      "idea": "research/program/ideas/ME-007/idea.md",
+      "protocol": null,
+      "report": null,
+      "result": null,
+      "dependencies": [
+        "ME-000"
+      ],
+      "policy_ids": [
+        "S17"
+      ],
+      "authorization": {
+        "prepare": false,
+        "run": false,
+        "basis": "Owner skill-authoring task only. Study implementation and execution require separate authorization."
+      },
+      "next_action": "Design directional/unit/rounding fixtures and identify missing full-depth accounting."
+    },
+    {
+      "id": "ME-008",
+      "title": "Capital/crowding and substitution",
+      "claim_type": "CAUSAL",
+      "stage": "INTAKE",
+      "idea": "research/program/ideas/ME-008/idea.md",
+      "protocol": null,
+      "report": null,
+      "result": null,
+      "dependencies": [
+        "ME-000",
+        "ME-001"
+      ],
+      "policy_ids": [
+        "S07",
+        "S08",
+        "S09",
+        "S13",
+        "S26"
+      ],
+      "authorization": {
+        "prepare": false,
+        "run": false,
+        "basis": "Owner skill-authoring task only. Study implementation and execution require separate authorization."
+      },
+      "next_action": "Verify capital-to-action and payoff/exit paths before selecting one focal policy."
+    },
+    {
+      "id": "ME-009",
+      "title": "Minimal ensemble interaction panel",
+      "claim_type": "CAUSAL",
+      "stage": "INTAKE",
+      "idea": "research/program/ideas/ME-009/idea.md",
+      "protocol": null,
+      "report": null,
+      "result": null,
+      "dependencies": [
+        "ME-001",
+        "ME-006",
+        "ME-008"
+      ],
+      "policy_ids": [
+        "S07",
+        "S10",
+        "S12",
+        "S27"
+      ],
+      "authorization": {
+        "prepare": false,
+        "run": false,
+        "basis": "Owner skill-authoring task only. Study implementation and execution require separate authorization."
+      },
+      "next_action": "Choose a fractional panel only after its component studies have interpretable outcomes."
+    },
+    {
+      "id": "ME-010",
+      "title": "Financing and derivative child-study readiness",
+      "claim_type": "MECHANICAL",
+      "stage": "INTAKE",
+      "idea": "research/program/ideas/ME-010/idea.md",
+      "protocol": null,
+      "report": null,
+      "result": null,
+      "dependencies": [
+        "ME-000"
+      ],
+      "policy_ids": [
+        "S18",
+        "S19",
+        "S20",
+        "S21",
+        "S22",
+        "S23",
+        "S24",
+        "S25"
+      ],
+      "authorization": {
+        "prepare": false,
+        "run": false,
+        "basis": "Owner skill-authoring task only. Study implementation and execution require separate authorization."
+      },
+      "next_action": "Select a bounded child such as ME-010-PERP only after owner direction; do not run the umbrella."
+    },
+    {
+      "id": "ME-011",
+      "title": "Restricted response and invasion graph",
+      "claim_type": "GAME-THEORETIC",
+      "stage": "INTAKE",
+      "idea": "research/program/ideas/ME-011/idea.md",
+      "protocol": null,
+      "report": null,
+      "result": null,
+      "dependencies": [
+        "ME-008",
+        "ME-009"
+      ],
+      "policy_ids": [
+        "S07",
+        "S10",
+        "S12",
+        "S14"
+      ],
+      "authorization": {
+        "prepare": false,
+        "run": false,
+        "basis": "Owner skill-authoring task only. Study implementation and execution require separate authorization."
+      },
+      "next_action": "Specify a finite policy/resource class and uncertainty after payoff readiness."
+    },
+    {
+      "id": "ME-012",
+      "title": "Explicit long-run capital dynamics",
+      "claim_type": "GAME-THEORETIC",
+      "stage": "INTAKE",
+      "idea": "research/program/ideas/ME-012/idea.md",
+      "protocol": null,
+      "report": null,
+      "result": null,
+      "dependencies": [
+        "ME-011"
+      ],
+      "policy_ids": [
+        "S07",
+        "S10",
+        "S12",
+        "S14"
+      ],
+      "authorization": {
+        "prepare": false,
+        "run": false,
+        "basis": "Owner skill-authoring task only. Study implementation and execution require separate authorization."
+      },
+      "next_action": "Propose adaptation and source/sink rules only after shorter payoff studies; no implementation now."
+    }
+  ],
+  "policies": [
+    {
+      "id": "S01",
+      "title": "Immediate aggressive finite-target execution",
+      "source_status": "IMPLEMENTED",
+      "sources": [
+        "simulations/executionlab/execution.go"
+      ],
+      "catalogue_anchor": "research/program/policy-catalogue.md#s01"
+    },
+    {
+      "id": "S02",
+      "title": "TWAP child-order execution",
+      "source_status": "IMPLEMENTED",
+      "sources": [
+        "simulations/executionlab/execution.go"
+      ],
+      "catalogue_anchor": "research/program/policy-catalogue.md#s02"
+    },
+    {
+      "id": "S03",
+      "title": "Participation-of-volume execution",
+      "source_status": "UNVERIFIED",
+      "sources": [],
+      "catalogue_anchor": "research/program/policy-catalogue.md#s03"
+    },
+    {
+      "id": "S04",
+      "title": "Passive deadline execution",
+      "source_status": "PARTIAL",
+      "sources": [
+        "simulations/multivenue/term_carry.go"
+      ],
+      "catalogue_anchor": "research/program/policy-catalogue.md#s04"
+    },
+    {
+      "id": "S05",
+      "title": "Adaptive passive/aggressive deadline execution",
+      "source_status": "UNVERIFIED",
+      "sources": [],
+      "catalogue_anchor": "research/program/policy-catalogue.md#s05"
+    },
+    {
+      "id": "S06",
+      "title": "Symmetric passive market maker",
+      "source_status": "PARTIAL",
+      "sources": [
+        "simulations/feesim/mm.go",
+        "simulations/multivenue/naive.go"
+      ],
+      "catalogue_anchor": "research/program/policy-catalogue.md#s06"
+    },
+    {
+      "id": "S07",
+      "title": "Inventory-sensitive price/size maker",
+      "source_status": "IMPLEMENTED",
+      "sources": [
+        "simulations/multivenue/stoikov.go"
+      ],
+      "catalogue_anchor": "research/program/policy-catalogue.md#s07"
+    },
+    {
+      "id": "S08",
+      "title": "Flow/adverse-selection-aware maker",
+      "source_status": "PARTIAL",
+      "sources": [
+        "simulations/multivenue/naive.go"
+      ],
+      "catalogue_anchor": "research/program/policy-catalogue.md#s08"
+    },
+    {
+      "id": "S09",
+      "title": "Costly inventory rebalancing",
+      "source_status": "IMPLEMENTED",
+      "sources": [
+        "simulations/multivenue/stoikov.go"
+      ],
+      "catalogue_anchor": "research/program/policy-catalogue.md#s09"
+    },
+    {
+      "id": "S10",
+      "title": "Heterogeneous private-value trader",
+      "source_status": "PARTIAL",
+      "sources": [
+        "simulations/feesim/value.go"
+      ],
+      "catalogue_anchor": "research/program/policy-catalogue.md#s10"
+    },
+    {
+      "id": "S11",
+      "title": "Finite-resource momentum/trend follower",
+      "source_status": "UNVERIFIED",
+      "sources": [],
+      "catalogue_anchor": "research/program/policy-catalogue.md#s11"
+    },
+    {
+      "id": "S12",
+      "title": "Liability/delivery hedger",
+      "source_status": "IMPLEMENTED",
+      "sources": [
+        "simulations/multivenue/liability_hedger.go",
+        "simulations/multivenue/perp_exposure_hedger.go"
+      ],
+      "catalogue_anchor": "research/program/policy-catalogue.md#s12"
+    },
+    {
+      "id": "S13",
+      "title": "Treasury/target-allocation rebalancer",
+      "source_status": "UNVERIFIED",
+      "sources": [],
+      "catalogue_anchor": "research/program/policy-catalogue.md#s13"
+    },
+    {
+      "id": "S14",
+      "title": "Prefunded two-venue executable arbitrage",
+      "source_status": "IMPLEMENTED",
+      "sources": [
+        "simulations/multivenue/router.go"
+      ],
+      "catalogue_anchor": "research/program/policy-catalogue.md#s14"
+    },
+    {
+      "id": "S15",
+      "title": "Finite-objective smart order routing",
+      "source_status": "PARTIAL",
+      "sources": [
+        "simulations/multivenue/router.go",
+        "simulations/multivenue/metaorder.go"
+      ],
+      "catalogue_anchor": "research/program/policy-catalogue.md#s15"
+    },
+    {
+      "id": "S16",
+      "title": "Cross-venue-informed passive maker",
+      "source_status": "IMPLEMENTED",
+      "sources": [
+        "simulations/multivenue/stoikov.go",
+        "simulation/feed_gateway.go"
+      ],
+      "catalogue_anchor": "research/program/policy-catalogue.md#s16"
+    },
+    {
+      "id": "S17",
+      "title": "Three-asset triangular conversion",
+      "source_status": "PARTIAL",
+      "sources": [
+        "simulations/feesim/triarb.go",
+        "simulations/multivenue/naive.go"
+      ],
+      "catalogue_anchor": "research/program/policy-catalogue.md#s17"
+    },
+    {
+      "id": "S18",
+      "title": "Spot-perpetual carry/reverse carry",
+      "source_status": "IMPLEMENTED",
+      "sources": [
+        "simulations/multivenue/funding_carry.go",
+        "simulations/feesim/arb.go"
+      ],
+      "catalogue_anchor": "research/program/policy-catalogue.md#s18"
+    },
+    {
+      "id": "S19",
+      "title": "Spot-dated-future carry",
+      "source_status": "IMPLEMENTED",
+      "sources": [
+        "simulations/multivenue/dated_term_carry.go",
+        "simulations/derivsim/carryarb.go"
+      ],
+      "catalogue_anchor": "research/program/policy-catalogue.md#s19"
+    },
+    {
+      "id": "S20",
+      "title": "Calendar-spread relative value",
+      "source_status": "UNVERIFIED",
+      "sources": [
+        "simulations/multivenue/dated_term_carry.go"
+      ],
+      "catalogue_anchor": "research/program/policy-catalogue.md#s20"
+    },
+    {
+      "id": "S21",
+      "title": "Inventory-bearing option dealer with delta hedge",
+      "source_status": "IMPLEMENTED",
+      "sources": [
+        "simulations/derivsim/optionmm.go",
+        "simulations/derivsim/hedge.go"
+      ],
+      "catalogue_anchor": "research/program/policy-catalogue.md#s21"
+    },
+    {
+      "id": "S22",
+      "title": "Costed executable put-call parity",
+      "source_status": "PARTIAL",
+      "sources": [
+        "simulations/derivsim/parityarb.go"
+      ],
+      "catalogue_anchor": "research/program/policy-catalogue.md#s22"
+    },
+    {
+      "id": "S23",
+      "title": "Heterogeneous option-value takers",
+      "source_status": "IMPLEMENTED",
+      "sources": [
+        "simulations/derivsim/valuetaker.go",
+        "simulations/derivsim/opttaker.go"
+      ],
+      "catalogue_anchor": "research/program/policy-catalogue.md#s23"
+    },
+    {
+      "id": "S24",
+      "title": "Gamma/vega and higher-Greek risk transfer",
+      "source_status": "PARTIAL",
+      "sources": [
+        "simulations/derivsim/vannavolga.go",
+        "simulations/derivsim/greeks.go"
+      ],
+      "catalogue_anchor": "research/program/policy-catalogue.md#s24"
+    },
+    {
+      "id": "S25",
+      "title": "Leveraged directional desk",
+      "source_status": "IMPLEMENTED",
+      "sources": [
+        "simulations/multivenue/perp_exposure_hedger.go"
+      ],
+      "catalogue_anchor": "research/program/policy-catalogue.md#s25"
+    },
+    {
+      "id": "S26",
+      "title": "Statistical pairs trader",
+      "source_status": "UNVERIFIED",
+      "sources": [],
+      "catalogue_anchor": "research/program/policy-catalogue.md#s26"
+    },
+    {
+      "id": "S27",
+      "title": "Finite distress liquidity absorber",
+      "source_status": "PARTIAL",
+      "sources": [
+        "simulations/multivenue/supplier.go",
+        "simulations/multivenue/cdf_liquidity_supplier.go"
+      ],
+      "catalogue_anchor": "research/program/policy-catalogue.md#s27"
+    }
+  ]
+}

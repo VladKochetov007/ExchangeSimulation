@@ -1,0 +1,48 @@
+Independent skill mock review B — 2026-09-23
+Reviewer: fresh Luna xhigh agent 01a0cfa1-7f3f-7631-920d-df6183f40726 (Confucius).
+Target: e307bca132aa1b3caabe0055f6d1d6f64d1cba87; bounded follow-up 8b08780.
+Scope: B1–B5 synthetic cases; authorization, history, causal/statistical claims.
+The response below is preserved as received. Absolute links identify the review
+checkout, not portable reproduction paths. This is a skill review, not a market result.
+
+**Execution: COMPLETED. Verdict for HEAD `8b08780aca9c3241bcd4e6eea0e6f8d953fad96a`: ACCEPT_WITH_REQUIRED_CHANGES.**
+
+The missing `causal_verdict` field in pinned candidate `e307bca` was a required change; HEAD adds it to the result template, typed record, guidance, and validator test. One validation gap remains.
+
+### Assigned mock responses
+
+- **B1 — Valid no-trade:** Do not label the packet invalid. In result terms: process `COMPLETED`, evidence `VALID`, opportunity `PRESENT`, policy `INACTIVE`. Treat registered activation as `NOT_ASSESSED` unless a predicate was registered. The evidence supports a documented abstention under the declared utility threshold, not a broader causal or profitability claim.
+
+- **B2 — Historical boundary:** Supplier trading (523 fills in the compact summary) does not establish restoration: the summary records valid treatment evidence, `TREATMENT_NOT_ACTIVATED`, zero qualifying restorations, no completed 24-hour successor, and no next-study authorization. Do not enlarge capital to turn the historical result positive. That changes the question and requires prospective authority; it cannot rewrite the historical finding. [Closeout summary](</home/vlad/ExchangeSimulation-market-ecology-skill/research/artifacts/v2-r2-sv1d-closeout-summary.json>)
+
+- **B3 — Missing authorization:** Do not run or choose an idea autonomously. The registry is not execution authority. Return to INTAKE/PLAN until the owner selects a study and pinned protocol and authorizes a finite set of worlds, seeds, horizon, resources, and stop rules.
+
+- **B4 — Review unavailable:** Record the primary review as `UNAVAILABLE` / `NOT_ISSUED`; the fallback did not start, so it produced no substantive review either. Prepare the external review package after the permitted fallback. Do not issue an acceptance or rejection from these failures.
+
+- **B5 — Paper synthesis:** Keep the studies separate; their design descriptions do not supply effect values.
+
+  | Study | Known scope and endpoint | Evidence and limits |
+  |---|---|---|
+  | X | Population X; one venue; execution-cost contrast. Other design details unspecified. | Complete, valid; source X1. No effect direction or magnitude supplied. |
+  | Y | Three-venue router; cashflow endpoint. Population, resources, and horizon unspecified. | Complete, valid; source Y1. No cashflow result supplied. |
+  | Z | Planned option-surface hypothesis. | Never run; no observed evidence. |
+
+  Do not pool these as replications or claim realistic profitable market ecology. A bounded next question is whether X and Y were intended to support any one explicitly shared claim; absent a comparable estimand, report them separately.
+
+### Required change
+
+The follow-up validator allows `scientific_verdict=MECHANICAL_ONLY` alongside `causal_verdict=SUPPORTED` when general evidence requirements are met. That combination is ambiguous and can contradict the “mechanical only” verdict. Define its intended meaning or reject the combination in validation, with a focused test.
+
+### Unperformed checks
+
+I did not run tests, simulations, or market suites; reserve seeds; inspect raw or reserved outcomes; implement readiness fixes; or audit the broader platform. The follow-up was assessed statically. The anti-AI-slop skill was unavailable in the inspected skill locations, so I did not claim to have loaded it.
+
+Follow-up response, same reviewer context; requested delta was
+8b08780..f2cca325fa552766e23f83c3204bfa8f83f9e241, limited to the validator,
+its regression test, and the reporting reference:
+
+**Scoped delta execution: COMPLETED. Delta verdict: ACCEPT.**
+
+The change documents and enforces the `MECHANICAL_ONLY` boundary. Its otherwise-valid fixture accepts `NOT_ASSESSED` and `NOT_APPLICABLE`, and rejects all four substantive causal verdicts, including null verdicts. This resolves the outstanding finding.
+
+Per your instruction, the original overall verdict remains **ACCEPT_WITH_REQUIRED_CHANGES**. Helper tests and vet were reported as passing; I did not rerun them.
