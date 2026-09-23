@@ -75,9 +75,9 @@
       "id": "ME-003",
       "title": "Execution-instruction contrast",
       "claim_type": "CAUSAL",
-      "stage": "PLAN",
+      "stage": "PREPARE",
       "idea": "research/program/ideas/ME-003/idea.md",
-      "protocol": null,
+      "protocol": "research/program/ideas/ME-003/protocol.md",
       "report": null,
       "result": null,
       "dependencies": [
@@ -90,11 +90,11 @@
         "S05"
       ],
       "authorization": {
-        "prepare": false,
+        "prepare": true,
         "run": false,
-        "basis": "Owner skill-authoring task only. Study implementation and execution require separate authorization."
+        "basis": "Owner 2026-09-23 bounded continuation conditionally authorizes ME-003 readiness and a small development screen only after ME-002 valid completion, exact protocol/candidate readiness and independent prospective review; the present protocol is DRAFT and authorizes no world yet."
       },
-      "next_action": "Proposed IOC-versus-FOK limit-instruction contrast only: first bind parent instruction/provenance and independently reconstruct full/partial/rejected outcomes; no implementation or run authorized."
+      "next_action": "Finish configurable limit IOC/FOK parent path, independent versioned replay of full/partial/rejected/cancelled lifecycles, corruption fixtures and prospective review; lock exact candidate before any ME-003 world."
     },
     {
       "id": "ME-004",

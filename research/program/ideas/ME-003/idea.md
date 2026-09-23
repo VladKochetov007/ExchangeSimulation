@@ -8,7 +8,11 @@ Strongest intended claim: **CAUSAL** (proposed, not established).
 One contrast at a time; identical economic objective; allocation and routing held fixed.
 
 Authorization and current stage: [authoritative registry](../../registry.json).
-No study execution or readiness implementation is authorized by this card.
+The owner's bounded continuation permits readiness work after the reviewed
+ME-002 result. The [prospective protocol](protocol.md) is a DRAFT; this card
+does not authorize a world. The older two-seed sketch below is historical
+and is superseded by the draft's three paired development seeds where they
+conflict.
 
 ## Entities and readiness
 
