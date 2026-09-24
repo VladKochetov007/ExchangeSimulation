@@ -1099,7 +1099,11 @@ func TestTwoVenueRouterEvaluationsPersistInCanonicalBinaryEvidence(t *testing.T)
 	if responseCount == 0 || uint64(responseCount) != expectedResponses {
 		t.Fatalf("router response receipts persisted = %d, want report counter %d", responseCount, expectedResponses)
 	}
-	if err := os.WriteFile(filepath.Join(rendered, "greeks.json"), []byte("{}\n"), 0o644); err != nil {
+	terminalReport, err := json.Marshal(map[string]any{"router_reports": []CrossVenueArbReport{sim.Routers[0].Report()}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(rendered, "greeks.json"), terminalReport, 0o644); err != nil {
 		t.Fatal(err)
 	}
 	renderedRun, err := analysis.Open(rendered)
@@ -1107,11 +1111,15 @@ func TestTwoVenueRouterEvaluationsPersistInCanonicalBinaryEvidence(t *testing.T)
 		t.Fatal(err)
 	}
 	venues := [2]string{"north", "south"}
-	evaluations, err := renderedRun.CollectCrossVenueEvaluations(venues, sim.Routers[0].Report().RouterID, expectedEvaluations)
+	counters, err := renderedRun.CrossVenueRouterCounters(sim.Routers[0].Report().RouterID)
+	if err != nil || counters.QuoteEvaluations != expectedEvaluations || counters.ResponseReceipts != expectedResponses {
+		t.Fatalf("terminal router counter binding = %#v, %v", counters, err)
+	}
+	evaluations, err := renderedRun.CollectCrossVenueEvaluations(venues, counters.RouterID, counters.QuoteEvaluations)
 	if err != nil {
 		t.Fatal(err)
 	}
-	receipts, err := renderedRun.CollectCrossVenueResponseReceipts(venues, sim.Routers[0].Report().RouterID, expectedResponses)
+	receipts, err := renderedRun.CollectCrossVenueResponseReceipts(venues, counters.RouterID, counters.ResponseReceipts)
 	if err != nil || uint64(len(receipts)) != expectedResponses {
 		t.Fatalf("router response receipt audit = %d/%d, %v", len(receipts), expectedResponses, err)
 	}
@@ -1157,6 +1165,7 @@ func TestTwoVenueRouterEvaluationEvidenceDoesNotChangeEconomicOutcome(t *testing
 		result := normalizedCrossVenueReport(sim.Routers[0].Report())
 		result.QuoteEvaluations = 0 // evidence-only count is absent in the control
 		result.ResponseReceipts = 0
+		result.EvaluationEvidenceEnabled = false
 		ledgers := sim.CaptureVenueLedgers()
 		if err := sim.Close(); err != nil {
 			t.Fatal(err)

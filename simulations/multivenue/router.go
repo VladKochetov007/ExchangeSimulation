@@ -109,21 +109,22 @@ type CrossVenueArb struct {
 // attempts, fully completed conversions, failures, and non-atomic residual.
 // It is execution telemetry, not a marked-PnL claim.
 type CrossVenueArbReport struct {
-	Tier              float64 `json:"tier"`
-	RouterID          uint64  `json:"router_id"`
-	QuoteEvaluations  uint64  `json:"quote_evaluations,omitempty"`
-	ResponseReceipts  uint64  `json:"response_receipts,omitempty"`
-	ExecutableSignals int     `json:"executable_signals"`
-	SubmittedGroups   int     `json:"submitted_groups"`
-	CompletedGroups   int     `json:"completed_groups"`
-	FailedGroups      int     `json:"failed_groups"`
-	PendingGroups     int     `json:"pending_groups"`
-	BuyFilledQty      int64   `json:"buy_filled_qty"`
-	SellFilledQty     int64   `json:"sell_filled_qty"`
-	BuyNotional       int64   `json:"buy_notional"`
-	SellNotional      int64   `json:"sell_notional"`
-	QuoteFees         int64   `json:"quote_fees"`
-	UnpricedFeeCount  int     `json:"unpriced_fee_count"`
+	Tier                      float64 `json:"tier"`
+	RouterID                  uint64  `json:"router_id"`
+	EvaluationEvidenceEnabled bool    `json:"evaluation_evidence_enabled,omitempty"`
+	QuoteEvaluations          uint64  `json:"quote_evaluations,omitempty"`
+	ResponseReceipts          uint64  `json:"response_receipts,omitempty"`
+	ExecutableSignals         int     `json:"executable_signals"`
+	SubmittedGroups           int     `json:"submitted_groups"`
+	CompletedGroups           int     `json:"completed_groups"`
+	FailedGroups              int     `json:"failed_groups"`
+	PendingGroups             int     `json:"pending_groups"`
+	BuyFilledQty              int64   `json:"buy_filled_qty"`
+	SellFilledQty             int64   `json:"sell_filled_qty"`
+	BuyNotional               int64   `json:"buy_notional"`
+	SellNotional              int64   `json:"sell_notional"`
+	QuoteFees                 int64   `json:"quote_fees"`
+	UnpricedFeeCount          int     `json:"unpriced_fee_count"`
 	// OutOfDomainQuotePairs counts present executable touches that this
 	// positive-spot router deliberately cannot price. It is distinct from a
 	// missing book: the feed delivered a signed numeric quote, but the
@@ -258,6 +259,7 @@ func (r *CrossVenueArb) Tier() float64 { return r.tier }
 func (r *CrossVenueArb) Report() CrossVenueArbReport {
 	report := r.report
 	if r.cfg.EvaluationObserver != nil {
+		report.EvaluationEvidenceEnabled = true
 		report.QuoteEvaluations = r.quoteGeneration
 		report.ResponseReceipts = r.responseReceipts.Load()
 	}

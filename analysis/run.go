@@ -116,11 +116,12 @@ type RequestBudget struct {
 
 // Report is the run's summary document.
 type Report struct {
-	InitialAccounts  []AccountRow    `json:"initial_accounts"`
-	TerminalAccounts []AccountRow    `json:"terminal_accounts"`
-	Metaorders       []Metaorder     `json:"metaorders"`
-	RequestBudgets   []RequestBudget `json:"request_budgets"`
-	VenueLedgers     []VenueLedger   `json:"venue_ledgers"`
+	InitialAccounts  []AccountRow                       `json:"initial_accounts"`
+	TerminalAccounts []AccountRow                       `json:"terminal_accounts"`
+	Metaorders       []Metaorder                        `json:"metaorders"`
+	RequestBudgets   []RequestBudget                    `json:"request_budgets"`
+	VenueLedgers     []VenueLedger                      `json:"venue_ledgers"`
+	RouterReports    []CrossVenueRouterEvidenceCounters `json:"router_reports"`
 }
 
 // VenueLedger is what an exchange itself holds: the fees it took and whatever
