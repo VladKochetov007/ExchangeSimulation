@@ -48,6 +48,22 @@ func TestCrossVenueOneLotEdgeSeparatesPolicyFromLegSideOpportunity(t *testing.T)
 	}
 }
 
+func TestCrossVenuePolicyEdgeRequiresUnusedSidesPresentButNotPositive(t *testing.T) {
+	venues := [2]string{"north", "south"}
+	books := [2]CrossVenueTouch{
+		{Bid: -1, BidQty: 1, HasBid: true, Ask: 100, AskQty: 1, HasAsk: true},
+		{Bid: 105, BidQty: 1, HasBid: true, Ask: 0, AskQty: 1, HasAsk: true},
+	}
+	policy := EvaluateCrossVenueOneLotEdge(venues, books, 1, 1, 0, true)
+	if policy.Status != "POSITIVE_EDGE" || policy.Edge != 5 || policy.BuyVenue != "north" || policy.SellVenue != "south" {
+		t.Fatalf("signed unused quote side incorrectly excluded router opportunity: %#v", policy)
+	}
+	books[0].HasBid = false
+	if missing := EvaluateCrossVenueOneLotEdge(venues, books, 1, 1, 0, true); missing.Status != "MISSING_SIDE" {
+		t.Fatalf("absent unused side incorrectly admitted: %#v", missing)
+	}
+}
+
 func TestCrossVenueEpisodesRespectSameTimestampGlobalOrderAndHorizon(t *testing.T) {
 	venues := [2]string{"north", "south"}
 	north := CrossVenueTouch{Bid: 99, BidQty: 1, HasBid: true, Ask: 100, AskQty: 1, HasAsk: true}

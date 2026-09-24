@@ -20,18 +20,21 @@ type CrossVenueEdgeWorldInput struct {
 }
 
 type CrossVenueEdgeWorldSummary struct {
-	Seed               int64
-	Arm                string
-	BackgroundIdentity string
-	Venues             [2]string
-	HorizonNano        int64
-	LotQty             int64
-	BasePrecision      int64
-	TakerFeeBps        int64
-	EpisodeCount       int
-	CensoredEpisodes   int
-	PositiveNanos      int64
-	NoOpportunity      bool
+	Seed                    int64
+	Arm                     string
+	BackgroundIdentity      string
+	Venues                  [2]string
+	HorizonNano             int64
+	LotQty                  int64
+	BasePrecision           int64
+	TakerFeeBps             int64
+	EpisodeCount            int
+	CensoredEpisodes        int
+	PositiveNanos           int64
+	NoOpportunity           bool
+	BroaderEpisodeCount     int
+	BroaderCensoredEpisodes int
+	BroaderPositiveNanos    int64
 }
 
 type CrossVenuePairedEdgeContrast struct {
@@ -53,27 +56,49 @@ func SummarizeCrossVenueEdgeWorld(input CrossVenueEdgeWorldInput) (CrossVenueEdg
 	if err != nil {
 		return CrossVenueEdgeWorldSummary{}, err
 	}
+	broaderEpisodes, err := ReconstructCrossVenueLegSideEdgeEpisodes(input.Venues, input.Transitions, input.HorizonNano, input.LotQty, input.BasePrecision, input.TakerFeeBps)
+	if err != nil {
+		return CrossVenueEdgeWorldSummary{}, err
+	}
 	result := CrossVenueEdgeWorldSummary{
 		Seed: input.Seed, Arm: input.Arm, BackgroundIdentity: input.BackgroundIdentity,
 		Venues: input.Venues, HorizonNano: input.HorizonNano, LotQty: input.LotQty,
 		BasePrecision: input.BasePrecision, TakerFeeBps: input.TakerFeeBps,
 		EpisodeCount: len(episodes), NoOpportunity: len(episodes) == 0,
+		BroaderEpisodeCount: len(broaderEpisodes),
 	}
-	for _, episode := range episodes {
-		if episode.EndTS < episode.StartTS || episode.EndTS > input.HorizonNano {
-			return CrossVenueEdgeWorldSummary{}, fmt.Errorf("cross-venue edge world: episode outside horizon")
-		}
-		duration := episode.EndTS - episode.StartTS
-		positiveNanos, ok := etypes.TryAdd(result.PositiveNanos, duration)
-		if !ok || positiveNanos > input.HorizonNano {
-			return CrossVenueEdgeWorldSummary{}, fmt.Errorf("cross-venue edge world: episode durations exceed horizon")
-		}
-		result.PositiveNanos = positiveNanos
-		if episode.Censored {
-			result.CensoredEpisodes++
-		}
+	result.PositiveNanos, result.CensoredEpisodes, err = summarizeCrossVenueEpisodeDurations(episodes, input.HorizonNano)
+	if err != nil {
+		return CrossVenueEdgeWorldSummary{}, err
+	}
+	result.BroaderPositiveNanos, result.BroaderCensoredEpisodes, err = summarizeCrossVenueEpisodeDurations(broaderEpisodes, input.HorizonNano)
+	if err != nil {
+		return CrossVenueEdgeWorldSummary{}, err
+	}
+	if result.BroaderPositiveNanos < result.PositiveNanos {
+		return CrossVenueEdgeWorldSummary{}, fmt.Errorf("cross-venue edge world: broader duration excludes policy opportunity")
 	}
 	return result, nil
+}
+
+func summarizeCrossVenueEpisodeDurations(episodes []CrossVenueEdgeEpisode, horizonNano int64) (int64, int, error) {
+	var positiveNanos int64
+	var censoredEpisodes int
+	for _, episode := range episodes {
+		if episode.EndTS < episode.StartTS || episode.EndTS > horizonNano {
+			return 0, 0, fmt.Errorf("cross-venue edge world: episode outside horizon")
+		}
+		duration := episode.EndTS - episode.StartTS
+		next, ok := etypes.TryAdd(positiveNanos, duration)
+		if !ok || next > horizonNano {
+			return 0, 0, fmt.Errorf("cross-venue edge world: episode durations exceed horizon")
+		}
+		positiveNanos = next
+		if episode.Censored {
+			censoredEpisodes++
+		}
+	}
+	return positiveNanos, censoredEpisodes, nil
 }
 
 // CompareCrossVenuePairedEdgeWorlds requires every declared seed to have one
@@ -89,7 +114,10 @@ func CompareCrossVenuePairedEdgeWorlds(worlds []CrossVenueEdgeWorldSummary) ([]C
 			world.LotQty <= 0 || world.BasePrecision <= 0 || world.TakerFeeBps < 0 ||
 			world.Venues[0] == "" || world.Venues[1] == "" || world.Venues[0] == world.Venues[1] ||
 			world.PositiveNanos < 0 || world.PositiveNanos > world.HorizonNano || world.EpisodeCount < 0 ||
-			world.CensoredEpisodes < 0 || world.CensoredEpisodes > world.EpisodeCount || world.NoOpportunity != (world.EpisodeCount == 0) {
+			world.CensoredEpisodes < 0 || world.CensoredEpisodes > world.EpisodeCount || world.NoOpportunity != (world.EpisodeCount == 0) ||
+			world.BroaderEpisodeCount < 0 || world.BroaderCensoredEpisodes < 0 || world.BroaderCensoredEpisodes > world.BroaderEpisodeCount ||
+			world.BroaderPositiveNanos < world.PositiveNanos || world.BroaderPositiveNanos > world.HorizonNano ||
+			world.BroaderEpisodeCount == 0 && (world.EpisodeCount != 0 || world.BroaderPositiveNanos != 0) {
 			return nil, fmt.Errorf("cross-venue paired worlds: invalid world summary")
 		}
 		arms := bySeed[world.Seed]

@@ -197,6 +197,24 @@ func TestCrossVenueRouterRejectsPresentSignedQuotesByPolicy(t *testing.T) {
 	}
 }
 
+func TestCrossVenueRouterAndEstimatorAgreeOnSignedUnusedSides(t *testing.T) {
+	router := testCrossVenueRouter(t, 0)
+	setRouterBook(router.legs[0], -1, 100)
+	setRouterBook(router.legs[1], 105, 0)
+	buy, sell, edge, ok := router.bestOpportunity()
+	if !ok || buy.venueID != "alpha" || sell.venueID != "bravo" || edge != 5 {
+		t.Fatalf("router excluded positive traded-side edge with signed unused sides: %s/%s edge %d ok %t", venueID(buy), venueID(sell), edge, ok)
+	}
+	books := [2]analysis.CrossVenueTouch{
+		{Bid: -1, BidQty: 1, HasBid: true, Ask: 100, AskQty: 1, HasAsk: true},
+		{Bid: 105, BidQty: 1, HasBid: true, Ask: 0, AskQty: 1, HasAsk: true},
+	}
+	measured := analysis.EvaluateCrossVenueOneLotEdge([2]string{"alpha", "bravo"}, books, 1, 1, 0, true)
+	if measured.Status != "POSITIVE_EDGE" || measured.Edge != edge || measured.BuyVenue != buy.venueID || measured.SellVenue != sell.venueID {
+		t.Fatalf("estimator disagrees with router: %#v", measured)
+	}
+}
+
 func TestCrossVenueRouterRequiresAllInExecutableEdge(t *testing.T) {
 	router := testCrossVenueRouter(t, 100) // 1% fee per leg in integer units.
 	setRouterBook(router.legs[0], 100, 101)

@@ -57,6 +57,24 @@ func TestCrossVenuePairedWorldsCountZeroDurationAndNoOpportunity(t *testing.T) {
 	}
 }
 
+func TestCrossVenueWorldReportsBroaderLegSideDiagnosticSeparately(t *testing.T) {
+	input := crossVenuePairedWorldFixture("OFF", 95)
+	input.Transitions[0].Touch.HasBid = false
+	input.Transitions[1].Touch.HasAsk = false
+	input.Transitions[2].Touch.HasAsk = false
+	world, err := SummarizeCrossVenueEdgeWorld(input)
+	if err != nil || world.EpisodeCount != 0 || !world.NoOpportunity || world.PositiveNanos != 0 ||
+		world.BroaderEpisodeCount != 1 || world.BroaderPositiveNanos != 3 || world.BroaderCensoredEpisodes != 0 {
+		t.Fatalf("leg-side diagnostic replaced or disappeared from policy denominator: %#v, %v", world, err)
+	}
+	on := world
+	on.Arm = "ON"
+	on.BroaderPositiveNanos = -1
+	if _, err := CompareCrossVenuePairedEdgeWorlds([]CrossVenueEdgeWorldSummary{world, on}); err == nil {
+		t.Fatal("invalid broader duration accepted by paired comparison")
+	}
+}
+
 func TestCrossVenuePairedWorldsRejectMissingOrConfoundedCells(t *testing.T) {
 	off, err := SummarizeCrossVenueEdgeWorld(crossVenuePairedWorldFixture("OFF", 110))
 	if err != nil {

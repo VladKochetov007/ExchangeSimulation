@@ -50,7 +50,7 @@ func EvaluateCrossVenueOneLotEdge(venues [2]string, books [2]CrossVenueTouch, lo
 		switch {
 		case !buy.HasAsk || !sell.HasBid || requireTwoSided && (!buy.HasBid || !sell.HasAsk):
 			status = "MISSING_SIDE"
-		case buy.Ask <= 0 || sell.Bid <= 0 || requireTwoSided && (buy.Bid <= 0 || sell.Ask <= 0):
+		case buy.Ask <= 0 || sell.Bid <= 0:
 			status = "OUT_OF_DOMAIN"
 		case buy.AskQty < lotQty || sell.BidQty < lotQty:
 			status = "INSUFFICIENT_DEPTH"
@@ -125,6 +125,16 @@ type CrossVenueEdgeEpisode struct {
 // canonical global frame sequence. A sample-clock midpoint tape cannot be
 // substituted for these public book transitions.
 func ReconstructCrossVenueEdgeEpisodes(venues [2]string, transitions []CrossVenuePublicTransition, horizonNano int64, lotQty, basePrecision, feeBps int64) ([]CrossVenueEdgeEpisode, error) {
+	return reconstructCrossVenueEdgeEpisodes(venues, transitions, horizonNano, lotQty, basePrecision, feeBps, true)
+}
+
+// ReconstructCrossVenueLegSideEdgeEpisodes measures the broader executable
+// leg-side opportunity set without changing the router-policy denominator.
+func ReconstructCrossVenueLegSideEdgeEpisodes(venues [2]string, transitions []CrossVenuePublicTransition, horizonNano int64, lotQty, basePrecision, feeBps int64) ([]CrossVenueEdgeEpisode, error) {
+	return reconstructCrossVenueEdgeEpisodes(venues, transitions, horizonNano, lotQty, basePrecision, feeBps, false)
+}
+
+func reconstructCrossVenueEdgeEpisodes(venues [2]string, transitions []CrossVenuePublicTransition, horizonNano int64, lotQty, basePrecision, feeBps int64, requireTwoSided bool) ([]CrossVenueEdgeEpisode, error) {
 	if venues[0] == "" || venues[1] == "" || venues[0] == venues[1] || lotQty <= 0 || basePrecision <= 0 || feeBps < 0 || horizonNano <= 0 {
 		return nil, fmt.Errorf("cross-venue episodes: invalid convention")
 	}
@@ -153,7 +163,7 @@ func ReconstructCrossVenueEdgeEpisodes(venues [2]string, transitions []CrossVenu
 		if !known[0] || !known[1] {
 			continue
 		}
-		state := EvaluateCrossVenueOneLotEdge(venues, books, lotQty, basePrecision, feeBps, true)
+		state := EvaluateCrossVenueOneLotEdge(venues, books, lotQty, basePrecision, feeBps, requireTwoSided)
 		if state.Status == "INVALID_CONVENTION" {
 			return nil, fmt.Errorf("cross-venue episodes: invalid book convention")
 		}
