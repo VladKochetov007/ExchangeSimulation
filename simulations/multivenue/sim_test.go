@@ -1215,6 +1215,15 @@ func TestTwoVenueRouterEvaluationsPersistInCanonicalBinaryEvidence(t *testing.T)
 		t.Fatalf("router terminal book/account binding: %v", err)
 	}
 	t.Logf("synthetic terminal closeout available=%t", terminalValue.Available)
+	reconstructed, err := renderedRun.ReconstructCrossVenueFirstAttempt(analysis.CrossVenueFirstAttemptSpec{
+		EvidenceDir: dir, Venues: venues, Clients: routerClients, RouterID: sim.Routers[0].Report().RouterID,
+		Symbol: "ABC/USD", BaseAsset: "ABC", QuoteAsset: "USD", HorizonNano: sim.terminalNano,
+		LotQty: cfg.CrossVenueArbLotQty, BasePrecision: mvBasePrecision, TakerFeeBps: cfg.TakerFeeBps,
+		MaxAttempts: cfg.CrossVenueArbMaxAttempts, MaxBookEvidenceAgeNanos: int64(2 * time.Second),
+	})
+	if err != nil || reconstructed == nil || reconstructed.Terminal != nil {
+		t.Fatalf("zero-attempt production reconstruction = %#v, %v", reconstructed, err)
+	}
 }
 
 // Injected crossed books are a mechanical evidence fixture, not an estimate
@@ -1418,6 +1427,17 @@ func TestTwoVenueRouterInjectedOpportunityProducesAuditableBinaryEvidence(t *tes
 		if identity.Residual != 0 {
 			t.Fatalf("injected route venue residual: %#v", identity)
 		}
+	}
+	reconstructed, err := renderedRun.ReconstructCrossVenueFirstAttempt(analysis.CrossVenueFirstAttemptSpec{
+		EvidenceDir: dir, Venues: venues, Clients: routerClients, RouterID: report.RouterID,
+		Symbol: "ABC/USD", BaseAsset: "ABC", QuoteAsset: "USD", HorizonNano: sim.terminalNano,
+		LotQty: cfg.CrossVenueArbLotQty, BasePrecision: mvBasePrecision, TakerFeeBps: sim.Config.TakerFeeBps,
+		MaxAttempts: cfg.CrossVenueArbMaxAttempts, MaxBookEvidenceAgeNanos: int64(10 * time.Second),
+	})
+	if err != nil || reconstructed == nil || reconstructed.Terminal == nil ||
+		reconstructed.Terminal.ExchangeOutcome != "MATCHED_FOK" || !reconstructed.TerminalValue.Available ||
+		reconstructed.TerminalValue.Value != terminalValue.Value {
+		t.Fatalf("positive production reconstruction = %#v, %v", reconstructed, err)
 	}
 }
 
