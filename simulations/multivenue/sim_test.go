@@ -1155,6 +1155,26 @@ func TestTwoVenueRouterEvaluationsPersistInCanonicalBinaryEvidence(t *testing.T)
 	if len(placements) != 2*sim.Routers[0].Report().SubmittedGroups {
 		t.Fatalf("exchange placements = %d, submitted router legs = %d", len(placements), 2*sim.Routers[0].Report().SubmittedGroups)
 	}
+	decisionLinks := make(map[uint32]uint64, 2)
+	for _, evaluation := range evaluations {
+		for _, feed := range evaluation.Payload.Feeds {
+			if feed.Frontier.LinkID != 0 && feed.ClientID != 0 {
+				decisionLinks[feed.Frontier.LinkID] = feed.ClientID
+			}
+		}
+	}
+	if len(decisionLinks) != 2 {
+		t.Fatalf("router decision links = %#v, want both venue-local links", decisionLinks)
+	}
+	decisions, err := analysis.SelectVerifiedDecisionFrontierVectors(dir, analysis.DecisionFrontierVectorSelection{
+		Symbol: "ABC/USD", ClientByLink: decisionLinks,
+	})
+	if err != nil {
+		t.Fatalf("audited router gateway decisions: %v", err)
+	}
+	if _, err := analysis.BindCrossVenueSubmissionOutcomes(evaluations, decisions, placements, "ABC/USD", cfg.CrossVenueArbLotQty, cfg.CrossVenueArbMaxAttempts); err != nil {
+		t.Fatalf("router consumed-feed submission/venue outcome join: %v", err)
+	}
 	t.Logf("synthetic two-venue router groups=%d placements=%d fills=%d", sim.Routers[0].Report().SubmittedGroups, len(placements), len(fills))
 	if _, err := analysis.ReconcileCrossVenuePlacementReceipts(placements, receipts, fills, sim.terminalNano, cfg.CrossVenueArbLotQty); err != nil {
 		t.Fatalf("router FOK placement/fill/inbox reconciliation: %v", err)
@@ -1190,6 +1210,137 @@ func TestTwoVenueRouterEvaluationsPersistInCanonicalBinaryEvidence(t *testing.T)
 		t.Fatalf("router terminal book/account binding: %v", err)
 	}
 	t.Logf("synthetic terminal closeout available=%t", terminalValue.Available)
+}
+
+// Injected crossed books are a mechanical evidence fixture, not an estimate
+// of naturally occurring cross-venue opportunities or strategy profitability.
+func TestTwoVenueRouterInjectedOpportunityProducesAuditableBinaryEvidence(t *testing.T) {
+	dir := t.TempDir()
+	cfg := crossVenueRaceConfig(dir, []float64{1})
+	cfg.VenueIDs = []string{"north", "south"}
+	cfg.AutoBorrowSpot = boolPointer(false)
+	cfg.CrossVenueArbInitialBase = 2 * mvBasePrecision
+	cfg.CrossVenueArbInitialQuote = 150_000 * mvQuotePrecision
+	cfg.LogMode = "full"
+	cfg.EvidenceFormat = binaryRepresentation
+	cfg.EvidenceContractVersion = 2
+	cfg.RecordMarketDataReceipts = true
+	cfg.MarketDataReceiptRoles = []string{"cross_venue_router_tier"}
+	cfg.RecordDecisionFrontierVectors = true
+	cfg.RecordCrossVenueArbEvaluations = true
+	cfg.StrictPopulationAccounting = true
+	cfg.QuoteInterval = 100 * time.Second
+	cfg.NoiseTraderCount = 0
+	cfg.OptionFlowCount = 0
+	sim, err := NewSim(10*time.Second, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, venue := range sim.Venues {
+		if len(venue.SpotMakers) == 0 {
+			t.Fatalf("venue %s has no registered spot maker for fixture quotes", venue.ID)
+		}
+		makerID := venue.SpotMakers[0].Gateway().ID()
+		quotes := [2]int64{49_000 * mvQuotePrecision, 49_500 * mvQuotePrecision}
+		if venue.ID == "south" {
+			quotes = [2]int64{50_500 * mvQuotePrecision, 51_000 * mvQuotePrecision}
+		}
+		for index, side := range []exchange.Side{exchange.Buy, exchange.Sell} {
+			response := venue.Exchange.PlaceOrder(makerID, &exchange.OrderRequest{
+				RequestID: uint64(index + 1), Symbol: "ABC/USD", Side: side,
+				Type: exchange.LimitOrder, TimeInForce: exchange.GTC,
+				Price: quotes[index], Qty: mvBasePrecision,
+			})
+			if !response.Success {
+				t.Fatalf("injected %s %s quote: %#v", venue.ID, side, response)
+			}
+		}
+	}
+	if err := sim.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	report := sim.Routers[0].Report()
+	t.Logf("injected synthetic router report: submitted=%d completed=%d failed=%d pending=%d", report.SubmittedGroups, report.CompletedGroups, report.FailedGroups, report.PendingGroups)
+	if report.SubmittedGroups != 1 {
+		t.Fatalf("injected route did not produce one attempt: %#v", report)
+	}
+	if err := sim.Close(); err != nil {
+		t.Fatal(err)
+	}
+	rendered := filepath.Join(t.TempDir(), "rendered")
+	if _, err := RenderBinaryEvidence(dir, rendered); err != nil {
+		t.Fatal(err)
+	}
+	terminalReport, err := json.Marshal(map[string]any{
+		"router_reports":    []CrossVenueArbReport{report},
+		"initial_accounts":  sim.InitialAccounts,
+		"terminal_accounts": sim.TerminalAccounts,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(rendered, "greeks.json"), terminalReport, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	renderedRun, err := analysis.Open(rendered)
+	if err != nil {
+		t.Fatal(err)
+	}
+	venues := [2]string{"north", "south"}
+	counters, err := renderedRun.CrossVenueRouterCounters(report.RouterID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	evaluations, err := renderedRun.CollectCrossVenueEvaluations(venues, report.RouterID, counters.QuoteEvaluations)
+	if err != nil {
+		t.Fatal(err)
+	}
+	receipts, err := renderedRun.CollectCrossVenueResponseReceipts(venues, report.RouterID, counters.ResponseReceipts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	routerClients := map[string]uint64{}
+	for _, leg := range sim.Routers[0].legs {
+		routerClients[leg.venueID] = leg.clientID
+	}
+	placements, err := renderedRun.CollectCrossVenuePlacements(venues, routerClients, "ABC/USD", cfg.CrossVenueArbLotQty)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(placements) != 2 {
+		t.Fatalf("injected route placements = %d, want two", len(placements))
+	}
+	decisionLinks := make(map[uint32]uint64, 2)
+	for _, evaluation := range evaluations {
+		for _, feed := range evaluation.Payload.Feeds {
+			decisionLinks[feed.Frontier.LinkID] = feed.ClientID
+		}
+	}
+	decisions, err := analysis.SelectVerifiedDecisionFrontierVectors(dir, analysis.DecisionFrontierVectorSelection{
+		Symbol: "ABC/USD", ClientByLink: decisionLinks,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	groups, err := analysis.BindCrossVenueSubmissionOutcomes(evaluations, decisions, placements, "ABC/USD", cfg.CrossVenueArbLotQty, cfg.CrossVenueArbMaxAttempts)
+	if err != nil || len(groups) != 1 {
+		t.Fatalf("injected route decision/placement join = %d, %v", len(groups), err)
+	}
+	fills, err := renderedRun.CollectCrossVenueExchangeFills(venues, routerClients, "ABC/USD", receipts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fills) != 2 {
+		t.Fatalf("injected route fills = %d, want two", len(fills))
+	}
+	if _, err := analysis.ReconcileCrossVenuePlacementReceipts(placements, receipts, fills, sim.terminalNano, cfg.CrossVenueArbLotQty); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := analysis.ReconcileCrossVenueRouterAccounts(renderedRun.Report, venues, routerClients, fills, analysis.CrossVenueAccountConvention{
+		Symbol: "ABC/USD", BaseAsset: "ABC", QuoteAsset: "USD", BasePrecision: mvBasePrecision, TakerFeeBps: sim.Config.TakerFeeBps,
+	}); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestTwoVenueRouterEvaluationEvidenceDoesNotChangeEconomicOutcome(t *testing.T) {
