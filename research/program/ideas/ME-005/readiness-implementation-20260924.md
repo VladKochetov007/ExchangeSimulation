@@ -26,7 +26,9 @@ cannot be inferred from absent evaluations. The r1c protocol prospectively
 replaces that unsupported label with delivery unknown and limits
 `NoOpportunity` to the two-sided policy denominator. Source C and all
 economic cells are unchanged. Clean full `make test`, vet and targeted race
-passed at r1b; both reviewers must assess r1c before execution.
+passed at r1b. Both final independent r1c reviews have now [accepted their
+scoped gates](../../../reviews/me005-r1c-prerun-review-20260924.md); finite
+resource preflight and clean pinned build remain before execution.
 No ME-005 economic world has run.
 
 Source baseline: merged `main` `eb921aa29b26b43cd39e1613dabc44ec60dbf5c9`.
