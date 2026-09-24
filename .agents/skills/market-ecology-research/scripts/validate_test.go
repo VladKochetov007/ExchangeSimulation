@@ -157,3 +157,27 @@ func TestStrictDecode(t *testing.T) {
 		}
 	}
 }
+
+func TestObservedResultExtension(t *testing.T) {
+	path := filepath.Join(projectRoot(t), "research/program/ideas/ME-003/result.json")
+	var result Result
+	if err := readJSON(path, &result); err != nil {
+		t.Fatalf("decode current observed result: %v", err)
+	}
+	if result.Observed == nil || len(*result.Observed) == 0 {
+		t.Fatal("ME-003 observed summary was lost")
+	}
+	if err := validateResult(result); err != nil {
+		t.Fatalf("validate current observed result: %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mutated := []byte(strings.Replace(string(data), `"observed": {`, `"unregistered_extension": {}, "observed": {`, 1))
+	var invalid Result
+	if err := decode(mutated, &invalid); err == nil {
+		t.Fatal("unregistered top-level result extension accepted")
+	}
+}

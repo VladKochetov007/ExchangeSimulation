@@ -65,23 +65,24 @@ type Evidence struct {
 	Identity string `json:"identity"`
 }
 type Result struct {
-	SchemaVersion        int                `json:"schema_version"`
-	StudyID              string             `json:"study_id"`
-	Stage                string             `json:"stage"`
-	ProcessStatus        string             `json:"process_status"`
-	EvidenceValidity     string             `json:"evidence_validity"`
-	OpportunityPresence  string             `json:"opportunity_presence"`
-	PolicyActivity       string             `json:"policy_activity"`
-	RegisteredActivation string             `json:"registered_activation"`
-	ScientificVerdict    string             `json:"scientific_verdict"`
-	CausalVerdict        string             `json:"causal_verdict"`
-	EmpiricalComparison  string             `json:"empirical_comparison"`
-	Reasons              []string           `json:"reasons"`
-	Identities           map[string]*string `json:"identities"`
-	Authorization        Authorization      `json:"authorization"`
-	Review               Review             `json:"review"`
-	Claims               []Claim            `json:"claims"`
-	Evidence             []Evidence         `json:"evidence"`
+	SchemaVersion        int                         `json:"schema_version"`
+	StudyID              string                      `json:"study_id"`
+	Stage                string                      `json:"stage"`
+	ProcessStatus        string                      `json:"process_status"`
+	EvidenceValidity     string                      `json:"evidence_validity"`
+	OpportunityPresence  string                      `json:"opportunity_presence"`
+	PolicyActivity       string                      `json:"policy_activity"`
+	RegisteredActivation string                      `json:"registered_activation"`
+	ScientificVerdict    string                      `json:"scientific_verdict"`
+	CausalVerdict        string                      `json:"causal_verdict"`
+	EmpiricalComparison  string                      `json:"empirical_comparison"`
+	Reasons              []string                    `json:"reasons"`
+	Identities           map[string]*string          `json:"identities"`
+	Authorization        Authorization               `json:"authorization"`
+	Review               Review                      `json:"review"`
+	Observed             *map[string]json.RawMessage `json:"observed,omitempty"`
+	Claims               []Claim                     `json:"claims"`
+	Evidence             []Evidence                  `json:"evidence"`
 }
 
 const skillPath = ".agents/skills/market-ecology-research"
@@ -137,6 +138,9 @@ func requireFields(data []byte, shape reflect.Type) error {
 			name := field.Tag.Get("json")
 			raw, exists := fields[name]
 			if !exists {
+				if strings.Contains(field.Tag.Get("json"), ",omitempty") {
+					continue
+				}
 				return fmt.Errorf("missing field %s", name)
 			}
 			if err := requireFields(raw, field.Type); err != nil {
@@ -302,11 +306,11 @@ func validateResult(result Result) error {
 		{result.Stage, stages},
 		{result.ProcessStatus, "NOT_RUN COMPLETED FAILED INCOMPLETE"},
 		{result.EvidenceValidity, "NOT_ASSESSED VALID INVALID INCOMPLETE"},
-		{result.OpportunityPresence, "NOT_ASSESSED PRESENT ABSENT UNKNOWN NOT_APPLICABLE"},
+		{result.OpportunityPresence, "NOT_ASSESSED PRESENT ABSENT UNKNOWN NOT_APPLICABLE SAMPLED_LOCAL_PROXY_PRESENT_AT_DECISION"},
 		{result.PolicyActivity, "NOT_ASSESSED ACTIVE INACTIVE UNKNOWN NOT_APPLICABLE"},
 		{result.RegisteredActivation, "NOT_ASSESSED SATISFIED NOT_SATISFIED UNKNOWN NOT_APPLICABLE"},
 		{result.ScientificVerdict, "NOT_ISSUED SUPPORTED NOT_SUPPORTED INCONCLUSIVE IDENTIFICATION_LIMITATION MECHANICAL_ONLY"},
-		{result.CausalVerdict, "NOT_ASSESSED SUPPORTED NOT_SUPPORTED INCONCLUSIVE NOT_IDENTIFIED NOT_APPLICABLE"},
+		{result.CausalVerdict, "NOT_ASSESSED SUPPORTED NOT_SUPPORTED INCONCLUSIVE NOT_IDENTIFIED NOT_APPLICABLE BOUNDED_RESPONSE_OBSERVED"},
 		{result.EmpiricalComparison, "NOT_PERFORMED COMPATIBLE MISMATCH INCONCLUSIVE NOT_APPLICABLE"},
 		{result.Review.Execution, "COMPLETED UNAVAILABLE FAILED NOT_REQUESTED"},
 		{result.Review.Verdict, "ACCEPT ACCEPT_WITH_REQUIRED_CHANGES REJECT NOT_ISSUED"},
@@ -335,7 +339,7 @@ func validateResult(result Result) error {
 	if len(result.Claims) > 0 && (result.EvidenceValidity != "VALID" || result.ProcessStatus != "COMPLETED") {
 		return fmt.Errorf("claims without complete valid evidence")
 	}
-	if member(result.CausalVerdict, "SUPPORTED NOT_SUPPORTED INCONCLUSIVE NOT_IDENTIFIED") && (result.ScientificVerdict == "NOT_ISSUED" || result.EvidenceValidity != "VALID") {
+	if member(result.CausalVerdict, "SUPPORTED NOT_SUPPORTED INCONCLUSIVE NOT_IDENTIFIED BOUNDED_RESPONSE_OBSERVED") && (result.ScientificVerdict == "NOT_ISSUED" || result.EvidenceValidity != "VALID") {
 		return fmt.Errorf("causal verdict without valid scientific result")
 	}
 	if result.ScientificVerdict == "MECHANICAL_ONLY" && !member(result.CausalVerdict, "NOT_ASSESSED NOT_APPLICABLE") {
