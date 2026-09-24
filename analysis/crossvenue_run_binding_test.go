@@ -35,7 +35,7 @@ func crossVenueBindingFixture(t *testing.T) (string, string, CrossVenueRunBindin
 	configHash := sha256.Sum256(configRaw)
 	expected := CrossVenueRunBindingExpectation{
 		SourceRevision: strings.Repeat("a", 40), EffectiveConfigSHA256: hex.EncodeToString(configHash[:]),
-		ExecutionStreamHash: strings.Repeat("b", 64), Venues: [2]string{"north", "south"},
+		ExecutionStreamHash: strings.Repeat("b", 64), RouterEnabled: true, Venues: [2]string{"north", "south"},
 		LotQty: 5, MaxAttempts: 1, TakerFeeBps: 10,
 	}
 	manifest := map[string]any{
@@ -137,5 +137,43 @@ func TestCrossVenueRunBindingRequiresExactConfigSourceReportAndStream(t *testing
 				t.Fatal("mismatched run identity accepted")
 			}
 		})
+	}
+}
+
+func TestCrossVenueRunBindingDistinguishesRouterOffArm(t *testing.T) {
+	rawDir, renderedDir, expected := crossVenueBindingFixture(t)
+	manifestPath := filepath.Join(rawDir, "manifest.json")
+	manifestRaw, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest map[string]json.RawMessage
+	if err := json.Unmarshal(manifestRaw, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	var config map[string]any
+	if err := json.Unmarshal(manifest["config"], &config); err != nil {
+		t.Fatal(err)
+	}
+	config["cross_venue_arb_tiers"] = nil
+	config["cross_venue_arb_max_attempts"] = 0
+	config["record_market_data_receipts"] = false
+	config["record_decision_frontier_vectors"] = false
+	delete(config, "record_cross_venue_arb_evaluations")
+	configRaw, err := json.Marshal(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	configHash := sha256.Sum256(configRaw)
+	expected.RouterEnabled, expected.MaxAttempts = false, 0
+	expected.EffectiveConfigSHA256 = hex.EncodeToString(configHash[:])
+	manifest["config"] = configRaw
+	crossVenueWriteBindingJSON(t, manifestPath, manifest)
+	if _, err := VerifyCrossVenueRunBinding(rawDir, renderedDir, expected); err != nil {
+		t.Fatalf("valid router-off arm was rejected: %v", err)
+	}
+	expected.RouterEnabled, expected.MaxAttempts = true, 1
+	if _, err := VerifyCrossVenueRunBinding(rawDir, renderedDir, expected); err == nil {
+		t.Fatal("router-off arm was accepted as router-on")
 	}
 }

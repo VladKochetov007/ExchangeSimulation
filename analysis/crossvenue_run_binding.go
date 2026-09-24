@@ -14,6 +14,7 @@ type CrossVenueRunBindingExpectation struct {
 	SourceRevision        string
 	EffectiveConfigSHA256 string
 	ExecutionStreamHash   string
+	RouterEnabled         bool
 	Venues                [2]string
 	LotQty                int64
 	MaxAttempts           int
@@ -79,7 +80,8 @@ type crossVenueRenderedAttestation struct {
 func VerifyCrossVenueRunBinding(rawDir, renderedDir string, expected CrossVenueRunBindingExpectation) (CrossVenueRunBinding, error) {
 	if rawDir == "" || renderedDir == "" || !crossVenueSourceRevision(expected.SourceRevision) || !crossVenueHexHash(expected.EffectiveConfigSHA256) ||
 		!crossVenueHexHash(expected.ExecutionStreamHash) || expected.Venues[0] == "" || expected.Venues[1] == "" ||
-		expected.Venues[0] == expected.Venues[1] || expected.LotQty <= 0 || expected.MaxAttempts != 1 || expected.TakerFeeBps < 0 {
+		expected.Venues[0] == expected.Venues[1] || expected.LotQty <= 0 || expected.TakerFeeBps < 0 ||
+		expected.RouterEnabled && expected.MaxAttempts != 1 || !expected.RouterEnabled && expected.MaxAttempts != 0 {
 		return CrossVenueRunBinding{}, fmt.Errorf("cross-venue run binding: invalid expected contract")
 	}
 	manifestRaw, configHash, err := crossVenueVerifyManifest(rawDir, expected)
@@ -132,21 +134,33 @@ func crossVenueVerifyManifest(rawDir string, expected CrossVenueRunBindingExpect
 
 func crossVenueVerifyEffectiveFields(raw json.RawMessage, expected CrossVenueRunBindingExpectation) error {
 	var config crossVenueBindingConfig
-	if err := decodeRequiredJSON(raw, &config,
+	required := []string{
 		"log_mode", "evidence_format", "evidence_contract_version", "record_market_data_receipts",
-		"record_decision_frontier_vectors", "record_cross_venue_arb_evaluations", "venue_ids",
-		"cross_venue_arb_tiers", "cross_venue_arb_lot_qty", "cross_venue_arb_max_attempts",
-		"cross_venue_arb_initial_base", "cross_venue_arb_initial_quote", "auto_borrow_spot", "taker_fee_bps"); err != nil {
+		"record_decision_frontier_vectors", "venue_ids",
+		"cross_venue_arb_max_attempts", "auto_borrow_spot", "taker_fee_bps",
+	}
+	if expected.RouterEnabled {
+		required = append(required, "record_cross_venue_arb_evaluations", "cross_venue_arb_tiers", "cross_venue_arb_lot_qty", "cross_venue_arb_initial_base", "cross_venue_arb_initial_quote")
+	}
+	if err := decodeRequiredJSON(raw, &config, required...); err != nil {
 		return fmt.Errorf("cross-venue run binding: malformed effective fields: %w", err)
 	}
 	if config.LogMode != "full" || config.EvidenceFormat != "evstream_v3" || config.EvidenceContractVersion != 2 ||
-		!config.RecordMarketDataReceipts || !config.RecordDecisionFrontierVectors || !config.RecordCrossVenueArbEvaluations ||
-		!slices.Contains(config.MarketDataReceiptRoles, "cross_venue_router_tier") || !slices.Equal(config.VenueIDs, expected.Venues[:]) ||
-		len(config.CrossVenueArbTiers) != 1 || config.CrossVenueArbTiers[0] <= 0 ||
-		config.CrossVenueArbLotQty != expected.LotQty || config.CrossVenueArbMaxAttempts != expected.MaxAttempts ||
-		config.CrossVenueArbInitialBase <= 0 || config.CrossVenueArbInitialQuote <= 0 ||
-		config.AutoBorrowSpot == nil || *config.AutoBorrowSpot || config.TakerFeeBps != expected.TakerFeeBps {
+		!slices.Equal(config.VenueIDs, expected.Venues[:]) || config.AutoBorrowSpot == nil || *config.AutoBorrowSpot ||
+		config.TakerFeeBps != expected.TakerFeeBps {
 		return fmt.Errorf("cross-venue run binding: effective configuration violates first-attempt evidence contract")
+	}
+	if expected.RouterEnabled {
+		if !config.RecordMarketDataReceipts || !config.RecordDecisionFrontierVectors || !config.RecordCrossVenueArbEvaluations ||
+			!slices.Contains(config.MarketDataReceiptRoles, "cross_venue_router_tier") ||
+			len(config.CrossVenueArbTiers) != 1 || config.CrossVenueArbTiers[0] <= 0 ||
+			config.CrossVenueArbLotQty != expected.LotQty || config.CrossVenueArbMaxAttempts != 1 ||
+			config.CrossVenueArbInitialBase <= 0 || config.CrossVenueArbInitialQuote <= 0 {
+			return fmt.Errorf("cross-venue run binding: router-on evidence or funding contract differs")
+		}
+	} else if len(config.CrossVenueArbTiers) != 0 || config.RecordCrossVenueArbEvaluations ||
+		config.CrossVenueArbMaxAttempts != 0 {
+		return fmt.Errorf("cross-venue run binding: router-off arm contains router activation")
 	}
 	return nil
 }
