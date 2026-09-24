@@ -1,7 +1,7 @@
 # ME-005 implementation checkpoint — development readiness, not a result
 
 Source baseline: merged `main` `eb921aa29b26b43cd39e1613dabc44ec60dbf5c9`.
-Latest clean code gate: `50dcbcf` on `research/market-ecology-me005-20260924`.
+Latest clean code gate: `5b6b6fb` on `research/market-ecology-me005-20260924`.
 The authoritative [readiness assessment](readiness-20260924.md) and
 [prospective preparation contract](prepare-contract-20260924.md) still define
 four acceptance fixes. This note records implementation progress without
@@ -12,8 +12,8 @@ registering a protocol or scoring a market world. ME-005 economic worlds run:
 |---|---|---|
 | 1. Two-venue wiring | Exactly two distinct venues and finite, separate router accounts; historical three-venue default retained. Two-venue router configs now require explicit `auto_borrow_spot=false`. | Pin the effective two-venue config, initial balances, lot, attempt cap and deployment in a preregistration; independently review this successor population choice. |
 | 2. Opportunity/execution reconstruction | Optional canonical callback evidence including no-action and consumed source identity; public-book replay in global frame order; receipt-prefix and actor-local book checks; actor-inbox response receipts; terminal count binding; first trade ID zero, Trade/OrderFill/response joins. Submitted FOK requests now join audited decision vectors on both links to exchange placements and then settled fills and delayed acknowledgements. A manufactured positive route exercises that chain through the binary renderer. | Prove the public→delivered→evaluated→feasible→attempted opportunity denominator, cancellation/other terminal outcomes and horizon censoring. Bind the complete chain to a verified run manifest under the registered config. |
-| 3. Costed closeout | Independent venue-local bid/ask depth walk with quote taker fees and insufficient-depth failure; initial/terminal venue-account deltas independently checked against settled fills, fee rounding and zero debt/locked inventory. The terminal helper requires both account timestamps at the declared horizon and bounds the age of each replayed book. A static fixture gives +48 matched cashflow but −13 local terminal liquidation value. | Pin the book-evidence recency bound prospectively; prove replay and accounts derive from one verified completed run; join pending-request/FOK terminal status. Verify complete movement/conservation evidence and absence of financing/transfer flows over the interval. |
-| 4. Dislocation measurement | Two-venue, event-ordered, one-lot executable edge and half-open episode functions with same-time tests. | Build and test the registered paired OFF/ON world-level estimator, timing/attribution rules, missing-run handling and no-op controls. Keep trade-attributed convergence `NOT_IDENTIFIED` if the retained evidence cannot distinguish it from background movement. |
+| 3. Costed closeout | Independent venue-local bid/ask depth walk with quote taker fees and insufficient-depth failure; initial/terminal venue-account deltas independently checked against settled fills, fee rounding and zero debt/locked inventory. The terminal helper requires both account timestamps at the declared horizon and bounds the age of each replayed book. A static fixture gives +48 matched cashflow but −13 local terminal liquidation value. A manufactured production path now binds binary evidence, venue accounts, local terminal value and run-wide movement identities. | Pin the book-evidence recency bound prospectively; bind replay, accounts and report to one independently verified completed run under the exact candidate; join pending-request/FOK terminal status. Prove no router financing/transfer path can escape the account reconciliation in the registered horizon. |
+| 4. Dislocation measurement | Two-venue, event-ordered, one-lot executable edge and half-open episode functions; a pure OFF/ON seed-pair estimator reports episode counts and positive-edge duration, retains same-time episodes and rejects missing/mismatched cells. | Bind actual OFF/ON world evidence and background config/clock identities, test receipt lag and sampled-snapshot aliasing, and preregister missing-run and uncertainty rules. Trade-attributed convergence remains `NOT_IDENTIFIED` absent stronger attribution evidence. |
 
 The positive matched cashflow in the static fixture is **not** profit after
 restoring prefunded venue-local inventory. For an unchanged uncrossed book,
@@ -153,6 +153,24 @@ Focused tests, vet, targeted race checks, the skill validator and a clean
 `GOMAXPROCS=7 make test` passed at `50dcbcf`. A dirty-tree invocation passed
 all Go packages but failed the clean-worktree archive parity fixture as
 designed; it is not counted as a clean gate.
+
+Commit `ea92e2e` adds a pure event-time OFF/ON world-pair summary. It retains
+zero-duration positive episodes, censored episodes and valid no-opportunity
+worlds; pairing rejects duplicate, missing, or mismatched seed/arm, horizon,
+lot, fee and background-identity cells. Venue-list permutation is harmless.
+Its `BackgroundIdentity` is supplied by the caller and **does not prove**
+common-random-stream alignment or causal attribution. The output explicitly
+labels trade attribution `NOT_IDENTIFIED`. Focused race/vet and clean full
+tests passed. No OFF/ON economic worlds were run.
+
+Commit `5b6b6fb` tightens the positive synthetic binary fixture. Independently
+replayed books and terminal account deltas produce a *hypothetical* local
+liquidation value of −44,000,000 quote atoms for its one completed route;
+the all-participant movement stream has zero malformed/chain/fee mismatches
+and zero asset and venue-asset residuals. This is a constructed arithmetic
+and evidence check, not a profitability result. Focused race/vet and a clean
+full test gate passed. The registered-world recency limit and complete
+run-manifest/account/evidence binding remain prospective.
 
 No ME-005 final preregistration, two final independent reviews, new development
 seed, OFF/ON comparison, result, freeze or holdout claim exists. ME-001/002/003
