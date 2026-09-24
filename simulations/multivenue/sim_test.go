@@ -1395,6 +1395,51 @@ func TestTwoVenueRouterInjectedOpportunityProducesAuditableBinaryEvidence(t *tes
 	}
 }
 
+func TestTwoVenueRouterNoOpportunityLeavesBackgroundSpotBooksUnchanged(t *testing.T) {
+	type spotBook struct {
+		Bids, Asks []etypes.PriceLevel
+	}
+	run := func(routerEnabled bool) map[string]spotBook {
+		t.Helper()
+		cfg := crossVenueRaceConfig(t.TempDir(), []float64{1})
+		cfg.VenueIDs = []string{"north", "south"}
+		cfg.AutoBorrowSpot = boolPointer(false)
+		cfg.CrossVenueArbInitialBase = 2 * mvBasePrecision
+		cfg.CrossVenueArbInitialQuote = 150_000 * mvQuotePrecision
+		cfg.NoiseTraderCount = 0
+		cfg.OptionFlowCount = 0
+		if !routerEnabled {
+			cfg.CrossVenueArbTiers = nil
+		}
+		sim, err := NewSim(10*time.Second, cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := sim.Run(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		if routerEnabled && (len(sim.Routers) != 1 || sim.Routers[0].Report().SubmittedGroups != 0) {
+			t.Fatalf("no-op fixture acquired router attempts: %#v", sim.Routers)
+		}
+		books := make(map[string]spotBook, 2)
+		for _, venue := range sim.Venues {
+			book := venue.Exchange.Books["ABC/USD"]
+			if book == nil {
+				t.Fatalf("venue %s lacks ABC/USD", venue.ID)
+			}
+			books[venue.ID] = spotBook{Bids: book.Bids.GetPublicSnapshot(), Asks: book.Asks.GetPublicSnapshot()}
+		}
+		if err := sim.Close(); err != nil {
+			t.Fatal(err)
+		}
+		return books
+	}
+	off, on := run(false), run(true)
+	if !reflect.DeepEqual(off, on) {
+		t.Fatalf("no-op router changed final displayed background books: off=%#v on=%#v", off, on)
+	}
+}
+
 func TestTwoVenueRouterEvaluationEvidenceDoesNotChangeEconomicOutcome(t *testing.T) {
 	run := func(recordEvaluations bool) (CrossVenueArbReport, []VenueLedger) {
 		t.Helper()
