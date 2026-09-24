@@ -1,6 +1,7 @@
 package multivenue
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -991,6 +992,126 @@ func TestTwoVenueRouterConfigRejectsMissingOrInvalidFunding(t *testing.T) {
 	cfg.CrossVenueArbInitialBase, cfg.CrossVenueArbInitialQuote = mvBasePrecision, mvQuotePrecision
 	if err := cfg.normalize(); err != nil {
 		t.Fatalf("finite two-venue account rejected: %v", err)
+	}
+}
+
+func TestCrossVenueEvaluationEvidenceRequiresSuccessorBinaryAndReceipts(t *testing.T) {
+	base := crossVenueRaceConfig("x", []float64{1})
+	base.VenueIDs = []string{"north", "south"}
+	base.CrossVenueArbInitialBase = mvBasePrecision
+	base.CrossVenueArbInitialQuote = 100_000 * mvQuotePrecision
+	base.RecordCrossVenueArbEvaluations = true
+	for _, mutate := range []func(*Config){
+		func(c *Config) { c.RecordMarketDataReceipts = false },
+		func(c *Config) { c.RecordDecisionFrontierVectors = false },
+		func(c *Config) { c.EvidenceFormat = "jsonl" },
+		func(c *Config) { c.EvidenceContractVersion = 1 },
+		func(c *Config) { c.LogMode = "none" },
+	} {
+		cfg := base
+		cfg.RecordMarketDataReceipts = true
+		cfg.RecordDecisionFrontierVectors = true
+		cfg.MarketDataReceiptRoles = []string{"cross_venue_router_tier"}
+		cfg.EvidenceFormat = binaryRepresentation
+		cfg.EvidenceContractVersion = 2
+		cfg.LogMode = "full"
+		mutate(&cfg)
+		if err := cfg.normalize(); err == nil {
+			t.Fatalf("incomplete router evaluation evidence accepted: %#v", cfg)
+		}
+	}
+}
+
+func TestTwoVenueRouterEvaluationsPersistInCanonicalBinaryEvidence(t *testing.T) {
+	dir := t.TempDir()
+	cfg := crossVenueRaceConfig(dir, []float64{1})
+	cfg.VenueIDs = []string{"north", "south"}
+	cfg.CrossVenueArbInitialBase = 2 * mvBasePrecision
+	cfg.CrossVenueArbInitialQuote = 150_000 * mvQuotePrecision
+	cfg.LogMode = "full"
+	cfg.EvidenceFormat = binaryRepresentation
+	cfg.EvidenceContractVersion = 2
+	cfg.RecordMarketDataReceipts = true
+	cfg.MarketDataReceiptRoles = []string{"cross_venue_router_tier"}
+	cfg.RecordDecisionFrontierVectors = true
+	cfg.RecordCrossVenueArbEvaluations = true
+	sim, err := NewSim(10*time.Second, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sim.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := sim.Close(); err != nil {
+		t.Fatal(err)
+	}
+	rendered := filepath.Join(t.TempDir(), "rendered")
+	if _, err := RenderBinaryEvidence(dir, rendered); err != nil {
+		t.Fatal(err)
+	}
+	count := 0
+	for _, venueID := range cfg.VenueIDs {
+		raw, err := os.ReadFile(filepath.Join(rendered, "venues", venueID, "general.jsonl"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, line := range bytes.Split(bytes.TrimSpace(raw), []byte{'\n'}) {
+			var event struct {
+				Event string `json:"event"`
+				Data  struct {
+					GlobalSequence uint64                  `json:"global_sequence"`
+					Payload        CrossVenueArbEvaluation `json:"payload"`
+				} `json:"data"`
+			}
+			if err := json.Unmarshal(line, &event); err != nil {
+				t.Fatal(err)
+			}
+			if event.Event != "cross_venue_arb_evaluation" {
+				continue
+			}
+			count++
+			if event.Data.GlobalSequence == 0 || event.Data.Payload.Generation == 0 || len(event.Data.Payload.Books) != 2 || len(event.Data.Payload.Feeds) != 2 {
+				t.Fatalf("incomplete canonical router evaluation: %#v", event)
+			}
+		}
+	}
+	if count == 0 {
+		t.Fatal("no router quote evaluations persisted")
+	}
+}
+
+func TestTwoVenueRouterEvaluationEvidenceDoesNotChangeEconomicOutcome(t *testing.T) {
+	run := func(recordEvaluations bool) (CrossVenueArbReport, []VenueLedger) {
+		t.Helper()
+		cfg := crossVenueRaceConfig(t.TempDir(), []float64{1})
+		cfg.VenueIDs = []string{"north", "south"}
+		cfg.CrossVenueArbInitialBase = 2 * mvBasePrecision
+		cfg.CrossVenueArbInitialQuote = 150_000 * mvQuotePrecision
+		cfg.LogMode = "full"
+		cfg.EvidenceFormat = binaryRepresentation
+		cfg.EvidenceContractVersion = 2
+		cfg.RecordMarketDataReceipts = true
+		cfg.MarketDataReceiptRoles = []string{"cross_venue_router_tier"}
+		cfg.RecordDecisionFrontierVectors = true
+		cfg.RecordCrossVenueArbEvaluations = recordEvaluations
+		sim, err := NewSim(10*time.Second, cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := sim.Run(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		result := normalizedCrossVenueReport(sim.Routers[0].Report())
+		ledgers := sim.CaptureVenueLedgers()
+		if err := sim.Close(); err != nil {
+			t.Fatal(err)
+		}
+		return result, ledgers
+	}
+	withoutReport, withoutLedgers := run(false)
+	withReport, withLedgers := run(true)
+	if !reflect.DeepEqual(withoutReport, withReport) || !reflect.DeepEqual(withoutLedgers, withLedgers) {
+		t.Fatalf("evaluation-only evidence changed economics: reports %#v / %#v, ledgers %#v / %#v", withoutReport, withReport, withoutLedgers, withLedgers)
 	}
 }
 

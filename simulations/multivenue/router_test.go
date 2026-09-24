@@ -156,6 +156,48 @@ func TestTwoVenueCrossVenueRouterRequiresDistinctCompleteLegs(t *testing.T) {
 	}
 }
 
+func TestTwoVenueRouterEvaluationEvidenceCoversNoActionAndSubmission(t *testing.T) {
+	frontiers := []simulation.MarketDataFrontier{
+		{LinkID: 11, Ordinal: 1, DeliveredAt: 100, Digest: [16]byte{1}},
+		{},
+	}
+	legs := []CrossVenueArbLegConfig{
+		{VenueID: "alpha", ClientID: 1, ActorID: 1, Gateway: &routerFrontierGateway{ClientGateway: exchange.NewClientGateway(1), frontier: &frontiers[0]}},
+		{VenueID: "bravo", ClientID: 1, ActorID: 2, Gateway: &routerFrontierGateway{ClientGateway: exchange.NewClientGateway(1), frontier: &frontiers[1]}},
+	}
+	var evaluations []CrossVenueArbEvaluation
+	router, err := NewCrossVenueArb(1, CrossVenueArbConfig{
+		Symbol: "ABC/USD", LotQty: 1, BasePrecision: 1, MaxAttempts: 1,
+		RequireCompleteFeedFrontier: true,
+		EvaluationObserver:          func(row CrossVenueArbEvaluation) { evaluations = append(evaluations, row) },
+	}, legs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	setRouterBook(router.legs[0], 100, 101)
+	setRouterBook(router.legs[1], 100, 101)
+	router.onQuote(router.legs[0])
+	frontiers[1] = simulation.MarketDataFrontier{LinkID: 12, Ordinal: 1, DeliveredAt: 101, Digest: [16]byte{2}}
+	router.onQuote(router.legs[1])
+	setRouterBook(router.legs[1], 105, 106)
+	router.onQuote(router.legs[1])
+	router.onQuote(router.legs[0])
+	router.inFlight = nil
+	router.onQuote(router.legs[1])
+	wantReasons := []string{"INCOMPLETE_FRONTIER", "NO_POSITIVE_POLICY_EDGE", "SUBMIT", "IN_FLIGHT", "ATTEMPT_LIMIT"}
+	if len(evaluations) != len(wantReasons) {
+		t.Fatalf("evaluation count = %d, want %d", len(evaluations), len(wantReasons))
+	}
+	for index, row := range evaluations {
+		if row.Reason != wantReasons[index] || row.Generation != uint64(index+1) || len(row.Books) != 2 || len(row.Feeds) != 2 {
+			t.Fatalf("evaluation %d = %#v, want reason %s and two books/feeds", index, row, wantReasons[index])
+		}
+	}
+	if evaluations[0].Feeds[1].Frontier.Ordinal != 0 || evaluations[2].SelectedBuy != "alpha" || evaluations[2].SelectedSell != "bravo" || evaluations[2].QuotedEdge != 4 {
+		t.Fatalf("missing frontier or submitted route not preserved: %#v", evaluations)
+	}
+}
+
 // The router may compare three delayed venue feeds only after every declared
 // venue has delivered a real prefix. This distinguishes an absent third feed
 // from a knowingly observed third market with no opportunity, and gives the

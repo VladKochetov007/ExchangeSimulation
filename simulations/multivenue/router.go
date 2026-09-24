@@ -24,6 +24,42 @@ type CrossVenueArbConfig struct {
 	MaxAttempts                 int
 	RequireCompleteFeedFrontier bool
 	DecisionObserver            func(CrossVenueArbDecision)
+	EvaluationObserver          func(CrossVenueArbEvaluation)
+}
+
+type CrossVenueArbObservedBook struct {
+	VenueID  string `json:"venue_id"`
+	ClientID uint64 `json:"client_id"`
+	Bid      int64  `json:"bid"`
+	BidQty   int64  `json:"bid_qty"`
+	Ask      int64  `json:"ask"`
+	AskQty   int64  `json:"ask_qty"`
+	HasBid   bool   `json:"has_bid"`
+	HasAsk   bool   `json:"has_ask"`
+}
+
+type CrossVenueArbObservedFeed struct {
+	VenueID  string                        `json:"venue_id"`
+	ClientID uint64                        `json:"client_id"`
+	Frontier simulation.MarketDataFrontier `json:"frontier"`
+}
+
+// CrossVenueArbEvaluation is optional evidence of a consumed quote callback,
+// including abstention. It is not an input to the policy or a venue oracle.
+type CrossVenueArbEvaluation struct {
+	RouterID        uint64                      `json:"router_id"`
+	TriggerActorID  uint64                      `json:"trigger_actor_id"`
+	TriggerClientID uint64                      `json:"trigger_client_id"`
+	TriggerVenueID  string                      `json:"trigger_venue_id"`
+	Generation      uint64                      `json:"generation"`
+	Reason          string                      `json:"reason"`
+	InFlightGroupID uint64                      `json:"in_flight_group_id,omitempty"`
+	AttemptsUsed    int                         `json:"attempts_used"`
+	SelectedBuy     string                      `json:"selected_buy,omitempty"`
+	SelectedSell    string                      `json:"selected_sell,omitempty"`
+	QuotedEdge      int64                       `json:"quoted_edge,omitempty"`
+	Books           []CrossVenueArbObservedBook `json:"books"`
+	Feeds           []CrossVenueArbObservedFeed `json:"feeds"`
 }
 
 // CrossVenueArbDecision is the observation-only evidence boundary for one
@@ -278,21 +314,70 @@ func (l *crossVenueArbLeg) HandleEvent(_ context.Context, event *actor.Event) {
 	}
 }
 
-func (r *CrossVenueArb) onQuote(_ *crossVenueArbLeg) {
+func (r *CrossVenueArb) onQuote(trigger *crossVenueArbLeg) {
 	r.quoteGeneration++
-	if r.inFlight != nil || len(r.groups) >= r.cfg.MaxAttempts || r.quoteGeneration == r.lastAttemptGeneration {
+	if r.inFlight != nil {
+		r.observeEvaluation(trigger, "IN_FLIGHT", nil, nil, 0)
+		return
+	}
+	if len(r.groups) >= r.cfg.MaxAttempts {
+		r.observeEvaluation(trigger, "ATTEMPT_LIMIT", nil, nil, 0)
+		return
+	}
+	if r.quoteGeneration == r.lastAttemptGeneration {
+		r.observeEvaluation(trigger, "DUPLICATE_GENERATION", nil, nil, 0)
 		return
 	}
 	if _, ok := r.completeFeedFrontier(); !ok {
+		r.observeEvaluation(trigger, "INCOMPLETE_FRONTIER", nil, nil, 0)
 		return
 	}
 	buy, sell, edge, ok := r.bestOpportunity()
 	if !ok {
+		r.observeEvaluation(trigger, "NO_POSITIVE_POLICY_EDGE", nil, nil, 0)
 		return
 	}
+	r.observeEvaluation(trigger, "SUBMIT", buy, sell, edge)
 	r.lastAttemptGeneration = r.quoteGeneration
 	r.report.ExecutableSignals++
 	r.openGroup(buy, sell, edge)
+}
+
+func (r *CrossVenueArb) observeEvaluation(trigger *crossVenueArbLeg, reason string, buy, sell *crossVenueArbLeg, edge int64) {
+	if r.cfg.EvaluationObserver == nil {
+		return
+	}
+	row := CrossVenueArbEvaluation{
+		RouterID: r.report.RouterID, TriggerActorID: trigger.ID(), TriggerClientID: trigger.clientID,
+		TriggerVenueID: trigger.venueID, Generation: r.quoteGeneration, Reason: reason,
+		AttemptsUsed: len(r.groups), QuotedEdge: edge,
+		Books: make([]CrossVenueArbObservedBook, 0, len(r.legs)),
+		Feeds: make([]CrossVenueArbObservedFeed, 0, len(r.legs)),
+	}
+	if r.inFlight != nil {
+		row.InFlightGroupID = r.inFlight.id
+	}
+	if buy != nil {
+		row.SelectedBuy = buy.venueID
+	}
+	if sell != nil {
+		row.SelectedSell = sell.venueID
+	}
+	ordered := append([]*crossVenueArbLeg(nil), r.legs...)
+	slices.SortFunc(ordered, func(left, right *crossVenueArbLeg) int { return strings.Compare(left.venueID, right.venueID) })
+	for _, leg := range ordered {
+		bid, bidQty, ask, askQty, hasBid, hasAsk := leg.book.bestSides()
+		row.Books = append(row.Books, CrossVenueArbObservedBook{
+			VenueID: leg.venueID, ClientID: leg.clientID,
+			Bid: bid, BidQty: bidQty, Ask: ask, AskQty: askQty, HasBid: hasBid, HasAsk: hasAsk,
+		})
+		feed := CrossVenueArbObservedFeed{VenueID: leg.venueID, ClientID: leg.clientID}
+		if leg.frontier != nil {
+			feed.Frontier = leg.frontier()
+		}
+		row.Feeds = append(row.Feeds, feed)
+	}
+	r.cfg.EvaluationObserver(row)
 }
 
 func (r *CrossVenueArb) bestOpportunity() (buy, sell *crossVenueArbLeg, edge int64, ok bool) {
@@ -565,21 +650,24 @@ func (b *crossVenueQuoteBook) apply(delta *exchange.BookDelta) {
 }
 
 func (b *crossVenueQuoteBook) best() (bid, bidQty, ask, askQty int64, ok bool) {
-	haveBid := false
+	bid, bidQty, ask, askQty, hasBid, hasAsk := b.bestSides()
+	return bid, bidQty, ask, askQty, hasBid && hasAsk
+}
+
+func (b *crossVenueQuoteBook) bestSides() (bid, bidQty, ask, askQty int64, hasBid, hasAsk bool) {
 	for price, qty := range b.bids {
-		if qty > 0 && (!haveBid || price > bid) {
+		if qty > 0 && (!hasBid || price > bid) {
 			bid, bidQty = price, qty
-			haveBid = true
+			hasBid = true
 		}
 	}
-	haveAsk := false
 	for price, qty := range b.asks {
-		if qty > 0 && (!haveAsk || price < ask) {
+		if qty > 0 && (!hasAsk || price < ask) {
 			ask, askQty = price, qty
-			haveAsk = true
+			hasAsk = true
 		}
 	}
-	return bid, bidQty, ask, askQty, haveBid && haveAsk
+	return bid, bidQty, ask, askQty, hasBid, hasAsk
 }
 
 func checkedAdd(left, right int64, field string) int64 {

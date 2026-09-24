@@ -121,7 +121,8 @@ type Config struct {
 	MarketDataReceiptRoles   []string `json:"market_data_receipt_roles,omitempty"`
 	// RecordDecisionFrontierVectors persists the optional V2-1b multi-feed
 	// evidence sidecar. It requires the scalar V2-0 receipt sidecars.
-	RecordDecisionFrontierVectors bool `json:"record_decision_frontier_vectors"`
+	RecordDecisionFrontierVectors  bool `json:"record_decision_frontier_vectors"`
+	RecordCrossVenueArbEvaluations bool `json:"record_cross_venue_arb_evaluations,omitempty"`
 	// RecordMakerQuoteSizeDecisions retains the compact raw evidence used by
 	// the V2-3 P1 inventory-size screen. These observations are excluded from
 	// the execution checkpoint domain by design.
@@ -662,8 +663,8 @@ type Config struct {
 	CrossVenueArbMaxAttempts int           `json:"cross_venue_arb_max_attempts"`
 	// InitialBase/InitialQuote are per-venue account endowments in ABC/USD
 	// atomic units. Three-venue legacy configs retain their former defaults.
-	CrossVenueArbInitialBase  int64 `json:"cross_venue_arb_initial_base"`
-	CrossVenueArbInitialQuote int64 `json:"cross_venue_arb_initial_quote"`
+	CrossVenueArbInitialBase  int64 `json:"cross_venue_arb_initial_base,omitempty"`
+	CrossVenueArbInitialQuote int64 `json:"cross_venue_arb_initial_quote,omitempty"`
 }
 
 // DecodeConfig reads a scenario configuration and rejects unknown fields. A
@@ -760,6 +761,14 @@ func (c *Config) normalize() error {
 		}
 		if !slices.Contains(c.MarketDataReceiptRoles, "cross_venue_router_tier") {
 			return errors.New("multivenue: instrumented cross-venue routers require cross_venue_router_tier receipt coverage")
+		}
+	}
+	if c.RecordCrossVenueArbEvaluations {
+		if len(c.CrossVenueArbTiers) == 0 || !c.RecordMarketDataReceipts || !c.RecordDecisionFrontierVectors {
+			return errors.New("multivenue: cross-venue evaluation evidence requires an instrumented router")
+		}
+		if c.LogMode != "full" || c.EvidenceFormat != binaryRepresentation || c.EvidenceContractVersion < 2 {
+			return errors.New("multivenue: cross-venue evaluation evidence requires full successor binary evidence")
 		}
 	}
 	if c.LogMode != "full" && c.LogMode != "none" {
@@ -3874,6 +3883,15 @@ func (s *Sim) addCrossVenueRouters(clock *simulation.SimulatedClock, scheduler *
 			return err
 		}
 		if instrumented {
+			if s.Config.RecordCrossVenueArbEvaluations {
+				router.cfg.EvaluationObserver = func(evaluation CrossVenueArbEvaluation) {
+					venue := s.venueByID(evaluation.TriggerVenueID)
+					if venue == nil {
+						panic("multivenue: cross-venue evaluation has unknown trigger venue")
+					}
+					venue.makerStateLog.LogEvidenceOnly(clock.NowUnixNano(), evaluation.TriggerClientID, "cross_venue_arb_evaluation", evaluation)
+				}
+			}
 			for _, leg := range router.legs {
 				frontier := leg.frontier()
 				if err := s.frontierVectors.RequireScalarDecisionLink(leg.clientID, frontier.LinkID); err != nil {
