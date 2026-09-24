@@ -1,7 +1,7 @@
 # ME-005 implementation checkpoint — development readiness, not a result
 
 Source baseline: merged `main` `eb921aa29b26b43cd39e1613dabc44ec60dbf5c9`.
-Latest clean code gate: `0dfadc6` on `research/market-ecology-me005-20260924`.
+Latest clean code gate: `b03fc70` on `research/market-ecology-me005-20260924`.
 The authoritative [readiness assessment](readiness-20260924.md) and
 [prospective preparation contract](prepare-contract-20260924.md) still define
 four acceptance fixes. This note records implementation progress without
@@ -111,6 +111,16 @@ join assumes its inputs came from the independently validated collectors;
 it does not yet prove that every submitted decision vector reached an
 exchange outcome, or that terminal cancellation and pending requests are
 completely classified. Those are still readiness blockers.
+
+The existing ten-second two-venue synthetic production fixture was extended
+at `b03fc70` to pass rendered binary logs through the placement/fill/inbox
+join and to bind replayed terminal books to both account timestamps. Focused
+race/vet and a clean full `GOMAXPROCS=7 make test` passed. It produced **zero
+submitted router groups, zero placements and zero fills**; terminal local
+valuation was available at zero inventory change. This is a useful
+zero-attempt completeness control, not a positive end-to-end execution test.
+A distinct manufactured positive-edge fixture through the production exchange
+path remains required; it will not estimate endogenous opportunity frequency.
 
 No ME-005 final preregistration, two final independent reviews, new development
 seed, OFF/ON comparison, result, freeze or holdout claim exists. ME-001/002/003
