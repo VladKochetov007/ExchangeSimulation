@@ -1,7 +1,7 @@
 # ME-005 implementation checkpoint — development readiness, not a result
 
 Source baseline: merged `main` `eb921aa29b26b43cd39e1613dabc44ec60dbf5c9`.
-Latest clean code gate: `5b6b6fb` on `research/market-ecology-me005-20260924`.
+Latest clean code gate: `b8ca004` on `research/market-ecology-me005-20260924`.
 The authoritative [readiness assessment](readiness-20260924.md) and
 [prospective preparation contract](prepare-contract-20260924.md) still define
 four acceptance fixes. This note records implementation progress without
@@ -11,9 +11,9 @@ registering a protocol or scoring a market world. ME-005 economic worlds run:
 | Fix | Implemented and mechanically exercised | Still required before ME-005 RUN |
 |---|---|---|
 | 1. Two-venue wiring | Exactly two distinct venues and finite, separate router accounts; historical three-venue default retained. Two-venue router configs now require explicit `auto_borrow_spot=false`. | Pin the effective two-venue config, initial balances, lot, attempt cap and deployment in a preregistration; independently review this successor population choice. |
-| 2. Opportunity/execution reconstruction | Optional canonical callback evidence including no-action and consumed source identity; public-book replay in global frame order; receipt-prefix and actor-local book checks; actor-inbox response receipts; terminal count binding; first trade ID zero, Trade/OrderFill/response joins. Submitted FOK requests now join audited decision vectors on both links to exchange placements and then settled fills and delayed acknowledgements. A manufactured positive route exercises that chain through the binary renderer. | Prove the public→delivered→evaluated→feasible→attempted opportunity denominator, cancellation/other terminal outcomes and horizon censoring. Bind the complete chain to a verified run manifest under the registered config. |
+| 2. Opportunity/execution reconstruction | Optional canonical callback evidence including no-action and consumed source identity; public-book replay in global frame order; receipt-prefix and actor-local book checks; actor-inbox response receipts; terminal count binding; first trade ID zero, Trade/OrderFill/response joins. Submitted FOK requests join audited decision vectors to exchange placements, fills and acknowledgements. A public-episode/actor-evaluation timeline now distinguishes public-active, locally aligned, locally inactive and post-public local-positive states, with half-open frame ordering and censoring. | Prove the *balance-feasible* stage from venue-qualified account/reservation evidence; finish cancellation/other terminal outcomes, reason attribution and horizon handling. Bind the complete chain to a verified run manifest under the registered config. |
 | 3. Costed closeout | Independent venue-local bid/ask depth walk with quote taker fees and insufficient-depth failure; initial/terminal venue-account deltas independently checked against settled fills, fee rounding and zero debt/locked inventory. The terminal helper requires both account timestamps at the declared horizon and bounds the age of each replayed book. A static fixture gives +48 matched cashflow but −13 local terminal liquidation value. A manufactured production path now binds binary evidence, venue accounts, local terminal value and run-wide movement identities. | Pin the book-evidence recency bound prospectively; bind replay, accounts and report to one independently verified completed run under the exact candidate; join pending-request/FOK terminal status. Prove no router financing/transfer path can escape the account reconciliation in the registered horizon. |
-| 4. Dislocation measurement | Two-venue, event-ordered, one-lot executable edge and half-open episode functions; a pure OFF/ON seed-pair estimator reports episode counts and positive-edge duration, retains same-time episodes and rejects missing/mismatched cells. | Bind actual OFF/ON world evidence and background config/clock identities, test receipt lag and sampled-snapshot aliasing, and preregister missing-run and uncertainty rules. Trade-attributed convergence remains `NOT_IDENTIFIED` absent stronger attribution evidence. |
+| 4. Dislocation measurement | Two-venue, event-ordered, one-lot executable edge and half-open episode functions; a pure OFF/ON seed-pair estimator reports episode counts and positive-edge duration, retains same-time episodes and rejects missing/mismatched cells. A ten-second no-op production fixture leaves final displayed background ABC/USD books unchanged when the router submits nothing. | Bind actual OFF/ON world evidence and background config/clock identities, test receipt lag and sampled-snapshot aliasing, and preregister missing-run and uncertainty rules. Trade-attributed convergence remains `NOT_IDENTIFIED` absent stronger attribution evidence. |
 
 The positive matched cashflow in the static fixture is **not** profit after
 restoring prefunded venue-local inventory. For an unchanged uncrossed book,
@@ -171,6 +171,38 @@ and zero asset and venue-asset residuals. This is a constructed arithmetic
 and evidence check, not a profitability result. Focused race/vet and a clean
 full test gate passed. The registered-world recency limit and complete
 run-manifest/account/evidence binding remain prospective.
+
+An advisory read-only Sol-6 medium review at `44dc477`, agent
+`01a0d38b-3809-7310-b843-1422c7325f35`, challenged the opportunity
+denominator, not the completed candidate. It recommended one row per public
+positive episode, joined by canonical half-open frame order to zero or more
+verified delayed evaluations; a missing callback is not an ignored
+opportunity. It emphasized that local positive state can persist after the
+public edge ends and that balance feasibility cannot be inferred from quote
+or receipt evidence. It also identified a concrete source ambiguity: a
+`BookDelta` log does not carry the publisher sequence, so two identical
+same-time deltas can otherwise both match one claimed actor trigger.
+
+Commit `7dad7b8` makes that exact duplicate-publication case fail closed and
+adds a mutation fixture. This can make an ambiguous retained trace
+unattributable; no historical result was rewritten, and no blanket claim is
+made that it never occurs elsewhere. Commit `cdc1c23` adds a no-op OFF/ON
+simulator fixture: with no router attempts, the displayed terminal ABC/USD
+books match across arms. It does not prove every background RNG stream or
+total-capital identity matches, so the future paired design still needs a
+registered background check.
+
+Commit `b8ca004` implements the evidence-gated public/local timeline. It
+requires the compact receipt audit, consumed-public-source match, local-book
+reconstruction and canonical public replay before assigning evaluations to
+half-open positive episodes. It retains zero-evaluation episodes, same-time
+ordering and the latest matched publication frame for each venue. In the
+manufactured production fixture, one public episode is horizon-censored,
+22 delayed evaluations are reconstructed, 20 have a locally aligned positive
+route, and one submits. These are **synthetic fixture counts**, not an ME-005
+world or natural opportunity denominator. Focused race/vet and a clean full
+test gate passed at `b8ca004`. The advisory review is not Reviewer A or B's
+final acceptance of all four readiness fixes.
 
 No ME-005 final preregistration, two final independent reviews, new development
 seed, OFF/ON comparison, result, freeze or holdout claim exists. ME-001/002/003
