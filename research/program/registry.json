@@ -94,7 +94,7 @@
         "run": false,
         "basis": "Owner 2026-09-23 bounded continuation conditionally authorized only the locked ME-003 12-cell development matrix and two controls. All 14 retained executions completed under accepted candidate ae0fc33, with 12/12 valid economic cells and two bounded post-result reviews. The finite ME-003 run budget is exhausted. No confirmation, holdout or unregistered instruction variant is authorized; initial f407505 REJECT remains historical."
       },
-      "next_action": "Preserve the reviewed development response map and proceed only to bounded ME-005 source/evidence readiness if wall time and the owner's continuation permit; do not rerun or confirm ME-003 under this budget."
+      "next_action": "Preserve the reviewed development response map. ME-005 source/evidence readiness is now documented separately; do not rerun or confirm ME-003 under this exhausted budget."
     },
     {
       "id": "ME-004",

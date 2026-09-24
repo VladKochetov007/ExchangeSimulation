@@ -28,6 +28,10 @@ rejections, fees and global base residual. Decision-frontier vectors bind
 *submitted orders* to complete delivered feed prefixes when instrumentation
 is enabled. Existing router tests cover signed-quote exclusion, fee/depth
 gates, one-leg failure and a complete three-feed frontier.
+`bestOpportunity` uses a helper that requires **both sides** of each local
+book, even though a buy leg needs only the ask and a sell leg only the bid.
+That extra two-sided eligibility is part of the existing policy, not a
+general definition of every economically executable cross-venue edge.
 
 The actual production [`Config.normalize`](../../../../simulations/multivenue/sim.go)
 requires exactly three venue IDs; [`NewCrossVenueArb`](../../../../simulations/multivenue/router.go)
@@ -77,6 +81,9 @@ have not been demonstrated for this new two-venue claim.
    delivered local edge, actor feasible/no-action/attempt state, gateway
    admission, two exchange-time FOK outcomes and actor receipt times.
    Define the sampling clock and opportunity lifetime before outcomes.
+   Declare whether the denominator follows the current two-sided-book
+   policy or the broader leg-side executable state; changing the policy
+   after seeing absent opportunities would be a new candidate.
    Distinguish a quote-policy signal from balance-feasible and
    venue-arrival-executable quantity; classify missing/stale, zero, negative,
    out-of-domain and censored episodes explicitly. Add small positive,
