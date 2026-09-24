@@ -1148,9 +1148,21 @@ func TestTwoVenueRouterEvaluationsPersistInCanonicalBinaryEvidence(t *testing.T)
 	if err != nil {
 		t.Fatalf("router exchange fill/actor receipt join: %v", err)
 	}
-	if _, err := analysis.ReconcileCrossVenueRouterAccounts(renderedRun.Report, venues, routerClients, fills, analysis.CrossVenueAccountConvention{
+	placements, err := renderedRun.CollectCrossVenuePlacements(venues, routerClients, "ABC/USD", cfg.CrossVenueArbLotQty)
+	if err != nil {
+		t.Fatalf("router exchange placement reconstruction: %v", err)
+	}
+	if len(placements) != 2*sim.Routers[0].Report().SubmittedGroups {
+		t.Fatalf("exchange placements = %d, submitted router legs = %d", len(placements), 2*sim.Routers[0].Report().SubmittedGroups)
+	}
+	t.Logf("synthetic two-venue router groups=%d placements=%d fills=%d", sim.Routers[0].Report().SubmittedGroups, len(placements), len(fills))
+	if _, err := analysis.ReconcileCrossVenuePlacementReceipts(placements, receipts, fills, sim.terminalNano, cfg.CrossVenueArbLotQty); err != nil {
+		t.Fatalf("router FOK placement/fill/inbox reconciliation: %v", err)
+	}
+	accountDeltas, err := analysis.ReconcileCrossVenueRouterAccounts(renderedRun.Report, venues, routerClients, fills, analysis.CrossVenueAccountConvention{
 		Symbol: "ABC/USD", BaseAsset: "ABC", QuoteAsset: "USD", BasePrecision: mvBasePrecision, TakerFeeBps: cfg.TakerFeeBps,
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatalf("router venue-local balance reconstruction: %v", err)
 	}
 	if err := analysis.VerifyCrossVenueEvaluationReceipts(evaluations, dir, "ABC/USD"); err != nil {
@@ -1164,11 +1176,20 @@ func TestTwoVenueRouterEvaluationsPersistInCanonicalBinaryEvidence(t *testing.T)
 	if err != nil || len(matchedSources) != len(evaluations) {
 		t.Fatalf("actor-consumed source reconstruction = %d/%d, %v", len(matchedSources), len(evaluations), err)
 	}
-	if _, err := analysis.ReplayCrossVenuePublicEvents(publicEvents, analysis.CrossVenuePublicReplayOptions{
+	publicReplay, err := analysis.ReplayCrossVenuePublicEvents(publicEvents, analysis.CrossVenuePublicReplayOptions{
 		Venues: venues, Symbol: "ABC/USD", InitiallyEmpty: true,
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
+	terminalValue, err := analysis.ValueCrossVenueTerminalState(renderedRun.Report, publicReplay, accountDeltas, analysis.CrossVenueTerminalConvention{
+		Venues: venues, Clients: routerClients, HorizonNano: sim.terminalNano,
+		MaxBookEvidenceAgeNanos: int64(2 * time.Second), BasePrecision: mvBasePrecision, TakerFeeBps: cfg.TakerFeeBps,
+	})
+	if err != nil {
+		t.Fatalf("router terminal book/account binding: %v", err)
+	}
+	t.Logf("synthetic terminal closeout available=%t", terminalValue.Available)
 }
 
 func TestTwoVenueRouterEvaluationEvidenceDoesNotChangeEconomicOutcome(t *testing.T) {
