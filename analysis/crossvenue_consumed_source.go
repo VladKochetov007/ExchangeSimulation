@@ -45,7 +45,7 @@ func MatchCrossVenueEvaluationSources(records []CrossVenueEvaluationRecord, publ
 		venueEvents := byVenue[row.TriggerVenueID]
 		var source Event
 		var message *etypes.MarketDataMsg
-		found := false
+		matchedCursor := -1
 		for cursor := cursors[row.TriggerVenueID]; cursor < len(venueEvents) && venueEvents[cursor].GlobalSequence < item.Event.GlobalSequence; cursor++ {
 			candidate := venueEvents[cursor]
 			if candidate.SimTS != row.TriggerPublishedAt || !crossVenueSourceTypeMatches(candidate.Name, row.TriggerType) {
@@ -65,13 +65,15 @@ func MatchCrossVenueEvaluationSources(records []CrossVenueEvaluationRecord, publ
 			if fingerprint != row.TriggerDigest {
 				continue
 			}
-			source, message, found = candidate, decoded, true
-			cursors[row.TriggerVenueID] = cursor + 1
-			break
+			if matchedCursor >= 0 {
+				return nil, fmt.Errorf("cross-venue consumed source: row %d has ambiguous earlier publications", rowIndex)
+			}
+			source, message, matchedCursor = candidate, decoded, cursor
 		}
-		if !found {
+		if matchedCursor < 0 {
 			return nil, fmt.Errorf("cross-venue consumed source: row %d has no earlier matching publication", rowIndex)
 		}
+		cursors[row.TriggerVenueID] = matchedCursor + 1
 		state := local[row.TriggerVenueID]
 		if state == nil {
 			state = &crossVenueDepthState{bids: make(map[int64]int64), asks: make(map[int64]int64)}

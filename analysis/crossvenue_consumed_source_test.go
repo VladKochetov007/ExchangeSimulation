@@ -68,3 +68,24 @@ func TestCrossVenueConsumedSourceReconstructsLocalNotGlobalBooks(t *testing.T) {
 		t.Fatal("missing southern publication was accepted")
 	}
 }
+
+func TestCrossVenueConsumedSourceRejectsIndistinguishableSameTimeDeltas(t *testing.T) {
+	delta := crossVenueDeltaEvidence{Side: "BUY", Price: 99, VisibleQty: 1, TotalQty: 1}
+	first := crossVenueReplayEvent(t, "BookDelta", "north", 1, 10, delta)
+	duplicate := crossVenueReplayEvent(t, "BookDelta", "north", 2, 10, delta)
+	message, err := crossVenueSourceMessage(first, "ABC/USD", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest, err := etypes.MarketDataFingerprint(message)
+	if err != nil {
+		t.Fatal(err)
+	}
+	evaluation := validCrossVenueEvaluationRecord(t)
+	evaluation.Payload.TriggerType = etypes.MDDelta
+	evaluation.Payload.TriggerSequence = 2
+	evaluation.Payload.TriggerDigest = digest
+	if _, err := MatchCrossVenueEvaluationSources([]CrossVenueEvaluationRecord{evaluation}, []Event{first, duplicate}, "ABC/USD", 1, 1, 0); err == nil || !strings.Contains(err.Error(), "ambiguous") {
+		t.Fatalf("indistinguishable delta publications accepted: %v", err)
+	}
+}
