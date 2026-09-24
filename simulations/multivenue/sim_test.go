@@ -1035,6 +1035,7 @@ func TestTwoVenueRouterEvaluationsPersistInCanonicalBinaryEvidence(t *testing.T)
 	cfg.MarketDataReceiptRoles = []string{"cross_venue_router_tier"}
 	cfg.RecordDecisionFrontierVectors = true
 	cfg.RecordCrossVenueArbEvaluations = true
+	cfg.StrictPopulationAccounting = true
 	sim, err := NewSim(10*time.Second, cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -1099,7 +1100,11 @@ func TestTwoVenueRouterEvaluationsPersistInCanonicalBinaryEvidence(t *testing.T)
 	if responseCount == 0 || uint64(responseCount) != expectedResponses {
 		t.Fatalf("router response receipts persisted = %d, want report counter %d", responseCount, expectedResponses)
 	}
-	terminalReport, err := json.Marshal(map[string]any{"router_reports": []CrossVenueArbReport{sim.Routers[0].Report()}})
+	terminalReport, err := json.Marshal(map[string]any{
+		"router_reports":    []CrossVenueArbReport{sim.Routers[0].Report()},
+		"initial_accounts":  sim.InitialAccounts,
+		"terminal_accounts": sim.TerminalAccounts,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1127,8 +1132,12 @@ func TestTwoVenueRouterEvaluationsPersistInCanonicalBinaryEvidence(t *testing.T)
 	for _, leg := range sim.Routers[0].legs {
 		routerClients[leg.venueID] = leg.clientID
 	}
-	if _, err := renderedRun.CollectCrossVenueExchangeFills(venues, routerClients, "ABC/USD", receipts); err != nil {
+	fills, err := renderedRun.CollectCrossVenueExchangeFills(venues, routerClients, "ABC/USD", receipts)
+	if err != nil {
 		t.Fatalf("router exchange fill/actor receipt join: %v", err)
+	}
+	if _, err := analysis.ReconcileCrossVenueRouterAccounts(renderedRun.Report, venues, routerClients, fills, mvBasePrecision, cfg.TakerFeeBps); err != nil {
+		t.Fatalf("router venue-local balance reconstruction: %v", err)
 	}
 	if err := analysis.VerifyCrossVenueEvaluationReceipts(evaluations, dir, "ABC/USD"); err != nil {
 		t.Fatal(err)

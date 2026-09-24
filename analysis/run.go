@@ -30,17 +30,21 @@ type Participant struct {
 
 // Account is the subset of a logged account this package reads.
 type Account struct {
-	Timestamp    int64      `json:"timestamp"`
-	SpotBalances []Balance  `json:"spot_balances"`
-	PerpBalances []Balance  `json:"perp_balances"`
-	Positions    []Position `json:"positions"`
-	Equity       int64      `json:"equity"`
+	Timestamp    int64            `json:"timestamp"`
+	SpotBalances []Balance        `json:"spot_balances"`
+	PerpBalances []Balance        `json:"perp_balances"`
+	Borrowed     map[string]int64 `json:"borrowed"`
+	Positions    []Position       `json:"positions"`
+	Equity       int64            `json:"equity"`
 }
 
 // Balance is one asset's net holding.
 type Balance struct {
 	Asset    string `json:"asset"`
+	Free     int64  `json:"free"`
+	Locked   int64  `json:"locked"`
 	Borrowed int64  `json:"borrowed"`
+	Interest int64  `json:"interest"`
 	NetAsset int64  `json:"net_asset"`
 }
 
@@ -83,6 +87,7 @@ type AccountRow struct {
 	VenueID  string           `json:"venue_id"`
 	ClientID uint64           `json:"client_id"`
 	Role     string           `json:"role"`
+	Phase    string           `json:"phase"`
 	Marks    map[string]int64 `json:"marks"`
 	Account  Account          `json:"account"`
 }
