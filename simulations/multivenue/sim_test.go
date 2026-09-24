@@ -943,6 +943,57 @@ func TestThreeVenueCrossVenueRoutersUsePhaseOrderedIndependentLegs(t *testing.T)
 	}
 }
 
+func TestTwoVenueRouterUsesExplicitIndependentFiniteAccounts(t *testing.T) {
+	cfg := crossVenueRaceConfig(t.TempDir(), []float64{1})
+	cfg.VenueIDs = []string{"north", "south"}
+	cfg.CrossVenueArbInitialBase = 2 * mvBasePrecision
+	cfg.CrossVenueArbInitialQuote = 150_000 * mvQuotePrecision
+	sim, err := NewSim(2*time.Second, cfg)
+	if err != nil {
+		t.Fatalf("two-venue NewSim: %v", err)
+	}
+	defer sim.Close()
+	if len(sim.Venues) != 2 || len(sim.Routers) != 1 || len(sim.Routers[0].Actors()) != 2 {
+		t.Fatalf("two-venue construction: venues=%d routers=%d actors=%d", len(sim.Venues), len(sim.Routers), len(sim.Routers[0].Actors()))
+	}
+	var previous *exchange.Client
+	for index, leg := range sim.Routers[0].legs {
+		venue := sim.Venues[index]
+		if leg.venueID != venue.ID {
+			t.Fatalf("leg %d venue = %s, want %s", index, leg.venueID, venue.ID)
+		}
+		client := venue.Exchange.Clients[leg.clientID]
+		if client == nil || client == previous || client.GetBalance("ABC") != cfg.CrossVenueArbInitialBase || client.GetBalance("USD") != cfg.CrossVenueArbInitialQuote {
+			t.Fatalf("venue %s router account is not independently funded: %#v", venue.ID, client)
+		}
+		previous = client
+	}
+}
+
+func TestTwoVenueRouterConfigRejectsMissingOrInvalidFunding(t *testing.T) {
+	base := crossVenueRaceConfig("x", []float64{1})
+	base.VenueIDs = []string{"north", "south"}
+	for _, venueIDs := range [][]string{{"north"}, {"north", "north"}, {"north", "south", "east", "west"}} {
+		cfg := base
+		cfg.VenueIDs = venueIDs
+		if err := cfg.normalize(); err == nil {
+			t.Fatalf("invalid venues %v accepted", venueIDs)
+		}
+	}
+	for _, balances := range [][2]int64{{0, 0}, {mvBasePrecision, 0}, {0, mvQuotePrecision}, {-1, mvQuotePrecision}, {mvBasePrecision, -1}} {
+		cfg := base
+		cfg.CrossVenueArbInitialBase, cfg.CrossVenueArbInitialQuote = balances[0], balances[1]
+		if err := cfg.normalize(); err == nil {
+			t.Fatalf("invalid router balances %v accepted", balances)
+		}
+	}
+	cfg := base
+	cfg.CrossVenueArbInitialBase, cfg.CrossVenueArbInitialQuote = mvBasePrecision, mvQuotePrecision
+	if err := cfg.normalize(); err != nil {
+		t.Fatalf("finite two-venue account rejected: %v", err)
+	}
+}
+
 func TestCrossVenueRouterTierOutcomesSurviveLabelSwapAndGOMAXPROCS(t *testing.T) {
 	run := func(procs int, tiers []float64) map[float64]CrossVenueArbReport {
 		t.Helper()

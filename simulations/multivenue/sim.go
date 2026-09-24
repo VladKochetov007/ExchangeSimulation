@@ -77,7 +77,7 @@ type RemoteMakerFeedConfig struct {
 	Latency           LatencyProfile `json:"latency"`
 }
 
-// Config creates exactly three separately funded direct venues on one
+// Config creates two or three separately funded direct venues on one
 // deterministic simulated clock. The one-second default is intentional: all
 // configured actor and venue timers are at least one second, making hour/day
 // experiments feasible without changing their event semantics through tick
@@ -660,6 +660,10 @@ type Config struct {
 	CrossVenueBaseLatency    time.Duration `json:"cross_venue_base_latency"`
 	CrossVenueArbLotQty      int64         `json:"cross_venue_arb_lot_qty"`
 	CrossVenueArbMaxAttempts int           `json:"cross_venue_arb_max_attempts"`
+	// InitialBase/InitialQuote are per-venue account endowments in ABC/USD
+	// atomic units. Three-venue legacy configs retain their former defaults.
+	CrossVenueArbInitialBase  int64 `json:"cross_venue_arb_initial_base"`
+	CrossVenueArbInitialQuote int64 `json:"cross_venue_arb_initial_quote"`
 }
 
 // DecodeConfig reads a scenario configuration and rejects unknown fields. A
@@ -1054,8 +1058,8 @@ func (c *Config) normalize() error {
 	if len(c.VenueIDs) == 0 {
 		c.VenueIDs = []string{"north", "central", "south"}
 	}
-	if len(c.VenueIDs) != 3 {
-		return fmt.Errorf("multivenue: exactly three venue IDs required, got %d", len(c.VenueIDs))
+	if len(c.VenueIDs) < 2 || len(c.VenueIDs) > 3 {
+		return fmt.Errorf("multivenue: two or three venue IDs required, got %d", len(c.VenueIDs))
 	}
 	seen := make(map[string]struct{}, len(c.VenueIDs))
 	for _, id := range c.VenueIDs {
@@ -1422,6 +1426,15 @@ func (c *Config) normalize() error {
 		c.DealerHedgeMode = "on"
 	}
 	if len(c.CrossVenueArbTiers) > 0 {
+		if len(c.VenueIDs) == 2 && (c.CrossVenueArbInitialBase <= 0 || c.CrossVenueArbInitialQuote <= 0) {
+			return errors.New("multivenue: two-venue routers require explicit positive base and quote endowments")
+		}
+		if c.CrossVenueArbInitialBase == 0 {
+			c.CrossVenueArbInitialBase = 1_000 * mvBasePrecision
+		}
+		if c.CrossVenueArbInitialQuote == 0 {
+			c.CrossVenueArbInitialQuote = 100_000_000 * mvQuotePrecision
+		}
 		if c.CrossVenueBaseLatency <= 0 {
 			return errors.New("multivenue: cross-venue base latency is required when routers are enabled")
 		}
@@ -1452,7 +1465,7 @@ func (c *Config) normalize() error {
 		c.OptionMaxStrikesPerExpiry <= 0 || c.NoiseTraderCount < 1 || c.OptionFlowCount < 1 ||
 		c.StoikovMaxVarianceMultiple <= 0 || c.StoikovVolatilitySampleInterval < 0 || c.SpotTickQuoteUnits <= 0 || c.MakerIndexWeight <= 0 || c.MakerIndexWeight > 1 || c.MakerInventoryLimit <= 0 || c.MakerMinHalfSpreadTicks <= 0 || c.RoundTripTraderCount < 0 || c.RoundTripHold <= 0 || c.RoundTripLotQty <= 0 || c.RoundTripInventoryLots <= 0 || c.ElasticSupplierCount < 0 || c.ElasticSupplierUnitsPerPercent <= 0 || c.CarryArbitrageurCount < 0 ||
 		c.CarryEntryBps <= 0 || c.CarryExitBps < 0 || c.CarryMaxPosition <= 0 || c.CarryLotQty <= 0 || c.MakerQuoteQty <= 0 || c.SpotMakerCount < 1 || c.OptionDealerCount < 1 || c.DatedCarryArbCount < 0 || c.ParityArbCount < 0 || c.FuturesMakerCount < 1 || c.FundingMaxRateBps <= 0 || c.FundingIntervalSeconds <= 0 || c.LatentLiquidityCount < 0 ||
-		c.CrossVenueArbLotQty < 0 || c.CrossVenueArbMaxAttempts < 0 ||
+		c.CrossVenueArbLotQty < 0 || c.CrossVenueArbMaxAttempts < 0 || c.CrossVenueArbInitialBase < 0 || c.CrossVenueArbInitialQuote < 0 ||
 		c.OptionIV <= 0 || c.StoikovRiskAversion <= 0 || c.StoikovFillDecay <= 0 || c.StoikovVariancePerSecond < 0 ||
 		c.StoikovInventoryHorizon <= 0 || c.StoikovVolatilityHalfLife <= 0 || *c.OptionBuyProbability < 0 || *c.OptionBuyProbability > 1 {
 		return errors.New("multivenue: invalid non-positive duration or model parameter")
@@ -3811,10 +3824,7 @@ func (s *Sim) addCrossVenueRouters(clock *simulation.SimulatedClock, scheduler *
 	if len(s.Config.CrossVenueArbTiers) == 0 {
 		return nil
 	}
-	balances := map[string]int64{
-		"ABC": 1_000 * mvBasePrecision,
-		"USD": 100_000_000 * mvQuotePrecision,
-	}
+	balances := map[string]int64{"ABC": s.Config.CrossVenueArbInitialBase, "USD": s.Config.CrossVenueArbInitialQuote}
 	fee := &exchange.PercentageFee{MakerBps: 0, TakerBps: s.Config.TakerFeeBps, InQuote: true}
 	for _, tier := range s.Config.CrossVenueArbTiers {
 		delay := time.Duration(float64(s.Config.CrossVenueBaseLatency) * tier)

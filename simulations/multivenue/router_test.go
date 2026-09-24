@@ -118,6 +118,44 @@ func TestCrossVenueRouterRequiresDisplayedLotAtEachTouch(t *testing.T) {
 	}
 }
 
+func TestTwoVenueCrossVenueRouterRequiresDistinctCompleteLegs(t *testing.T) {
+	frontiers := []simulation.MarketDataFrontier{
+		{LinkID: 11, Ordinal: 1, DeliveredAt: 100, Digest: [16]byte{1}},
+		{},
+	}
+	legs := []CrossVenueArbLegConfig{
+		{VenueID: "bravo", ClientID: 1, ActorID: 1, Gateway: &routerFrontierGateway{ClientGateway: exchange.NewClientGateway(1), frontier: &frontiers[0]}},
+		{VenueID: "alpha", ClientID: 1, ActorID: 2, Gateway: &routerFrontierGateway{ClientGateway: exchange.NewClientGateway(1), frontier: &frontiers[1]}},
+	}
+	cfg := CrossVenueArbConfig{Symbol: "ABC/USD", LotQty: 1, BasePrecision: 1, MaxAttempts: 1, RequireCompleteFeedFrontier: true}
+	if _, err := NewCrossVenueArb(1, cfg, legs[:1]); err == nil {
+		t.Fatal("one router endpoint accepted")
+	}
+	duplicate := append([]CrossVenueArbLegConfig(nil), legs...)
+	duplicate[1].VenueID = duplicate[0].VenueID
+	if _, err := NewCrossVenueArb(1, cfg, duplicate); err == nil {
+		t.Fatal("duplicate venue endpoint accepted")
+	}
+	router, err := NewCrossVenueArb(1, cfg, legs)
+	if err != nil {
+		t.Fatalf("two-venue router: %v", err)
+	}
+	setRouterBook(router.legs[0], 105, 106)
+	setRouterBook(router.legs[1], 100, 101)
+	if _, ok := router.completeFeedFrontier(); ok {
+		t.Fatal("incomplete two-link frontier accepted")
+	}
+	frontiers[1] = simulation.MarketDataFrontier{LinkID: 12, Ordinal: 1, DeliveredAt: 100, Digest: [16]byte{2}}
+	components, ok := router.completeFeedFrontier()
+	if !ok || len(components) != 2 {
+		t.Fatalf("complete two-link frontier = %#v, %t", components, ok)
+	}
+	buy, sell, edge, ok := router.bestOpportunity()
+	if !ok || buy.venueID != "alpha" || sell.venueID != "bravo" || edge != 4 {
+		t.Fatalf("two-venue route = %s/%s edge %d ok %t", venueID(buy), venueID(sell), edge, ok)
+	}
+}
+
 // The router may compare three delayed venue feeds only after every declared
 // venue has delivered a real prefix. This distinguishes an absent third feed
 // from a knowingly observed third market with no opportunity, and gives the

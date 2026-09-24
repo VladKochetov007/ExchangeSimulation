@@ -27,7 +27,7 @@ type CrossVenueArbConfig struct {
 }
 
 // CrossVenueArbDecision is the observation-only evidence boundary for one
-// submitted router leg. Components are the complete three-venue local public
+// submitted router leg. Components are the complete configured local public
 // feed frontier that made the route eligible; they are not an actor input.
 type CrossVenueArbDecision struct {
 	ActorID       uint64
@@ -150,15 +150,15 @@ type crossVenueArbLeg struct {
 	frontier func() simulation.MarketDataFrontier
 }
 
-// NewCrossVenueArb creates one three-endpoint router. Each leg has one
+// NewCrossVenueArb creates one multi-endpoint router. Each leg has one
 // gateway/account and therefore cannot silently net or transfer balances
 // between venues.
 func NewCrossVenueArb(tier float64, cfg CrossVenueArbConfig, legs []CrossVenueArbLegConfig) (*CrossVenueArb, error) {
 	if tier <= 0 || cfg.Symbol == "" || cfg.LotQty <= 0 || cfg.BasePrecision <= 0 || cfg.TakerFeeBps < 0 || cfg.MaxAttempts <= 0 {
 		return nil, fmt.Errorf("multivenue: invalid cross-venue router config")
 	}
-	if len(legs) != 3 {
-		return nil, fmt.Errorf("multivenue: cross-venue router requires exactly three venue legs")
+	if len(legs) < 2 {
+		return nil, fmt.Errorf("multivenue: cross-venue router requires at least two venue legs")
 	}
 	router := &CrossVenueArb{tier: tier, cfg: cfg, report: CrossVenueArbReport{Tier: tier}}
 	seenVenues := make(map[string]struct{}, len(legs))
@@ -386,7 +386,7 @@ func (r *CrossVenueArb) openGroup(buy, sell *crossVenueArbLeg, edge int64) {
 }
 
 // completeFeedFrontier returns the exact frontiers used by the fixed
-// three-venue comparison. In ordinary compatibility mode it has no effect on
+// configured-venue comparison. In ordinary compatibility mode it has no effect on
 // routing. An instrumented V2 router requires a nonempty prefix from every
 // declared venue before it may turn quote state into a pair of order requests.
 func (r *CrossVenueArb) completeFeedFrontier() ([]simulation.DecisionFrontierComponent, bool) {
