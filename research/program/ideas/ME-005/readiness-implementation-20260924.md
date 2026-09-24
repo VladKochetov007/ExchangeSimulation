@@ -1,7 +1,7 @@
 # ME-005 implementation checkpoint — development readiness, not a result
 
 Source baseline: merged `main` `eb921aa29b26b43cd39e1613dabc44ec60dbf5c9`.
-Latest clean code gate: `0a1c0d0` on `research/market-ecology-me005-20260924`.
+Latest clean code gate: `006afb1` on `research/market-ecology-me005-20260924`.
 The authoritative [readiness assessment](readiness-20260924.md) and
 [prospective preparation contract](prepare-contract-20260924.md) still define
 four acceptance fixes. This note records implementation progress without
@@ -11,8 +11,8 @@ registering a protocol or scoring a market world. ME-005 economic worlds run:
 | Fix | Implemented and mechanically exercised | Still required before ME-005 RUN |
 |---|---|---|
 | 1. Two-venue wiring | Exactly two distinct venues and finite, separate router accounts; historical three-venue default retained. Two-venue router configs now require explicit `auto_borrow_spot=false`. | Pin the effective two-venue config, initial balances, lot, attempt cap and deployment in a preregistration; independently review this successor population choice. |
-| 2. Opportunity/execution reconstruction | Optional canonical callback evidence including no-action and consumed source identity; public-book replay in global frame order; receipt-prefix and actor-local book checks; actor-inbox response receipts; terminal count binding; first trade ID zero, Trade/OrderFill/response joins. Submitted FOK requests join audited decision vectors to exchange placements, fills and acknowledgements. A public-episode/actor-evaluation timeline distinguishes public-active, locally aligned, locally inactive and post-public local-positive states, with half-open frame ordering and censoring. The first submitted quote can now be checked against audited initial venue balances. Dedicated market-FOK router cancellations fail closed; a first-attempt terminal join separates settled exchange outcome from actor-observed status and requires accepted-order acknowledgements before fill receipts can establish actor knowledge. | Classify disappearance reasons only where the event chain actually identifies them; unclassified causes must remain unknown. Quote-time funding is not arrival-time admission. Bind the complete chain to a verified run manifest under the registered config. |
-| 3. Costed closeout | Independent venue-local bid/ask depth walk with quote taker fees and insufficient-depth failure; initial/terminal venue-account deltas checked against settled fills, fee rounding and zero debt/locked inventory. The terminal helper requires both account timestamps at the declared horizon and bounds replayed-book evidence age when base inventory changed; a zero-base-change account needs no price update. A static fixture gives +48 matched cashflow but −13 local terminal value. A manufactured production path binds binary evidence, venue accounts, local value and run-wide conservation. A per-router movement audit rejects undeclared balance changes and pairs each settlement with one canonical fill. | Pin the book-evidence recency bound prospectively; bind replay, accounts and report to one independently verified completed run under the exact candidate. The complete registered-world audit and final independent review remain. |
+| 2. Opportunity/execution reconstruction | Optional canonical callback evidence including no-action and consumed source identity; public-book replay in global frame order; receipt-prefix and actor-local book checks; actor-inbox response receipts; terminal count binding; first trade ID zero, Trade/OrderFill/response joins. Submitted FOK requests join audited decision vectors to exchange placements, fills and acknowledgements. A public-episode/actor-evaluation timeline distinguishes public-active, locally aligned, locally inactive and post-public local-positive states, with half-open frame ordering and censoring. The first submitted quote can now be checked against audited initial venue balances. Dedicated market-FOK router cancellations fail closed; a first-attempt terminal join separates settled exchange outcome from actor-observed status and requires accepted-order acknowledgements before fill receipts can establish actor knowledge. A narrow binder checks manifest/config/source, raw/rendered report and stream-attestation identities after a successful binary render. | Classify disappearance reasons only where the event chain actually identifies them; unclassified causes must remain unknown. Quote-time funding is not arrival-time admission. Integrate the binder into the registered-world driver with a prospectively pinned effective config. |
+| 3. Costed closeout | Independent venue-local bid/ask depth walk with quote taker fees and insufficient-depth failure; initial/terminal venue-account deltas checked against settled fills, fee rounding and zero debt/locked inventory. The terminal helper requires both account timestamps at the declared horizon and bounds replayed-book evidence age when base inventory changed; a zero-base-change account needs no price update. A static fixture gives +48 matched cashflow but −13 local terminal value. A manufactured production path binds binary evidence, venue accounts, local value and run-wide conservation. A per-router movement audit rejects undeclared balance changes and pairs each settlement with one canonical fill. | Pin the book-evidence recency bound prospectively; invoke the renderer, binder and entire reconstruction on each registered completed world. The final independent review remains. |
 | 4. Dislocation measurement | Two-venue, event-ordered, one-lot executable edge and half-open episode functions; a pure OFF/ON seed-pair estimator reports episode counts and positive-edge duration, retains same-time episodes and rejects missing/mismatched cells. A ten-second no-op production fixture leaves final displayed background ABC/USD books unchanged when the router submits nothing. A static test proves an episode between periodic samples is visible to the event-time estimator but absent at both sample endpoints. | Bind actual OFF/ON world evidence and background config/clock identities, retain receipt-lag classification, and preregister missing-run and uncertainty rules. Trade-attributed convergence remains `NOT_IDENTIFIED` absent stronger attribution evidence. |
 
 The positive matched cashflow in the static fixture is **not** profit after
@@ -252,3 +252,23 @@ the rendered binary tree, terminal report and raw sidecars belong to the same
 completed manifest/config/source identity; that binding is **not yet
 implemented** by this function. Focused race/vet and clean full tests passed.
 The wrapper is not a ME-005 development result or final four-fix acceptance.
+
+Commit `006afb1` adds a narrow run-binding check for the exact effective
+manifest-config digest, clean 40-hex source revision, two-venue finite
+one-attempt evidence settings, byte-identical raw/rendered terminal report,
+and matching terminated-binary/rendered-attestation stream identities. It
+rejects changed source/config/report/stream and a borrowing-enabled config
+even when its new digest is supplied. The positive production-path fixture
+uses a **synthetic** 40-hex revision because `go test` stamps that fixture's
+binary `unknown`; this substitution is confined to the test. Actual economic
+runs must use a clean production build at a pinned committed revision.
+The binding consumes the execution hash returned by the existing completed
+binary renderer, which must run first; it is not a second byte-for-byte
+decode of `events.evs`. Focused race/vet and clean full tests passed.
+
+Still open before preregistration/review: a single finite registered-world
+driver that invokes the renderer, copies and binds the report without
+overwriting evidence, extracts both arms and emits the complete funnel and
+per-attempt economics; an exact effective config and horizon/recency choice;
+paired background/clock identity and missing-cell rules; and the two final
+independent scoped reviews. No ME-005 economic cell has run.
