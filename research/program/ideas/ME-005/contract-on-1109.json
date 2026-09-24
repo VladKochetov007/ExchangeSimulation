@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "arm": "ON",
+  "seed": 1109,
+  "source_revision": "b9ed591e255ff951b53dc2c001c6ac25a90b7b0e",
+  "effective_config_sha256": "3a4e6a37f269dba160bafd5bbe354d53d84431f9deca3306a088a589558ab0e2",
+  "venues": ["north", "south"],
+  "symbol": "ABC/USD",
+  "base_asset": "ABC",
+  "quote_asset": "USD",
+  "horizon_nano": 1735689900000000000,
+  "lot_qty": 1000000,
+  "base_precision": 100000000,
+  "taker_fee_bps": 5,
+  "max_book_evidence_age_nanos": 10000000000,
+  "initial_base_per_venue": 100000000,
+  "initial_quote_per_venue": 10000000000
+}

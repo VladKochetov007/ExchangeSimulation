@@ -147,9 +147,9 @@
       "id": "ME-005",
       "title": "Prefunded two-venue executable arbitrage",
       "claim_type": "CAUSAL",
-      "stage": "PLAN",
+      "stage": "PREPARE",
       "idea": "research/program/ideas/ME-005/idea.md",
-      "protocol": null,
+      "protocol": "research/program/ideas/ME-005/protocol.md",
       "report": null,
       "result": null,
       "dependencies": [
@@ -160,11 +160,11 @@
         "S15"
       ],
       "authorization": {
-        "prepare": false,
+        "prepare": true,
         "run": false,
-        "basis": "Owner bounded 2026-09-23 overnight continuation authorized ME-005 source/evidence readiness after ME-002 and ME-003; the 2026-09-24 assessment found four prerequisite fixes. No two-venue implementation, protocol lock, economic world or holdout is authorized at this boundary."
+        "basis": "Owner 2026-09-24 PREPARE_AND_RUN_IF_READY instruction authorized exactly four ME-005 readiness fixes and a smallest registered development screen only after prospective protocol and two independent scoped reviews. Protocol r1 is locked pending review; no economic world or holdout has run."
       },
-      "next_action": "READY AFTER FOUR SPECIFIC FIXES: explicit two-venue wiring and finite budgets; independent opportunity/execution denominator; prospectively selected costed venue-local closeout; event-time causal edge estimator. See ideas/ME-005/readiness-20260924.md. No implementation or run under this assessment."
+      "next_action": "Review exact ME-005 source candidate b9ed591 and protocol r1 with two fresh independent scoped reviewers. Run only the four registered development cells plus one technical duplicate if both accept and capacity passes; otherwise preserve the specific blocker."
     },
     {
       "id": "ME-006",

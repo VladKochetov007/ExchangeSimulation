@@ -1,12 +1,31 @@
 # ME-005 implementation checkpoint — development readiness, not a result
 
 Source baseline: merged `main` `eb921aa29b26b43cd39e1613dabc44ec60dbf5c9`.
-Latest clean code gate: `006afb1` on `research/market-ecology-me005-20260924`.
+The table below records the earlier clean code gate `006afb1` on
+`research/market-ecology-me005-20260924`; its pending-work column is
+historical, not the current run instruction.
 The authoritative [readiness assessment](readiness-20260924.md) and
 [prospective preparation contract](prepare-contract-20260924.md) still define
 four acceptance fixes. This note records implementation progress without
 registering a protocol or scoring a market world. ME-005 economic worlds run:
 **zero**. Holdouts consumed: **zero**.
+
+## Current prospective candidate after that checkpoint
+
+Source/config candidate `b9ed591e255ff951b53dc2c001c6ac25a90b7b0e`
+adds the completed first-attempt world analyzer, strict source/config/seed
+and raw/rendered binary binding, run-wide conservation failure gate, an
+effective-config-derived OFF/ON background identity, and four prospectively
+fixed two-venue configs. Synthetic ten-second OFF and ON binary fixtures,
+static matched/unmatched local-closeout examples, corruption tests, focused
+race/vet and clean full `make test` pass at that candidate. Those are
+**mechanical fixtures, not ME-005 economic worlds**. The effective hashes
+are asserted by a normalization-only test; no development outcome selected
+the seeds, lot, horizon or closeout bound. See the later
+[conditional r1 protocol](protocol.md) for the current cell list and stop
+rules. The four scoped readiness implementations are prepared for final
+review, **not independently accepted yet**. Two fresh reviews and resource
+preflight remain mandatory before the first economic world.
 
 | Fix | Implemented and mechanically exercised | Still required before ME-005 RUN |
 |---|---|---|

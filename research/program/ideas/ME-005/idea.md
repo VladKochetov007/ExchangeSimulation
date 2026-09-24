@@ -8,14 +8,17 @@ Strongest intended claim: **CAUSAL** (proposed, not established).
 Two venues proposed; current integrated harness uses three, so isolate wiring readiness explicitly.
 
 Authorization and current stage: [authoritative registry](../../registry.json).
-No study execution or readiness implementation is authorized by this card.
+This original card did not itself authorize implementation or execution. The
+owner's subsequent bounded ME-005 instruction authorized the four readiness
+fixes and a development run **only after** prospective review. The current
+[r1 protocol](protocol.md) is the governing conditional lock; no ME-005
+economic world has run at this documentation checkpoint.
 The source-grounded [2026-09-24 readiness assessment](readiness-20260924.md)
 ends at **READY AFTER FOUR SPECIFIC FIXES**; it is not a protocol or result.
 The [prospective preparation contract](prepare-contract-20260924.md) selects
 the local closeout convention and scopes those four fixes before implementation.
 The [implementation checkpoint](readiness-implementation-20260924.md) records
-the current partial acceptance work and its independent design limitation;
-it is not a locked protocol or an economic result.
+the staged acceptance work and its independent design limitation.
 
 ## Entities and readiness
 
