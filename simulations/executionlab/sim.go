@@ -29,15 +29,29 @@ type SimConfig struct {
 	NoiseTraderCount  int
 	BackgroundLatency time.Duration
 	ExecutionLatency  time.Duration
+	// ParentDeployment is an explicit directed transport/actor-processing
+	// assignment. Nil preserves the legacy symmetric ExecutionLatency path.
+	ParentDeployment                 *ParentDeployment
+	RecordSnapshotProjectionEvidence bool
 	// ParentCount schedules independent parent-order clients using the same
 	// policy and deterministic side schedule. One preserves the original
 	// single-parent experiment.
 	ParentCount int
+	// ParentClientID overrides the first parent's account ID for controlled
+	// identity-swap fixtures. Zero uses the next sequential ID.
+	ParentClientID uint64
 	// ParentInterval separates consecutive parent decisions. It is required
 	// when ParentCount is greater than one so a study cannot accidentally send
 	// a simultaneous, inseparable parent-order burst.
 	ParentInterval time.Duration
 	Parent         ParentOrderConfig
+}
+
+type ParentDeployment struct {
+	MarketDataLatency time.Duration `json:"market_data_latency_nanos"`
+	RequestLatency    time.Duration `json:"request_latency_nanos"`
+	ResponseLatency   time.Duration `json:"response_latency_nanos"`
+	ProcessingDelay   time.Duration `json:"processing_delay_nanos"`
 }
 
 func DefaultSimConfig(policy Policy) SimConfig {
@@ -84,11 +98,27 @@ func (c *SimConfig) normalize() error {
 	if c.ParentCount < 1 {
 		return fmt.Errorf("executionlab: parent count must be positive")
 	}
+	if c.ParentClientID != 0 && c.ParentClientID <= uint64(c.MMCount+c.NoiseTraderCount) {
+		return fmt.Errorf("executionlab: parent client ID must not collide with a background account")
+	}
+	if c.ParentClientID > ^uint64(0)-uint64(c.ParentCount-1) {
+		return fmt.Errorf("executionlab: parent client ID range overflows")
+	}
+	if c.MMCount < 0 || c.NoiseTraderCount < 0 {
+		return fmt.Errorf("executionlab: background account counts must be non-negative")
+	}
 	if c.ParentCount > 1 && c.ParentInterval <= 0 {
 		return fmt.Errorf("executionlab: parent interval must be positive when parent count exceeds one")
 	}
 	if c.BackgroundLatency < 0 || c.ExecutionLatency < 0 {
 		return fmt.Errorf("executionlab: latency must be non-negative")
+	}
+	if c.ParentDeployment != nil {
+		deployment := c.ParentDeployment
+		if c.ExecutionLatency != 0 || deployment.MarketDataLatency < 0 || deployment.RequestLatency < 0 ||
+			deployment.ResponseLatency < 0 || deployment.ProcessingDelay < 0 {
+			return fmt.Errorf("executionlab: explicit parent deployment requires zero legacy latency and non-negative components")
+		}
 	}
 	if err := c.Parent.validate(); err != nil {
 		return err
@@ -101,7 +131,11 @@ func (c *SimConfig) normalize() error {
 	// Constant latency gives this experiment a finite causal horizon. A
 	// log-normal tail has no finite drain bound and would turn unprocessed
 	// children at shutdown into fabricated execution failures.
-	minimumDuration := lastChild + c.ExecutionLatency + c.ExecutionLatency + 2*c.Parent.PollInterval
+	requestLatency, responseLatency, processingDelay := c.ExecutionLatency, c.ExecutionLatency, time.Duration(0)
+	if c.ParentDeployment != nil {
+		requestLatency, responseLatency, processingDelay = c.ParentDeployment.RequestLatency, c.ParentDeployment.ResponseLatency, c.ParentDeployment.ProcessingDelay
+	}
+	minimumDuration := lastChild + processingDelay + requestLatency + responseLatency + 2*c.Parent.PollInterval
 	if c.Duration < minimumDuration {
 		return fmt.Errorf("executionlab: duration %s ends before final child can arrive and be observed (%s)", c.Duration, minimumDuration)
 	}
@@ -116,7 +150,11 @@ type Sim struct {
 	clock    *simulation.SimulatedClock
 	mounts   []*simulation.Mount
 	actors   []actor.Actor
+	contract WorldContract
+	observe  func(EvidenceObservation)
 }
+
+func (s *Sim) WorldContract() WorldContract { return s.contract.clone() }
 
 func newLatencyMount(ex *exchange.Exchange, scheduler *simulation.EventScheduler, clock *simulation.SimulatedClock, delay time.Duration) *simulation.Mount {
 	if delay == 0 {
@@ -131,23 +169,49 @@ func newLatencyMount(ex *exchange.Exchange, scheduler *simulation.EventScheduler
 	})
 }
 
+func newDirectedLatencyMount(ex *exchange.Exchange, scheduler *simulation.EventScheduler, clock *simulation.SimulatedClock, deployment ParentDeployment) *simulation.Mount {
+	if deployment.MarketDataLatency == 0 && deployment.RequestLatency == 0 && deployment.ResponseLatency == 0 {
+		return simulation.NewMount(ex, simulation.LatencyConfig{})
+	}
+	return simulation.NewMount(ex, simulation.LatencyConfig{
+		Request:    simulation.NewConstantLatency(deployment.RequestLatency),
+		Response:   simulation.NewConstantLatency(deployment.ResponseLatency),
+		MarketData: simulation.NewConstantLatency(deployment.MarketDataLatency),
+		Scheduler:  scheduler, Clock: clock,
+	})
+}
+
 func NewSim(cfg SimConfig) (*Sim, error) {
 	if err := cfg.normalize(); err != nil {
 		return nil, err
+	}
+	if cfg.Parent.Instruction != nil {
+		copyOfInstruction := *cfg.Parent.Instruction
+		cfg.Parent.Instruction = &copyOfInstruction
+	}
+	runnerContract := RunnerContract{
+		Iterations: int(cfg.Duration / time.Millisecond), Step: time.Millisecond,
+		DeterministicIngress: true, DeterministicPhases: true,
 	}
 	clock := simulation.NewSimulatedClock(0)
 	scheduler := simulation.NewEventScheduler(clock)
 	clock.SetScheduler(scheduler)
 	timers := simulation.NewSimTimerFactory(scheduler)
 	ex := exchange.NewExchangeWithConfig(exchange.ExchangeConfig{
-		Clock:                clock,
-		TickerFactory:        timers,
-		DeterministicIngress: true,
-		DeterministicPhases:  true,
+		Clock:                            clock,
+		TickerFactory:                    timers,
+		DeterministicIngress:             runnerContract.DeterministicIngress,
+		DeterministicPhases:              runnerContract.DeterministicPhases,
+		RecordSnapshotProjectionEvidence: cfg.RecordSnapshotProjectionEvidence,
 	})
+	instrument := InstrumentContract{
+		Symbol: cfg.Parent.Symbol, BaseAsset: "ABC", QuoteAsset: cfg.Parent.QuoteAsset,
+		BasePrecision: basePrecision, QuotePrecision: quotePrecision,
+		TickSize: priceTick, LotSize: basePrecision / 100,
+	}
 	ex.AddInstrument(exchange.NewSpotInstrument(
-		cfg.Parent.Symbol, "ABC", cfg.Parent.QuoteAsset, basePrecision, quotePrecision,
-		priceTick, basePrecision/100,
+		instrument.Symbol, instrument.BaseAsset, instrument.QuoteAsset,
+		instrument.BasePrecision, instrument.QuotePrecision, instrument.TickSize, instrument.LotSize,
 	))
 
 	fee := &exchange.PercentageFee{MakerBps: 0, TakerBps: 5, InQuote: true}
@@ -155,6 +219,18 @@ func NewSim(cfg SimConfig) (*Sim, error) {
 	balances := map[string]int64{
 		"ABC": 100_000 * basePrecision,
 		"USD": 100_000_000 * quotePrecision,
+	}
+	contract := WorldContract{
+		SchemaVersion: 1,
+		Config:        cfg,
+		Instrument:    instrument,
+		Bootstrap:     bootstrapPrice,
+		Runner:        runnerContract,
+	}
+	addAccount := func(id uint64, role string, feeModel *exchange.PercentageFee) {
+		contract.Accounts = append(contract.Accounts, AccountContract{
+			ClientID: id, Role: role, InitialBalances: balances, Fee: *feeModel,
+		})
 	}
 
 	directMount := simulation.NewMount(ex, simulation.LatencyConfig{})
@@ -164,7 +240,7 @@ func NewSim(cfg SimConfig) (*Sim, error) {
 	for i := 0; i < cfg.MMCount; i++ {
 		clientID++
 		gateway := directMount.ConnectNewClient(clientID, balances, mmFee)
-		mm := feesim.NewMarketMaker(clientID, gateway, feesim.MMConfig{
+		makerConfig := feesim.MMConfig{
 			Symbol:         cfg.Parent.Symbol,
 			BootstrapPrice: bootstrapPrice,
 			Levels:         5,
@@ -174,6 +250,12 @@ func NewSim(cfg SimConfig) (*Sim, error) {
 			MidPriceMode:   feesim.MidFromWeightedMid,
 			BaseInterval:   10*time.Millisecond + time.Duration(i)*time.Millisecond,
 			MaxInterval:    30*time.Millisecond + time.Duration(i)*time.Millisecond,
+		}
+		mm := feesim.NewMarketMaker(clientID, gateway, makerConfig)
+		addAccount(clientID, "maker", mmFee)
+		contract.Makers = append(contract.Makers, MakerContract{
+			ClientID: clientID, Config: makerConfig,
+			RealizedLevelCadences: mm.RealizedLevelCadences(),
 		})
 		mm.SetTickerFactory(timers)
 		actors = append(actors, mm)
@@ -183,11 +265,22 @@ func NewSim(cfg SimConfig) (*Sim, error) {
 		mount := newLatencyMount(ex, scheduler, clock, cfg.BackgroundLatency)
 		mounts = append(mounts, mount)
 		gateway := mount.ConnectNewClient(clientID, balances, fee)
-		noise := feesim.NewRandomTaker(clientID, gateway, feesim.TakerConfig{
+		noiseConfig := feesim.TakerConfig{
 			Symbols:      []string{cfg.Parent.Symbol},
 			TargetQtys:   map[string]int64{cfg.Parent.Symbol: basePrecision / 20},
 			TakeInterval: 25 * time.Millisecond,
 			Seed:         cfg.Seed + int64(i) + 1,
+		}
+		noise := feesim.NewRandomTaker(clientID, gateway, noiseConfig)
+		addAccount(clientID, "random_taker", fee)
+		contract.Noise = append(contract.Noise, NoiseContract{
+			ClientID: clientID, Symbol: cfg.Parent.Symbol,
+			TargetQty:    noiseConfig.TargetQtys[cfg.Parent.Symbol],
+			TakeInterval: noiseConfig.TakeInterval, DecisionPhaseOffset: noiseConfig.DecisionPhaseOffset,
+			Seed: noiseConfig.Seed, Latency: cfg.BackgroundLatency,
+			ImbalanceCoupling: noiseConfig.ImbalanceCoupling,
+			ExciteAlpha:       noiseConfig.ExciteAlpha, ExciteBetaPerSec: noiseConfig.ExciteBetaPerSec,
+			SizeParetoAlpha: noiseConfig.SizeParetoAlpha, SizeCapMultiple: noiseConfig.SizeCapMultiple,
 		})
 		noise.SetTickerFactory(timers)
 		actors = append(actors, noise)
@@ -195,7 +288,15 @@ func NewSim(cfg SimConfig) (*Sim, error) {
 	parents := make([]*executionAgent, 0, cfg.ParentCount)
 	for i := 0; i < cfg.ParentCount; i++ {
 		clientID++
-		executionMount := newLatencyMount(ex, scheduler, clock, cfg.ExecutionLatency)
+		if i == 0 && cfg.ParentClientID != 0 {
+			clientID = cfg.ParentClientID
+		}
+		var executionMount *simulation.Mount
+		if cfg.ParentDeployment != nil {
+			executionMount = newDirectedLatencyMount(ex, scheduler, clock, *cfg.ParentDeployment)
+		} else {
+			executionMount = newLatencyMount(ex, scheduler, clock, cfg.ExecutionLatency)
+		}
 		mounts = append(mounts, executionMount)
 		parentCfg := cfg.Parent
 		parentCfg.DecisionAfter += time.Duration(i) * cfg.ParentInterval
@@ -211,14 +312,24 @@ func NewSim(cfg SimConfig) (*Sim, error) {
 			return nil, err
 		}
 		parent.SetTickerFactory(timers)
+		parent.observationTime = clock.NowUnixNano
+		if cfg.ParentDeployment != nil {
+			parent.processingDelay = cfg.ParentDeployment.ProcessingDelay
+			parent.emitProcessingCompletion = true
+		}
+		addAccount(clientID, "parent", fee)
+		contract.Parents = append(contract.Parents, ParentContract{
+			ClientID: clientID, Config: parentCfg, Latency: cfg.ExecutionLatency,
+			Deployment: cfg.ParentDeployment,
+		})
 		parents = append(parents, parent)
 		actors = append(actors, parent)
 	}
 
 	runner := simulation.NewRunner(clock, simulation.RunnerConfig{
-		Iterations:          int(cfg.Duration / time.Millisecond),
-		Step:                time.Millisecond,
-		DeterministicPhases: true,
+		Iterations:          runnerContract.Iterations,
+		Step:                runnerContract.Step,
+		DeterministicPhases: runnerContract.DeterministicPhases,
 	})
 	runner.AddIdler(timers)
 	for _, mount := range mounts {
@@ -229,7 +340,7 @@ func NewSim(cfg SimConfig) (*Sim, error) {
 	}
 	return &Sim{
 		Runner: runner, Parent: parents[0], Parents: parents,
-		exchange: ex, clock: clock, mounts: mounts, actors: actors,
+		exchange: ex, clock: clock, mounts: mounts, actors: actors, contract: contract.clone(),
 	}, nil
 }
 
@@ -251,6 +362,14 @@ func (s *Sim) RunMany(ctx context.Context) ([]ExecutionReport, error) {
 		// fixed point and before venue shutdown. The value is therefore a
 		// terminal exchange observation, not a delayed actor market-data view.
 		terminalMid, _ = s.exchange.TwoSidedMidPrice(s.Parent.cfg.Symbol)
+		if s.observe != nil {
+			s.exchange.LogAllBalances()
+			bid, ask, valid := s.exchange.TwoSidedTopOfBook(s.Parent.cfg.Symbol)
+			s.observe(EvidenceObservation{
+				Timestamp: s.clock.NowUnixNano(), Source: "exchange", Name: "terminal_book", Route: s.Parent.cfg.Symbol,
+				Payload: TerminalBook{Symbol: s.Parent.cfg.Symbol, Bid: bid, Ask: ask, Valid: valid},
+			})
+		}
 	})
 	if err := s.Runner.Run(ctx); err != nil {
 		return nil, err

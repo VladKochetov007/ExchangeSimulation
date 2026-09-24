@@ -8,10 +8,23 @@ scientific freeze and it is not a certificate of market realism.
 ## Current development state
 
 The [market-ecology program](program/README.md) provides the finite idea registry,
-policy catalogue and explicit research-skill invocation. Its current starting
-point is the merged immediate-execution readiness/pilot draft. Registry entries
-do not authorize implementation or market runs; the R2/SV1D closure below remains
-the completed historical boundary.
+policy catalogue, explicit research-skill invocation and the current resume
+point. On its dedicated research branch, ME-000 readiness was closed and the
+[ME-001 immediate-execution development screen](program/ideas/ME-001/report.md)
+completed 27 economic worlds plus two controls. The later
+[ME-002 development screen](program/ideas/ME-002/report.md) completed 24
+economic worlds plus two controls on a separately pinned source, with a
+reviewed mixed-sign network response and processing-order-timing non-activation
+under the fixed decision gate. The later
+[ME-003 execution-instruction screen](program/ideas/ME-003/report.md) completed
+12 economic worlds plus two controls. ME-005 has only a
+[source-grounded two-venue readiness assessment](program/ideas/ME-005/readiness-20260924.md),
+not an economic result; optional [ME-002-B](program/ideas/ME-002-B/idea.md)
+is planning only. The completed ME-001/002/003 studies are simulation-internal
+development maps, not a freeze or empirical claim; their finite budgets are
+exhausted. This
+research branch is not automatically the published `main` baseline. The
+R2/SV1D closure below remains a separate completed historical boundary.
 
 The consolidated code baseline is the former scientific tip
 `f507c7ee2b11fd05e1adb9f17fa0a66faf889ea1`, descended from the published

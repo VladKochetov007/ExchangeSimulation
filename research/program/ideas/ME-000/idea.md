@@ -8,7 +8,9 @@ Strongest intended claim: **MECHANICAL** (proposed, not established).
 Implementation/evidence tasks only; no change to economics or study matrix.
 
 Authorization and current stage: [authoritative registry](../../registry.json).
-No study execution or readiness implementation is authorized by this card.
+The separately authorized F1/F2 readiness work is complete at `b25223a`;
+see the [scoped report](report.md) and [machine result](result.json).
+This card's proposal text below is retained as the original task definition.
 
 ## Entities and readiness
 
@@ -43,7 +45,7 @@ Numeric choices remain prospective unless the authoritative draft below specifie
 them. Budget for this authoring task is zero market worlds. Future work needs its
 own protocol, modules/N/A reasons, fixtures, formula domains and owner budget.
 
-## F1 — canonical configuration/provenance adapter (NOT AUTHORIZED)
+## F1 — canonical configuration/provenance adapter (historical proposal)
 
 - Trace `SimConfig` normalization in executionlab/sim.go and CLI wiring in
   cmd/executionlab/main.go. The current CLI does not expose the full composition matrix.
@@ -60,7 +62,7 @@ own protocol, modules/N/A reasons, fixtures, formula domains and owner budget.
 - Candidate, binary, config and plan must agree through existing provenance paths.
   No production runner or 29-world batch is authorized by these fixtures.
 
-## F2 — independent opportunity/execution reconstruction (NOT AUTHORIZED)
+## F2 — independent opportunity/execution reconstruction (historical proposal)
 
 - Inspect executionlab/execution.go (actor report), executionlab/sim.go (terminal
   mark), actor/events.go and exchange evidence adapters.

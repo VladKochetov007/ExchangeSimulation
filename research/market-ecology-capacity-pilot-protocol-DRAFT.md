@@ -1,5 +1,10 @@
 # DRAFT protocol — composition-conditioned immediate-execution capacity
 
+Historical design draft. The prospective development contract is now
+[ME-001 protocol revision 1](program/ideas/ME-001/protocol.md). The draft's
+original proposal/authorization language below remains intact as history;
+the lock states the exact owner-authorized scope and explicit amendments.
+
 Status: **NOT AUTHORIZED TO IMPLEMENT OR RUN**
 
 Protocol state: decision-ready draft, contingent on two bounded fixes

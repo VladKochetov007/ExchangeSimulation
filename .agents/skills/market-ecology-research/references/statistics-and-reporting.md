@@ -40,6 +40,9 @@ Results contain schema_version, study_id, stage, process_status, evidence_validi
 opportunity_presence, policy_activity, registered_activation, scientific_verdict,
 causal_verdict,
 empirical_comparison, reasons, identities, authorization, review, claims and evidence.
+An optional top-level `observed` object may retain study-specific numeric
+summaries. Its values are not semantically certified by this metadata
+validator; the bound analyzer and evidence review own those checks.
 Use the supplied result template for exact field names and initial values.
 A status record is never an authorization grant; consult the owner instruction.
 
@@ -48,11 +51,11 @@ A status record is never an authorization grant; consult the owner instruction.
 | stage | INTAKE, PLAN, PREPARE, DEVELOPMENT, CONFIRMATION, REPORT, CLOSED |
 | process_status | NOT_RUN, COMPLETED, FAILED, INCOMPLETE |
 | evidence_validity | NOT_ASSESSED, VALID, INVALID, INCOMPLETE |
-| opportunity_presence | NOT_ASSESSED, PRESENT, ABSENT, UNKNOWN, NOT_APPLICABLE |
+| opportunity_presence | NOT_ASSESSED, PRESENT, ABSENT, UNKNOWN, NOT_APPLICABLE, SAMPLED_LOCAL_PROXY_PRESENT_AT_DECISION |
 | policy_activity | NOT_ASSESSED, ACTIVE, INACTIVE, UNKNOWN, NOT_APPLICABLE |
 | registered_activation | NOT_ASSESSED, SATISFIED, NOT_SATISFIED, UNKNOWN, NOT_APPLICABLE |
 | scientific_verdict | NOT_ISSUED, SUPPORTED, NOT_SUPPORTED, INCONCLUSIVE, IDENTIFICATION_LIMITATION, MECHANICAL_ONLY |
-| causal_verdict | NOT_ASSESSED, SUPPORTED, NOT_SUPPORTED, INCONCLUSIVE, NOT_IDENTIFIED, NOT_APPLICABLE |
+| causal_verdict | NOT_ASSESSED, SUPPORTED, NOT_SUPPORTED, INCONCLUSIVE, NOT_IDENTIFIED, NOT_APPLICABLE, BOUNDED_RESPONSE_OBSERVED |
 | empirical_comparison | NOT_PERFORMED, COMPATIBLE, MISMATCH, INCONCLUSIVE, NOT_APPLICABLE |
 | review execution | COMPLETED, UNAVAILABLE, FAILED, NOT_REQUESTED |
 | review verdict | ACCEPT, ACCEPT_WITH_REQUIRED_CHANGES, REJECT, NOT_ISSUED |
@@ -70,6 +73,10 @@ A no-run template has no claims and NOT_ISSUED verdict.
 Use reasons for unknown/N/A values; null identities require explicit explanation.
 Historic vocabulary is retained in linked original records, not silently translated
 into a stronger current schema verdict.
+`SAMPLED_LOCAL_PROXY_PRESENT_AT_DECISION` names a sampled delivered quote,
+not at-arrival executable depth. `BOUNDED_RESPONSE_OBSERVED` identifies an
+observed registered response in the stated development scope, not a general
+causal effect or confirmation.
 
 ## Reporting and synthesis
 

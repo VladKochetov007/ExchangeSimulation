@@ -30,10 +30,36 @@ type ParentOrderConfig struct {
 	BasePrecision int64
 	QuoteAsset    string
 	Policy        Policy
+	Instruction   *ChildInstruction `json:"instruction,omitempty"`
 	DecisionAfter time.Duration
 	SliceInterval time.Duration
 	SliceCount    int
 	PollInterval  time.Duration
+}
+
+type ChildInstruction struct {
+	OrderType   exchange.OrderType   `json:"order_type"`
+	TimeInForce exchange.TimeInForce `json:"time_in_force"`
+	LimitPrice  int64                `json:"limit_price"`
+}
+
+func (i ChildInstruction) validate() error {
+	if i.TimeInForce != exchange.GTC && i.TimeInForce != exchange.IOC && i.TimeInForce != exchange.FOK {
+		return fmt.Errorf("executionlab: unsupported time-in-force %d", i.TimeInForce)
+	}
+	switch i.OrderType {
+	case exchange.Market:
+		if i.LimitPrice != 0 {
+			return fmt.Errorf("executionlab: market child cannot have a limit price")
+		}
+	case exchange.LimitOrder:
+		if i.LimitPrice <= 0 {
+			return fmt.Errorf("executionlab: spot limit child requires a positive price")
+		}
+	default:
+		return fmt.Errorf("executionlab: unsupported order type %d", i.OrderType)
+	}
+	return nil
 }
 
 func (c ParentOrderConfig) validate() error {
@@ -48,6 +74,11 @@ func (c ParentOrderConfig) validate() error {
 	}
 	if c.Policy == TWAP && (c.SliceCount < 2 || c.SliceInterval <= 0) {
 		return fmt.Errorf("executionlab: TWAP requires at least two positive-interval slices")
+	}
+	if c.Instruction != nil {
+		if err := c.Instruction.validate(); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -109,10 +140,15 @@ type ExecutionReport struct {
 
 type executionAgent struct {
 	*actor.BaseActor
-	cfg ParentOrderConfig
+	cfg             ParentOrderConfig
+	observe         func(EvidenceObservation)
+	observationTime func() int64
 
-	bestBid int64
-	bestAsk int64
+	bestBid                  int64
+	bestAsk                  int64
+	processingDelay          time.Duration
+	emitProcessingCompletion bool
+	pendingSnapshots         []pendingProcessingSnapshot
 
 	decided      bool
 	nextSliceAt  int64
@@ -121,6 +157,15 @@ type executionAgent struct {
 	byRequest    map[uint64]int
 	byOrder      map[uint64]int
 	report       ExecutionReport
+}
+
+type pendingProcessingSnapshot struct {
+	sequence   uint64
+	receivedAt int64
+	readyAt    int64
+	bestBid    int64
+	bestAsk    int64
+	twoSided   bool
 }
 
 func newExecutionAgent(id uint64, gateway actor.Gateway, cfg ParentOrderConfig) (*executionAgent, error) {
@@ -149,14 +194,40 @@ func (a *executionAgent) Start(ctx context.Context) error {
 }
 
 func (a *executionAgent) HandleEvent(_ context.Context, event *actor.Event) {
+	a.observeReceipt(event)
 	switch event.Type {
 	case actor.EventBookSnapshot:
 		snapshot := event.Data.(actor.BookSnapshotEvent)
-		if snapshot.Symbol != a.cfg.Symbol || len(snapshot.Snapshot.Bids) == 0 || len(snapshot.Snapshot.Asks) == 0 {
+		if snapshot.Symbol != a.cfg.Symbol || snapshot.Snapshot == nil {
 			return
 		}
-		a.bestBid = snapshot.Snapshot.Bids[0].Price
-		a.bestAsk = snapshot.Snapshot.Asks[0].Price
+		twoSided := len(snapshot.Snapshot.Bids) != 0 && len(snapshot.Snapshot.Asks) != 0
+		if a.processingDelay == 0 {
+			if twoSided {
+				a.bestBid = snapshot.Snapshot.Bids[0].Price
+				a.bestAsk = snapshot.Snapshot.Asks[0].Price
+			}
+			if a.emitProcessingCompletion && a.observe != nil {
+				processed := SnapshotProcessingComplete{SeqNum: snapshot.SeqNum, ReceivedAt: a.observationTime(),
+					ProcessedAt: a.observationTime(), TwoSided: twoSided}
+				if twoSided {
+					processed.BestBid, processed.BestAsk = a.bestBid, a.bestAsk
+				}
+				a.observe(EvidenceObservation{Timestamp: processed.ProcessedAt, ClientID: a.ID(), Source: "actor",
+					Name: "snapshot_processing_complete", Payload: processed})
+			}
+			return
+		}
+		receivedAt := a.observationTime()
+		pending := pendingProcessingSnapshot{
+			sequence: snapshot.SeqNum, receivedAt: receivedAt,
+			readyAt: receivedAt + int64(a.processingDelay), twoSided: twoSided,
+		}
+		if twoSided {
+			pending.bestBid = snapshot.Snapshot.Bids[0].Price
+			pending.bestAsk = snapshot.Snapshot.Asks[0].Price
+		}
+		a.pendingSnapshots = append(a.pendingSnapshots, pending)
 	case actor.EventOrderAccepted:
 		accepted := event.Data.(actor.OrderAcceptedEvent)
 		if child, ok := a.byRequest[accepted.RequestID]; ok {
@@ -183,6 +254,13 @@ func (a *executionAgent) HandleEvent(_ context.Context, event *actor.Event) {
 
 func (a *executionAgent) onTick(t time.Time) {
 	now := t.UnixNano()
+	a.processDueSnapshots(now)
+	if a.observe != nil {
+		a.observe(EvidenceObservation{
+			Timestamp: now, ClientID: a.ID(), Source: "actor", Name: "decision_tick",
+			Payload: DecisionTick{BestBid: a.bestBid, BestAsk: a.bestAsk, AlreadyDecided: a.decided},
+		})
+	}
 	if !a.decided {
 		if now < a.cfg.DecisionAfter.Nanoseconds() || a.bestBid <= 0 || a.bestAsk <= 0 {
 			return
@@ -198,6 +276,27 @@ func (a *executionAgent) onTick(t time.Time) {
 	}
 }
 
+func (a *executionAgent) processDueSnapshots(now int64) {
+	processed := 0
+	for processed < len(a.pendingSnapshots) && a.pendingSnapshots[processed].readyAt <= now {
+		snapshot := a.pendingSnapshots[processed]
+		if snapshot.twoSided {
+			a.bestBid, a.bestAsk = snapshot.bestBid, snapshot.bestAsk
+		}
+		if a.observe != nil {
+			a.observe(EvidenceObservation{
+				Timestamp: now, ClientID: a.ID(), Source: "actor", Name: "snapshot_processing_complete",
+				Payload: SnapshotProcessingComplete{
+					SeqNum: snapshot.sequence, ReceivedAt: snapshot.receivedAt, ProcessedAt: now,
+					BestBid: snapshot.bestBid, BestAsk: snapshot.bestAsk, TwoSided: snapshot.twoSided,
+				},
+			})
+		}
+		processed++
+	}
+	a.pendingSnapshots = a.pendingSnapshots[processed:]
+}
+
 func (a *executionAgent) sendNext(now int64) {
 	remaining := a.cfg.TargetQty - a.submittedQty
 	if remaining <= 0 {
@@ -211,7 +310,12 @@ func (a *executionAgent) sendNext(now int64) {
 	if remaining%int64(slicesLeft) != 0 {
 		qty++
 	}
-	requestID := a.SubmitOrder(a.cfg.Symbol, a.cfg.Side, exchange.Market, 0, qty)
+	orderType, timeInForce, price := exchange.Market, exchange.GTC, int64(0)
+	if a.cfg.Instruction != nil {
+		orderType, timeInForce, price = a.cfg.Instruction.OrderType,
+			a.cfg.Instruction.TimeInForce, a.cfg.Instruction.LimitPrice
+	}
+	requestID := a.SubmitOrderWithTimeInForce(a.cfg.Symbol, a.cfg.Side, orderType, price, qty, timeInForce)
 	a.report.Children = append(a.report.Children, ChildReport{
 		RequestID:    requestID,
 		SentAt:       now,

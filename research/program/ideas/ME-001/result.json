@@ -1,0 +1,88 @@
+{
+  "schema_version": 1,
+  "study_id": "ME-001",
+  "stage": "REPORT",
+  "process_status": "COMPLETED",
+  "evidence_validity": "VALID",
+  "opportunity_presence": "PRESENT",
+  "policy_activity": "ACTIVE",
+  "registered_activation": "SATISFIED",
+  "scientific_verdict": "INCONCLUSIVE",
+  "causal_verdict": "INCONCLUSIVE",
+  "empirical_comparison": "NOT_PERFORMED",
+  "reasons": [
+    "All 27 development cells have independently reconstructed focal activity and defined terminal marks; both arms met the preregistered delivered-depth separation sign.",
+    "The registered shortfall prediction has mixed signs across target sizes, so no binary uniform directional verdict is issued.",
+    "Fifteen cells passed and twelve failed the conjunction of full completion and at most 10 bp; a low marked shortfall with a large unfilled residual is still a failure.",
+    "This is a three-seed simulation-internal screen of bundled class replacement, not confirmation or empirical validation."
+  ],
+  "identities": {
+    "source": "13c02d533892e20bfa3153ed789b8a51ef893ddb; tree 92083079e1b3ec1a5e7e72277ff1781b788401a1",
+    "configuration": "27 canonical typed plans under /home/vlad/ExchangeSimulation-me001-development-13c02d5/plans; each digest in response-surface.json",
+    "run": "29 immutable development run directories under /home/vlad/ExchangeSimulation-me001-development-13c02d5/runs; 27 economic cells plus two controls",
+    "analyzer": "mepilotanalyze SHA256 d58fd8243e8ef31165a89ef8afb32894146403fade97fa9e231ca3766e5948fb at execution source; aggregate 16d5a505efa02adeaf99660057c014e0ede2fba2",
+    "protocol": "research/program/ideas/ME-001/protocol.md at 13c02d533892e20bfa3153ed789b8a51ef893ddb",
+    "skill_commit": "f2cca325fa552766e23f83c3204bfa8f83f9e241",
+    "skill_tree": "d1ff061a7d98b9e003d7ac4166d1f7434f54eb17"
+  },
+  "authorization": {
+    "prepare": true,
+    "run": true,
+    "basis": "Owner 2026-09-23 overnight goal authorized only the locked 27 ME-001 development worlds plus two controls after ME-000 and protocol review; that finite execution budget is exhausted."
+  },
+  "review": {
+    "execution": "COMPLETED",
+    "verdict": "ACCEPT",
+    "scope": "Independent prospective protocol, execution/evidence integrity, and three-seed causal/statistical development interpretation only",
+    "reference": "research/program/reviews/me001-result-20260923.md"
+  },
+  "claims": [
+    {
+      "id": "ME001-M1",
+      "type": "MECHANICAL",
+      "text": "Both fresh-process controls matched byte-for-byte and all 27 assigned economic cells completed with valid independently reconstructed evidence.",
+      "evidence_ids": ["ME001-E1", "ME001-E3", "ME001-E4"],
+      "limitations": ["The control environment settings are recorded in invocations/labels rather than bound as manifest fields."]
+    },
+    {
+      "id": "ME001-D1",
+      "type": "DESCRIPTIVE",
+      "text": "Within this tested grid, C0 and C+ were 3/3 admissible at 0.5 and 2 ABC; C− only at 0.5 ABC; none of the three arms was admissible at 5 ABC.",
+      "evidence_ids": ["ME001-E1", "ME001-E2", "ME001-E3"],
+      "limitations": ["This is a tested execution-quantity region, not a monotone threshold, capital capacity or real-market profitability."]
+    },
+    {
+      "id": "ME001-C1",
+      "type": "CAUSAL",
+      "text": "The registered bundled class-replacement intervention separated delivered ask depth in both directions, but its target-shortfall differences had mixed signs across sizes; no uniform directional shortfall claim is issued.",
+      "evidence_ids": ["ME001-E1", "ME001-E2", "ME001-E3"],
+      "limitations": ["Three development seeds; actor policy, fees, IDs and clocks change together; no isolated maker-count or empirical causal effect is identified."]
+    }
+  ],
+  "evidence": [
+    {
+      "id": "ME001-E1",
+      "kind": "external_response_surface_and_raw_evidence",
+      "location": "/home/vlad/ExchangeSimulation-me001-development-13c02d5/analysis/response-surface.json",
+      "identity": "SHA256 63f5ea420c3882fb475b4ca9be63998761045e77ad7cdf61215b552288f5156a; 27 raw streams replayed; execution source 13c02d5"
+    },
+    {
+      "id": "ME001-E2",
+      "kind": "preregistered_protocol",
+      "location": "research/program/ideas/ME-001/protocol.md",
+      "identity": "commit 13c02d533892e20bfa3153ed789b8a51ef893ddb; prospective Sol-6 medium ACCEPT"
+    },
+    {
+      "id": "ME001-E3",
+      "kind": "independent_reviews",
+      "location": "research/program/reviews/me001-result-20260923.md",
+      "identity": "Reviewer A and B COMPLETED/ACCEPT at their bounded scopes"
+    },
+    {
+      "id": "ME001-E4",
+      "kind": "fresh_process_controls",
+      "location": "/home/vlad/ExchangeSimulation-me001-development-13c02d5/runs/control-C0-S2-1009-gmp1",
+      "identity": "control gmp1/gmp7 canonical execution hash dd16fb27597981c7df9fbf728e60a71836c955c6ee5d2979c2c3b2fa2aceae5d and byte-identical evidence/results"
+    }
+  ]
+}

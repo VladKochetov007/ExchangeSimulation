@@ -67,6 +67,114 @@ func TestTWAPReportDeterministicAcrossGOMAXPROCS(t *testing.T) {
 	}
 }
 
+func TestExplicitDeploymentKeepsLegacyZeroProcessingEconomics(t *testing.T) {
+	legacyConfig := DefaultSimConfig(Immediate)
+	legacy, err := NewSim(legacyConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacyReport, err := legacy.Run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	directedConfig := legacyConfig
+	directedConfig.ExecutionLatency = 0
+	directedConfig.ParentDeployment = &ParentDeployment{
+		MarketDataLatency: time.Millisecond, RequestLatency: time.Millisecond,
+		ResponseLatency: time.Millisecond,
+	}
+	directed, err := NewSim(directedConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	directedReport, err := directed.Run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(legacyReport, directedReport) {
+		t.Fatalf("explicit zero-processing deployment changed old economics:\nlegacy=%#v\ndirected=%#v", legacyReport, directedReport)
+	}
+}
+
+func TestRetainedC0SeedEconomicsSurviveExplicitDeployment(t *testing.T) {
+	legacyConfig := DefaultSimConfig(Immediate)
+	legacyConfig.Seed = 1009
+	legacyConfig.Parent.TargetQty = 500_000_000
+	legacy, err := NewSim(legacyConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacyReport, err := legacy.Run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	directedConfig := legacyConfig
+	directedConfig.ExecutionLatency = 0
+	directedConfig.ParentDeployment = &ParentDeployment{MarketDataLatency: time.Millisecond,
+		RequestLatency: time.Millisecond, ResponseLatency: time.Millisecond}
+	directed, err := NewSim(directedConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	directedReport, err := directed.Run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(legacyReport, directedReport) {
+		t.Fatalf("retained C0 seed changed under equivalent deployment:\nlegacy=%#v\ndirected=%#v", legacyReport, directedReport)
+	}
+}
+
+func TestExplicitDeploymentRejectsConflictingOrNegativeLatencies(t *testing.T) {
+	for _, deployment := range []ParentDeployment{
+		{MarketDataLatency: -time.Millisecond}, {RequestLatency: -time.Millisecond},
+		{ResponseLatency: -time.Millisecond}, {ProcessingDelay: -time.Millisecond},
+	} {
+		config := DefaultSimConfig(Immediate)
+		config.ExecutionLatency = 0
+		config.ParentDeployment = &deployment
+		if _, err := NewSim(config); err == nil {
+			t.Fatalf("accepted negative deployment %#v", deployment)
+		}
+	}
+	config := DefaultSimConfig(Immediate)
+	config.ParentDeployment = &ParentDeployment{MarketDataLatency: time.Millisecond}
+	if _, err := NewSim(config); err == nil {
+		t.Fatal("accepted ambiguous legacy and explicit focal latency")
+	}
+}
+
+func TestFocalDeploymentFollowsAssignmentNotClientID(t *testing.T) {
+	for _, delay := range []time.Duration{time.Millisecond, 90 * time.Millisecond} {
+		var reports []ExecutionReport
+		for _, clientID := range []uint64{13, 14} {
+			config := DefaultSimConfig(Immediate)
+			config.Seed = 42
+			config.ParentClientID = clientID
+			config.ExecutionLatency = 0
+			config.ParentDeployment = &ParentDeployment{
+				MarketDataLatency: delay, RequestLatency: delay, ResponseLatency: delay,
+				ProcessingDelay: 120 * time.Millisecond,
+			}
+			world, err := NewSim(config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if world.Parent.ID() != clientID {
+				t.Fatalf("assigned ID=%d got %d", clientID, world.Parent.ID())
+			}
+			report, err := world.Run(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			reports = append(reports, report)
+		}
+		if !reflect.DeepEqual(reports[0], reports[1]) {
+			t.Fatalf("identical policy/deployment differs when client ID changes at %s: %#v versus %#v", delay, reports[0], reports[1])
+		}
+	}
+}
+
 func TestStaggeredParentReportsAreDeterministicAndAlternating(t *testing.T) {
 	config := DefaultSimConfig(TWAP)
 	config.ParentCount = 4
@@ -117,6 +225,61 @@ func TestTWAPRejectsInsufficientDrainHorizon(t *testing.T) {
 	cfg.Duration = cfg.Parent.DecisionAfter
 	if _, err := NewSim(cfg); err == nil {
 		t.Fatal("NewSim accepted a duration that drops scheduled parent children")
+	}
+}
+
+func TestWorldContractCapturesConstructedParticipants(t *testing.T) {
+	for _, counts := range [][2]int{{2, 10}, {4, 8}, {6, 6}} {
+		cfg := DefaultSimConfig(Immediate)
+		cfg.MMCount, cfg.NoiseTraderCount = counts[0], counts[1]
+		sim, err := NewSim(cfg)
+		if err != nil {
+			t.Fatalf("NewSim(%v): %v", counts, err)
+		}
+		contract := sim.WorldContract()
+		if contract.Config.MMCount != counts[0] || contract.Config.NoiseTraderCount != counts[1] ||
+			len(contract.Accounts) != 13 || len(contract.Makers) != counts[0] ||
+			len(contract.Noise) != counts[1] || len(contract.Parents) != 1 {
+			t.Fatalf("wrong roster for %v: %#v", counts, contract)
+		}
+		if contract.Parents[0].ClientID != 13 || contract.Parents[0].Config.TargetQty != cfg.Parent.TargetQty ||
+			contract.Instrument.Symbol != "ABC/USD" || contract.Runner.Iterations != 4000 {
+			t.Fatalf("wrong parent/instrument/runner for %v: %#v", counts, contract)
+		}
+		for i, maker := range contract.Makers {
+			if maker.ClientID != uint64(i+1) || len(maker.RealizedLevelCadences) != 5 ||
+				maker.RealizedLevelCadences[0] != time.Duration(10+i)*time.Millisecond {
+				t.Fatalf("wrong maker cadence for %v maker %d: %#v", counts, i, maker)
+			}
+		}
+		for i, noise := range contract.Noise {
+			if noise.ClientID != uint64(counts[0]+i+1) || noise.Seed != cfg.Seed+int64(i)+1 ||
+				noise.Latency != cfg.BackgroundLatency {
+				t.Fatalf("wrong taker for %v index %d: %#v", counts, i, noise)
+			}
+		}
+		if contract.Accounts[12].InitialBalances["ABC"] != 100_000*basePrecision ||
+			contract.Accounts[12].Fee.TakerBps != 5 || !contract.Accounts[12].Fee.InQuote {
+			t.Fatalf("wrong focal account for %v: %#v", counts, contract.Accounts[12])
+		}
+		contract.Accounts[0].InitialBalances["ABC"] = 1
+		contract.Makers[0].RealizedLevelCadences[0] = 1
+		again := sim.WorldContract()
+		if again.Accounts[0].InitialBalances["ABC"] != 100_000*basePrecision ||
+			again.Makers[0].RealizedLevelCadences[0] == 1 {
+			t.Fatal("caller mutated retained contract")
+		}
+	}
+}
+
+func TestNewSimRejectsNegativeRoster(t *testing.T) {
+	for _, cfg := range []SimConfig{
+		func() SimConfig { c := DefaultSimConfig(Immediate); c.MMCount = -1; return c }(),
+		func() SimConfig { c := DefaultSimConfig(Immediate); c.NoiseTraderCount = -1; return c }(),
+	} {
+		if _, err := NewSim(cfg); err == nil {
+			t.Fatalf("negative roster accepted: %#v", cfg)
+		}
 	}
 }
 

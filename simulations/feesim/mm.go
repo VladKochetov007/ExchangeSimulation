@@ -110,6 +110,17 @@ func NewMarketMaker(id uint64, gw actor.Gateway, cfg MMConfig) *MarketMaker {
 func (mm *MarketMaker) Mid() int64     { return mm.mid }
 func (mm *MarketMaker) Symbol() string { return mm.cfg.Symbol }
 
+func (mm *MarketMaker) RealizedLevelCadences() []time.Duration {
+	if !mm.cfg.isAdaptive() {
+		return nil
+	}
+	cadences := make([]time.Duration, len(mm.levels))
+	for level, state := range mm.levels {
+		cadences[level] = time.Duration(state.tickDiv) * mm.cfg.BaseInterval
+	}
+	return cadences
+}
+
 // ============================================================
 // Event routing
 // ============================================================

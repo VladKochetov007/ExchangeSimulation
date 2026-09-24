@@ -9,6 +9,8 @@ Two venues proposed; current integrated harness uses three, so isolate wiring re
 
 Authorization and current stage: [authoritative registry](../../registry.json).
 No study execution or readiness implementation is authorized by this card.
+The source-grounded [2026-09-24 readiness assessment](readiness-20260924.md)
+ends at **READY AFTER FOUR SPECIFIC FIXES**; it is not a protocol or result.
 
 ## Entities and readiness
 
@@ -37,7 +39,40 @@ Static edge success is MECHANICAL only; historical completed routes did not prov
 
 ## Tentative design and next action
 
-Specify static positive/negative edge and one-leg failure fixtures before any endogenous protocol.
-Numeric choices remain prospective unless the authoritative draft below specifies
-them. Budget for this authoring task is zero market worlds. Future work needs its
-own protocol, modules/N/A reasons, fixtures, formula domains and owner budget.
+The [current router](../../../../simulations/multivenue/router.go) is a
+three-endpoint positive-spot FOK router with independently funded venue legs.
+It checks one-lot displayed depth and fee-adjusted touch edge and records
+both legs and residual base, but requires **exactly three** venue endpoints;
+its completed quote cashflow is not net profit after local-inventory unwind
+or transfer. A two-venue study therefore needs explicit harness/router
+readiness, not a renamed three-venue historical result.
+
+Primary question: when two delayed local feeds show an *executable* positive
+edge, how often can a finite prefunded non-atomic router complete both legs,
+and does enabling it reduce the duration of that edge in the tested ecology?
+Falsifier for the proposed market effect: eligible episodes and submitted
+routes occur, yet matched router-on/off worlds show no prospectively
+meaningful edge-duration reduction. No eligible episodes mean an
+identification limit; positive cashflow in a static fixture is mechanical,
+not emergent alpha. Competing explanations include a shared price anchor,
+background order flow, feed delay, leg race, rejected FOK, and venue-local
+inventory left after two fills.
+
+Before any endogenous protocol, require static positive/zero/negative
+all-in-edge fixtures with quantity/fee rounding, stale delivered-feed
+frontiers, one-leg rejection, partial/mismatched evidence, venue-specific
+cash/asset reconciliation and a costed *optional* unwind/transfer policy.
+The decision denominator is executable delayed-feed opportunities; report
+actual request/admission/fill, residual venue inventories and incomplete
+groups separately. No omniscient same-time price scan may be described as
+the actor's opportunity. If the two-venue adapter cannot preserve exact
+frontier and account segregation, label this study NOT READY.
+
+Smallest **proposed**, unregistered endogenous screen after those gates:
+router off/on × two new development seeds = four worlds at one fixed lot,
+fee, latency and ecology, plus two determinism controls. A horizon must cover
+multiple opportunity lifetimes and the costed closeout window; do not copy
+ME-001's four seconds. Future upper budget: 15 minutes, 4 GiB peak RSS,
+1 GiB evidence **subject to measured preflight**, with stop on invalid
+evidence. No seeds, lot or horizon are locked and zero worlds or source
+changes are authorized by this readiness card.

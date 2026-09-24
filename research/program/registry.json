@@ -6,11 +6,11 @@
       "id": "ME-000",
       "title": "Immediate-execution pilot readiness",
       "claim_type": "MECHANICAL",
-      "stage": "PLAN",
+      "stage": "CLOSED",
       "idea": "research/program/ideas/ME-000/idea.md",
       "protocol": null,
-      "report": null,
-      "result": null,
+      "report": "research/program/ideas/ME-000/report.md",
+      "result": "research/program/ideas/ME-000/result.json",
       "dependencies": [],
       "policy_ids": [
         "S01",
@@ -18,21 +18,21 @@
         "S06"
       ],
       "authorization": {
-        "prepare": false,
+        "prepare": true,
         "run": false,
-        "basis": "Owner skill-authoring task only. Study implementation and execution require separate authorization."
+        "basis": "Owner 2026-09-23 overnight goal authorized only the F1/F2 readiness fixes and synthetic fixtures; no economic ME-000 run."
       },
-      "next_action": "Complete F1 and F2 only after separate owner implementation authorization."
+      "next_action": "Closed readiness gate; retain its accepted scope and use the completed ME-001 report for the next owner decision."
     },
     {
       "id": "ME-001",
       "title": "Immediate-execution quantity/composition screen",
       "claim_type": "CAUSAL",
-      "stage": "PLAN",
+      "stage": "REPORT",
       "idea": "research/program/ideas/ME-001/idea.md",
-      "protocol": "research/market-ecology-capacity-pilot-protocol-DRAFT.md",
-      "report": null,
-      "result": null,
+      "protocol": "research/program/ideas/ME-001/protocol.md",
+      "report": "research/program/ideas/ME-001/report.md",
+      "result": "research/program/ideas/ME-001/result.json",
       "dependencies": [
         "ME-000"
       ],
@@ -41,21 +41,21 @@
         "S06"
       ],
       "authorization": {
-        "prepare": false,
+        "prepare": true,
         "run": false,
-        "basis": "Owner skill-authoring task only. Study implementation and execution require separate authorization."
+        "basis": "Owner 2026-09-23 overnight goal authorized only 27 ME-001 development worlds plus two controls; all 29 were completed and the finite run budget is exhausted. No holdouts or ME-002+ execution."
       },
-      "next_action": "After ME-000, prospectively review and obtain owner authorization for the unchanged linked draft."
+      "next_action": "Retain the reviewed development response map; propose any confirmation or next study only under a separate prospective owner decision."
     },
     {
       "id": "ME-002",
       "title": "Identical-policy deployment assignment",
       "claim_type": "CAUSAL",
-      "stage": "INTAKE",
+      "stage": "REPORT",
       "idea": "research/program/ideas/ME-002/idea.md",
-      "protocol": null,
-      "report": null,
-      "result": null,
+      "protocol": "research/program/ideas/ME-002/protocol.md",
+      "report": "research/program/ideas/ME-002/report.md",
+      "result": "research/program/ideas/ME-002/result.json",
       "dependencies": [
         "ME-000"
       ],
@@ -65,21 +65,44 @@
         "S16"
       ],
       "authorization": {
+        "prepare": true,
+        "run": false,
+        "basis": "Owner 2026-09-23 continuation authorized 24 ME-002 development cells plus two controls after prospective review; the reviewed 26-execution budget is complete and exhausted. No confirmation or holdout is authorized."
+      },
+      "next_action": "Retain the reviewed, mixed-sign three-seed development response map; no further ME-002 world under this budget. ME-003 is reported and optional ME-002-B cadence planning is separate; do not treat this result as general latency irrelevance."
+    },
+    {
+      "id": "ME-002-B",
+      "title": "First-decision cadence by network delay",
+      "claim_type": "CAUSAL",
+      "stage": "PLAN",
+      "idea": "research/program/ideas/ME-002-B/idea.md",
+      "protocol": null,
+      "report": null,
+      "result": null,
+      "dependencies": [
+        "ME-000",
+        "ME-002"
+      ],
+      "policy_ids": [
+        "S01"
+      ],
+      "authorization": {
         "prepare": false,
         "run": false,
-        "basis": "Owner skill-authoring task only. Study implementation and execution require separate authorization."
+        "basis": "Owner 2026-09-23 bounded continuation requested an optional ME-002B cadence plan only. No readiness implementation, economic world, seed reservation, confirmation or holdout is authorized."
       },
-      "next_action": "Design a fixed-profile swap and realized-time evidence fixture; do not add it to ME-001."
+      "next_action": "PROPOSED first-action cadence/network interaction screen only; it cannot locate a poll-dominates-transport threshold. Decide prospectively whether its one-child scope is useful; parameterize fail-closed coarse-poll replay, gate-adjusted wait and phase fixtures before protocol lock. Repeated adaptive strategy frequency is a different study."
     },
     {
       "id": "ME-003",
       "title": "Execution-instruction contrast",
       "claim_type": "CAUSAL",
-      "stage": "INTAKE",
+      "stage": "REPORT",
       "idea": "research/program/ideas/ME-003/idea.md",
-      "protocol": null,
-      "report": null,
-      "result": null,
+      "protocol": "research/program/ideas/ME-003/protocol.md",
+      "report": "research/program/ideas/ME-003/report.md",
+      "result": "research/program/ideas/ME-003/result.json",
       "dependencies": [
         "ME-000",
         "ME-001"
@@ -90,11 +113,11 @@
         "S05"
       ],
       "authorization": {
-        "prepare": false,
+        "prepare": true,
         "run": false,
-        "basis": "Owner skill-authoring task only. Study implementation and execution require separate authorization."
+        "basis": "Owner 2026-09-23 bounded continuation conditionally authorized only the locked ME-003 12-cell development matrix and two controls. All 14 retained executions completed under accepted candidate ae0fc33, with 12/12 valid economic cells and two bounded post-result reviews. The finite ME-003 run budget is exhausted. No confirmation, holdout or unregistered instruction variant is authorized; initial f407505 REJECT remains historical."
       },
-      "next_action": "Choose one supported IOC/FOK/GTC/passive contrast after execution evidence readiness."
+      "next_action": "Preserve the reviewed development response map. ME-005 source/evidence readiness is now documented separately; do not rerun or confirm ME-003 under this exhausted budget."
     },
     {
       "id": "ME-004",
@@ -124,7 +147,7 @@
       "id": "ME-005",
       "title": "Prefunded two-venue executable arbitrage",
       "claim_type": "CAUSAL",
-      "stage": "INTAKE",
+      "stage": "PLAN",
       "idea": "research/program/ideas/ME-005/idea.md",
       "protocol": null,
       "report": null,
@@ -139,9 +162,9 @@
       "authorization": {
         "prepare": false,
         "run": false,
-        "basis": "Owner skill-authoring task only. Study implementation and execution require separate authorization."
+        "basis": "Owner bounded 2026-09-23 overnight continuation authorized ME-005 source/evidence readiness after ME-002 and ME-003; the 2026-09-24 assessment found four prerequisite fixes. No two-venue implementation, protocol lock, economic world or holdout is authorized at this boundary."
       },
-      "next_action": "Specify static positive/negative edge and one-leg failure fixtures before any endogenous protocol."
+      "next_action": "READY AFTER FOUR SPECIFIC FIXES: explicit two-venue wiring and finite budgets; independent opportunity/execution denominator; prospectively selected costed venue-local closeout; event-time causal edge estimator. See ideas/ME-005/readiness-20260924.md. No implementation or run under this assessment."
     },
     {
       "id": "ME-006",
@@ -170,7 +193,7 @@
       "id": "ME-007",
       "title": "Three-asset executable conversion",
       "claim_type": "MECHANICAL",
-      "stage": "INTAKE",
+      "stage": "PLAN",
       "idea": "research/program/ideas/ME-007/idea.md",
       "protocol": null,
       "report": null,
@@ -186,7 +209,7 @@
         "run": false,
         "basis": "Owner skill-authoring task only. Study implementation and execution require separate authorization."
       },
-      "next_action": "Design directional/unit/rounding fixtures and identify missing full-depth accounting."
+      "next_action": "Proposed mechanical stage: two directions, fee-asset/depth/rounding and partial-leg evidence fixtures before any endogenous screen; no implementation or run authorized."
     },
     {
       "id": "ME-008",
