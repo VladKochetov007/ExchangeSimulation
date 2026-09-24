@@ -80,6 +80,9 @@ func (r *Run) ReconstructCrossVenueFirstAttempt(spec CrossVenueFirstAttemptSpec)
 	if err != nil {
 		return nil, err
 	}
+	if err := VerifyCrossVenueResponseActors(evaluations, groups, receipts, spec.Clients); err != nil {
+		return nil, err
+	}
 	placementResults, err := ReconcileCrossVenuePlacementReceipts(placements, receipts, fills, spec.HorizonNano, spec.LotQty)
 	if err != nil {
 		return nil, err

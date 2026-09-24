@@ -1381,6 +1381,17 @@ func TestTwoVenueRouterInjectedOpportunityProducesAuditableBinaryEvidence(t *tes
 	if err != nil || len(groups) != 1 {
 		t.Fatalf("injected route decision/placement join = %d, %v", len(groups), err)
 	}
+	if err := analysis.VerifyCrossVenueResponseActors(evaluations, groups, receipts, routerClients); err != nil {
+		t.Fatalf("injected route response actor identity: %v", err)
+	}
+	if len(receipts) == 0 {
+		t.Fatal("injected route has no response receipts")
+	}
+	corruptedReceipts := append([]analysis.CrossVenueResponseReceiptRecord(nil), receipts...)
+	corruptedReceipts[0].Payload.ActorID++
+	if err := analysis.VerifyCrossVenueResponseActors(evaluations, groups, corruptedReceipts, routerClients); err == nil {
+		t.Fatal("wrong nonzero actor identity survived response join")
+	}
 	fills, err := renderedRun.CollectCrossVenueExchangeFills(venues, routerClients, "ABC/USD", receipts)
 	if err != nil {
 		t.Fatal(err)

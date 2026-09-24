@@ -36,7 +36,7 @@ func crossVenuePlacementJoinFixture(t *testing.T) ([]CrossVenuePlacement, []Cros
 func TestCrossVenuePlacementJoinKeepsExchangeAndInboxTimelinesSeparate(t *testing.T) {
 	placements, receipts, fills := crossVenuePlacementJoinFixture(t)
 	rows, err := ReconcileCrossVenuePlacementReceipts(placements, receipts, fills, 20, 5)
-	if err != nil || len(rows) != 2 || rows[0].FilledQty != 5 || rows[0].ExchangeAt != 10 || rows[0].InboxAt == nil || *rows[0].InboxAt != 13 || rows[1].Reason != "FOK_NOT_FILLED" {
+	if err != nil || len(rows) != 2 || rows[0].FilledQty != 5 || rows[0].ExchangeAt != 10 || rows[0].InboxAt == nil || *rows[0].InboxAt != 13 || rows[0].InboxFrame != 7 || rows[1].Reason != "FOK_NOT_FILLED" {
 		t.Fatalf("placement join = %#v, %v", rows, err)
 	}
 	rows, err = ReconcileCrossVenuePlacementReceipts(placements, receipts[1:], fills, 20, 5)

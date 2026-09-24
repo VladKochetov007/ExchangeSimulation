@@ -16,6 +16,7 @@ type CrossVenuePlacementResult struct {
 	Side       string
 	ExchangeAt int64
 	InboxAt    *int64
+	InboxFrame uint64
 	FilledQty  int64
 }
 
@@ -93,6 +94,7 @@ func ReconcileCrossVenuePlacementReceipts(placements []CrossVenuePlacement, rece
 		}
 		receivedAt := receipt.Payload.ReceivedAt
 		results[index].InboxAt = &receivedAt
+		results[index].InboxFrame = receipt.Event.GlobalSequence
 	}
 	for _, fill := range fills {
 		key := crossVenuePlacementOrderKey{fill.Event.VenueID, fill.OrderID}

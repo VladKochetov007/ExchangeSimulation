@@ -23,18 +23,21 @@ func crossVenueTerminalGroupFixture(t *testing.T, matched bool, actorSawOutcome 
 	}
 	counters := CrossVenueRouterEvidenceCounters{SubmittedGroups: 1}
 	if actorSawOutcome {
-		receipt := &CrossVenueResponseReceiptRecord{}
+		receipt := &CrossVenueResponseReceiptRecord{Event: Event{GlobalSequence: 17}}
 		acceptedAt := int64(13)
 		results[0].InboxAt = &acceptedAt
+		results[0].InboxFrame = 13
 		for index := range fills {
 			fills[index].Receipt = receipt
 		}
 		if matched {
 			results[1].InboxAt = &acceptedAt
+			results[1].InboxFrame = 14
 			counters.CompletedGroups = 1
 		} else {
 			at := int64(13)
 			results[1].InboxAt = &at
+			results[1].InboxFrame = 14
 			counters.FailedGroups = 1
 		}
 	} else {
@@ -101,5 +104,25 @@ func TestCrossVenueFirstAttemptTerminalRejectsInflatedOrIncompleteReport(t *test
 				t.Fatal("unsupported terminal status accepted")
 			}
 		})
+	}
+}
+
+func TestCrossVenueFirstAttemptTerminalReplaysBufferedFillAfterAcceptedInbox(t *testing.T) {
+	groups, results, fills, counters := crossVenueTerminalGroupFixture(t, true, true)
+	fills[0].Receipt = &CrossVenueResponseReceiptRecord{Event: Event{GlobalSequence: results[0].InboxFrame - 1}}
+	terminal, err := ReconcileCrossVenueFirstAttemptTerminal(groups, results, fills, counters, 5)
+	if err != nil || terminal.ActorOutcome != "COMPLETE" || terminal.BufferedEarlyFillReceipts != 1 {
+		t.Fatalf("buffered early fill not reconciled: %#v, %v", terminal, err)
+	}
+	results[0].InboxAt = nil
+	results[0].InboxFrame = 0
+	counters.CompletedGroups, counters.PendingGroups = 0, 1
+	terminal, err = ReconcileCrossVenueFirstAttemptTerminal(groups, results, fills, counters, 5)
+	if err != nil || terminal.ActorOutcome != "ACTOR_TERMINAL_UNOBSERVED" {
+		t.Fatalf("fill without acceptance treated as actor-observed: %#v, %v", terminal, err)
+	}
+	counters.CompletedGroups, counters.PendingGroups = 1, 0
+	if _, err := ReconcileCrossVenueFirstAttemptTerminal(groups, results, fills, counters, 5); err == nil {
+		t.Fatal("actor complete counter accepted without delivered order identity")
 	}
 }
