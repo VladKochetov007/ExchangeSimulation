@@ -823,7 +823,8 @@ func (s *reconstructionState) consumeExchange(event RecordedEvent) error {
 			return err
 		}
 		if trade.TakerOrderID == s.result.OrderID && s.result.OrderID != 0 {
-			if trade.Qty <= 0 || trade.Price <= 0 {
+			if trade.Qty <= 0 || trade.Price <= 0 ||
+				(s.instructionEvidence && (trade.Price > s.expectedLimitPrice || event.Timestamp != s.result.VenueArrivalAt)) {
 				return errors.New("execution pilot: malformed focal venue trade")
 			}
 			if _, exists := s.tradeByID[trade.TradeID]; exists {
@@ -923,6 +924,7 @@ func (s *reconstructionState) consumeExchange(event RecordedEvent) error {
 		}
 		if !s.wasAccepted || s.wasCancelled || fill.OrderID != s.result.OrderID || fill.Symbol != s.contract.Instrument.Symbol ||
 			fill.Side != "BUY" || fill.Qty <= 0 || fill.Price <= 0 ||
+			(s.instructionEvidence && (fill.Price > s.expectedLimitPrice || event.Timestamp != s.result.VenueArrivalAt)) ||
 			fill.FeeAsset != s.contract.Instrument.QuoteAsset || fill.FeeAmount < 0 ||
 			fill.FilledQty != s.result.FilledQty+fill.Qty || fill.RemainingQty != s.result.TargetQty-fill.FilledQty ||
 			event.Timestamp < s.result.VenueArrivalAt {
@@ -962,7 +964,8 @@ func (s *reconstructionState) consumeExchange(event RecordedEvent) error {
 		}
 		if !s.wasAccepted || s.wasCancelled || cancel.OrderID != s.result.OrderID ||
 			cancel.RequestID != s.result.RequestID || cancel.RemainingQty <= 0 ||
-			cancel.Reason != s.expectedCancelReason() {
+			cancel.Reason != s.expectedCancelReason() ||
+			(s.instructionEvidence && event.Timestamp != s.result.VenueArrivalAt) {
 			return errors.New("execution pilot: unmatched focal cancellation")
 		}
 		s.wasCancelled = true
