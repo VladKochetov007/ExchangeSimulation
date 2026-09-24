@@ -1123,6 +1123,13 @@ func TestTwoVenueRouterEvaluationsPersistInCanonicalBinaryEvidence(t *testing.T)
 	if err != nil || uint64(len(receipts)) != expectedResponses {
 		t.Fatalf("router response receipt audit = %d/%d, %v", len(receipts), expectedResponses, err)
 	}
+	routerClients := map[string]uint64{}
+	for _, leg := range sim.Routers[0].legs {
+		routerClients[leg.venueID] = leg.clientID
+	}
+	if _, err := renderedRun.CollectCrossVenueExchangeFills(venues, routerClients, "ABC/USD", receipts); err != nil {
+		t.Fatalf("router exchange fill/actor receipt join: %v", err)
+	}
 	if err := analysis.VerifyCrossVenueEvaluationReceipts(evaluations, dir, "ABC/USD"); err != nil {
 		t.Fatal(err)
 	}

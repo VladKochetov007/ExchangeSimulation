@@ -113,7 +113,7 @@ func selectCrossVenueGeneralFiles(run *Run, venues [2]string) ([]string, error) 
 
 func validateCrossVenueResponseReceipt(record CrossVenueResponseReceiptRecord, venues [2]string, routerID uint64) error {
 	row := record.Payload
-	if row.RouterID != routerID || row.ActorID == 0 || row.ClientID == 0 || row.VenueID != venues[0] && row.VenueID != venues[1] || record.Event.VenueID != row.VenueID || record.Event.ClientID != row.ClientID || record.Event.SimTS != row.ReceivedAt || row.ReceivedAt < 0 {
+	if row.RouterID == 0 || row.RouterID != routerID || row.ActorID == 0 || row.ClientID == 0 || row.VenueID != venues[0] && row.VenueID != venues[1] || record.Event.VenueID != row.VenueID || record.Event.ClientID != row.ClientID || record.Event.SimTS != row.ReceivedAt || row.ReceivedAt < 0 {
 		return fmt.Errorf("actor, venue, router or receipt-time identity mismatch")
 	}
 	if row.Kind != "REJECTED" && !row.Success || row.Kind == "REJECTED" && row.Success {
