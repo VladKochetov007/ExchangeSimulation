@@ -9,9 +9,10 @@ One contrast at a time; identical economic objective; allocation and routing hel
 
 Authorization and current stage: [authoritative registry](../../registry.json).
 The owner's bounded continuation permits readiness work after the reviewed
-ME-002 result. The [prospective protocol](protocol.md) is a DRAFT; this card
-does not authorize a world. The older two-seed sketch below is historical
-and is superseded by the draft's three paired development seeds where they
+ME-002 result. The [prospective protocol](protocol.md) is locked but execution
+remains gated on independent review and controls; this card does not authorize
+a world. The older two-seed sketch below is historical and is superseded by
+the protocol's three paired development seeds where they
 conflict.
 
 ## Entities and readiness
@@ -45,10 +46,11 @@ The first contrast should be a fixed-price **limit IOC versus limit FOK** on
 the same immediate finite buy mandate, not a four-way policy tournament.
 The venue implements both TIFs and tests FOK preflight/partial IOC, but the
 [executionlab parent](../../../../simulations/executionlab/execution.go)
-currently submits a market child with default GTC. The generic
+previously submitted a market child with default GTC. The optional instruction
+adapter leaves that historical default unchanged. The generic
 [actor gateway](../../../../actor/actor.go) can send TIF-specific orders;
-the parent adapter, provenance contract and independent analyzer do not yet
-establish this order-instruction comparison. Passive GTC/deadline execution
+the parent adapter, provenance contract and independent analyzer now form a
+review-pending ME-003 candidate, not an accepted development result. Passive GTC/deadline execution
 is a distinct later study; the term-carry passive exit is not a substitute.
 
 Primary question: when the delayed delivered ask book makes partial

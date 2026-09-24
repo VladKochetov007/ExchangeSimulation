@@ -1,9 +1,12 @@
-# ME-003 — limit IOC versus limit FOK development protocol (draft)
+# ME-003 — limit IOC versus limit FOK development protocol
 
-Status: **DRAFT / READINESS NOT COMPLETE / NO ME-003 WORLD RUN**. This is a
-prospective design under the owner's bounded 2026-09-23 continuation, not a
-locked plan or permission to execute before source, evidence, tests and
-independent review pass. It keeps the same immediate finite buy mandate as
+Status: **PROSPECTIVE DESIGN LOCKED / EXECUTION NOT YET RELEASED / NO ME-003
+DEVELOPMENT WORLD RUN**. This contract is locked before the first ME-003
+development outcome under the owner's bounded 2026-09-23 continuation. The
+source implementation through `3012682` requires fresh prospective review of
+this exact protocol tree, clean tests and fresh-process controls before any
+economic cell. A lock is not a positive reviewer verdict or run release. It
+keeps the same immediate finite buy mandate as
 ME-001/002 and changes only the child order's time-in-force. Passive GTC,
 post-only, market, and adaptive deadline variants are outside this comparison.
 
@@ -135,6 +138,18 @@ tests must fail closed on wrong TIF, cap, request ID, order ID, fill timestamp,
 fee, cancel reason/quantity, duplicate/missing response, ledger delta,
 terminal book and raw ordering, including rehashed adversarial evidence.
 Preserve the earlier legitimate exchange-fill/later-receipt distinction.
+
+Readiness fixture map at lock: `instruction_evidence_test.go` covers full,
+partial, no-reachable-ask, exact-selected-ask and one-tick-below cap,
+cancelled/rejected, unavailable terminal mark, queued fill receipt and
+rehashed corruption. `tests/me003_instruction_fixture_test.go` separately
+forces a local/arrival ask reprice. `exchange/order_admission_regression_test.go`
+`TestSpotPlanRejectsFOKWithoutCancellingUnfundedMaker` establishes that
+fee/spot-plan pruning can cause a FOK non-fill rejection even when top-of-book
+depth exists; this is a venue mechanic fixture, not a claim that such a case
+occurred in a development world. The canonical frame timestamp, not an
+`OrderFill` JSON payload field, anchors venue fill time; the direct replay
+invariant fixture shifts that time. This map is subject to independent review.
 
 Falsifier for the narrow mechanism is a verified partial-fillable venue
 condition where the reconstructed IOC/FOK lifecycle contradicts the venue
