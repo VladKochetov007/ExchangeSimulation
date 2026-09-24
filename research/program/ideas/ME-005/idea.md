@@ -5,14 +5,17 @@
 When can finite non-atomic routing capture an executable dislocation and change its persistence?
 
 Strongest intended claim: **CAUSAL** (proposed, not established).
-Two venues proposed; current integrated harness uses three, so isolate wiring readiness explicitly.
+At original intake the harness used three venues; the reviewed r1c successor
+supports two without rewriting the three-venue history.
 
 Authorization and current stage: [authoritative registry](../../registry.json).
 This original card did not itself authorize implementation or execution. The
 owner's subsequent bounded ME-005 instruction authorized the four readiness
 fixes and a development run **only after** prospective review. The current
-[r1c protocol](protocol.md) is the governing conditional lock; no ME-005
-economic world has run at this documentation checkpoint.
+[r1c protocol](protocol.md) was the governing conditional lock. The four
+economic cells and one control have now completed; see the [development
+report](report.md). The readiness documents below are pre-run history, not
+new authorization.
 The source-grounded [2026-09-24 readiness assessment](readiness-20260924.md)
 ends at **READY AFTER FOUR SPECIFIC FIXES**; it is not a protocol or result.
 The [prospective preparation contract](prepare-contract-20260924.md) selects
@@ -45,9 +48,9 @@ These are readiness dependencies, not authorization to run ancestors.
 
 Static edge success is MECHANICAL only; historical completed routes did not prove reduced sampled edge.
 
-## Tentative design and next action
+## Original tentative design (historical)
 
-The [current router](../../../../simulations/multivenue/router.go) is a
+At intake, the [router](../../../../simulations/multivenue/router.go) was a
 three-endpoint positive-spot FOK router with independently funded venue legs.
 It checks one-lot displayed depth and fee-adjusted touch edge and records
 both legs and residual base, but requires **exactly three** venue endpoints;

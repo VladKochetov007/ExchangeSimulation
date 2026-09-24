@@ -1,0 +1,119 @@
+{
+  "schema_version": 1,
+  "study_id": "ME-005",
+  "stage": "REPORT",
+  "process_status": "COMPLETED",
+  "evidence_validity": "VALID",
+  "opportunity_presence": "ABSENT",
+  "policy_activity": "INACTIVE",
+  "registered_activation": "NOT_APPLICABLE",
+  "scientific_verdict": "IDENTIFICATION_LIMITATION",
+  "causal_verdict": "NOT_IDENTIFIED",
+  "empirical_comparison": "NOT_PERFORMED",
+  "reasons": [
+    "The four preregistered five-minute development cells and one ON-1109 technical duplicate completed under source C; every raw binary stream and bound report passed the pinned Go analyzer and strict conservation checks.",
+    "At both development seeds, both OFF and ON had zero positive one-lot, fee-adjusted, two-sided router-policy public episodes and zero broader leg-side episodes. ON routers evaluated 783 and 790 local updates respectively, but submitted zero groups.",
+    "The GOMAXPROCS=1/7 ON-1109 duplicate has the same canonical execution hash and byte-identical reconstructed result. Both paired edge-duration differences are descriptively zero only because no registered opportunity occurred.",
+    "No attempted route, matched leg, residual closeout cost, economic arbitrage return or trade-attributed convergence was observed. Absence within two five-minute worlds is an identification limitation, not a general arbitrage null or an instruction to retune seeds/ecology.",
+    "The finite ME-005 development budget is exhausted; no confirmation, holdout, ME-006/007/008 or ME-002B execution follows."
+  ],
+  "identities": {
+    "source": "442da046f8cc9a6b78ce3900ec13badd3fd2b74a; tree eda8e6d56187c624ce6ce06800371741f91021ee",
+    "configuration": "Four unchanged ME-005-r1 config files in research/program/ideas/ME-005; exact raw/effective digests in protocol r1c and the four bound analysis contracts",
+    "run": "Four raw economic directories and one ON-1109 fresh-process duplicate under /home/vlad/ExchangeSimulation-me005-evidence-20260924",
+    "analyzer": "me005analyze SHA256 59b3aa4f65cd547828f0f3283eea9e1579c7ccd7b91896e02d2face177fc89bb at clean source C; multivenue SHA256 01422b114b94e1ee654c8e81f45ec85c575e47eae16b4ed521fb9fee7eecb7c1",
+    "protocol": "research/program/ideas/ME-005/protocol.md at 96d240ad60bbfb9e3c73c9f0eb21acd665b156ee; blob db7d672bd31a4e1d8f88c95f09458c5c5ebca886",
+    "skill_commit": "442da046f8cc9a6b78ce3900ec13badd3fd2b74a",
+    "skill_tree": "60b91e73f1000a285e003bed122648636a737b2d"
+  },
+  "authorization": {
+    "prepare": true,
+    "run": false,
+    "basis": "Owner's 2026-09-24 conditional ME-005 instruction authorized exactly the four readiness fixes and the preregistered four development cells plus one technical duplicate after review/preflight. All five processes completed; the finite budget is exhausted. No confirmation or holdout was authorized."
+  },
+  "review": {
+    "execution": "NOT_REQUESTED",
+    "verdict": "NOT_ISSUED",
+    "scope": "Post-result independent mechanics/evidence and causal/claim review pending; two scoped preregistration reviews accepted C/P before all economic outcomes",
+    "reference": "research/reviews/me005-r1c-prerun-review-20260924.md"
+  },
+  "observed": {
+    "assigned_economic_worlds": 4,
+    "valid_economic_worlds": 4,
+    "technical_duplicates": 1,
+    "horizon_simulated_seconds_per_world": 300,
+    "policy_episodes_by_cell": [
+      {"seed": 1109, "arm": "OFF", "count": 0, "positive_nanos": 0},
+      {"seed": 1109, "arm": "ON", "count": 0, "positive_nanos": 0},
+      {"seed": 1117, "arm": "OFF", "count": 0, "positive_nanos": 0},
+      {"seed": 1117, "arm": "ON", "count": 0, "positive_nanos": 0}
+    ],
+    "broader_leg_side_episodes_all_cells": 0,
+    "on_router_evaluations_by_seed": {"1109": 783, "1117": 790},
+    "on_router_submitted_groups_all_cells": 0,
+    "on_router_evaluation_reason": "NO_POSITIVE_POLICY_EDGE for all 1573 retained ON evaluations",
+    "paired_on_minus_off_policy_positive_nanos": [
+      {"seed": 1109, "difference": 0},
+      {"seed": 1117, "difference": 0}
+    ],
+    "fresh_process_control_execution_hash": "bf0d19765bbc0b1289c5c269562103ca9c2490b592c05967edb9ef407c17b740",
+    "fresh_process_control_result_sha256": "8abb776e46e1fd3419b28407314ca951e7e9c5e1673ca49533353d54829b3c41",
+    "economic_raw_plus_rendered_disk_bytes": 136876032,
+    "retained_namespace_disk_bytes_at_first_report": 188973056,
+    "cell_results": [
+      {"seed": 1109, "arm": "OFF", "execution_hash": "c31f4d64712d5f782481d62b9e68e9117efddeb0c9063b58f40984adf003df12", "result_sha256": "f8aafcc757ce9e4773c811080d822a52ba9991af8000902083bb5f6540290234"},
+      {"seed": 1109, "arm": "ON", "execution_hash": "bf0d19765bbc0b1289c5c269562103ca9c2490b592c05967edb9ef407c17b740", "result_sha256": "8abb776e46e1fd3419b28407314ca951e7e9c5e1673ca49533353d54829b3c41"},
+      {"seed": 1117, "arm": "OFF", "execution_hash": "b3f0e4ab33df06469d662974c95c491be852f46c9bd215ada71f5c703dc11fae", "result_sha256": "4512b127be4337edfec1caaffa42d51dc8fc3da8fa0f4664a2115db3224491a1"},
+      {"seed": 1117, "arm": "ON", "execution_hash": "45e70d8f215f3e4f1a73744b70e3e95bcfe5246e9e4f73abd8a44375fb1ef810", "result_sha256": "a00ca8edec20687f286ed3157451606b9c3d2136554a5456eccd655bb7e976c6"}
+    ]
+  },
+  "claims": [
+    {
+      "id": "ME005-M1",
+      "type": "MECHANICAL",
+      "text": "All five registered simulator processes completed. The ON-1109 fresh-process duplicate was bit-identical across one and seven Go workers, and all four assigned economic streams passed pinned binary rendering, source/config/report binding, account and run-wide conservation validation.",
+      "evidence_ids": ["ME005-E1", "ME005-E2", "ME005-E3"],
+      "limitations": ["The content-bound manifests are not independently signed attestations of shell settings or absence of unrecorded attempts; the finite-cgroup settings are recorded in a separate operational preflight artifact."]
+    },
+    {
+      "id": "ME005-D1",
+      "type": "DESCRIPTIVE",
+      "text": "In the four assigned five-minute development worlds, the registered public two-sided one-lot opportunity count and duration, and the broader leg-side count and duration, were zero. The ON router evaluated 783 and 790 local updates and submitted no group.",
+      "evidence_ids": ["ME005-E1", "ME005-E3"],
+      "limitations": ["This identifies absence only under the fixed two-venue books, 0.01-ABC lot, 5-bp fee convention, five-minute horizon and two development seeds; it does not identify actor failure, general edge frequency or longer-horizon behavior."]
+    },
+    {
+      "id": "ME005-D2",
+      "type": "DESCRIPTIVE",
+      "text": "The paired ON-minus-OFF registered positive-edge duration was 0 ns for each seed because both arms had zero policy episodes; no route execution or trade-attributed convergence contrast was available.",
+      "evidence_ids": ["ME005-E1", "ME005-E4"],
+      "limitations": ["A zero difference without an opportunity is not evidence of equivalence, successful arbitrage, or a causal convergence effect. Equal seed labels do not prove that endogenous background random streams were coupled."]
+    }
+  ],
+  "evidence": [
+    {
+      "id": "ME005-E1",
+      "kind": "external_raw_rendered_and_go_reconstruction",
+      "location": "/home/vlad/ExchangeSimulation-me005-evidence-20260924",
+      "identity": "Four assigned raw/result pairs are listed with SHA256 and canonical execution hashes in observed.cell_results; raw/rendered trees retain source C manifests and complete binary attestations. External location is not a remote backup."
+    },
+    {
+      "id": "ME005-E2",
+      "kind": "fresh_process_control",
+      "location": "/home/vlad/ExchangeSimulation-me005-evidence-20260924/on-1109-control-result.json",
+      "identity": "SHA256 8abb776e46e1fd3419b28407314ca951e7e9c5e1673ca49533353d54829b3c41; same canonical execution hash and byte-identical reconstructed result as ON-1109 GOMAXPROCS=7 economic cell"
+    },
+    {
+      "id": "ME005-E3",
+      "kind": "prospective_protocol_reviews_and_resource_preflight",
+      "location": "research/reviews/me005-r1c-prerun-review-20260924.md",
+      "identity": "Source C and protocol P were independently accepted before any economic result; external preflight.json SHA256 cbd4f493bf2275a6755507879ec2f3351d65a11e7b652876370058b52b1766fb recorded 12-GiB/700%-CPU scope and Go 1.27 clean binary hashes"
+    },
+    {
+      "id": "ME005-E4",
+      "kind": "registered_off_on_design",
+      "location": "research/program/ideas/ME-005/protocol.md",
+      "identity": "Protocol r1c commit 96d240ad60bbfb9e3c73c9f0eb21acd665b156ee, blob db7d672bd31a4e1d8f88c95f09458c5c5ebca886; fixed four-cell matrix, opportunity and claim boundaries"
+    }
+  ]
+}

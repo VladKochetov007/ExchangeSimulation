@@ -147,11 +147,11 @@
       "id": "ME-005",
       "title": "Prefunded two-venue executable arbitrage",
       "claim_type": "CAUSAL",
-      "stage": "PREPARE",
+      "stage": "REPORT",
       "idea": "research/program/ideas/ME-005/idea.md",
       "protocol": "research/program/ideas/ME-005/protocol.md",
-      "report": null,
-      "result": null,
+      "report": "research/program/ideas/ME-005/report.md",
+      "result": "research/program/ideas/ME-005/result.json",
       "dependencies": [
         "ME-000"
       ],
@@ -162,9 +162,9 @@
       "authorization": {
         "prepare": true,
         "run": false,
-        "basis": "Owner 2026-09-24 PREPARE_AND_RUN_IF_READY instruction authorized exactly four ME-005 readiness fixes and a smallest registered development screen only after prospective protocol and two independent scoped reviews. Protocol r1c is pinned pending review; no economic world or holdout has run."
+        "basis": "Owner 2026-09-24 PREPARE_AND_RUN_IF_READY instruction authorized exactly four ME-005 readiness fixes and the r1c four-cell development screen plus one technical duplicate after independent review and finite-cgroup preflight. All five processes completed and the finite run budget is exhausted. No confirmation or holdout is authorized."
       },
-      "next_action": "Review exact ME-005 source candidate 442da04 and protocol r1c with two independent scoped reviewers. Run only the four registered development cells plus one technical duplicate if both accept and capacity passes; otherwise preserve the specific blocker."
+      "next_action": "Preserve the valid two-seed no-opportunity development result; obtain bounded post-result claim/evidence reviews. Do not retune or rerun ME-005. Propose ME-002-B separately for owner authorization."
     },
     {
       "id": "ME-006",

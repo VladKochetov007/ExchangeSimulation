@@ -17,9 +17,12 @@ economic worlds plus two controls on a separately pinned source, with a
 reviewed mixed-sign network response and processing-order-timing non-activation
 under the fixed decision gate. The later
 [ME-003 execution-instruction screen](program/ideas/ME-003/report.md) completed
-12 economic worlds plus two controls. ME-005 has only a
-[source-grounded two-venue readiness assessment](program/ideas/ME-005/readiness-20260924.md),
-not an economic result; optional [ME-002-B](program/ideas/ME-002-B/idea.md)
+12 economic worlds plus two controls. The later
+[ME-005 two-venue development screen](program/ideas/ME-005/report.md) completed
+four economic worlds and one technical duplicate with valid evidence but no
+registered public opportunity in either seed. It does not identify arbitrage
+profitability or convergence; post-result review is pending. Optional
+[ME-002-B](program/ideas/ME-002-B/idea.md)
 is planning only. The completed ME-001/002/003 studies are simulation-internal
 development maps, not a freeze or empirical claim; their finite budgets are
 exhausted. This

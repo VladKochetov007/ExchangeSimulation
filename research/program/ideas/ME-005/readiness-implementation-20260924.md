@@ -1,5 +1,10 @@
 # ME-005 implementation checkpoint — development readiness, not a result
 
+Historical pre-run checkpoint. The [current development report](report.md)
+records four completed valid economic cells and one technical duplicate, all
+with no registered public opportunity. Statements below about worlds not yet
+run describe this earlier checkpoint only; they are not current status.
+
 Current prospective source successor: `442da046f8cc9a6b78ce3900ec13badd3fd2b74a`.
 The [r1c protocol](protocol.md) and four analysis contracts now pin this
 source, leaving the original r1 configs/hashes unchanged. An initial bounded
