@@ -1,7 +1,11 @@
-# ME-005 development protocol r1 — two-venue first-attempt screen
+# ME-005 development protocol r1a — two-venue first-attempt screen
 
 Status: **PREREGISTERED, CONDITIONAL**. This document was written before any
-ME-005 economic outcome. Execution is permitted by the owner's conditional
+ME-005 economic outcome. Revision r1a supersedes the source identity and
+clarifies the existing policy/evidence interpretation after a pre-run review;
+the four immutable config files retain their `ME-005-r1` experiment label and
+their exact raw/effective hashes. No economic cell was run under r1. Execution
+is permitted by the owner's conditional
 ME-005 instruction only after both bounded independent reviews accept the
 exact code/config/protocol package and the resource preflight below succeeds.
 The four readiness requirements remain defined by
@@ -37,8 +41,8 @@ the mechanism's opportunity set is absent in this small screen, not falsified.
 ## Candidate, policy, ecology and exact cells
 
 Executable/analyzer source commit C is
-`b9ed591e255ff951b53dc2c001c6ac25a90b7b0e` (tree
-`05352204d1254c7436ea11318ef2e0857741a2de`), built cleanly with
+`0fd30445bd15ae0aa45407a59b39ee494ef5f6ae` (tree
+`0e063e46b87062e3c8e2e694067fbe83897e621b`), to be built cleanly with
 Go 1.27.0 linux/amd64. Skill directory tree at C is
 `60b91e73f1000a285e003bed122648636a737b2d`. This later documentation
 commit governs the protocol but does not change C. Build the simulator and
@@ -47,9 +51,14 @@ Any source, config, estimator, endpoint or protocol change needs a named
 successor amendment and affected cells rerun. Existing outcomes are retained.
 
 The policy is the current `CrossVenueArb` two-sided-book, one-lot,
-positive-after-fee touch-edge rule. It observes two delayed venue-local feeds,
-checks its own prefunded venue balances, and submits a buy FOK then a sell FOK
-through the existing courier. Max one group/world; it may rationally abstain.
+positive-after-fee touch-edge rule. It observes two delayed venue-local feeds
+and selects on quotes/depth, **not** on its account balances. On a positive
+policy quote it submits a buy FOK then a sell FOK through the existing
+courier. The independent analyzer assesses quote-time prefunded balance
+feasibility after a `SUBMIT`; an insufficient-balance submission can be
+rejected at admission. Do not classify that attempt as policy abstention or
+an executable funded opportunity. Max one group/world; it may abstain when
+its quoted edge is absent or when already in flight/at its attempt cap.
 Both venues use price-time matching. There is no transfer/shared wallet and no
 router borrowing. Each ON venue account begins with 1 ABC (`100000000` atoms)
 and USD 100000 (`10000000000` quote atoms); the order lot is 0.01 ABC
@@ -101,13 +110,17 @@ event-frame order. A public opportunity is a half-open interval with positive
 one-lot bid/ask/depth/fee edge in either direction; same-time transitions and
 horizon censoring remain explicit. The router policy additionally requires
 both sides of each local book. For ON, audit received local publication
-prefixes and each actual evaluation, including no-action; join submitted
+prefixes and each actual evaluation, including no-action; assess selected
+quote-time funding separately; join submitted
 vectors, gateway placement, exchange-time FOK fill/cancellation, actor inbox
 receipt, account movements and terminal venue-local book. A public episode
 with no aligned evaluation is not an actor rejection. Quote-time funding is
 not proof of arrival-time depth/admission. Preserve unknown disappearance
 cause where event identities cannot distinguish price, depth, other execution
 or latency. Do not read a periodic midpoint as executable opportunity.
+The actor buffers a fill receipt delivered before its order-accepted receipt
+and replays it after acceptance. Reconstruction records this early-delivery
+count; a fill with no delivered acceptance is not actor-terminal evidence.
 
 For a matched group of quantity `q`, report actual sell proceeds minus buy
 cost before fees, charged USD leg fees, and matched cashflow after fees.

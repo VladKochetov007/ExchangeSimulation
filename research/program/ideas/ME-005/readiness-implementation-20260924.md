@@ -1,5 +1,21 @@
 # ME-005 implementation checkpoint — development readiness, not a result
 
+Current prospective source successor: `0fd30445bd15ae0aa45407a59b39ee494ef5f6ae`.
+The [r1a protocol](protocol.md) and four analysis contracts now pin this
+source, leaving the original r1 configs/hashes unchanged. An initial bounded
+Reviewer A pass on the predecessor protocol returned required changes, not
+acceptance: nonzero response actor IDs needed to bind to the submitted leg,
+actor-terminal reconstruction needed to account for inbox response ordering,
+and the protocol had incorrectly described prefunded balance checking as a
+router-side policy gate. The source successor adds actor-ID joins and mutation
+tests. Its ordering regression follows `BaseActor`'s actual early-fill buffer:
+a pre-acceptance fill is replayed after acceptance, while a missing acceptance
+leaves the actor outcome unobserved. The protocol now classifies funding as an
+independent quote-time analysis following submission, not router abstention.
+No final Reviewer A acceptance or Reviewer B verdict has been issued for r1a;
+no ME-005 economic world has run. The candidate's full clean test gate must
+also be recorded after this documentation amendment.
+
 Source baseline: merged `main` `eb921aa29b26b43cd39e1613dabc44ec60dbf5c9`.
 The table below records the earlier clean code gate `006afb1` on
 `research/market-ecology-me005-20260924`; its pending-work column is

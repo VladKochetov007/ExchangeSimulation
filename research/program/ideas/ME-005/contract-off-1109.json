@@ -2,7 +2,7 @@
   "schema_version": 1,
   "arm": "OFF",
   "seed": 1109,
-  "source_revision": "b9ed591e255ff951b53dc2c001c6ac25a90b7b0e",
+  "source_revision": "0fd30445bd15ae0aa45407a59b39ee494ef5f6ae",
   "effective_config_sha256": "c121ae21036019d97edf1ed0ca60e8587250e8e842582b768f12447455016603",
   "venues": ["north", "south"],
   "symbol": "ABC/USD",

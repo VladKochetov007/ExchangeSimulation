@@ -11,7 +11,7 @@ Authorization and current stage: [authoritative registry](../../registry.json).
 This original card did not itself authorize implementation or execution. The
 owner's subsequent bounded ME-005 instruction authorized the four readiness
 fixes and a development run **only after** prospective review. The current
-[r1 protocol](protocol.md) is the governing conditional lock; no ME-005
+[r1a protocol](protocol.md) is the governing conditional lock; no ME-005
 economic world has run at this documentation checkpoint.
 The source-grounded [2026-09-24 readiness assessment](readiness-20260924.md)
 ends at **READY AFTER FOUR SPECIFIC FIXES**; it is not a protocol or result.
