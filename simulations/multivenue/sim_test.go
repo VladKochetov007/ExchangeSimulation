@@ -1283,7 +1283,8 @@ func TestTwoVenueRouterInjectedOpportunityProducesAuditableBinaryEvidence(t *tes
 		t.Fatal(err)
 	}
 	rendered := filepath.Join(t.TempDir(), "rendered")
-	if _, err := RenderBinaryEvidence(dir, rendered); err != nil {
+	renderReport, err := RenderBinaryEvidence(dir, rendered)
+	if err != nil {
 		t.Fatal(err)
 	}
 	terminalReport, err := json.Marshal(map[string]any{
@@ -1297,6 +1298,44 @@ func TestTwoVenueRouterInjectedOpportunityProducesAuditableBinaryEvidence(t *tes
 	}
 	if err := os.WriteFile(filepath.Join(rendered, "greeks.json"), terminalReport, 0o644); err != nil {
 		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "greeks.json"), terminalReport, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	manifestRaw, err := os.ReadFile(filepath.Join(dir, "manifest.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var bindingManifest manifest
+	if err := json.Unmarshal(manifestRaw, &bindingManifest); err != nil {
+		t.Fatal(err)
+	}
+	// Go test binaries have no production VCS stamp; this test substitutes a
+	// clearly synthetic revision only to exercise the manifest/report join.
+	bindingManifest.Build.Revision = strings.Repeat("a", 40)
+	bindingManifest.Build.Modified = false
+	manifestRaw, err = json.Marshal(bindingManifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "manifest.json"), manifestRaw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var compactConfig bytes.Buffer
+	configRaw, err := json.Marshal(bindingManifest.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Compact(&compactConfig, configRaw); err != nil {
+		t.Fatal(err)
+	}
+	configHash := sha256.Sum256(compactConfig.Bytes())
+	if _, err := analysis.VerifyCrossVenueRunBinding(dir, rendered, analysis.CrossVenueRunBindingExpectation{
+		SourceRevision: bindingManifest.Build.Revision, EffectiveConfigSHA256: fmt.Sprintf("%x", configHash[:]),
+		ExecutionStreamHash: renderReport.ExecutionHash, Venues: [2]string{"north", "south"},
+		LotQty: cfg.CrossVenueArbLotQty, MaxAttempts: cfg.CrossVenueArbMaxAttempts, TakerFeeBps: sim.Config.TakerFeeBps,
+	}); err != nil {
+		t.Fatalf("synthetic binary/report/config binding: %v", err)
 	}
 	renderedRun, err := analysis.Open(rendered)
 	if err != nil {
