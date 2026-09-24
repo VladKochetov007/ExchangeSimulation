@@ -9,7 +9,7 @@ import (
 
 func TestME005ContractRejectsUnknownOrTrailingFields(t *testing.T) {
 	contract := Contract{
-		SchemaVersion: 1, Arm: "ON", Seed: 701, BackgroundIdentity: "fixed-background",
+		SchemaVersion: 1, Arm: "ON", Seed: 701,
 		SourceRevision:        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		EffectiveConfigSHA256: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
 		Venues:                [2]string{"north", "south"}, Symbol: "ABC/USD", BaseAsset: "ABC", QuoteAsset: "USD",

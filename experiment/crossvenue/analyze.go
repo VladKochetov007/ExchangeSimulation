@@ -17,7 +17,6 @@ type Contract struct {
 	SchemaVersion           int       `json:"schema_version"`
 	Arm                     string    `json:"arm"`
 	Seed                    int64     `json:"seed"`
-	BackgroundIdentity      string    `json:"background_identity"`
 	SourceRevision          string    `json:"source_revision"`
 	EffectiveConfigSHA256   string    `json:"effective_config_sha256"`
 	Venues                  [2]string `json:"venues"`
@@ -81,7 +80,7 @@ func DecodeContract(raw []byte) (Contract, error) {
 
 func (contract Contract) Validate() error {
 	if contract.SchemaVersion != 1 || contract.Arm != "ON" && contract.Arm != "OFF" ||
-		contract.Seed == 0 || contract.BackgroundIdentity == "" || contract.SourceRevision == "" ||
+		contract.Seed == 0 || contract.SourceRevision == "" ||
 		contract.EffectiveConfigSHA256 == "" || contract.Venues[0] == "" || contract.Venues[1] == "" ||
 		contract.Venues[0] == contract.Venues[1] || contract.Symbol == "" || contract.BaseAsset == "" ||
 		contract.QuoteAsset == "" || contract.BaseAsset == contract.QuoteAsset || contract.HorizonNano <= 0 ||
@@ -124,6 +123,10 @@ func AnalyzeCompletedWorld(rawDir, renderedDir string, contract Contract) (Resul
 	if err != nil {
 		return Result{}, err
 	}
+	backgroundIdentity, err := backgroundIdentityFromManifest(filepath.Join(rawDir, "manifest.json"), binding.ManifestSHA256)
+	if err != nil {
+		return Result{}, err
+	}
 	run, err := analysis.Open(renderedDir)
 	if err != nil {
 		return Result{}, err
@@ -146,7 +149,7 @@ func AnalyzeCompletedWorld(rawDir, renderedDir string, contract Contract) (Resul
 		return Result{}, err
 	}
 	edge, err := analysis.SummarizeCrossVenueEdgeWorld(analysis.CrossVenueEdgeWorldInput{
-		Seed: contract.Seed, Arm: contract.Arm, BackgroundIdentity: contract.BackgroundIdentity,
+		Seed: contract.Seed, Arm: contract.Arm, BackgroundIdentity: backgroundIdentity,
 		Venues: contract.Venues, Transitions: replay.Transitions, HorizonNano: contract.HorizonNano,
 		LotQty: contract.LotQty, BasePrecision: contract.BasePrecision, TakerFeeBps: contract.TakerFeeBps,
 	})

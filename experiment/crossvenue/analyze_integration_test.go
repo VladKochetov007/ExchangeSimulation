@@ -100,7 +100,7 @@ func TestME005TenSecondBinaryFixtureExercisesBothAnalysisArms(t *testing.T) {
 			}
 			configHash := sha256.Sum256(compactConfig.Bytes())
 			contract := Contract{
-				SchemaVersion: 1, Arm: arm, Seed: 42, BackgroundIdentity: "synthetic-ten-second-background",
+				SchemaVersion: 1, Arm: arm, Seed: 42,
 				SourceRevision: strings.Repeat("a", 40), EffectiveConfigSHA256: fmt.Sprintf("%x", configHash[:]),
 				Venues: [2]string{"north", "south"}, Symbol: "ABC/USD", BaseAsset: "ABC", QuoteAsset: "USD",
 				HorizonNano: time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC).Add(10 * time.Second).UnixNano(),
@@ -116,7 +116,7 @@ func TestME005TenSecondBinaryFixtureExercisesBothAnalysisArms(t *testing.T) {
 				t.Fatal(err)
 			}
 			if result.Arm != arm || result.Binding.EventFrames == 0 || result.Router == nil && arm == "ON" ||
-				result.Router != nil && arm == "OFF" {
+				result.Router != nil && arm == "OFF" || result.Edge.BackgroundIdentity == "" {
 				t.Fatalf("synthetic arm reconstruction = %#v", result)
 			}
 			if result.Conservation == nil {
