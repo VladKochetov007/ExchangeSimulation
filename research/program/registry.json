@@ -69,7 +69,30 @@
         "run": false,
         "basis": "Owner 2026-09-23 continuation authorized 24 ME-002 development cells plus two controls after prospective review; the reviewed 26-execution budget is complete and exhausted. No confirmation or holdout is authorized."
       },
-      "next_action": "Retain the reviewed, mixed-sign three-seed development response map; no further ME-002 world under this budget. Assess ME-003 instruction readiness prospectively, without treating this result as general latency irrelevance."
+      "next_action": "Retain the reviewed, mixed-sign three-seed development response map; no further ME-002 world under this budget. ME-003 is reported and optional ME-002-B cadence planning is separate; do not treat this result as general latency irrelevance."
+    },
+    {
+      "id": "ME-002-B",
+      "title": "First-decision cadence by network delay",
+      "claim_type": "CAUSAL",
+      "stage": "PLAN",
+      "idea": "research/program/ideas/ME-002-B/idea.md",
+      "protocol": null,
+      "report": null,
+      "result": null,
+      "dependencies": [
+        "ME-000",
+        "ME-002"
+      ],
+      "policy_ids": [
+        "S01"
+      ],
+      "authorization": {
+        "prepare": false,
+        "run": false,
+        "basis": "Owner 2026-09-23 bounded continuation requested an optional ME-002B cadence plan only. No readiness implementation, economic world, seed reservation, confirmation or holdout is authorized."
+      },
+      "next_action": "PROPOSED first-action cadence/network interaction screen only; it cannot locate a poll-dominates-transport threshold. Decide prospectively whether its one-child scope is useful; parameterize fail-closed coarse-poll replay, gate-adjusted wait and phase fixtures before protocol lock. Repeated adaptive strategy frequency is a different study."
     },
     {
       "id": "ME-003",

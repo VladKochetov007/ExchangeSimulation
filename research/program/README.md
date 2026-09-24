@@ -35,6 +35,7 @@ normally merged before treating these documents as published `main` state.
 | 1 | [ME-000](ideas/ME-000/report.md) | CLOSED: F1/F2 mechanical readiness accepted at `b25223a` |
 | 2 | [ME-001](ideas/ME-001/report.md) | REPORT: finite development screen complete; no confirmation or new run authorized |
 | 3 | [ME-002](ideas/ME-002/report.md), [ME-003](ideas/ME-003/report.md) | Both REPORT: finite reviewed development screens complete; no confirmation authorized |
+| Planning only | [ME-002-B](ideas/ME-002-B/idea.md) | Optional [reviewed first-action cadence plan](reviews/me002b-plan-20260924.md); no execution authorization or general strategy-frequency claim. |
 | 4 | [ME-005](ideas/ME-005/readiness-20260924.md), [ME-007](ideas/ME-007/idea.md) | ME-005 readiness: four specific two-venue/evidence/closeout/convergence gaps; no world authorized. ME-007 remains proposed. |
 | 5 | ME-004/006/008–010 | deferred allocation, interaction, payoff or derivative questions |
 | 6 | ME-011–ME-012 | restricted games and explicit capital dynamics after reliable payoffs |

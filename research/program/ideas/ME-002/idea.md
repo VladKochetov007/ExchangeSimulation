@@ -90,3 +90,5 @@ proposal above where they conflict. The four factorial arms, three
 development seeds and finite 24-world budget were subsequently locked,
 executed and reported under their exact candidate; this old planning
 paragraph is not a current launch instruction.
+The separate optional [ME-002-B first-decision cadence plan](../ME-002-B/idea.md)
+has no protocol or run authorization and does not reinterpret this result.
