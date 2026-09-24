@@ -1,7 +1,7 @@
 # ME-005 implementation checkpoint — development readiness, not a result
 
 Source baseline: merged `main` `eb921aa29b26b43cd39e1613dabc44ec60dbf5c9`.
-Latest clean code gate: `b03fc70` on `research/market-ecology-me005-20260924`.
+Latest clean code gate: `1463586` on `research/market-ecology-me005-20260924`.
 The authoritative [readiness assessment](readiness-20260924.md) and
 [prospective preparation contract](prepare-contract-20260924.md) still define
 four acceptance fixes. This note records implementation progress without
@@ -120,7 +120,21 @@ submitted router groups, zero placements and zero fills**; terminal local
 valuation was available at zero inventory change. This is a useful
 zero-attempt completeness control, not a positive end-to-end execution test.
 A distinct manufactured positive-edge fixture through the production exchange
-path remains required; it will not estimate endogenous opportunity frequency.
+path was added at `1463586` but still does not estimate endogenous opportunity
+frequency.
+
+That fixture posts finite, deliberately crossed venue-local books and sends
+the existing router's two FOK orders through the actual deterministic
+exchange/actor path. Both legs fill in the completed case: matched-leg
+cashflow is +50 quote units, while restoring inventory *hypothetically at the
+remaining local displayed books* has value −10. A second case withdraws the
+observed sell-side bid before venue arrival: the north buy fills, the south
+sell FOK rejects, global base residual is +5, and local hypothetical exit
+value is −5. Repeated focused runs, targeted race/vet and clean full
+`GOMAXPROCS=7 make test` passed. These values are integer-unit fixture
+identities, not empirical or development-world arbitrage results. The fixture
+does not yet produce a complete canonical two-venue evidence bundle, and the
+decision-vector-to-outcome audit remains required.
 
 No ME-005 final preregistration, two final independent reviews, new development
 seed, OFF/ON comparison, result, freeze or holdout claim exists. ME-001/002/003
