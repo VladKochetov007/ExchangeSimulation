@@ -14,17 +14,17 @@ type CrossVenueArbResponseReceipt struct {
 	RequestID    uint64                `json:"request_id"`
 	Success      bool                  `json:"success"`
 	Error        exchange.RejectReason `json:"error"`
-	OrderID      uint64                `json:"order_id,omitempty"`
-	TradeID      uint64                `json:"trade_id,omitempty"`
-	Symbol       string                `json:"symbol,omitempty"`
-	Side         exchange.Side         `json:"side,omitempty"`
-	Qty          int64                 `json:"qty,omitempty"`
-	Price        int64                 `json:"price,omitempty"`
-	FeeAmount    int64                 `json:"fee_amount,omitempty"`
-	FeeAsset     string                `json:"fee_asset,omitempty"`
-	ExchangeAt   int64                 `json:"exchange_at,omitempty"`
-	IsFull       bool                  `json:"is_full,omitempty"`
-	RemainingQty int64                 `json:"remaining_qty,omitempty"`
+	OrderID      uint64                `json:"order_id"`
+	TradeID      uint64                `json:"trade_id"`
+	Symbol       string                `json:"symbol"`
+	Side         string                `json:"side"`
+	Qty          int64                 `json:"qty"`
+	Price        int64                 `json:"price"`
+	FeeAmount    int64                 `json:"fee_amount"`
+	FeeAsset     string                `json:"fee_asset"`
+	ExchangeAt   int64                 `json:"exchange_at"`
+	IsFull       bool                  `json:"is_full"`
+	RemainingQty int64                 `json:"remaining_qty"`
 }
 
 func newCrossVenueArbResponseReceipt(routerID, actorID, clientID uint64, venueID string, response exchange.Response, receivedAt int64) CrossVenueArbResponseReceipt {
@@ -46,7 +46,7 @@ func newCrossVenueArbResponseReceipt(routerID, actorID, clientID uint64, venueID
 		if data != nil {
 			receipt.Kind = "FILL"
 			receipt.OrderID, receipt.TradeID = data.OrderID, data.TradeID
-			receipt.Symbol, receipt.Side = data.Symbol, data.Side
+			receipt.Symbol, receipt.Side = data.Symbol, data.Side.String()
 			receipt.Qty, receipt.Price = data.Qty, data.Price
 			receipt.FeeAmount, receipt.FeeAsset = data.FeeAmount, data.FeeAsset
 			receipt.ExchangeAt, receipt.IsFull = data.Timestamp, data.IsFull

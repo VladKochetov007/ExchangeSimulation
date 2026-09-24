@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"path/filepath"
 	"sort"
 
 	etypes "exchange_sim/types"
@@ -67,21 +66,9 @@ func (r *Run) CollectCrossVenueEvaluations(venues [2]string, routerID, expectedC
 	if r == nil || routerID == 0 || venues[0] == "" || venues[1] == "" || venues[0] == venues[1] {
 		return nil, fmt.Errorf("cross-venue evaluations: invalid selection")
 	}
-	files := make([]string, 0, 2)
-	for _, venue := range venues {
-		selected := ""
-		for _, path := range r.Files() {
-			if filepath.Base(path) == "general.jsonl" && filepath.Base(filepath.Dir(path)) == venue {
-				if selected != "" {
-					return nil, fmt.Errorf("cross-venue evaluations: duplicate general log for %s", venue)
-				}
-				selected = path
-			}
-		}
-		if selected == "" {
-			return nil, fmt.Errorf("cross-venue evaluations: missing general log for %s", venue)
-		}
-		files = append(files, selected)
+	files, err := selectCrossVenueGeneralFiles(r, venues)
+	if err != nil {
+		return nil, fmt.Errorf("cross-venue evaluations: %w", err)
 	}
 	var records []CrossVenueEvaluationRecord
 	var callbackErr error
