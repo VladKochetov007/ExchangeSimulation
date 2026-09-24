@@ -1148,7 +1148,9 @@ func TestTwoVenueRouterEvaluationsPersistInCanonicalBinaryEvidence(t *testing.T)
 	if err != nil {
 		t.Fatalf("router exchange fill/actor receipt join: %v", err)
 	}
-	if _, err := analysis.ReconcileCrossVenueRouterAccounts(renderedRun.Report, venues, routerClients, fills, mvBasePrecision, cfg.TakerFeeBps); err != nil {
+	if _, err := analysis.ReconcileCrossVenueRouterAccounts(renderedRun.Report, venues, routerClients, fills, analysis.CrossVenueAccountConvention{
+		Symbol: "ABC/USD", BaseAsset: "ABC", QuoteAsset: "USD", BasePrecision: mvBasePrecision, TakerFeeBps: cfg.TakerFeeBps,
+	}); err != nil {
 		t.Fatalf("router venue-local balance reconstruction: %v", err)
 	}
 	if err := analysis.VerifyCrossVenueEvaluationReceipts(evaluations, dir, "ABC/USD"); err != nil {

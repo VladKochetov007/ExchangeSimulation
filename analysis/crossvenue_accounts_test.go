@@ -29,7 +29,9 @@ func crossVenueAccountFixture() (Report, []CrossVenueExchangeFill) {
 func TestCrossVenueRouterAccountsReconcileSegregatedCashAndInventory(t *testing.T) {
 	report, fills := crossVenueAccountFixture()
 	clients := map[string]uint64{"north": 7, "south": 8}
-	got, err := ReconcileCrossVenueRouterAccounts(report, [2]string{"north", "south"}, clients, fills, 1, 20)
+	got, err := ReconcileCrossVenueRouterAccounts(report, [2]string{"north", "south"}, clients, fills, CrossVenueAccountConvention{
+		Symbol: "ABC/USD", BaseAsset: "ABC", QuoteAsset: "USD", BasePrecision: 1, TakerFeeBps: 20,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -38,10 +40,32 @@ func TestCrossVenueRouterAccountsReconcileSegregatedCashAndInventory(t *testing.
 	}
 }
 
+func TestCrossVenueRouterAccountConventionIsNotHardwiredToABCUSD(t *testing.T) {
+	report, fills := crossVenueAccountFixture()
+	for _, rows := range [][]AccountRow{report.InitialAccounts, report.TerminalAccounts} {
+		for index := range rows {
+			rows[index].Account.SpotBalances[0].Asset = "XYZ"
+			rows[index].Account.SpotBalances[1].Asset = "EUR"
+		}
+	}
+	for index := range fills {
+		fills[index].Symbol = "XYZ/EUR"
+		fills[index].FeeAsset = "EUR"
+	}
+	clients := map[string]uint64{"north": 7, "south": 8}
+	if _, err := ReconcileCrossVenueRouterAccounts(report, [2]string{"north", "south"}, clients, fills, CrossVenueAccountConvention{
+		Symbol: "XYZ/EUR", BaseAsset: "XYZ", QuoteAsset: "EUR", BasePrecision: 1, TakerFeeBps: 20,
+	}); err != nil {
+		t.Fatalf("generic base/quote convention rejected: %v", err)
+	}
+}
+
 func TestCrossVenueLocalCloseoutCanErasePositiveMatchedCashflow(t *testing.T) {
 	report, fills := crossVenueAccountFixture()
 	clients := map[string]uint64{"north": 7, "south": 8}
-	deltas, err := ReconcileCrossVenueRouterAccounts(report, [2]string{"north", "south"}, clients, fills, 1, 20)
+	deltas, err := ReconcileCrossVenueRouterAccounts(report, [2]string{"north", "south"}, clients, fills, CrossVenueAccountConvention{
+		Symbol: "ABC/USD", BaseAsset: "ABC", QuoteAsset: "USD", BasePrecision: 1, TakerFeeBps: 20,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,6 +89,7 @@ func TestCrossVenueLocalCloseoutCanErasePositiveMatchedCashflow(t *testing.T) {
 
 func TestCrossVenueRouterAccountsRejectFinancingAndUnexplainedChanges(t *testing.T) {
 	clients := map[string]uint64{"north": 7, "south": 8}
+	convention := CrossVenueAccountConvention{Symbol: "ABC/USD", BaseAsset: "ABC", QuoteAsset: "USD", BasePrecision: 1, TakerFeeBps: 20}
 	for _, test := range []struct {
 		name   string
 		mutate func(*Report, []CrossVenueExchangeFill)
@@ -80,6 +105,11 @@ func TestCrossVenueRouterAccountsRejectFinancingAndUnexplainedChanges(t *testing
 		{"locked-inconsistent", func(report *Report, _ []CrossVenueExchangeFill) {
 			report.TerminalAccounts[0].Account.SpotBalances[0].Locked = 1
 		}},
+		{"locked-consistent", func(report *Report, _ []CrossVenueExchangeFill) {
+			balance := &report.TerminalAccounts[0].Account.SpotBalances[0]
+			balance.Free--
+			balance.Locked++
+		}},
 		{"undeclared-asset", func(report *Report, _ []CrossVenueExchangeFill) {
 			report.TerminalAccounts[0].Account.SpotBalances = append(report.TerminalAccounts[0].Account.SpotBalances, Balance{Asset: "CDF", Free: 1, NetAsset: 1})
 		}},
@@ -89,7 +119,7 @@ func TestCrossVenueRouterAccountsRejectFinancingAndUnexplainedChanges(t *testing
 		t.Run(test.name, func(t *testing.T) {
 			report, fills := crossVenueAccountFixture()
 			test.mutate(&report, fills)
-			if _, err := ReconcileCrossVenueRouterAccounts(report, [2]string{"north", "south"}, clients, fills, 1, 20); err == nil {
+			if _, err := ReconcileCrossVenueRouterAccounts(report, [2]string{"north", "south"}, clients, fills, convention); err == nil {
 				t.Fatal("unexplained account change accepted")
 			}
 		})

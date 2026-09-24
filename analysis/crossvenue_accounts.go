@@ -17,11 +17,19 @@ type CrossVenueAccountDelta struct {
 	FillCount     int
 }
 
+type CrossVenueAccountConvention struct {
+	Symbol        string
+	BaseAsset     string
+	QuoteAsset    string
+	BasePrecision int64
+	TakerFeeBps   int64
+}
+
 // ReconcileCrossVenueRouterAccounts requires settled spot fills to explain
-// every ABC/USD change in each prefunded venue account. No borrowing, transfer,
+// every base/quote change in each prefunded venue account. No borrowing, transfer,
 // derivative position or undeclared asset may be hidden in this endpoint.
-func ReconcileCrossVenueRouterAccounts(report Report, venues [2]string, clients map[string]uint64, fills []CrossVenueExchangeFill, basePrecision, takerFeeBps int64) (map[string]CrossVenueAccountDelta, error) {
-	if venues[0] == "" || venues[1] == "" || venues[0] == venues[1] || len(clients) != 2 || clients[venues[0]] == 0 || clients[venues[1]] == 0 || basePrecision <= 0 || takerFeeBps < 0 {
+func ReconcileCrossVenueRouterAccounts(report Report, venues [2]string, clients map[string]uint64, fills []CrossVenueExchangeFill, convention CrossVenueAccountConvention) (map[string]CrossVenueAccountDelta, error) {
+	if venues[0] == "" || venues[1] == "" || venues[0] == venues[1] || len(clients) != 2 || clients[venues[0]] == 0 || clients[venues[1]] == 0 || convention.Symbol == "" || convention.BaseAsset == "" || convention.QuoteAsset == "" || convention.BaseAsset == convention.QuoteAsset || convention.BasePrecision <= 0 || convention.TakerFeeBps < 0 {
 		return nil, fmt.Errorf("cross-venue accounts: invalid convention")
 	}
 	result := make(map[string]CrossVenueAccountDelta, 2)
@@ -38,16 +46,16 @@ func ReconcileCrossVenueRouterAccounts(report Report, venues [2]string, clients 
 		if initial.Role == "" || terminal.Role != initial.Role || initial.Account.Timestamp > terminal.Account.Timestamp {
 			return nil, fmt.Errorf("cross-venue accounts: %s/%d has inconsistent role or account time", venue, clientID)
 		}
-		initialBalances, err := crossVenueAccountBalances(initial.Account)
+		initialBalances, err := crossVenueAccountBalances(initial.Account, convention.BaseAsset, convention.QuoteAsset)
 		if err != nil {
 			return nil, fmt.Errorf("cross-venue accounts: %s/%d initial: %w", venue, clientID, err)
 		}
-		terminalBalances, err := crossVenueAccountBalances(terminal.Account)
+		terminalBalances, err := crossVenueAccountBalances(terminal.Account, convention.BaseAsset, convention.QuoteAsset)
 		if err != nil {
 			return nil, fmt.Errorf("cross-venue accounts: %s/%d terminal: %w", venue, clientID, err)
 		}
-		baseDelta, baseOK := etypes.TrySub(terminalBalances["ABC"], initialBalances["ABC"])
-		quoteDelta, quoteOK := etypes.TrySub(terminalBalances["USD"], initialBalances["USD"])
+		baseDelta, baseOK := etypes.TrySub(terminalBalances[convention.BaseAsset], initialBalances[convention.BaseAsset])
+		quoteDelta, quoteOK := etypes.TrySub(terminalBalances[convention.QuoteAsset], initialBalances[convention.QuoteAsset])
 		if !baseOK || !quoteOK {
 			return nil, fmt.Errorf("cross-venue accounts: %s/%d balance delta overflows", venue, clientID)
 		}
@@ -55,14 +63,14 @@ func ReconcileCrossVenueRouterAccounts(report Report, venues [2]string, clients 
 	}
 	for _, fill := range fills {
 		row, selected := result[fill.Event.VenueID]
-		if !selected || row.ClientID != fill.Event.ClientID || fill.Symbol != "ABC/USD" || fill.Role != "taker" || fill.Qty <= 0 || fill.Price <= 0 || fill.FeeAsset != "USD" {
-			return nil, fmt.Errorf("cross-venue accounts: fill outside prefunded ABC/USD router path")
+		if !selected || row.ClientID != fill.Event.ClientID || fill.Symbol != convention.Symbol || fill.Role != "taker" || fill.Qty <= 0 || fill.Price <= 0 || fill.FeeAsset != convention.QuoteAsset {
+			return nil, fmt.Errorf("cross-venue accounts: fill outside prefunded spot router path")
 		}
-		notional, ok := etypes.TryMulDiv(fill.Qty, fill.Price, basePrecision)
+		notional, ok := etypes.TryMulDiv(fill.Qty, fill.Price, convention.BasePrecision)
 		if !ok {
 			return nil, fmt.Errorf("cross-venue accounts: fill notional overflows")
 		}
-		fee, ok := etypes.TryMulBps(notional, takerFeeBps)
+		fee, ok := etypes.TryMulBps(notional, convention.TakerFeeBps)
 		if !ok || fee != fill.FeeAmount {
 			return nil, fmt.Errorf("cross-venue accounts: fill fee differs from declared quote taker fee")
 		}
@@ -123,7 +131,7 @@ func oneCrossVenueAccount(rows []AccountRow, venue string, clientID uint64, phas
 	return *selected, nil
 }
 
-func crossVenueAccountBalances(account Account) (map[string]int64, error) {
+func crossVenueAccountBalances(account Account, baseAsset, quoteAsset string) (map[string]int64, error) {
 	if len(account.PerpBalances) != 0 || len(account.Positions) != 0 {
 		return nil, fmt.Errorf("router has derivative exposure")
 	}
@@ -137,20 +145,23 @@ func crossVenueAccountBalances(account Account) (map[string]int64, error) {
 		if _, duplicate := balances[row.Asset]; duplicate || row.Borrowed != 0 || row.Interest != 0 {
 			return nil, fmt.Errorf("duplicate asset or router financing")
 		}
+		if row.Locked != 0 {
+			return nil, fmt.Errorf("router inventory remains locked")
+		}
 		total, ok := etypes.TryAdd(row.Free, row.Locked)
 		if !ok || total != row.NetAsset {
 			return nil, fmt.Errorf("spot wallet free/locked/net identity fails")
 		}
-		if row.Asset != "ABC" && row.Asset != "USD" && row.NetAsset != 0 {
+		if row.Asset != baseAsset && row.Asset != quoteAsset && row.NetAsset != 0 {
 			return nil, fmt.Errorf("router holds undeclared asset %s", row.Asset)
 		}
 		balances[row.Asset] = row.NetAsset
 	}
-	if _, ok := balances["ABC"]; !ok {
-		return nil, fmt.Errorf("missing ABC wallet")
+	if _, ok := balances[baseAsset]; !ok {
+		return nil, fmt.Errorf("missing %s wallet", baseAsset)
 	}
-	if _, ok := balances["USD"]; !ok {
-		return nil, fmt.Errorf("missing USD wallet")
+	if _, ok := balances[quoteAsset]; !ok {
+		return nil, fmt.Errorf("missing %s wallet", quoteAsset)
 	}
 	return balances, nil
 }
