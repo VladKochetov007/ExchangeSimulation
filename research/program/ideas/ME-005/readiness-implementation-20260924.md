@@ -1,7 +1,7 @@
 # ME-005 implementation checkpoint — development readiness, not a result
 
 Source baseline: merged `main` `eb921aa29b26b43cd39e1613dabc44ec60dbf5c9`.
-Current checkpoint: `6d0ab92` on `research/market-ecology-me005-20260924`.
+Latest clean code gate: `0620b86` on `research/market-ecology-me005-20260924`.
 The authoritative [readiness assessment](readiness-20260924.md) and
 [prospective preparation contract](prepare-contract-20260924.md) still define
 four acceptance fixes. This note records implementation progress without
@@ -49,6 +49,30 @@ checkpoints. The synthetic two-venue fixture exercises binary rendering,
 receipt/callback/source joins and strict initial/terminal account capture;
 its ten-second test horizon is not an economic development world. The static
 positive-edge fixtures prove arithmetic and evidence handling only.
+
+## Admission-refusal identity correction
+
+While completing fix 2, a focused regression found that a configured request
+policy could refuse a placement without returning its nonzero `RequestID`.
+The actor then emitted an unidentifiable rejection, and the router could leave
+the affected two-leg group pending. Commit `0620b86` copies the original
+request identity at the common admission gate, covering both direct and
+gateway entry. Direct, gateway-inbox, request-kind, focused race and vet checks
+passed. A clean full `GOMAXPROCS=7 make test` passed at that commit, including
+the R2 archive fixture. A preceding dirty-tree invocation passed its Go and
+contract tests but correctly rejected the clean-worktree parity fixture; it
+is not counted as a clean full gate.
+
+Fresh read-only Sol-6 medium reviewer
+`01a0d344-6455-76f1-b0b8-1d67b674893c` independently confirmed the defect
+on pre-fix `c4bcbd3`. This is **not** a standalone ME-005 execution gate when
+the candidate config has no rate-limit tiers; it is still a real conditional
+simulator correction. Historical tiered configs exist, so no global
+non-activation claim is made. One retained G4 smoke summary reports zero
+rate-limit and overload counts, but that observation does not establish the
+activation status of every historical run. No historical trajectory has been
+rewritten or rerun on account of this fix. The final ME-005 reviews remain
+unperformed.
 
 No ME-005 final preregistration, two final independent reviews, new development
 seed, OFF/ON comparison, result, freeze or holdout claim exists. ME-001/002/003
