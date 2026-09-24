@@ -47,19 +47,23 @@ type CrossVenueArbObservedFeed struct {
 // CrossVenueArbEvaluation is optional evidence of a consumed quote callback,
 // including abstention. It is not an input to the policy or a venue oracle.
 type CrossVenueArbEvaluation struct {
-	RouterID        uint64                      `json:"router_id"`
-	TriggerActorID  uint64                      `json:"trigger_actor_id"`
-	TriggerClientID uint64                      `json:"trigger_client_id"`
-	TriggerVenueID  string                      `json:"trigger_venue_id"`
-	Generation      uint64                      `json:"generation"`
-	Reason          string                      `json:"reason"`
-	InFlightGroupID uint64                      `json:"in_flight_group_id,omitempty"`
-	AttemptsUsed    int                         `json:"attempts_used"`
-	SelectedBuy     string                      `json:"selected_buy,omitempty"`
-	SelectedSell    string                      `json:"selected_sell,omitempty"`
-	QuotedEdge      int64                       `json:"quoted_edge,omitempty"`
-	Books           []CrossVenueArbObservedBook `json:"books"`
-	Feeds           []CrossVenueArbObservedFeed `json:"feeds"`
+	RouterID           uint64                      `json:"router_id"`
+	TriggerActorID     uint64                      `json:"trigger_actor_id"`
+	TriggerClientID    uint64                      `json:"trigger_client_id"`
+	TriggerVenueID     string                      `json:"trigger_venue_id"`
+	TriggerType        etypes.MDType               `json:"trigger_type"`
+	TriggerSequence    uint64                      `json:"trigger_sequence"`
+	TriggerPublishedAt int64                       `json:"trigger_published_at"`
+	TriggerDigest      [16]byte                    `json:"trigger_digest"`
+	Generation         uint64                      `json:"generation"`
+	Reason             string                      `json:"reason"`
+	InFlightGroupID    uint64                      `json:"in_flight_group_id,omitempty"`
+	AttemptsUsed       int                         `json:"attempts_used"`
+	SelectedBuy        string                      `json:"selected_buy,omitempty"`
+	SelectedSell       string                      `json:"selected_sell,omitempty"`
+	QuotedEdge         int64                       `json:"quoted_edge,omitempty"`
+	Books              []CrossVenueArbObservedBook `json:"books"`
+	Feeds              []CrossVenueArbObservedFeed `json:"feeds"`
 }
 
 // CrossVenueArbDecision is the observation-only evidence boundary for one
@@ -105,6 +109,7 @@ type CrossVenueArb struct {
 type CrossVenueArbReport struct {
 	Tier              float64 `json:"tier"`
 	RouterID          uint64  `json:"router_id"`
+	QuoteEvaluations  uint64  `json:"quote_evaluations,omitempty"`
 	ExecutableSignals int     `json:"executable_signals"`
 	SubmittedGroups   int     `json:"submitted_groups"`
 	CompletedGroups   int     `json:"completed_groups"`
@@ -249,6 +254,9 @@ func (r *CrossVenueArb) Tier() float64 { return r.tier }
 
 func (r *CrossVenueArb) Report() CrossVenueArbReport {
 	report := r.report
+	if r.cfg.EvaluationObserver != nil {
+		report.QuoteEvaluations = r.quoteGeneration
+	}
 	report.Groups = make([]CrossVenueGroupReport, 0, len(r.groups))
 	var residual int64
 	for _, group := range r.groups {
@@ -295,14 +303,22 @@ func (l *crossVenueArbLeg) HandleEvent(_ context.Context, event *actor.Event) {
 			return
 		}
 		l.book.reset(e.Snapshot)
-		l.owner.onQuote(l)
+		var message *etypes.MarketDataMsg
+		if l.owner.cfg.EvaluationObserver != nil {
+			message = &etypes.MarketDataMsg{Type: etypes.MDSnapshot, Symbol: e.Symbol, SeqNum: e.SeqNum, Timestamp: e.Timestamp, Data: e.Snapshot}
+		}
+		l.owner.onQuote(l, message)
 	case actor.EventBookDelta:
 		e := event.Data.(actor.BookDeltaEvent)
 		if e.Symbol != l.owner.cfg.Symbol {
 			return
 		}
 		l.book.apply(e.Delta)
-		l.owner.onQuote(l)
+		var message *etypes.MarketDataMsg
+		if l.owner.cfg.EvaluationObserver != nil {
+			message = &etypes.MarketDataMsg{Type: etypes.MDDelta, Symbol: e.Symbol, SeqNum: e.SeqNum, Timestamp: e.Timestamp, Data: e.Delta}
+		}
+		l.owner.onQuote(l, message)
 	case actor.EventOrderAccepted:
 		l.owner.onAccepted(l, event.Data.(actor.OrderAcceptedEvent))
 	case actor.EventOrderRejected:
@@ -314,42 +330,50 @@ func (l *crossVenueArbLeg) HandleEvent(_ context.Context, event *actor.Event) {
 	}
 }
 
-func (r *CrossVenueArb) onQuote(trigger *crossVenueArbLeg) {
+func (r *CrossVenueArb) onQuote(trigger *crossVenueArbLeg, message *etypes.MarketDataMsg) {
 	r.quoteGeneration++
 	if r.inFlight != nil {
-		r.observeEvaluation(trigger, "IN_FLIGHT", nil, nil, 0)
+		r.observeEvaluation(trigger, message, "IN_FLIGHT", nil, nil, 0)
 		return
 	}
 	if len(r.groups) >= r.cfg.MaxAttempts {
-		r.observeEvaluation(trigger, "ATTEMPT_LIMIT", nil, nil, 0)
+		r.observeEvaluation(trigger, message, "ATTEMPT_LIMIT", nil, nil, 0)
 		return
 	}
 	if r.quoteGeneration == r.lastAttemptGeneration {
-		r.observeEvaluation(trigger, "DUPLICATE_GENERATION", nil, nil, 0)
+		r.observeEvaluation(trigger, message, "DUPLICATE_GENERATION", nil, nil, 0)
 		return
 	}
 	if _, ok := r.completeFeedFrontier(); !ok {
-		r.observeEvaluation(trigger, "INCOMPLETE_FRONTIER", nil, nil, 0)
+		r.observeEvaluation(trigger, message, "INCOMPLETE_FRONTIER", nil, nil, 0)
 		return
 	}
 	buy, sell, edge, ok := r.bestOpportunity()
 	if !ok {
-		r.observeEvaluation(trigger, "NO_POSITIVE_POLICY_EDGE", nil, nil, 0)
+		r.observeEvaluation(trigger, message, "NO_POSITIVE_POLICY_EDGE", nil, nil, 0)
 		return
 	}
-	r.observeEvaluation(trigger, "SUBMIT", buy, sell, edge)
+	r.observeEvaluation(trigger, message, "SUBMIT", buy, sell, edge)
 	r.lastAttemptGeneration = r.quoteGeneration
 	r.report.ExecutableSignals++
 	r.openGroup(buy, sell, edge)
 }
 
-func (r *CrossVenueArb) observeEvaluation(trigger *crossVenueArbLeg, reason string, buy, sell *crossVenueArbLeg, edge int64) {
+func (r *CrossVenueArb) observeEvaluation(trigger *crossVenueArbLeg, message *etypes.MarketDataMsg, reason string, buy, sell *crossVenueArbLeg, edge int64) {
 	if r.cfg.EvaluationObserver == nil {
 		return
+	}
+	if message == nil || message.SeqNum == 0 || message.Symbol != r.cfg.Symbol {
+		panic("multivenue: router evaluation lacks a consumed public message identity")
+	}
+	fingerprint, err := etypes.MarketDataFingerprint(message)
+	if err != nil || fingerprint == ([16]byte{}) {
+		panic("multivenue: router evaluation cannot fingerprint consumed public message")
 	}
 	row := CrossVenueArbEvaluation{
 		RouterID: r.report.RouterID, TriggerActorID: trigger.ID(), TriggerClientID: trigger.clientID,
 		TriggerVenueID: trigger.venueID, Generation: r.quoteGeneration, Reason: reason,
+		TriggerType: message.Type, TriggerSequence: message.SeqNum, TriggerPublishedAt: message.Timestamp, TriggerDigest: fingerprint,
 		AttemptsUsed: len(r.groups), QuotedEdge: edge,
 		Books: make([]CrossVenueArbObservedBook, 0, len(r.legs)),
 		Feeds: make([]CrossVenueArbObservedFeed, 0, len(r.legs)),

@@ -6,6 +6,7 @@ import (
 	"exchange_sim/actor"
 	"exchange_sim/exchange"
 	"exchange_sim/simulation"
+	etypes "exchange_sim/types"
 )
 
 func TestCrossVenueQuoteBookRetainsSignedTouches(t *testing.T) {
@@ -176,14 +177,17 @@ func TestTwoVenueRouterEvaluationEvidenceCoversNoActionAndSubmission(t *testing.
 	}
 	setRouterBook(router.legs[0], 100, 101)
 	setRouterBook(router.legs[1], 100, 101)
-	router.onQuote(router.legs[0])
+	message := func(sequence uint64) *etypes.MarketDataMsg {
+		return &etypes.MarketDataMsg{Type: etypes.MDDelta, Symbol: "ABC/USD", SeqNum: sequence, Timestamp: 100, Data: &etypes.BookDelta{Side: exchange.Buy, Price: 100, VisibleQty: 1}}
+	}
+	router.onQuote(router.legs[0], message(1))
 	frontiers[1] = simulation.MarketDataFrontier{LinkID: 12, Ordinal: 1, DeliveredAt: 101, Digest: [16]byte{2}}
-	router.onQuote(router.legs[1])
+	router.onQuote(router.legs[1], message(2))
 	setRouterBook(router.legs[1], 105, 106)
-	router.onQuote(router.legs[1])
-	router.onQuote(router.legs[0])
+	router.onQuote(router.legs[1], message(3))
+	router.onQuote(router.legs[0], message(4))
 	router.inFlight = nil
-	router.onQuote(router.legs[1])
+	router.onQuote(router.legs[1], message(5))
 	wantReasons := []string{"INCOMPLETE_FRONTIER", "NO_POSITIVE_POLICY_EDGE", "SUBMIT", "IN_FLIGHT", "ATTEMPT_LIMIT"}
 	if len(evaluations) != len(wantReasons) {
 		t.Fatalf("evaluation count = %d, want %d", len(evaluations), len(wantReasons))
@@ -193,7 +197,7 @@ func TestTwoVenueRouterEvaluationEvidenceCoversNoActionAndSubmission(t *testing.
 			t.Fatalf("evaluation %d = %#v, want reason %s and two books/feeds", index, row, wantReasons[index])
 		}
 	}
-	if evaluations[0].Feeds[1].Frontier.Ordinal != 0 || evaluations[2].SelectedBuy != "alpha" || evaluations[2].SelectedSell != "bravo" || evaluations[2].QuotedEdge != 4 {
+	if evaluations[0].Feeds[1].Frontier.Ordinal != 0 || evaluations[2].SelectedBuy != "alpha" || evaluations[2].SelectedSell != "bravo" || evaluations[2].QuotedEdge != 4 || evaluations[2].TriggerSequence != 3 || evaluations[2].TriggerDigest == ([16]byte{}) || router.Report().QuoteEvaluations != 5 {
 		t.Fatalf("missing frontier or submitted route not preserved: %#v", evaluations)
 	}
 }
@@ -226,12 +230,12 @@ func TestInstrumentedCrossVenueRouterRequiresFullDeliveredFrontier(t *testing.T)
 	setRouterBook(router.legs[1], 105, 106)
 	setRouterBook(router.legs[2], 99, 110)
 
-	router.onQuote(router.legs[1])
+	router.onQuote(router.legs[1], nil)
 	if len(router.groups) != 0 || len(decisions) != 0 {
 		t.Fatalf("router traded before all declared feeds delivered: groups=%d decisions=%d", len(router.groups), len(decisions))
 	}
 	frontiers[2] = simulation.MarketDataFrontier{LinkID: 13, Ordinal: 1, DeliveredAt: 100, Digest: [16]byte{3}}
-	router.onQuote(router.legs[1])
+	router.onQuote(router.legs[1], nil)
 	if len(router.groups) != 1 || len(decisions) != 2 {
 		t.Fatalf("router after full frontier = groups=%d decisions=%d, want 1/2", len(router.groups), len(decisions))
 	}

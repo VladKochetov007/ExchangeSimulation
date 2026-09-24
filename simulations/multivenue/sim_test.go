@@ -1042,6 +1042,7 @@ func TestTwoVenueRouterEvaluationsPersistInCanonicalBinaryEvidence(t *testing.T)
 	if err := sim.Run(context.Background()); err != nil {
 		t.Fatal(err)
 	}
+	expectedEvaluations := sim.Routers[0].Report().QuoteEvaluations
 	if err := sim.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -1075,8 +1076,8 @@ func TestTwoVenueRouterEvaluationsPersistInCanonicalBinaryEvidence(t *testing.T)
 			}
 		}
 	}
-	if count == 0 {
-		t.Fatal("no router quote evaluations persisted")
+	if count == 0 || uint64(count) != expectedEvaluations {
+		t.Fatalf("router quote evaluations persisted = %d, want report counter %d", count, expectedEvaluations)
 	}
 }
 
@@ -1102,6 +1103,7 @@ func TestTwoVenueRouterEvaluationEvidenceDoesNotChangeEconomicOutcome(t *testing
 			t.Fatal(err)
 		}
 		result := normalizedCrossVenueReport(sim.Routers[0].Report())
+		result.QuoteEvaluations = 0 // evidence-only count is absent in the control
 		ledgers := sim.CaptureVenueLedgers()
 		if err := sim.Close(); err != nil {
 			t.Fatal(err)
