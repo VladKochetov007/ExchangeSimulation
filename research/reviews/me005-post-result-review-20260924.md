@@ -50,3 +50,13 @@ The correction commit changes only report/result prose and review status;
 it does not change C, P, raw evidence, the analyzer outputs or the economic
 verdict. Any material new source/protocol/estimator change would require a
 successor validation, not an edit to this review record.
+
+## Narrow correction check
+
+A1 and B each inspected the documentation-only correction commit
+`174e17e046488dbf988be443544916b2727fba86` against reviewed draft
+`471f35b`. Both returned `COMPLETED / ACCEPT`: the operational-attestation
+wording and exact duplicate identity resolve their required changes. Their
+original scope limits above remain. A2 required no numerical or wording
+correction. This follow-up does not constitute a new source, protocol,
+simulator or raw-evidence review.

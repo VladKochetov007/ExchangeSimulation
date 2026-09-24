@@ -33,8 +33,8 @@
   },
   "review": {
     "execution": "COMPLETED",
-    "verdict": "ACCEPT_WITH_REQUIRED_CHANGES",
-    "scope": "Three read-only Sol-6 medium post-result reviewers accepted the bounded no-opportunity conclusion subject to two wording corrections, now applied; they did not rerun the analyzer, independently decode all raw frames, attest process settings or inspect holdouts. Two earlier preregistration reviews accepted C/P before outcomes. Their literal verdict was ACCEPT_WITH_LIMITATIONS; the schema represents the required corrections as ACCEPT_WITH_REQUIRED_CHANGES pending a final narrow check.",
+    "verdict": "ACCEPT",
+    "scope": "Three read-only Sol-6 medium post-result reviewers accepted the bounded no-opportunity conclusion with stated scope limitations. A1 and B separately checked that commit 174e17e resolved their two required wording corrections and returned COMPLETED / ACCEPT. They did not rerun the analyzer, independently decode all raw frames, attest process settings or inspect holdouts. Two earlier preregistration reviews accepted C/P before outcomes.",
     "reference": "research/reviews/me005-post-result-review-20260924.md"
   },
   "observed": {
