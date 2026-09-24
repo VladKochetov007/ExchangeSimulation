@@ -11,6 +11,8 @@ Authorization and current stage: [authoritative registry](../../registry.json).
 No study execution or readiness implementation is authorized by this card.
 The source-grounded [2026-09-24 readiness assessment](readiness-20260924.md)
 ends at **READY AFTER FOUR SPECIFIC FIXES**; it is not a protocol or result.
+The [prospective preparation contract](prepare-contract-20260924.md) selects
+the local closeout convention and scopes those four fixes before implementation.
 
 ## Entities and readiness
 
