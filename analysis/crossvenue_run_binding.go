@@ -15,6 +15,7 @@ type CrossVenueRunBindingExpectation struct {
 	EffectiveConfigSHA256 string
 	ExecutionStreamHash   string
 	RouterEnabled         bool
+	Seed                  int64
 	Venues                [2]string
 	LotQty                int64
 	MaxAttempts           int
@@ -47,6 +48,7 @@ type crossVenueBindingConfig struct {
 	MarketDataReceiptRoles         []string  `json:"market_data_receipt_roles"`
 	RecordDecisionFrontierVectors  bool      `json:"record_decision_frontier_vectors"`
 	RecordCrossVenueArbEvaluations bool      `json:"record_cross_venue_arb_evaluations"`
+	StrictPopulationAccounting     bool      `json:"strict_population_accounting"`
 	VenueIDs                       []string  `json:"venue_ids"`
 	CrossVenueArbTiers             []float64 `json:"cross_venue_arb_tiers"`
 	CrossVenueArbLotQty            int64     `json:"cross_venue_arb_lot_qty"`
@@ -55,6 +57,7 @@ type crossVenueBindingConfig struct {
 	CrossVenueArbInitialQuote      int64     `json:"cross_venue_arb_initial_quote"`
 	AutoBorrowSpot                 *bool     `json:"auto_borrow_spot"`
 	TakerFeeBps                    int64     `json:"taker_fee_bps"`
+	Seed                           int64     `json:"seed"`
 }
 
 type crossVenueBinaryAttestation struct {
@@ -80,7 +83,7 @@ type crossVenueRenderedAttestation struct {
 func VerifyCrossVenueRunBinding(rawDir, renderedDir string, expected CrossVenueRunBindingExpectation) (CrossVenueRunBinding, error) {
 	if rawDir == "" || renderedDir == "" || !crossVenueSourceRevision(expected.SourceRevision) || !crossVenueHexHash(expected.EffectiveConfigSHA256) ||
 		!crossVenueHexHash(expected.ExecutionStreamHash) || expected.Venues[0] == "" || expected.Venues[1] == "" ||
-		expected.Venues[0] == expected.Venues[1] || expected.LotQty <= 0 || expected.TakerFeeBps < 0 ||
+		expected.Venues[0] == expected.Venues[1] || expected.Seed == 0 || expected.LotQty <= 0 || expected.TakerFeeBps < 0 ||
 		expected.RouterEnabled && expected.MaxAttempts != 1 || !expected.RouterEnabled && expected.MaxAttempts != 0 {
 		return CrossVenueRunBinding{}, fmt.Errorf("cross-venue run binding: invalid expected contract")
 	}
@@ -137,7 +140,8 @@ func crossVenueVerifyEffectiveFields(raw json.RawMessage, expected CrossVenueRun
 	required := []string{
 		"log_mode", "evidence_format", "evidence_contract_version", "record_market_data_receipts",
 		"record_decision_frontier_vectors", "venue_ids",
-		"cross_venue_arb_max_attempts", "auto_borrow_spot", "taker_fee_bps",
+		"strict_population_accounting",
+		"cross_venue_arb_max_attempts", "auto_borrow_spot", "taker_fee_bps", "seed",
 	}
 	if expected.RouterEnabled {
 		required = append(required, "record_cross_venue_arb_evaluations", "cross_venue_arb_tiers", "cross_venue_arb_lot_qty", "cross_venue_arb_initial_base", "cross_venue_arb_initial_quote")
@@ -146,8 +150,8 @@ func crossVenueVerifyEffectiveFields(raw json.RawMessage, expected CrossVenueRun
 		return fmt.Errorf("cross-venue run binding: malformed effective fields: %w", err)
 	}
 	if config.LogMode != "full" || config.EvidenceFormat != "evstream_v3" || config.EvidenceContractVersion != 2 ||
-		!slices.Equal(config.VenueIDs, expected.Venues[:]) || config.AutoBorrowSpot == nil || *config.AutoBorrowSpot ||
-		config.TakerFeeBps != expected.TakerFeeBps {
+		!config.StrictPopulationAccounting || !slices.Equal(config.VenueIDs, expected.Venues[:]) || config.AutoBorrowSpot == nil || *config.AutoBorrowSpot ||
+		config.TakerFeeBps != expected.TakerFeeBps || config.Seed != expected.Seed {
 		return fmt.Errorf("cross-venue run binding: effective configuration violates first-attempt evidence contract")
 	}
 	if expected.RouterEnabled {

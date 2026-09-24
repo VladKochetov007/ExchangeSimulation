@@ -1332,7 +1332,7 @@ func TestTwoVenueRouterInjectedOpportunityProducesAuditableBinaryEvidence(t *tes
 	configHash := sha256.Sum256(compactConfig.Bytes())
 	if _, err := analysis.VerifyCrossVenueRunBinding(dir, rendered, analysis.CrossVenueRunBindingExpectation{
 		SourceRevision: bindingManifest.Build.Revision, EffectiveConfigSHA256: fmt.Sprintf("%x", configHash[:]),
-		ExecutionStreamHash: renderReport.ExecutionHash, RouterEnabled: true, Venues: [2]string{"north", "south"},
+		ExecutionStreamHash: renderReport.ExecutionHash, RouterEnabled: true, Seed: sim.Config.Seed, Venues: [2]string{"north", "south"},
 		LotQty: cfg.CrossVenueArbLotQty, MaxAttempts: cfg.CrossVenueArbMaxAttempts, TakerFeeBps: sim.Config.TakerFeeBps,
 	}); err != nil {
 		t.Fatalf("synthetic binary/report/config binding: %v", err)

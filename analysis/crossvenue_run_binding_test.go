@@ -23,10 +23,11 @@ func crossVenueBindingFixture(t *testing.T) (string, string, CrossVenueRunBindin
 		"log_mode": "full", "evidence_format": "evstream_v3", "evidence_contract_version": 2,
 		"record_market_data_receipts": true, "market_data_receipt_roles": []string{"cross_venue_router_tier"},
 		"record_decision_frontier_vectors": true, "record_cross_venue_arb_evaluations": true,
-		"venue_ids": []string{"north", "south"}, "cross_venue_arb_tiers": []float64{1},
+		"strict_population_accounting": true,
+		"venue_ids":                    []string{"north", "south"}, "cross_venue_arb_tiers": []float64{1},
 		"cross_venue_arb_lot_qty": 5, "cross_venue_arb_max_attempts": 1,
 		"cross_venue_arb_initial_base": 10, "cross_venue_arb_initial_quote": 1000,
-		"auto_borrow_spot": false, "taker_fee_bps": 10,
+		"auto_borrow_spot": false, "taker_fee_bps": 10, "seed": 42,
 	}
 	configRaw, err := json.Marshal(config)
 	if err != nil {
@@ -35,7 +36,7 @@ func crossVenueBindingFixture(t *testing.T) (string, string, CrossVenueRunBindin
 	configHash := sha256.Sum256(configRaw)
 	expected := CrossVenueRunBindingExpectation{
 		SourceRevision: strings.Repeat("a", 40), EffectiveConfigSHA256: hex.EncodeToString(configHash[:]),
-		ExecutionStreamHash: strings.Repeat("b", 64), RouterEnabled: true, Venues: [2]string{"north", "south"},
+		ExecutionStreamHash: strings.Repeat("b", 64), RouterEnabled: true, Seed: 42, Venues: [2]string{"north", "south"},
 		LotQty: 5, MaxAttempts: 1, TakerFeeBps: 10,
 	}
 	manifest := map[string]any{
@@ -86,6 +87,9 @@ func TestCrossVenueRunBindingRequiresExactConfigSourceReportAndStream(t *testing
 		}},
 		{"wrong-config", func(_ string, _ string, expected *CrossVenueRunBindingExpectation) {
 			expected.EffectiveConfigSHA256 = strings.Repeat("d", 64)
+		}},
+		{"wrong-seed-label", func(_ string, _ string, expected *CrossVenueRunBindingExpectation) {
+			expected.Seed = 43
 		}},
 		{"borrowing-despite-matching-config-digest", func(rawDir string, _ string, expected *CrossVenueRunBindingExpectation) {
 			path := filepath.Join(rawDir, "manifest.json")
