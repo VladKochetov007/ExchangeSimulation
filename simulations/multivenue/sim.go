@@ -1438,6 +1438,9 @@ func (c *Config) normalize() error {
 		if len(c.VenueIDs) == 2 && (c.CrossVenueArbInitialBase <= 0 || c.CrossVenueArbInitialQuote <= 0) {
 			return errors.New("multivenue: two-venue routers require explicit positive base and quote endowments")
 		}
+		if len(c.VenueIDs) == 2 && (c.AutoBorrowSpot == nil || *c.AutoBorrowSpot) {
+			return errors.New("multivenue: two-venue routers require explicit auto_borrow_spot=false")
+		}
 		if c.CrossVenueArbInitialBase == 0 {
 			c.CrossVenueArbInitialBase = 1_000 * mvBasePrecision
 		}

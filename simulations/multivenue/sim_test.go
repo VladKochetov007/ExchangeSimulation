@@ -947,6 +947,7 @@ func TestThreeVenueCrossVenueRoutersUsePhaseOrderedIndependentLegs(t *testing.T)
 func TestTwoVenueRouterUsesExplicitIndependentFiniteAccounts(t *testing.T) {
 	cfg := crossVenueRaceConfig(t.TempDir(), []float64{1})
 	cfg.VenueIDs = []string{"north", "south"}
+	cfg.AutoBorrowSpot = boolPointer(false)
 	cfg.CrossVenueArbInitialBase = 2 * mvBasePrecision
 	cfg.CrossVenueArbInitialQuote = 150_000 * mvQuotePrecision
 	sim, err := NewSim(2*time.Second, cfg)
@@ -974,6 +975,7 @@ func TestTwoVenueRouterUsesExplicitIndependentFiniteAccounts(t *testing.T) {
 func TestTwoVenueRouterConfigRejectsMissingOrInvalidFunding(t *testing.T) {
 	base := crossVenueRaceConfig("x", []float64{1})
 	base.VenueIDs = []string{"north", "south"}
+	base.AutoBorrowSpot = boolPointer(false)
 	for _, venueIDs := range [][]string{{"north"}, {"north", "north"}, {"north", "south", "east", "west"}} {
 		cfg := base
 		cfg.VenueIDs = venueIDs
@@ -993,11 +995,20 @@ func TestTwoVenueRouterConfigRejectsMissingOrInvalidFunding(t *testing.T) {
 	if err := cfg.normalize(); err != nil {
 		t.Fatalf("finite two-venue account rejected: %v", err)
 	}
+	for _, autoBorrow := range []*bool{nil, boolPointer(true)} {
+		cfg := base
+		cfg.CrossVenueArbInitialBase, cfg.CrossVenueArbInitialQuote = mvBasePrecision, mvQuotePrecision
+		cfg.AutoBorrowSpot = autoBorrow
+		if err := cfg.normalize(); err == nil {
+			t.Fatal("two-venue prefunded router accepted automatic spot borrowing")
+		}
+	}
 }
 
 func TestCrossVenueEvaluationEvidenceRequiresSuccessorBinaryAndReceipts(t *testing.T) {
 	base := crossVenueRaceConfig("x", []float64{1})
 	base.VenueIDs = []string{"north", "south"}
+	base.AutoBorrowSpot = boolPointer(false)
 	base.CrossVenueArbInitialBase = mvBasePrecision
 	base.CrossVenueArbInitialQuote = 100_000 * mvQuotePrecision
 	base.RecordCrossVenueArbEvaluations = true
@@ -1026,6 +1037,7 @@ func TestTwoVenueRouterEvaluationsPersistInCanonicalBinaryEvidence(t *testing.T)
 	dir := t.TempDir()
 	cfg := crossVenueRaceConfig(dir, []float64{1})
 	cfg.VenueIDs = []string{"north", "south"}
+	cfg.AutoBorrowSpot = boolPointer(false)
 	cfg.CrossVenueArbInitialBase = 2 * mvBasePrecision
 	cfg.CrossVenueArbInitialQuote = 150_000 * mvQuotePrecision
 	cfg.LogMode = "full"
@@ -1162,6 +1174,7 @@ func TestTwoVenueRouterEvaluationEvidenceDoesNotChangeEconomicOutcome(t *testing
 		t.Helper()
 		cfg := crossVenueRaceConfig(t.TempDir(), []float64{1})
 		cfg.VenueIDs = []string{"north", "south"}
+		cfg.AutoBorrowSpot = boolPointer(false)
 		cfg.CrossVenueArbInitialBase = 2 * mvBasePrecision
 		cfg.CrossVenueArbInitialQuote = 150_000 * mvQuotePrecision
 		cfg.LogMode = "full"
