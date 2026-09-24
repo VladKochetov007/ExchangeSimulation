@@ -1,10 +1,13 @@
-# ME-005 development protocol r1b — two-venue first-attempt screen
+# ME-005 development protocol r1c — two-venue first-attempt screen
 
 Status: **PREREGISTERED, CONDITIONAL**. This document was written before any
-ME-005 economic outcome. Revision r1b supersedes the source identity and
-clarifies the existing policy/evidence interpretation after two pre-run reviews;
+ME-005 economic outcome. Revision r1c retains source C and the four r1
+configs, but narrows an unsupported episode-delivery label after a pre-run
+review. The r1b source successor clarified the policy/evidence interpretation;
 the four immutable config files retain their `ME-005-r1` experiment label and
-their exact raw/effective hashes. No economic cell was run under r1. Execution
+their exact raw/effective hashes. No economic cell was run under r1/r1a/r1b.
+This is an explicit prospective measurement amendment, not a change to the
+opportunity predicate, treatment, primary endpoint or market economics. Execution
 is permitted by the owner's conditional
 ME-005 instruction only after both bounded independent reviews accept the
 exact code/config/protocol package and the resource preflight below succeeds.
@@ -20,9 +23,10 @@ fee/depth-adjusted ABC/USD quote opportunity in its delayed local information,
 attempt two non-atomic market-FOK legs, and produce a reconstructible net
 economic result after *hypothetical venue-local terminal restoration*? A
 positive quote edge or matched cashflow is not by itself transferable profit.
-The primary output is the full public-to-local-to-admission-to-fill-to-local-
-value funnel, including valid zero-attempt, unmatched, negative and unavailable
-states. The strongest primary claim is a two-seed **development mechanical and
+The primary output is an audited public-to-evaluation-to-admission-to-fill-to-
+local-value funnel, with unobserved episode delivery explicitly unknown and
+valid zero-attempt, unmatched, negative and unavailable states retained. The
+strongest primary claim is a two-seed **development mechanical and
 economic response map**, not general arbitrage profitability. A router that
 receives a feasible positive local quote but does not attempt a route, a
 failure at venue arrival, a negative terminal value, and no opportunity are
@@ -35,7 +39,9 @@ router-enable comparison in this ecology, not trade-attributed convergence:
 `trade_attribution = NOT_IDENTIFIED`. Identical seeds and normalized
 background configs do not prove identical realized random streams. No
 equivalence margin, p-value, empirical corridor, tail-risk or general market-
-convergence claim is registered. If there are no public positive episodes,
+convergence claim is registered. `NoOpportunity` means zero **two-sided
+router-policy** public episodes; broader leg-side episodes may still exist.
+If there are no two-sided public positive episodes,
 the mechanism's opportunity set is absent in this small screen, not falsified.
 
 ## Candidate, policy, ecology and exact cells
@@ -117,7 +123,17 @@ prefixes and each actual evaluation, including no-action; assess selected
 quote-time funding separately; join submitted
 vectors, gateway placement, exchange-time FOK fill/cancellation, actor inbox
 receipt, account movements and terminal venue-local book. A public episode
-with no aligned evaluation is not an actor rejection. Quote-time funding is
+with no aligned evaluation is not an actor rejection. For each public policy
+episode use the registered timeline's evaluation and alignment counts:
+`ALIGNED_LOCAL_EVALUATION` requires a receipt-verified consumed source while
+the public episode is active; `EVALUATED_NOT_ALIGNED` records a callback but
+not an aligned local quote; zero in-episode evaluations is
+`NO_EVALUATION_OBSERVED / DELIVERY_NOT_DETERMINABLE`. Zero evaluations does
+**not** prove that publication failed to reach an inbox. The sidecar audit
+binds delivered prefixes for evaluations but does not establish a complete
+per-public-episode delivery denominator in this screen. Do not estimate a
+delivery failure rate or classify an episode as undelivered from these counts.
+Quote-time funding is
 not proof of arrival-time depth/admission. Preserve unknown disappearance
 cause where event identities cannot distinguish price, depth, other execution
 or latency. Do not read a periodic midpoint as executable opportunity.
@@ -142,8 +158,9 @@ No attempt has no matched-edge observation; it is not zero arbitrage profit.
 
 Report all four cells and every attempted group (at most one per ON world),
 including losing and unpriceable attempts. Classify process failure,
-incomplete binary run, valid no public opportunity, public opportunity not
-delivered while active, delivered but infeasible/no-action, order refusal,
+incomplete binary run, valid no two-sided policy opportunity, public episode
+with no evaluation (delivery unknown), evaluated but locally unaligned or
+infeasible/no-action, order refusal,
 one-leg fill, matched legs, unavailable local closeout, negative/zero/positive
 terminal value separately. The primary response map is not conditioned only
 on surviving profitable attempts. For valid paired edge-duration results,

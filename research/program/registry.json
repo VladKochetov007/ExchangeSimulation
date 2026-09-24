@@ -162,9 +162,9 @@
       "authorization": {
         "prepare": true,
         "run": false,
-        "basis": "Owner 2026-09-24 PREPARE_AND_RUN_IF_READY instruction authorized exactly four ME-005 readiness fixes and a smallest registered development screen only after prospective protocol and two independent scoped reviews. Protocol r1b is pinned pending review; no economic world or holdout has run."
+        "basis": "Owner 2026-09-24 PREPARE_AND_RUN_IF_READY instruction authorized exactly four ME-005 readiness fixes and a smallest registered development screen only after prospective protocol and two independent scoped reviews. Protocol r1c is pinned pending review; no economic world or holdout has run."
       },
-      "next_action": "Review exact ME-005 source candidate 442da04 and protocol r1b with two independent scoped reviewers. Run only the four registered development cells plus one technical duplicate if both accept and capacity passes; otherwise preserve the specific blocker."
+      "next_action": "Review exact ME-005 source candidate 442da04 and protocol r1c with two independent scoped reviewers. Run only the four registered development cells plus one technical duplicate if both accept and capacity passes; otherwise preserve the specific blocker."
     },
     {
       "id": "ME-006",

@@ -1,7 +1,7 @@
 # ME-005 implementation checkpoint — development readiness, not a result
 
 Current prospective source successor: `442da046f8cc9a6b78ce3900ec13badd3fd2b74a`.
-The [r1b protocol](protocol.md) and four analysis contracts now pin this
+The [r1c protocol](protocol.md) and four analysis contracts now pin this
 source, leaving the original r1 configs/hashes unchanged. An initial bounded
 Reviewer A pass on the predecessor protocol returned required changes, not
 acceptance: nonzero response actor IDs needed to bind to the submitted leg,
@@ -19,8 +19,14 @@ package: the policy estimator wrongly required positive *unused* quote sides,
 and the broader leg-side opportunity diagnostic was not emitted in the world
 summary. The `442da04` successor aligns the estimator with the router and
 emits broader episode count/duration separately; focused fixtures include a
-direct router/estimator comparison. Neither intermediate review is acceptance
-of r1b. Two final reviews of `442da04`/r1b and the clean full gate remain.
+direct router/estimator comparison. Reviewer A accepted `442da04`/r1b for
+accounting/execution/closeout. Reviewer B returned required changes on r1b
+because its promised public-episode "not delivered while active" category
+cannot be inferred from absent evaluations. The r1c protocol prospectively
+replaces that unsupported label with delivery unknown and limits
+`NoOpportunity` to the two-sided policy denominator. Source C and all
+economic cells are unchanged. Clean full `make test`, vet and targeted race
+passed at r1b; both reviewers must assess r1c before execution.
 No ME-005 economic world has run.
 
 Source baseline: merged `main` `eb921aa29b26b43cd39e1613dabc44ec60dbf5c9`.
