@@ -1,7 +1,7 @@
 # ME-005 implementation checkpoint — development readiness, not a result
 
 Source baseline: merged `main` `eb921aa29b26b43cd39e1613dabc44ec60dbf5c9`.
-Latest clean code gate: `7d3ef13` on `research/market-ecology-me005-20260924`.
+Latest clean code gate: `0a1c0d0` on `research/market-ecology-me005-20260924`.
 The authoritative [readiness assessment](readiness-20260924.md) and
 [prospective preparation contract](prepare-contract-20260924.md) still define
 four acceptance fixes. This note records implementation progress without
@@ -12,7 +12,7 @@ registering a protocol or scoring a market world. ME-005 economic worlds run:
 |---|---|---|
 | 1. Two-venue wiring | Exactly two distinct venues and finite, separate router accounts; historical three-venue default retained. Two-venue router configs now require explicit `auto_borrow_spot=false`. | Pin the effective two-venue config, initial balances, lot, attempt cap and deployment in a preregistration; independently review this successor population choice. |
 | 2. Opportunity/execution reconstruction | Optional canonical callback evidence including no-action and consumed source identity; public-book replay in global frame order; receipt-prefix and actor-local book checks; actor-inbox response receipts; terminal count binding; first trade ID zero, Trade/OrderFill/response joins. Submitted FOK requests join audited decision vectors to exchange placements, fills and acknowledgements. A public-episode/actor-evaluation timeline distinguishes public-active, locally aligned, locally inactive and post-public local-positive states, with half-open frame ordering and censoring. The first submitted quote can now be checked against audited initial venue balances. Dedicated market-FOK router cancellations fail closed; a first-attempt terminal join separates settled exchange outcome from actor-observed status and requires accepted-order acknowledgements before fill receipts can establish actor knowledge. | Classify disappearance reasons only where the event chain actually identifies them; unclassified causes must remain unknown. Quote-time funding is not arrival-time admission. Bind the complete chain to a verified run manifest under the registered config. |
-| 3. Costed closeout | Independent venue-local bid/ask depth walk with quote taker fees and insufficient-depth failure; initial/terminal venue-account deltas checked against settled fills, fee rounding and zero debt/locked inventory. The terminal helper requires both account timestamps at the declared horizon and bounds replayed-book evidence age. A static fixture gives +48 matched cashflow but −13 local terminal value. A manufactured production path binds binary evidence, venue accounts, local value and run-wide conservation. A per-router movement audit now rejects undeclared balance changes and pairs each settlement with one canonical fill. | Pin the book-evidence recency bound prospectively; bind replay, accounts and report to one independently verified completed run under the exact candidate; join pending-request/FOK terminal status. The complete registered-world audit and final independent review remain. |
+| 3. Costed closeout | Independent venue-local bid/ask depth walk with quote taker fees and insufficient-depth failure; initial/terminal venue-account deltas checked against settled fills, fee rounding and zero debt/locked inventory. The terminal helper requires both account timestamps at the declared horizon and bounds replayed-book evidence age when base inventory changed; a zero-base-change account needs no price update. A static fixture gives +48 matched cashflow but −13 local terminal value. A manufactured production path binds binary evidence, venue accounts, local value and run-wide conservation. A per-router movement audit rejects undeclared balance changes and pairs each settlement with one canonical fill. | Pin the book-evidence recency bound prospectively; bind replay, accounts and report to one independently verified completed run under the exact candidate. The complete registered-world audit and final independent review remain. |
 | 4. Dislocation measurement | Two-venue, event-ordered, one-lot executable edge and half-open episode functions; a pure OFF/ON seed-pair estimator reports episode counts and positive-edge duration, retains same-time episodes and rejects missing/mismatched cells. A ten-second no-op production fixture leaves final displayed background ABC/USD books unchanged when the router submits nothing. A static test proves an episode between periodic samples is visible to the event-time estimator but absent at both sample endpoints. | Bind actual OFF/ON world evidence and background config/clock identities, retain receipt-lag classification, and preregister missing-run and uncertainty rules. Trade-attributed convergence remains `NOT_IDENTIFIED` absent stronger attribution evidence. |
 
 The positive matched cashflow in the static fixture is **not** profit after
@@ -234,3 +234,21 @@ failure. Focused tests, affected-package vet and race checks passed. A dirty
 the archive parity check requiring a clean worktree; the clean committed
 `GOMAXPROCS=7 make test` passed in full. This is a mechanical readiness
 checkpoint, not an accepted final four-fix review or a development result.
+
+Commit `6a54a79` makes hypothetical terminal valuation independent of a fresh
+price when the audited account has no change in base inventory. A no-trade
+world can therefore retain its valid zero-value endpoint even if its last
+book update is old; any nonzero base change still needs fresh executable
+local depth. This analyzer-only correction has focused race/vet coverage and
+a clean full test gate. It does not make an unavailable nonzero position
+priceable.
+
+Commit `0a1c0d0` composes the already-tested actor callback, receipt, public
+book, decision vector, exchange placement, fill, account movement and
+terminal-value joins into one reusable first-attempt analysis entry point.
+Both zero-attempt and manufactured matched-FOK binary fixtures pass through
+it. The entry point explicitly assumes the caller has already verified that
+the rendered binary tree, terminal report and raw sidecars belong to the same
+completed manifest/config/source identity; that binding is **not yet
+implemented** by this function. Focused race/vet and clean full tests passed.
+The wrapper is not a ME-005 development result or final four-fix acceptance.
