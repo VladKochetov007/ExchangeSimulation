@@ -1079,6 +1079,34 @@ func TestTwoVenueRouterEvaluationsPersistInCanonicalBinaryEvidence(t *testing.T)
 	if count == 0 || uint64(count) != expectedEvaluations {
 		t.Fatalf("router quote evaluations persisted = %d, want report counter %d", count, expectedEvaluations)
 	}
+	if err := os.WriteFile(filepath.Join(rendered, "greeks.json"), []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	renderedRun, err := analysis.Open(rendered)
+	if err != nil {
+		t.Fatal(err)
+	}
+	venues := [2]string{"north", "south"}
+	evaluations, err := renderedRun.CollectCrossVenueEvaluations(venues, sim.Routers[0].Report().RouterID, expectedEvaluations)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := analysis.VerifyCrossVenueEvaluationReceipts(evaluations, dir, "ABC/USD"); err != nil {
+		t.Fatal(err)
+	}
+	publicEvents, err := renderedRun.CollectCrossVenuePublicEvents(venues, "ABC/USD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	matchedSources, err := analysis.MatchCrossVenueEvaluationSources(evaluations, publicEvents, "ABC/USD", cfg.CrossVenueArbLotQty, mvBasePrecision, cfg.TakerFeeBps)
+	if err != nil || len(matchedSources) != len(evaluations) {
+		t.Fatalf("actor-consumed source reconstruction = %d/%d, %v", len(matchedSources), len(evaluations), err)
+	}
+	if _, err := analysis.ReplayCrossVenuePublicEvents(publicEvents, analysis.CrossVenuePublicReplayOptions{
+		Venues: venues, Symbol: "ABC/USD", InitiallyEmpty: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestTwoVenueRouterEvaluationEvidenceDoesNotChangeEconomicOutcome(t *testing.T) {
