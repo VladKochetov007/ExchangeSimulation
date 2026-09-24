@@ -1,7 +1,7 @@
 # ME-005 implementation checkpoint — development readiness, not a result
 
 Source baseline: merged `main` `eb921aa29b26b43cd39e1613dabc44ec60dbf5c9`.
-Latest clean code gate: `1463586` on `research/market-ecology-me005-20260924`.
+Latest clean code gate: `50dcbcf` on `research/market-ecology-me005-20260924`.
 The authoritative [readiness assessment](readiness-20260924.md) and
 [prospective preparation contract](prepare-contract-20260924.md) still define
 four acceptance fixes. This note records implementation progress without
@@ -11,7 +11,7 @@ registering a protocol or scoring a market world. ME-005 economic worlds run:
 | Fix | Implemented and mechanically exercised | Still required before ME-005 RUN |
 |---|---|---|
 | 1. Two-venue wiring | Exactly two distinct venues and finite, separate router accounts; historical three-venue default retained. Two-venue router configs now require explicit `auto_borrow_spot=false`. | Pin the effective two-venue config, initial balances, lot, attempt cap and deployment in a preregistration; independently review this successor population choice. |
-| 2. Opportunity/execution reconstruction | Optional canonical callback evidence including no-action and consumed source identity; public-book replay in global frame order; receipt-prefix and actor-local book checks; actor-inbox response receipts; terminal count binding; first trade ID zero, Trade/OrderFill/response joins. Exchange-side market-FOK placement outcomes now join to settled full-lot fills and delayed actor acknowledgements, preserving missing inbox delivery. | Complete submitted request/decision-vector to placement and cancellation joins; prove the public→delivered→evaluated→feasible→attempted opportunity denominator and horizon censoring. Reconcile complete evidence under the registered config and verified run manifest. |
+| 2. Opportunity/execution reconstruction | Optional canonical callback evidence including no-action and consumed source identity; public-book replay in global frame order; receipt-prefix and actor-local book checks; actor-inbox response receipts; terminal count binding; first trade ID zero, Trade/OrderFill/response joins. Submitted FOK requests now join audited decision vectors on both links to exchange placements and then settled fills and delayed acknowledgements. A manufactured positive route exercises that chain through the binary renderer. | Prove the public→delivered→evaluated→feasible→attempted opportunity denominator, cancellation/other terminal outcomes and horizon censoring. Bind the complete chain to a verified run manifest under the registered config. |
 | 3. Costed closeout | Independent venue-local bid/ask depth walk with quote taker fees and insufficient-depth failure; initial/terminal venue-account deltas independently checked against settled fills, fee rounding and zero debt/locked inventory. The terminal helper requires both account timestamps at the declared horizon and bounds the age of each replayed book. A static fixture gives +48 matched cashflow but −13 local terminal liquidation value. | Pin the book-evidence recency bound prospectively; prove replay and accounts derive from one verified completed run; join pending-request/FOK terminal status. Verify complete movement/conservation evidence and absence of financing/transfer flows over the interval. |
 | 4. Dislocation measurement | Two-venue, event-ordered, one-lot executable edge and half-open episode functions with same-time tests. | Build and test the registered paired OFF/ON world-level estimator, timing/attribution rules, missing-run handling and no-op controls. Keep trade-attributed convergence `NOT_IDENTIFIED` if the retained evidence cannot distinguish it from background movement. |
 
@@ -132,9 +132,27 @@ observed sell-side bid before venue arrival: the north buy fills, the south
 sell FOK rejects, global base residual is +5, and local hypothetical exit
 value is −5. Repeated focused runs, targeted race/vet and clean full
 `GOMAXPROCS=7 make test` passed. These values are integer-unit fixture
-identities, not empirical or development-world arbitrage results. The fixture
-does not yet produce a complete canonical two-venue evidence bundle, and the
-decision-vector-to-outcome audit remains required.
+identities, not empirical or development-world arbitrage results. The original
+actor-level fixture does not itself produce a canonical evidence bundle.
+
+Commit `50dcbcf` closes that narrower measurement gap. An audited selector
+reads binary decision vectors only after the existing complete vector/scalar
+audit and rejects off-symbol decisions on selected router links. A fail-closed
+join binds each `SUBMIT` evaluation to buy-then-sell gateway decisions,
+complete consumed-feed components and unique exchange outcomes. Mutation
+tests reject missing vectors/outcomes, wrong request/side/frontier, future
+information and an unpaired no-action row. The existing zero-attempt
+production fixture checks the empty path; a separate ten-second *injected
+crossed-book* production fixture obtains one two-leg FOK attempt and
+independently reconstructs its placements, settled fills, inbox receipts and
+venue-local account deltas from rendered binary evidence. It uses registered
+maker accounts for finite fixture quotes, without an extra unmounted gateway
+or a runner change. This is a mechanical positive path, **not** a development
+world, natural opportunity rate, net-profit estimate or convergence result.
+Focused tests, vet, targeted race checks, the skill validator and a clean
+`GOMAXPROCS=7 make test` passed at `50dcbcf`. A dirty-tree invocation passed
+all Go packages but failed the clean-worktree archive parity fixture as
+designed; it is not counted as a clean gate.
 
 No ME-005 final preregistration, two final independent reviews, new development
 seed, OFF/ON comparison, result, freeze or holdout claim exists. ME-001/002/003
