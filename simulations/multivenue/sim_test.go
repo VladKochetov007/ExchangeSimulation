@@ -1344,6 +1344,12 @@ func TestTwoVenueRouterInjectedOpportunityProducesAuditableBinaryEvidence(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
+	movements, err := renderedRun.AuditCrossVenueRouterMovements(venues, routerClients, fills, analysis.CrossVenueAccountConvention{
+		Symbol: "ABC/USD", BaseAsset: "ABC", QuoteAsset: "USD", BasePrecision: mvBasePrecision, TakerFeeBps: sim.Config.TakerFeeBps,
+	})
+	if err != nil || len(movements) != 2 || movements["north"].Settlements != 1 || movements["south"].Settlements != 1 {
+		t.Fatalf("injected router movement audit = %#v, %v", movements, err)
+	}
 	publicEvents, err := renderedRun.CollectCrossVenuePublicEvents(venues, "ABC/USD")
 	if err != nil {
 		t.Fatal(err)
@@ -1352,6 +1358,10 @@ func TestTwoVenueRouterInjectedOpportunityProducesAuditableBinaryEvidence(t *tes
 	if err != nil || len(timeline.Evaluations) != len(evaluations) || len(timeline.Episodes) != 1 ||
 		timeline.Episodes[0].Submissions != 1 || timeline.Episodes[0].AlignedEvaluations == 0 || !timeline.Episodes[0].Episode.Censored {
 		t.Fatalf("injected public/local opportunity timeline = %#v, %v", timeline, err)
+	}
+	funding, err := analysis.AssessCrossVenueFirstAttemptFunding(evaluations, timeline, movements, venues, cfg.CrossVenueArbLotQty, mvBasePrecision, sim.Config.TakerFeeBps)
+	if err != nil || funding == nil || !funding.SufficientAtDecision || funding.BuyVenue != "north" || funding.SellVenue != "south" {
+		t.Fatalf("injected route first-decision funding = %#v, %v", funding, err)
 	}
 	t.Logf("injected public/local opportunity timeline: episodes=%#v evaluations=%d", timeline.Episodes, len(timeline.Evaluations))
 	if _, err := analysis.MatchCrossVenueEvaluationSources(evaluations, publicEvents, "ABC/USD", cfg.CrossVenueArbLotQty, mvBasePrecision, sim.Config.TakerFeeBps); err != nil {
