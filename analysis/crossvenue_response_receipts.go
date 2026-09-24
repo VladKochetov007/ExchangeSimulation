@@ -129,7 +129,7 @@ func validateCrossVenueResponseReceipt(record CrossVenueResponseReceiptRecord, v
 			return fmt.Errorf("rejection lacks request identity")
 		}
 	case "FILL":
-		if row.OrderID == 0 || row.TradeID == 0 || row.Symbol == "" || row.Qty <= 0 || row.ExchangeAt < 0 || row.ExchangeAt > row.ReceivedAt || row.Side != etypes.Buy.String() && row.Side != etypes.Sell.String() {
+		if row.OrderID == 0 || row.Symbol == "" || row.Qty <= 0 || row.ExchangeAt < 0 || row.ExchangeAt > row.ReceivedAt || row.Side != etypes.Buy.String() && row.Side != etypes.Sell.String() {
 			return fmt.Errorf("fill has invalid exchange or execution identity")
 		}
 	case "ORDER_CANCELLED":

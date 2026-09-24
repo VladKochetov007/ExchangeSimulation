@@ -26,6 +26,11 @@ func TestCrossVenueResponseReceiptRejectsIdentityAndTimingMutations(t *testing.T
 	if err := validateCrossVenueResponseReceipt(valid, venues, 1); err != nil {
 		t.Fatal(err)
 	}
+	firstTrade := valid
+	firstTrade.Payload.TradeID = 0 // The exchange starts each book's trade sequence at zero.
+	if err := validateCrossVenueResponseReceipt(firstTrade, venues, 1); err != nil {
+		t.Fatalf("first trade rejected: %v", err)
+	}
 	for _, test := range []struct {
 		name   string
 		mutate func(*CrossVenueResponseReceiptRecord)
@@ -33,7 +38,6 @@ func TestCrossVenueResponseReceiptRejectsIdentityAndTimingMutations(t *testing.T
 		{"wrong-client", func(row *CrossVenueResponseReceiptRecord) { row.Payload.ClientID++ }},
 		{"wrong-venue", func(row *CrossVenueResponseReceiptRecord) { row.Payload.VenueID = "south" }},
 		{"receipt-before-match", func(row *CrossVenueResponseReceiptRecord) { row.Payload.ExchangeAt = 21 }},
-		{"missing-trade", func(row *CrossVenueResponseReceiptRecord) { row.Payload.TradeID = 0 }},
 		{"invalid-side", func(row *CrossVenueResponseReceiptRecord) { row.Payload.Side = "OTHER" }},
 		{"invalid-quantity", func(row *CrossVenueResponseReceiptRecord) { row.Payload.Qty = 0 }},
 		{"unknown-kind", func(row *CrossVenueResponseReceiptRecord) { row.Payload.Kind = "MIRACLE_FILL" }},
