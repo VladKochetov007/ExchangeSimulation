@@ -57,7 +57,7 @@ func ValueCrossVenueTerminalState(report Report, replay *CrossVenuePublicReplay,
 		delta, hasDelta := deltas[venue]
 		book, hasBook := replay.Terminal[venue]
 		transition, hasTransition := latest[venue]
-		if clientID == 0 || !hasDelta || delta.VenueID != venue || delta.ClientID != clientID || !hasBook || !hasTransition {
+		if clientID == 0 || !hasDelta || delta.VenueID != venue || delta.ClientID != clientID || !hasBook || delta.BaseDelta != 0 && !hasTransition {
 			return result, fmt.Errorf("cross-venue terminal: missing or mismatched %s evidence", venue)
 		}
 		account, err := oneCrossVenueAccount(report.TerminalAccounts, venue, clientID, "terminal_post_mark")
@@ -69,7 +69,7 @@ func ValueCrossVenueTerminalState(report Report, replay *CrossVenuePublicReplay,
 		}
 		age := convention.HorizonNano - transition.SimTS
 		closeout := VenueLocalCloseout{Reason: "STALE_TERMINAL_BOOK"}
-		if age <= convention.MaxBookEvidenceAgeNanos {
+		if delta.BaseDelta == 0 || age <= convention.MaxBookEvidenceAgeNanos {
 			closeout = ValueVenueLocalInventory(VenueLocalCloseoutInput{
 				BaseDelta: delta.BaseDelta, QuoteDelta: delta.QuoteDelta,
 				BasePrecision: convention.BasePrecision, TakerFeeBps: convention.TakerFeeBps,

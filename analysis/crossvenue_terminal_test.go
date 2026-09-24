@@ -44,6 +44,30 @@ func TestCrossVenueTerminalValuationBindsBooksAndAccountsToHorizon(t *testing.T)
 	}
 }
 
+func TestCrossVenueTerminalZeroBaseChangeDoesNotRequireFreshPrice(t *testing.T) {
+	report, replay, deltas, convention := crossVenueTerminalFixture(t)
+	for index := range report.TerminalAccounts {
+		report.TerminalAccounts[index].Account.SpotBalances = append([]Balance(nil), report.InitialAccounts[index].Account.SpotBalances...)
+	}
+	for _, venue := range convention.Venues {
+		row := deltas[venue]
+		row.BaseDelta = 0
+		row.QuoteDelta = 0
+		deltas[venue] = row
+	}
+	convention.MaxBookEvidenceAgeNanos = 1
+	result, err := ValueCrossVenueTerminalState(report, replay, deltas, convention)
+	if err != nil || !result.Available || result.Value != 0 {
+		t.Fatalf("zero-base terminal value = %#v, %v", result, err)
+	}
+	replay.Transitions = nil
+	replay.Terminal = map[string]CrossVenueDisplayedBook{"north": {}, "south": {}}
+	result, err = ValueCrossVenueTerminalState(report, replay, deltas, convention)
+	if err != nil || !result.Available || result.Value != 0 {
+		t.Fatalf("zero-base terminal value without price update = %#v, %v", result, err)
+	}
+}
+
 func TestCrossVenueTerminalValuationRejectsMismatchedState(t *testing.T) {
 	for _, test := range []struct {
 		name   string
