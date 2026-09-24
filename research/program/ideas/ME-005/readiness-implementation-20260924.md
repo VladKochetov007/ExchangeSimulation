@@ -1,7 +1,7 @@
 # ME-005 implementation checkpoint — development readiness, not a result
 
 Source baseline: merged `main` `eb921aa29b26b43cd39e1613dabc44ec60dbf5c9`.
-Latest clean code gate: `0620b86` on `research/market-ecology-me005-20260924`.
+Latest clean code gate: `ce96909` on `research/market-ecology-me005-20260924`.
 The authoritative [readiness assessment](readiness-20260924.md) and
 [prospective preparation contract](prepare-contract-20260924.md) still define
 four acceptance fixes. This note records implementation progress without
@@ -12,7 +12,7 @@ registering a protocol or scoring a market world. ME-005 economic worlds run:
 |---|---|---|
 | 1. Two-venue wiring | Exactly two distinct venues and finite, separate router accounts; historical three-venue default retained. Two-venue router configs now require explicit `auto_borrow_spot=false`. | Pin the effective two-venue config, initial balances, lot, attempt cap and deployment in a preregistration; independently review this successor population choice. |
 | 2. Opportunity/execution reconstruction | Optional canonical callback evidence including no-action and consumed source identity; public-book replay in global frame order; receipt-prefix and actor-local book checks; actor-inbox response receipts; terminal count binding; first trade ID zero, Trade/OrderFill/response joins; targeted corruption fixtures. | Complete request/decision-vector to admission/rejection/cancellation and FOK terminal joins; prove the public→delivered→evaluated→feasible→attempted opportunity denominator and horizon censoring. Reconcile complete evidence under the registered config and verified run manifest. |
-| 3. Costed closeout | Independent venue-local bid/ask depth walk with quote taker fees and insufficient-depth failure; initial/terminal venue-account deltas independently checked against settled fills, fee rounding and zero debt/locked inventory. A static fixture gives +48 matched cashflow but −13 local terminal liquidation value. | Bind both displayed books and both account snapshots to the same registered terminal state; define and test quote freshness, pending-request status and unavailable-closeout classification. Verify complete movement/conservation evidence and absence of financing/transfer flows over the interval. |
+| 3. Costed closeout | Independent venue-local bid/ask depth walk with quote taker fees and insufficient-depth failure; initial/terminal venue-account deltas independently checked against settled fills, fee rounding and zero debt/locked inventory. The terminal helper requires both account timestamps at the declared horizon and bounds the age of each replayed book. A static fixture gives +48 matched cashflow but −13 local terminal liquidation value. | Pin the book-evidence recency bound prospectively; prove replay and accounts derive from one verified completed run; join pending-request/FOK terminal status. Verify complete movement/conservation evidence and absence of financing/transfer flows over the interval. |
 | 4. Dislocation measurement | Two-venue, event-ordered, one-lot executable edge and half-open episode functions with same-time tests. | Build and test the registered paired OFF/ON world-level estimator, timing/attribution rules, missing-run handling and no-op controls. Keep trade-attributed convergence `NOT_IDENTIFIED` if the retained evidence cannot distinguish it from background movement. |
 
 The positive matched cashflow in the static fixture is **not** profit after
@@ -73,6 +73,20 @@ rate-limit and overload counts, but that observation does not establish the
 activation status of every historical run. No historical trajectory has been
 rewritten or rerun on account of this fix. The final ME-005 reviews remain
 unperformed.
+
+## Terminal-state valuation boundary
+
+Commit `ce96909` adds a separate terminal-state valuation check with mutation
+tests for early account capture, future/missing book evidence, mismatched
+client identity, aged book evidence and insufficient visible depth. Focused
+analysis race/vet and a clean full `GOMAXPROCS=7 make test` passed. The
+`MaxBookEvidenceAgeNanos` parameter is an evidence-recency cutoff, **not** an
+estimate of an individual order's quote lifetime. A quiet but live book can
+have an old last transition; the protocol must choose this cutoff before
+outcomes, and an over-age state yields an unavailable value rather than an
+invented midpoint. The helper still requires an upstream verified binary
+stream, fill/account reconciliation and proof that terminal FOK orders are
+settled. It does not by itself complete fix 3 or license an economic run.
 
 No ME-005 final preregistration, two final independent reviews, new development
 seed, OFF/ON comparison, result, freeze or holdout claim exists. ME-001/002/003
