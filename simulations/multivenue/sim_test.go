@@ -1348,6 +1348,12 @@ func TestTwoVenueRouterInjectedOpportunityProducesAuditableBinaryEvidence(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
+	timeline, err := analysis.ReconstructCrossVenueOpportunityTimeline(evaluations, publicEvents, dir, venues, "ABC/USD", sim.terminalNano, cfg.CrossVenueArbLotQty, mvBasePrecision, sim.Config.TakerFeeBps)
+	if err != nil || len(timeline.Evaluations) != len(evaluations) || len(timeline.Episodes) != 1 ||
+		timeline.Episodes[0].Submissions != 1 || timeline.Episodes[0].AlignedEvaluations == 0 || !timeline.Episodes[0].Episode.Censored {
+		t.Fatalf("injected public/local opportunity timeline = %#v, %v", timeline, err)
+	}
+	t.Logf("injected public/local opportunity timeline: episodes=%#v evaluations=%d", timeline.Episodes, len(timeline.Evaluations))
 	if _, err := analysis.MatchCrossVenueEvaluationSources(evaluations, publicEvents, "ABC/USD", cfg.CrossVenueArbLotQty, mvBasePrecision, sim.Config.TakerFeeBps); err != nil {
 		t.Fatal(err)
 	}
