@@ -1264,6 +1264,7 @@ func TestTwoVenueRouterInjectedOpportunityProducesAuditableBinaryEvidence(t *tes
 	if report.SubmittedGroups != 1 {
 		t.Fatalf("injected route did not produce one attempt: %#v", report)
 	}
+	venueLedgers := sim.CaptureVenueLedgers()
 	if err := sim.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -1275,6 +1276,7 @@ func TestTwoVenueRouterInjectedOpportunityProducesAuditableBinaryEvidence(t *tes
 		"router_reports":    []CrossVenueArbReport{report},
 		"initial_accounts":  sim.InitialAccounts,
 		"terminal_accounts": sim.TerminalAccounts,
+		"venue_ledgers":     venueLedgers,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -1336,10 +1338,60 @@ func TestTwoVenueRouterInjectedOpportunityProducesAuditableBinaryEvidence(t *tes
 	if _, err := analysis.ReconcileCrossVenuePlacementReceipts(placements, receipts, fills, sim.terminalNano, cfg.CrossVenueArbLotQty); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := analysis.ReconcileCrossVenueRouterAccounts(renderedRun.Report, venues, routerClients, fills, analysis.CrossVenueAccountConvention{
+	accountDeltas, err := analysis.ReconcileCrossVenueRouterAccounts(renderedRun.Report, venues, routerClients, fills, analysis.CrossVenueAccountConvention{
 		Symbol: "ABC/USD", BaseAsset: "ABC", QuoteAsset: "USD", BasePrecision: mvBasePrecision, TakerFeeBps: sim.Config.TakerFeeBps,
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatal(err)
+	}
+	publicEvents, err := renderedRun.CollectCrossVenuePublicEvents(venues, "ABC/USD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := analysis.MatchCrossVenueEvaluationSources(evaluations, publicEvents, "ABC/USD", cfg.CrossVenueArbLotQty, mvBasePrecision, sim.Config.TakerFeeBps); err != nil {
+		t.Fatal(err)
+	}
+	publicReplay, err := analysis.ReplayCrossVenuePublicEvents(publicEvents, analysis.CrossVenuePublicReplayOptions{
+		Venues: venues, Symbol: "ABC/USD", InitiallyEmpty: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	terminalValue, err := analysis.ValueCrossVenueTerminalState(renderedRun.Report, publicReplay, accountDeltas, analysis.CrossVenueTerminalConvention{
+		Venues: venues, Clients: routerClients, HorizonNano: sim.terminalNano,
+		MaxBookEvidenceAgeNanos: int64(10 * time.Second), BasePrecision: mvBasePrecision, TakerFeeBps: sim.Config.TakerFeeBps,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !terminalValue.Available || terminalValue.Value != -44_000_000 {
+		t.Fatalf("injected route venue-local hypothetical exit = %#v, want available -44_000_000 quote atoms", terminalValue)
+	}
+	conservation, err := renderedRun.MeasureConservation(analysis.ConservationOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if conservation.Deltas.Checked == 0 || conservation.Deltas.ChainChecked == 0 ||
+		conservation.Deltas.Mismatched != 0 || conservation.Deltas.ChainBroken != 0 ||
+		conservation.Deltas.DecodeFailures != 0 || conservation.Deltas.MalformedVenueRecords != 0 ||
+		conservation.Deltas.MalformedFeeRecords != 0 || conservation.Deltas.VenueBalanceMismatches != 0 ||
+		conservation.Deltas.FeeRevenueMismatches != 0 || conservation.Deltas.TradingFeeMismatches != 0 ||
+		conservation.Deltas.VenueChainMismatches != 0 || conservation.Deltas.VenueSequenceMismatches != 0 ||
+		conservation.Deltas.ArithmeticFailures != 0 {
+		t.Fatalf("injected route movement stream did not reconcile: %#v", conservation.Deltas)
+	}
+	if len(conservation.Identities) == 0 || len(conservation.VenueIdentities) == 0 {
+		t.Fatal("injected route omitted conservation identities")
+	}
+	for _, identity := range conservation.Identities {
+		if identity.Residual != 0 {
+			t.Fatalf("injected route asset residual: %#v", identity)
+		}
+	}
+	for _, identity := range conservation.VenueIdentities {
+		if identity.Residual != 0 {
+			t.Fatalf("injected route venue residual: %#v", identity)
+		}
 	}
 }
 
