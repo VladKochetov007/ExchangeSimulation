@@ -138,6 +138,9 @@ func AnalyzeCompletedWorld(rawDir, renderedDir string, contract Contract) (Resul
 	if err != nil {
 		return Result{}, err
 	}
+	if err := validateConservation(conservation); err != nil {
+		return Result{}, err
+	}
 	publicEvents, err := run.CollectCrossVenuePublicEvents(contract.Venues, contract.Symbol)
 	if err != nil {
 		return Result{}, err
