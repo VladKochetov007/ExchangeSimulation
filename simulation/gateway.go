@@ -52,21 +52,22 @@ type DelayedGateway struct {
 	// phaseMode replaces scheduler-mode forwarding goroutines with runner
 	// pumps. It is enabled before actors start, so latency arrival ordering is
 	// model-defined rather than chosen by host goroutine scheduling.
-	phaseMode     atomic.Bool
-	phaseStopCh   chan struct{}
-	phaseWG       sync.WaitGroup
-	phaseLifeMu   sync.Mutex
-	phaseMu       sync.Mutex
-	phaseResp     []exchange.Response
-	phaseMD       []phaseMarketData
-	latencyStats  *LatencyStats
-	latencyLabel  string
-	receiptSink   *MarketDataReceiptRecorder
-	receiptSource string
-	receiptLink   string
-	receiptLinkID uint32
-	receiptMu     sync.Mutex
-	frontier      MarketDataFrontier
+	phaseMode               atomic.Bool
+	phaseStopCh             chan struct{}
+	phaseWG                 sync.WaitGroup
+	phaseLifeMu             sync.Mutex
+	phaseMu                 sync.Mutex
+	phaseResp               []exchange.Response
+	phaseMD                 []phaseMarketData
+	latencyStats            *LatencyStats
+	latencyLabel            string
+	receiptSink             *MarketDataReceiptRecorder
+	receiptSource           string
+	receiptLink             string
+	receiptLinkID           uint32
+	receiptMu               sync.Mutex
+	frontier                MarketDataFrontier
+	responseReceiptObserver func(exchange.Response, int64)
 }
 
 // Idle reports whether this wrapper and the gateway beneath it have nothing
@@ -121,6 +122,17 @@ func (d *DelayedGateway) SetMarketDataReceiptRecorder(sink *MarketDataReceiptRec
 	if sink != nil {
 		d.receiptLinkID = sink.RegisterLink(sourceVenue, link, role)
 	}
+}
+
+// SetDeterministicResponseReceiptObserver observes successful actor-inbox
+// delivery, not exchange execution or later actor callback processing.
+// Configure it before runner traffic starts.
+func (d *DelayedGateway) SetDeterministicResponseReceiptObserver(observer func(exchange.Response, int64)) error {
+	if observer != nil && !d.deterministicPhasesEnabled() {
+		return fmt.Errorf("simulation: response receipt observer requires deterministic phases")
+	}
+	d.responseReceiptObserver = observer
+	return nil
 }
 
 // MarketDataFrontier returns the exact receipt prefix currently available at
@@ -521,13 +533,18 @@ func (d *DelayedGateway) DrainDeterministicPhaseEgress() bool {
 	d.phaseMu.Lock()
 	processed := false
 	received := make([]scheduledMarketDataReceipt, 0)
+	var responses []exchange.Response
 	for len(d.phaseResp) > 0 {
 		select {
 		case d.responseCh <- d.phaseResp[0]:
+			if d.responseReceiptObserver != nil {
+				responses = append(responses, d.phaseResp[0])
+			}
 			d.phaseResp = d.phaseResp[1:]
 			processed = true
 		default:
 			d.phaseMu.Unlock()
+			d.recordResponseReceipts(responses)
 			return processed
 		}
 	}
@@ -539,6 +556,7 @@ func (d *DelayedGateway) DrainDeterministicPhaseEgress() bool {
 			processed = true
 		default:
 			d.phaseMu.Unlock()
+			d.recordResponseReceipts(responses)
 			for _, ticket := range received {
 				d.recordMarketDataReceipt(ticket)
 			}
@@ -546,10 +564,21 @@ func (d *DelayedGateway) DrainDeterministicPhaseEgress() bool {
 		}
 	}
 	d.phaseMu.Unlock()
+	d.recordResponseReceipts(responses)
 	for _, ticket := range received {
 		d.recordMarketDataReceipt(ticket)
 	}
 	return processed
+}
+
+func (d *DelayedGateway) recordResponseReceipts(responses []exchange.Response) {
+	if d.responseReceiptObserver == nil || len(responses) == 0 {
+		return
+	}
+	receivedAt := d.clock.NowUnixNano()
+	for _, response := range responses {
+		d.responseReceiptObserver(response, receivedAt)
+	}
 }
 
 func (d *DelayedGateway) Responses() <-chan exchange.Response          { return d.responseCh }

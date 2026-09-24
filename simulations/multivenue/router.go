@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"sync/atomic"
 
 	"exchange_sim/actor"
 	"exchange_sim/exchange"
@@ -101,6 +102,7 @@ type CrossVenueArb struct {
 	lastAttemptGeneration uint64
 	inFlight              *crossVenueArbGroup
 	report                CrossVenueArbReport
+	responseReceipts      atomic.Uint64
 }
 
 // CrossVenueArbReport distinguishes observed quoted opportunities, submitted
@@ -110,6 +112,7 @@ type CrossVenueArbReport struct {
 	Tier              float64 `json:"tier"`
 	RouterID          uint64  `json:"router_id"`
 	QuoteEvaluations  uint64  `json:"quote_evaluations,omitempty"`
+	ResponseReceipts  uint64  `json:"response_receipts,omitempty"`
 	ExecutableSignals int     `json:"executable_signals"`
 	SubmittedGroups   int     `json:"submitted_groups"`
 	CompletedGroups   int     `json:"completed_groups"`
@@ -256,6 +259,7 @@ func (r *CrossVenueArb) Report() CrossVenueArbReport {
 	report := r.report
 	if r.cfg.EvaluationObserver != nil {
 		report.QuoteEvaluations = r.quoteGeneration
+		report.ResponseReceipts = r.responseReceipts.Load()
 	}
 	report.Groups = make([]CrossVenueGroupReport, 0, len(r.groups))
 	var residual int64

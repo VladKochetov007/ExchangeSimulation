@@ -6,6 +6,51 @@ import (
 	"exchange_sim/exchange"
 )
 
+func TestDeterministicResponseReceiptObserverOnlyRecordsDeliveredMessages(t *testing.T) {
+	gateway := blockedGateway(t)
+	var received []uint64
+	if err := gateway.SetDeterministicResponseReceiptObserver(func(response exchange.Response, receivedAt int64) {
+		if receivedAt != 0 {
+			t.Errorf("receipt time = %d, want simulated time zero", receivedAt)
+		}
+		received = append(received, response.RequestID)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	gateway.responseCh <- exchange.Response{RequestID: 1}
+	gateway.phaseResp = append(gateway.phaseResp, exchange.Response{RequestID: 2}, exchange.Response{RequestID: 3})
+	if gateway.DrainDeterministicPhaseEgress() {
+		t.Fatal("full actor inbox was reported as successful delivery")
+	}
+	if len(received) != 0 {
+		t.Fatalf("recorded undelivered response: %v", received)
+	}
+	<-gateway.responseCh
+	if !gateway.DrainDeterministicPhaseEgress() {
+		t.Fatal("first response was not delivered")
+	}
+	if len(received) != 1 || received[0] != 2 {
+		t.Fatalf("first receipt = %v", received)
+	}
+	<-gateway.responseCh
+	if !gateway.DrainDeterministicPhaseEgress() {
+		t.Fatal("second response was not delivered")
+	}
+	if len(received) != 2 || received[1] != 3 {
+		t.Fatalf("receipts = %v", received)
+	}
+	if gateway.DrainDeterministicPhaseEgress() || len(received) != 2 {
+		t.Fatalf("duplicate response receipt: %v", received)
+	}
+}
+
+func TestResponseReceiptObserverRejectsNondeterministicGateway(t *testing.T) {
+	gateway := NewDelayedGateway(nil, nil, nil, nil)
+	if err := gateway.SetDeterministicResponseReceiptObserver(func(exchange.Response, int64) {}); err == nil {
+		t.Fatal("accepted observer without a deterministic clock")
+	}
+}
+
 func blockedGateway(t *testing.T) *DelayedGateway {
 	t.Helper()
 	gateway := &DelayedGateway{

@@ -3891,6 +3891,24 @@ func (s *Sim) addCrossVenueRouters(clock *simulation.SimulatedClock, scheduler *
 					}
 					venue.makerStateLog.LogEvidenceOnly(clock.NowUnixNano(), evaluation.TriggerClientID, "cross_venue_arb_evaluation", evaluation)
 				}
+				for _, leg := range router.legs {
+					gateway, ok := leg.Gateway().(*simulation.DelayedGateway)
+					if !ok {
+						return fmt.Errorf("multivenue: cross-venue router %s response receipt lacks delayed gateway", leg.venueID)
+					}
+					venue := s.venueByID(leg.venueID)
+					if venue == nil {
+						return fmt.Errorf("multivenue: cross-venue router response receipt has unknown venue %s", leg.venueID)
+					}
+					routerID, actorID, clientID, venueID := router.report.RouterID, leg.ID(), leg.clientID, leg.venueID
+					if err := gateway.SetDeterministicResponseReceiptObserver(func(response exchange.Response, receivedAt int64) {
+						receipt := newCrossVenueArbResponseReceipt(routerID, actorID, clientID, venueID, response, receivedAt)
+						venue.makerStateLog.LogEvidenceOnly(receivedAt, clientID, "cross_venue_arb_response_receipt", receipt)
+						router.responseReceipts.Add(1)
+					}); err != nil {
+						return fmt.Errorf("multivenue: cross-venue router response receipt: %w", err)
+					}
+				}
 			}
 			for _, leg := range router.legs {
 				frontier := leg.frontier()

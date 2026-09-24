@@ -1043,6 +1043,7 @@ func TestTwoVenueRouterEvaluationsPersistInCanonicalBinaryEvidence(t *testing.T)
 		t.Fatal(err)
 	}
 	expectedEvaluations := sim.Routers[0].Report().QuoteEvaluations
+	expectedResponses := sim.Routers[0].Report().ResponseReceipts
 	if err := sim.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -1051,6 +1052,7 @@ func TestTwoVenueRouterEvaluationsPersistInCanonicalBinaryEvidence(t *testing.T)
 		t.Fatal(err)
 	}
 	count := 0
+	responseCount := 0
 	for _, venueID := range cfg.VenueIDs {
 		raw, err := os.ReadFile(filepath.Join(rendered, "venues", venueID, "general.jsonl"))
 		if err != nil {
@@ -1060,24 +1062,42 @@ func TestTwoVenueRouterEvaluationsPersistInCanonicalBinaryEvidence(t *testing.T)
 			var event struct {
 				Event string `json:"event"`
 				Data  struct {
-					GlobalSequence uint64                  `json:"global_sequence"`
-					Payload        CrossVenueArbEvaluation `json:"payload"`
+					GlobalSequence uint64          `json:"global_sequence"`
+					Payload        json.RawMessage `json:"payload"`
 				} `json:"data"`
 			}
 			if err := json.Unmarshal(line, &event); err != nil {
 				t.Fatal(err)
 			}
+			if event.Event == "cross_venue_arb_response_receipt" {
+				var receipt CrossVenueArbResponseReceipt
+				if err := json.Unmarshal(event.Data.Payload, &receipt); err != nil {
+					t.Fatal(err)
+				}
+				if event.Data.GlobalSequence == 0 || receipt.RouterID != sim.Routers[0].Report().RouterID || receipt.VenueID != venueID || receipt.Kind == "" {
+					t.Fatalf("invalid router response receipt: %#v", receipt)
+				}
+				responseCount++
+				continue
+			}
 			if event.Event != "cross_venue_arb_evaluation" {
 				continue
 			}
+			var evaluation CrossVenueArbEvaluation
+			if err := json.Unmarshal(event.Data.Payload, &evaluation); err != nil {
+				t.Fatal(err)
+			}
 			count++
-			if event.Data.GlobalSequence == 0 || event.Data.Payload.Generation == 0 || len(event.Data.Payload.Books) != 2 || len(event.Data.Payload.Feeds) != 2 {
+			if event.Data.GlobalSequence == 0 || evaluation.Generation == 0 || len(evaluation.Books) != 2 || len(evaluation.Feeds) != 2 {
 				t.Fatalf("incomplete canonical router evaluation: %#v", event)
 			}
 		}
 	}
 	if count == 0 || uint64(count) != expectedEvaluations {
 		t.Fatalf("router quote evaluations persisted = %d, want report counter %d", count, expectedEvaluations)
+	}
+	if responseCount == 0 || uint64(responseCount) != expectedResponses {
+		t.Fatalf("router response receipts persisted = %d, want report counter %d", responseCount, expectedResponses)
 	}
 	if err := os.WriteFile(filepath.Join(rendered, "greeks.json"), []byte("{}\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -1132,6 +1152,7 @@ func TestTwoVenueRouterEvaluationEvidenceDoesNotChangeEconomicOutcome(t *testing
 		}
 		result := normalizedCrossVenueReport(sim.Routers[0].Report())
 		result.QuoteEvaluations = 0 // evidence-only count is absent in the control
+		result.ResponseReceipts = 0
 		ledgers := sim.CaptureVenueLedgers()
 		if err := sim.Close(); err != nil {
 			t.Fatal(err)
