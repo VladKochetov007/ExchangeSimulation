@@ -1,8 +1,8 @@
-# ME-005 development protocol r1a — two-venue first-attempt screen
+# ME-005 development protocol r1b — two-venue first-attempt screen
 
 Status: **PREREGISTERED, CONDITIONAL**. This document was written before any
-ME-005 economic outcome. Revision r1a supersedes the source identity and
-clarifies the existing policy/evidence interpretation after a pre-run review;
+ME-005 economic outcome. Revision r1b supersedes the source identity and
+clarifies the existing policy/evidence interpretation after two pre-run reviews;
 the four immutable config files retain their `ME-005-r1` experiment label and
 their exact raw/effective hashes. No economic cell was run under r1. Execution
 is permitted by the owner's conditional
@@ -41,8 +41,8 @@ the mechanism's opportunity set is absent in this small screen, not falsified.
 ## Candidate, policy, ecology and exact cells
 
 Executable/analyzer source commit C is
-`0fd30445bd15ae0aa45407a59b39ee494ef5f6ae` (tree
-`0e063e46b87062e3c8e2e694067fbe83897e621b`), to be built cleanly with
+`442da046f8cc9a6b78ce3900ec13badd3fd2b74a` (tree
+`eda8e6d56187c624ce6ce06800371741f91021ee`), to be built cleanly with
 Go 1.27.0 linux/amd64. Skill directory tree at C is
 `60b91e73f1000a285e003bed122648636a737b2d`. This later documentation
 commit governs the protocol but does not change C. Build the simulator and
@@ -109,7 +109,10 @@ For both arms, independently replay public book snapshots/deltas in global
 event-frame order. A public opportunity is a half-open interval with positive
 one-lot bid/ask/depth/fee edge in either direction; same-time transitions and
 horizon censoring remain explicit. The router policy additionally requires
-both sides of each local book. For ON, audit received local publication
+both sides of each local book; only the traded ask and bid must have positive
+prices under its spot cashflow rule. Report the broader leg-side executable
+episode count and duration as a separate diagnostic, never as the primary
+two-sided policy denominator. For ON, audit received local publication
 prefixes and each actual evaluation, including no-action; assess selected
 quote-time funding separately; join submitted
 vectors, gateway placement, exchange-time FOK fill/cancellation, actor inbox

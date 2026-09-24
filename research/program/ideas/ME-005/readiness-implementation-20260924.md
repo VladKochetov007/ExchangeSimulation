@@ -1,7 +1,7 @@
 # ME-005 implementation checkpoint — development readiness, not a result
 
-Current prospective source successor: `0fd30445bd15ae0aa45407a59b39ee494ef5f6ae`.
-The [r1a protocol](protocol.md) and four analysis contracts now pin this
+Current prospective source successor: `442da046f8cc9a6b78ce3900ec13badd3fd2b74a`.
+The [r1b protocol](protocol.md) and four analysis contracts now pin this
 source, leaving the original r1 configs/hashes unchanged. An initial bounded
 Reviewer A pass on the predecessor protocol returned required changes, not
 acceptance: nonzero response actor IDs needed to bind to the submitted leg,
@@ -12,9 +12,16 @@ tests. Its ordering regression follows `BaseActor`'s actual early-fill buffer:
 a pre-acceptance fill is replayed after acceptance, while a missing acceptance
 leaves the actor outcome unobserved. The protocol now classifies funding as an
 independent quote-time analysis following submission, not router abstention.
-No final Reviewer A acceptance or Reviewer B verdict has been issued for r1a;
-no ME-005 economic world has run. The candidate's full clean test gate must
-also be recorded after this documentation amendment.
+Reviewer A accepted the intermediate `0fd3044`/r1a package for accounting,
+execution and local closeout, explicitly leaving statistical review open.
+Reviewer B returned `ACCEPT_WITH_REQUIRED_CHANGES` on that intermediate
+package: the policy estimator wrongly required positive *unused* quote sides,
+and the broader leg-side opportunity diagnostic was not emitted in the world
+summary. The `442da04` successor aligns the estimator with the router and
+emits broader episode count/duration separately; focused fixtures include a
+direct router/estimator comparison. Neither intermediate review is acceptance
+of r1b. Two final reviews of `442da04`/r1b and the clean full gate remain.
+No ME-005 economic world has run.
 
 Source baseline: merged `main` `eb921aa29b26b43cd39e1613dabc44ec60dbf5c9`.
 The table below records the earlier clean code gate `006afb1` on
