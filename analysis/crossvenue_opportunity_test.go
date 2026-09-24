@@ -86,3 +86,25 @@ func TestCrossVenueOneLotEdgeIsVenueLabelInvariant(t *testing.T) {
 		t.Fatalf("venue swap changed opportunity: forward %#v, reversed %#v", forward, reversed)
 	}
 }
+
+func TestCrossVenueEventTimeEpisodeIsNotLostToPeriodicSnapshotAliasing(t *testing.T) {
+	venues := [2]string{"north", "south"}
+	north := CrossVenueTouch{Bid: 99, BidQty: 1, HasBid: true, Ask: 100, AskQty: 1, HasAsk: true}
+	southFlat := CrossVenueTouch{Bid: 100, BidQty: 1, HasBid: true, Ask: 101, AskQty: 1, HasAsk: true}
+	southPositive := CrossVenueTouch{Bid: 105, BidQty: 1, HasBid: true, Ask: 106, AskQty: 1, HasAsk: true}
+	transitions := []CrossVenuePublicTransition{
+		{SimTS: 0, GlobalSequence: 1, VenueID: "north", Touch: north},
+		{SimTS: 0, GlobalSequence: 2, VenueID: "south", Touch: southFlat},
+		{SimTS: 5, GlobalSequence: 3, VenueID: "south", Touch: southPositive},
+		{SimTS: 10, GlobalSequence: 4, VenueID: "south", Touch: southFlat},
+	}
+	episodes, err := ReconstructCrossVenueEdgeEpisodes(venues, transitions, 20, 1, 1, 0)
+	if err != nil || len(episodes) != 1 || episodes[0].StartTS != 5 || episodes[0].EndTS != 10 {
+		t.Fatalf("event-time edge was lost: %#v, %v", episodes, err)
+	}
+	for _, sampled := range [][2]CrossVenueTouch{{north, southFlat}, {north, southFlat}} {
+		if edge := EvaluateCrossVenueOneLotEdge(venues, sampled, 1, 1, 0, false); edge.Status == "POSITIVE_EDGE" {
+			t.Fatalf("periodic endpoint unexpectedly observed the intervening edge: %#v", edge)
+		}
+	}
+}

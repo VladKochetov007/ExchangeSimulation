@@ -89,3 +89,17 @@ func TestCrossVenuePlacementsRejectCorruptedOutcome(t *testing.T) {
 		})
 	}
 }
+
+func TestCrossVenuePlacementsRejectUnexpectedRouterCancellation(t *testing.T) {
+	for _, eventName := range []string{"OrderCancelled", "OrderCancelRejected"} {
+		t.Run(eventName, func(t *testing.T) {
+			row := crossVenuePlacementRow(3, 11, 21, "OrderAccepted", "FOK")
+			cancel := crossVenuePlacementRow(4, 11, 21, "OrderAccepted", "FOK")
+			cancel["event"] = eventName
+			run := crossVenuePlacementFixture(t, row, cancel)
+			if _, err := run.CollectCrossVenuePlacements([2]string{"north", "south"}, map[string]uint64{"north": 7, "south": 8}, "ABC/USD", 5); err == nil {
+				t.Fatal("market-FOK router cancellation was silently omitted")
+			}
+		})
+	}
+}

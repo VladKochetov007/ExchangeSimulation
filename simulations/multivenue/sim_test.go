@@ -1172,12 +1172,17 @@ func TestTwoVenueRouterEvaluationsPersistInCanonicalBinaryEvidence(t *testing.T)
 	if err != nil {
 		t.Fatalf("audited router gateway decisions: %v", err)
 	}
-	if _, err := analysis.BindCrossVenueSubmissionOutcomes(evaluations, decisions, placements, "ABC/USD", cfg.CrossVenueArbLotQty, cfg.CrossVenueArbMaxAttempts); err != nil {
+	groups, err := analysis.BindCrossVenueSubmissionOutcomes(evaluations, decisions, placements, "ABC/USD", cfg.CrossVenueArbLotQty, cfg.CrossVenueArbMaxAttempts)
+	if err != nil {
 		t.Fatalf("router consumed-feed submission/venue outcome join: %v", err)
 	}
 	t.Logf("synthetic two-venue router groups=%d placements=%d fills=%d", sim.Routers[0].Report().SubmittedGroups, len(placements), len(fills))
-	if _, err := analysis.ReconcileCrossVenuePlacementReceipts(placements, receipts, fills, sim.terminalNano, cfg.CrossVenueArbLotQty); err != nil {
+	placementResults, err := analysis.ReconcileCrossVenuePlacementReceipts(placements, receipts, fills, sim.terminalNano, cfg.CrossVenueArbLotQty)
+	if err != nil {
 		t.Fatalf("router FOK placement/fill/inbox reconciliation: %v", err)
+	}
+	if terminal, err := analysis.ReconcileCrossVenueFirstAttemptTerminal(groups, placementResults, fills, counters, cfg.CrossVenueArbLotQty); err != nil || terminal != nil {
+		t.Fatalf("zero-attempt router terminal classification = %#v, %v", terminal, err)
 	}
 	accountDeltas, err := analysis.ReconcileCrossVenueRouterAccounts(renderedRun.Report, venues, routerClients, fills, analysis.CrossVenueAccountConvention{
 		Symbol: "ABC/USD", BaseAsset: "ABC", QuoteAsset: "USD", BasePrecision: mvBasePrecision, TakerFeeBps: cfg.TakerFeeBps,
@@ -1335,8 +1340,13 @@ func TestTwoVenueRouterInjectedOpportunityProducesAuditableBinaryEvidence(t *tes
 	if len(fills) != 2 {
 		t.Fatalf("injected route fills = %d, want two", len(fills))
 	}
-	if _, err := analysis.ReconcileCrossVenuePlacementReceipts(placements, receipts, fills, sim.terminalNano, cfg.CrossVenueArbLotQty); err != nil {
+	placementResults, err := analysis.ReconcileCrossVenuePlacementReceipts(placements, receipts, fills, sim.terminalNano, cfg.CrossVenueArbLotQty)
+	if err != nil {
 		t.Fatal(err)
+	}
+	terminalGroup, err := analysis.ReconcileCrossVenueFirstAttemptTerminal(groups, placementResults, fills, counters, cfg.CrossVenueArbLotQty)
+	if err != nil || terminalGroup == nil || terminalGroup.ExchangeOutcome != "MATCHED_FOK" || terminalGroup.ActorOutcome != "COMPLETE" {
+		t.Fatalf("injected route exchange/actor terminal classification = %#v, %v", terminalGroup, err)
 	}
 	accountDeltas, err := analysis.ReconcileCrossVenueRouterAccounts(renderedRun.Report, venues, routerClients, fills, analysis.CrossVenueAccountConvention{
 		Symbol: "ABC/USD", BaseAsset: "ABC", QuoteAsset: "USD", BasePrecision: mvBasePrecision, TakerFeeBps: sim.Config.TakerFeeBps,

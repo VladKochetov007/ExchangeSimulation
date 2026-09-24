@@ -62,7 +62,7 @@ func (r *Run) CollectCrossVenuePlacements(venues [2]string, clients map[string]u
 	var rows []CrossVenuePlacement
 	var scanErr error
 	lastByFile := make(map[string]uint64, 2)
-	if err := r.Scan(ScanOptions{Events: []string{"OrderAccepted", "OrderRejected"}, Files: files, FilesSelected: true, Workers: 1}, func(event Event) {
+	if err := r.Scan(ScanOptions{Events: []string{"OrderAccepted", "OrderRejected", "OrderCancelled", "OrderCancelRejected"}, Files: files, FilesSelected: true, Workers: 1}, func(event Event) {
 		if scanErr != nil {
 			return
 		}
@@ -71,6 +71,10 @@ func (r *Run) CollectCrossVenuePlacements(venues [2]string, clients map[string]u
 			return
 		}
 		if event.ClientID != clients[event.VenueID] {
+			return
+		}
+		if event.Name == "OrderCancelled" || event.Name == "OrderCancelRejected" {
+			scanErr = fmt.Errorf("cross-venue placements: dedicated market-FOK router emitted a cancellation outcome")
 			return
 		}
 		if event.GlobalSequence == 0 || event.GlobalSequence <= lastByFile[event.File] || event.Symbol != "" && event.Symbol != symbol {

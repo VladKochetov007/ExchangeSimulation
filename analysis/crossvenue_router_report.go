@@ -9,6 +9,10 @@ type CrossVenueRouterEvidenceCounters struct {
 	EvaluationEvidenceEnabled bool   `json:"evaluation_evidence_enabled"`
 	QuoteEvaluations          uint64 `json:"quote_evaluations"`
 	ResponseReceipts          uint64 `json:"response_receipts"`
+	SubmittedGroups           int    `json:"submitted_groups"`
+	CompletedGroups           int    `json:"completed_groups"`
+	FailedGroups              int    `json:"failed_groups"`
+	PendingGroups             int    `json:"pending_groups"`
 }
 
 func (r *Run) CrossVenueRouterCounters(routerID uint64) (CrossVenueRouterEvidenceCounters, error) {
