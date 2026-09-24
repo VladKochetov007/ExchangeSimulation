@@ -1,7 +1,7 @@
 # ME-005 implementation checkpoint — development readiness, not a result
 
 Source baseline: merged `main` `eb921aa29b26b43cd39e1613dabc44ec60dbf5c9`.
-Latest clean code gate: `f11f9f2` on `research/market-ecology-me005-20260924`.
+Latest clean code gate: `0dfadc6` on `research/market-ecology-me005-20260924`.
 The authoritative [readiness assessment](readiness-20260924.md) and
 [prospective preparation contract](prepare-contract-20260924.md) still define
 four acceptance fixes. This note records implementation progress without
@@ -11,7 +11,7 @@ registering a protocol or scoring a market world. ME-005 economic worlds run:
 | Fix | Implemented and mechanically exercised | Still required before ME-005 RUN |
 |---|---|---|
 | 1. Two-venue wiring | Exactly two distinct venues and finite, separate router accounts; historical three-venue default retained. Two-venue router configs now require explicit `auto_borrow_spot=false`. | Pin the effective two-venue config, initial balances, lot, attempt cap and deployment in a preregistration; independently review this successor population choice. |
-| 2. Opportunity/execution reconstruction | Optional canonical callback evidence including no-action and consumed source identity; public-book replay in global frame order; receipt-prefix and actor-local book checks; actor-inbox response receipts; terminal count binding; first trade ID zero, Trade/OrderFill/response joins. A new collector independently validates exchange-side FOK placement acceptance/rejection for the two router accounts, including file/venue and request/order identities. | Complete request/decision-vector to placement/receipt/fill/cancellation and FOK terminal joins; prove the public→delivered→evaluated→feasible→attempted opportunity denominator and horizon censoring. Reconcile complete evidence under the registered config and verified run manifest. |
+| 2. Opportunity/execution reconstruction | Optional canonical callback evidence including no-action and consumed source identity; public-book replay in global frame order; receipt-prefix and actor-local book checks; actor-inbox response receipts; terminal count binding; first trade ID zero, Trade/OrderFill/response joins. Exchange-side market-FOK placement outcomes now join to settled full-lot fills and delayed actor acknowledgements, preserving missing inbox delivery. | Complete submitted request/decision-vector to placement and cancellation joins; prove the public→delivered→evaluated→feasible→attempted opportunity denominator and horizon censoring. Reconcile complete evidence under the registered config and verified run manifest. |
 | 3. Costed closeout | Independent venue-local bid/ask depth walk with quote taker fees and insufficient-depth failure; initial/terminal venue-account deltas independently checked against settled fills, fee rounding and zero debt/locked inventory. The terminal helper requires both account timestamps at the declared horizon and bounds the age of each replayed book. A static fixture gives +48 matched cashflow but −13 local terminal liquidation value. | Pin the book-evidence recency bound prospectively; prove replay and accounts derive from one verified completed run; join pending-request/FOK terminal status. Verify complete movement/conservation evidence and absence of financing/transfer flows over the interval. |
 | 4. Dislocation measurement | Two-venue, event-ordered, one-lot executable edge and half-open episode functions with same-time tests. | Build and test the registered paired OFF/ON world-level estimator, timing/attribution rules, missing-run handling and no-op controls. Keep trade-attributed convergence `NOT_IDENTIFIED` if the retained evidence cannot distinguish it from background movement. |
 
@@ -95,10 +95,22 @@ book-log `OrderAccepted` and `OrderRejected` events. It enforces the registered
 market-FOK lot shape, unique request/order identity, and global frame ordering;
 synthetic malformed, duplicate, wrong-venue and missing-field fixtures pass.
 Focused analysis race/vet and clean full `GOMAXPROCS=7 make test` passed. This
-collector does **not** infer a submitted request from a missing book event,
-does not cover a rate-policy refusal outside the book log, and does not yet
-prove accepted FOK terminal fill or actor receipt. Those are separate joins
-required before fix 2 is complete.
+collector does **not** infer a submitted request from a missing book event or
+cover a rate-policy refusal outside the book log. By itself, it cannot prove
+accepted FOK terminal fill or actor receipt; the next join addresses those
+specific links but does not complete fix 2.
+
+Commit `0dfadc6` adds the next join: accepted FOK placements require settled
+fills summing exactly to the lot; rejected placements cannot acquire a fill;
+actor acknowledgements must match request, order, reason and causal ordering.
+An acknowledgement absent from the terminal inbox is represented as absent,
+not silently converted into an exchange rejection. Split fills and mutated
+identity, reason, quantity, sequence and horizon cases are covered. Focused
+analysis race/vet and clean full `GOMAXPROCS=7 make test` passed. This pure
+join assumes its inputs came from the independently validated collectors;
+it does not yet prove that every submitted decision vector reached an
+exchange outcome, or that terminal cancellation and pending requests are
+completely classified. Those are still readiness blockers.
 
 No ME-005 final preregistration, two final independent reviews, new development
 seed, OFF/ON comparison, result, freeze or holdout claim exists. ME-001/002/003
