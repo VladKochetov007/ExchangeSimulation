@@ -164,7 +164,7 @@
         "run": false,
         "basis": "Owner 2026-09-24 PREPARE_AND_RUN_IF_READY instruction authorized exactly four ME-005 readiness fixes and the r1c four-cell development screen plus one technical duplicate after independent review and finite-cgroup preflight. All five processes completed and the finite run budget is exhausted. No confirmation or holdout is authorized."
       },
-      "next_action": "Preserve the valid two-seed no-opportunity development result; obtain bounded post-result claim/evidence reviews. Do not retune or rerun ME-005. Propose ME-002-B separately for owner authorization."
+      "next_action": "Preserve the reviewed two-seed no-opportunity development result. Do not retune or rerun ME-005. ME-002-B remains a separately proposed, unauthorized next study."
     },
     {
       "id": "ME-006",

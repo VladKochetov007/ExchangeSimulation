@@ -1,6 +1,6 @@
 # ME-005 development report — valid no-opportunity boundary
 
-Status: **DEVELOPMENT RESULT; POST-RESULT REVIEW PENDING**. The entire
+Status: **REVIEWED DEVELOPMENT RESULT; NO-OPPORTUNITY BOUNDARY**. The entire
 preregistered budget—four economic cells and one ON-1109 technical duplicate—
 completed. No parameter, horizon, seed, counterparty, fee, or router policy was
 changed after observing an outcome. This is not confirmation, a holdout result,
@@ -81,12 +81,15 @@ The machine [result](result.json) records the four economic result SHA-256s,
 canonical execution hashes, cell counts and evidence IDs. This external path
 is an index of retained local evidence, **not** proof of a remote backup.
 
-Every simulator and analyzer process exited zero. The analyzer verified full
+The runner observed zero exit status for each simulator and analyzer process;
+the retained result files do not independently attest those shell statuses.
+The analyzer verified full
 ordered `evstream_v3` rendering, exact source/effective-config/report binding,
 strict terminal horizon, accounts, venue movements and run-wide conservation;
 an incomplete or contradictory cell would have been invalid, not scored as a
-no-opportunity world. The ON-1109 one-worker technical run and seven-worker
-economic run have identical canonical execution hash
+no-opportunity world. The ON-1109 technical and economic runs, invoked with
+recorded `GOMAXPROCS=1` and `GOMAXPROCS=7` settings respectively, have identical
+canonical execution hash
 `bf0d19765bbc0b1289c5c269562103ca9c2490b592c05967edb9ef407c17b740`
 and byte-identical reconstructed result SHA-256
 `8abb776e46e1fd3419b28407314ca951e7e9c5e1673ca49533353d54829b3c41`.
@@ -98,12 +101,14 @@ unchanged executable tree. The finite-cgroup preflight recorded actual child
 placement, `MemoryMax=12 GiB`, zero swap, `CPUQuota=700%`, and exit-status and
 timeout propagation. Available disk and RAM before first execution were
 75,952,738,304 and 31,663,923,200 bytes, above the 55-GiB/16-GiB floor.
-Each raw-plus-rendered economic cell used 33.1–35.4 MB of disk; together they
-used 136,876,032 bytes. The entire retained namespace used 188,973,056 bytes
-at first report inspection. No cell hit the 10-GiB disk, 12-GiB memory, or
-10-minute wall cap. The simulator printed coarse `wall=0s`; no precise
-per-process peak RSS or wall attestation was retained, so none is invented.
-Manifests are content-bound, not cryptographically signed shell attestations.
+Each raw-plus-rendered economic cell used 33.1–35.4 MB of disk at inspection;
+together they used 136,876,032 bytes. The entire retained namespace used
+188,973,056 bytes at first report inspection. No resource-limit failure was
+observed, but final disk size does not attest peak staging, and the result
+files do not independently prove per-process CPU/memory settings or exit
+statuses. The simulator printed coarse `wall=0s`; no precise per-process peak
+RSS or wall attestation was retained, so none is invented. Manifests are
+content-bound, not cryptographically signed shell attestations.
 
 ## Offline reproduction and boundaries
 
@@ -149,6 +154,8 @@ ME-008 still needs a verified capital→orders/exposure/payoff channel. None is
 started by this report.
 
 No plot is generated: four zero-valued episode series and no attempts are
-clearer in the complete table above than in a graph. Post-result independent
-review of this report and retained evidence is pending; any finding will be
-recorded without changing C, P, or the raw trajectories.
+clearer in the complete table above than in a graph. Three bounded
+[post-result independent reviews](../../../reviews/me005-post-result-review-20260924.md)
+accepted this no-opportunity conclusion with limitations and required precise
+wording about operational settings and duplicate-run identity. Neither C, P,
+nor the raw trajectories changed.

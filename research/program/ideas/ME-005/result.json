@@ -32,10 +32,10 @@
     "basis": "Owner's 2026-09-24 conditional ME-005 instruction authorized exactly the four readiness fixes and the preregistered four development cells plus one technical duplicate after review/preflight. All five processes completed; the finite budget is exhausted. No confirmation or holdout was authorized."
   },
   "review": {
-    "execution": "NOT_REQUESTED",
-    "verdict": "NOT_ISSUED",
-    "scope": "Post-result independent mechanics/evidence and causal/claim review pending; two scoped preregistration reviews accepted C/P before all economic outcomes",
-    "reference": "research/reviews/me005-r1c-prerun-review-20260924.md"
+    "execution": "COMPLETED",
+    "verdict": "ACCEPT_WITH_REQUIRED_CHANGES",
+    "scope": "Three read-only Sol-6 medium post-result reviewers accepted the bounded no-opportunity conclusion subject to two wording corrections, now applied; they did not rerun the analyzer, independently decode all raw frames, attest process settings or inspect holdouts. Two earlier preregistration reviews accepted C/P before outcomes. Their literal verdict was ACCEPT_WITH_LIMITATIONS; the schema represents the required corrections as ACCEPT_WITH_REQUIRED_CHANGES pending a final narrow check.",
+    "reference": "research/reviews/me005-post-result-review-20260924.md"
   },
   "observed": {
     "assigned_economic_worlds": 4,
@@ -71,9 +71,9 @@
     {
       "id": "ME005-M1",
       "type": "MECHANICAL",
-      "text": "All five registered simulator processes completed. The ON-1109 fresh-process duplicate was bit-identical across one and seven Go workers, and all four assigned economic streams passed pinned binary rendering, source/config/report binding, account and run-wide conservation validation.",
+      "text": "All five registered simulator processes produced completed retained evidence. The ON-1109 fresh-process duplicate has the same canonical execution hash and byte-identical reconstructed result under the recorded one- and seven-worker invocations; all four assigned economic streams passed pinned binary rendering, source/config/report binding, account and run-wide conservation validation.",
       "evidence_ids": ["ME005-E1", "ME005-E2", "ME005-E3"],
-      "limitations": ["The content-bound manifests are not independently signed attestations of shell settings or absence of unrecorded attempts; the finite-cgroup settings are recorded in a separate operational preflight artifact."]
+      "limitations": ["The content-bound manifests are not independently signed attestations of shell settings, process exit status or absence of unrecorded attempts; the finite-cgroup settings are recorded in a separate operational preflight artifact."]
     },
     {
       "id": "ME005-D1",

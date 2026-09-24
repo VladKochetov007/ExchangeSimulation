@@ -21,7 +21,8 @@ under the fixed decision gate. The later
 [ME-005 two-venue development screen](program/ideas/ME-005/report.md) completed
 four economic worlds and one technical duplicate with valid evidence but no
 registered public opportunity in either seed. It does not identify arbitrage
-profitability or convergence; post-result review is pending. Optional
+profitability or convergence; bounded post-result review accepted that claim
+with stated limitations. Optional
 [ME-002-B](program/ideas/ME-002-B/idea.md)
 is planning only. The completed ME-001/002/003 studies are simulation-internal
 development maps, not a freeze or empirical claim; their finite budgets are
