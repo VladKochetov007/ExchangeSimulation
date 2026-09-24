@@ -13,6 +13,9 @@ The source-grounded [2026-09-24 readiness assessment](readiness-20260924.md)
 ends at **READY AFTER FOUR SPECIFIC FIXES**; it is not a protocol or result.
 The [prospective preparation contract](prepare-contract-20260924.md) selects
 the local closeout convention and scopes those four fixes before implementation.
+The [implementation checkpoint](readiness-implementation-20260924.md) records
+the current partial acceptance work and its independent design limitation;
+it is not a locked protocol or an economic result.
 
 ## Entities and readiness
 
