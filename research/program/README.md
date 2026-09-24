@@ -16,9 +16,15 @@ The owner's 2026-09-23 overnight ME-001 development budget is now exhausted:
 [review ledger](reviews/me001-result-20260923.md). The later bounded
 [ME-002 network × processing screen](ideas/ME-002/report.md) also completed
 24 development cells plus two controls; its finite budget is exhausted.
-Both are simulation-internal development response maps, not a scientific
+The later [ME-003 IOC/FOK screen](ideas/ME-003/report.md) completed 12
+development cells plus two controls, with a distinct instruction response in
+one 5-ABC pair and zero filled-fraction contrast in the other five pairs.
+Its [machine result](ideas/ME-003/result.json) and
+[bounded reviews](reviews/me003-result-20260924.md) preserve the exact scope.
+All three are simulation-internal development response maps, not a scientific
 freeze or empirical validation. The ME-002 execution source is `e042e68`;
-later report/analysis commits are not new market worlds. This research branch
+the ME-003 execution source is `ae0fc33`; later report/analysis commits are
+not new market worlds. This research branch
 descends from completed ME-001 branch `a6afaa9`; check whether it has been
 normally merged before treating these documents as published `main` state.
 
@@ -28,8 +34,8 @@ normally merged before treating these documents as published `main` state.
 |---|---|---|
 | 1 | [ME-000](ideas/ME-000/report.md) | CLOSED: F1/F2 mechanical readiness accepted at `b25223a` |
 | 2 | [ME-001](ideas/ME-001/report.md) | REPORT: finite development screen complete; no confirmation or new run authorized |
-| 3 | [ME-002](ideas/ME-002/report.md), [ME-003](ideas/ME-003/idea.md) | ME-002 REPORT: finite reviewed development screen complete; ME-003 instruction readiness is the next conditional task |
-| 4 | [ME-005](ideas/ME-005/idea.md), [ME-007](ideas/ME-007/idea.md) | proposed executable-arbitrage readiness, with mechanical gates first |
+| 3 | [ME-002](ideas/ME-002/report.md), [ME-003](ideas/ME-003/report.md) | Both REPORT: finite reviewed development screens complete; no confirmation authorized |
+| 4 | [ME-005](ideas/ME-005/idea.md), [ME-007](ideas/ME-007/idea.md) | ME-005 source/evidence readiness is next if bounded time permits; ME-007 remains proposed |
 | 5 | ME-004/006/008–010 | deferred allocation, interaction, payoff or derivative questions |
 | 6 | ME-011–ME-012 | restricted games and explicit capital dynamics after reliable payoffs |
 
@@ -67,9 +73,13 @@ Processing changed selected information but not arrival under the 1-second
 decision gate. Exact values and scope are in the [ME-002 report](ideas/ME-002/report.md),
 [result](ideas/ME-002/result.json), and
 [reviews](reviews/me002-result-20260923.md). This does not authorize ME-001
-confirmation, more ME-002 worlds, freeze or holdouts. The current bounded
-continuation may assess ME-003 readiness prospectively; other queue entries
-are not an automatic run schedule.
+confirmation, more ME-002 worlds, freeze or holdouts. The later ME-003 screen
+held that C0 ecology, deployment, cap and target objective fixed while
+contrasting limit IOC/FOK. It produced one partial-IOC/rejected-FOK 5-ABC
+pair and five zero-contrast pairs; the selected ask proxy did not establish
+at-arrival depth. See its [report](ideas/ME-003/report.md) and
+[result](ideas/ME-003/result.json). The ME-003 budget is now exhausted;
+other queue entries are not an automatic run schedule.
 
 ## Historical map (HISTORY, never new-main results)
 

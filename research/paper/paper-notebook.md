@@ -64,6 +64,37 @@ market-realism or future trading-profit claim.
   proxies and usually censored. No geography, city connection, confirmation,
   empirical benchmark, long-run risk, PnL or capital-capacity conclusion.
 
+## ME-003 — limit IOC versus limit FOK
+
+- Question: at one venue and a fixed immediate finite buy mandate, cap,
+  counterparties and deployment, how does the child time-in-force alter
+  completion and non-fill risk?
+- Mechanism: IOC may take reachable capped depth and cancel the residual;
+  FOK rejects unless its preflight can complete the whole quantity.
+- Exact reviewed development result: 12/12 assigned worlds and two controls
+  had valid evidence. At 0.5 ABC all IOC/FOK seed pairs fully filled. At
+  5 ABC, seed 14001 IOC bought 4.80395196 ABC and cancelled 0.19604804,
+  whereas FOK bought none and rejected; both instructions filled 5 ABC in
+  the other two seeds. The three-pair median filled-fraction difference is
+  zero at both targets. See the [report](../program/ideas/ME-003/report.md),
+  [machine result](../program/ideas/ME-003/result.json) and
+  [scoped reviews](../program/reviews/me003-result-20260924.md).
+- Evidence class: pinned binary/canonical evidence, independent Go replay
+  and two bounded Sol-6 medium post-result reviews. This is a
+  simulation-internal three-seed **development** response map, not a
+  confirmation or empirical claim.
+- Candidate figure/table: paired seed points for IOC and FOK filled fraction
+  at 0.5/5 ABC, with the partial/rejected lifecycle annotated and sampled
+  selected ask quantity shown as a separate proxy. If plotted, derive every
+  point from the versioned `instruction-surface.json` using a versioned
+  `.venv` matplotlib script; do not smooth a six-pair surface or make fills
+  independent uncertainty samples.
+- Limitations: `FOK_NOT_FILLED` does not reveal the exact preflight branch;
+  delayed selected depth is not at-arrival executable depth. FOK's zero
+  marked shortfall in the rejected seed is an entirely unmet mandate, not
+  good execution. No universal TIF preference, PnL, long-run capacity,
+  real-data comparison or holdout result follows.
+
 ## Draft article architecture, not yet results text
 
 1. Why conditional market ecology requires explicit policy, actor,
@@ -72,10 +103,12 @@ market-realism or future trading-profit claim.
    denominator.
 3. ME-001 composition × quantity response (development only).
 4. ME-002 deployment × quantity response (reviewed development only).
-5. Contradictory and null outcomes, fixed-clock limits, and what remains
+5. ME-003 IOC/FOK conditional completion and non-fill response (reviewed
+   development only).
+6. Contradictory and null outcomes, fixed-clock limits, and what remains
    unconfirmed.
-6. A future separately authorized confirmation/empirical-comparison design.
+7. A future separately authorized confirmation/empirical-comparison design.
 
-No ME-003 or ME-005 result exists at this notebook revision. Their proposed
-figures and economic claims remain placeholders until registered evidence is
-available; none should be drawn from fixtures alone.
+No ME-005 result exists at this notebook revision. Its proposed figure and
+economic claim remain placeholders until registered evidence is available;
+none should be drawn from fixtures alone.

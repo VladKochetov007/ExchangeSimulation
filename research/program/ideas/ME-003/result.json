@@ -1,0 +1,126 @@
+{
+  "schema_version": 1,
+  "study_id": "ME-003",
+  "stage": "REPORT",
+  "process_status": "COMPLETED",
+  "evidence_validity": "VALID",
+  "opportunity_presence": "SAMPLED_LOCAL_PROXY_PRESENT_AT_DECISION",
+  "policy_activity": "ACTIVE",
+  "registered_activation": "NOT_APPLICABLE",
+  "scientific_verdict": "INCONCLUSIVE",
+  "causal_verdict": "BOUNDED_RESPONSE_OBSERVED",
+  "empirical_comparison": "NOT_PERFORMED",
+  "reasons": [
+    "All 12 registered development cells and two technical controls completed; the pinned analyzer and later Go all-assigned aggregation replayed every retained economic stream and reconciled actor, fee and ledger evidence.",
+    "The paired IOC-minus-FOK filled-fraction median was zero at both 0.5 and 5 ABC. At 5 ABC seed 14001 IOC filled 0.960790392 of the target and cancelled the remainder while FOK rejected without a fill; the other five pairs had zero contrast.",
+    "The registered comparison has no binary activation threshold. One pair exhibited a distinct instruction lifecycle, but FOK_NOT_FILLED does not identify the exact preflight branch and selected public ask depth is not at-arrival executable depth.",
+    "Three development seed pairs do not support equivalence, a reliable effect frequency, universal instruction superiority, trading profitability or empirical exchange behavior.",
+    "No confirmation, holdout, passive-order successor or new-world authorization follows; the 12-cell ME-003 development budget is exhausted."
+  ],
+  "identities": {
+    "source": "ae0fc333f51b2975827116d2c72db00b4f282ad9; tree f15f2c750786792b0083fbe0bfe3b5a0cd3ee32d",
+    "configuration": "12 typed plans under /home/vlad/ExchangeSimulation-me003-development-ae0fc33, each bound to execution C, LIMIT IOC/FOK, cap 5010000000, target and seed; exact digests in instruction-surface.json",
+    "run": "12 retained economic directories plus two technical-control directories under /home/vlad/ExchangeSimulation-me003-development-ae0fc33",
+    "analyzer": "pinned meinstructionanalyze SHA256 1f24aa42c56eface199a4acd73845d05aa2a9af31f724760d5ecb62d190601a5 at C; all-assigned aggregator 12f4d398749443de19806799711ffad5b9a3b14b; opportunity diagnostic 5b015b80271945ca3e9358f4cff70f529657d75f",
+    "protocol": "research/program/ideas/ME-003/protocol.md blob a5ff309de9c9b674796273d6b7f5a447d5208b78 at execution C",
+    "skill_commit": "ae0fc333f51b2975827116d2c72db00b4f282ad9",
+    "skill_tree": "ee529dd73d061b43717e57d8b7fa832543f0e5a2"
+  },
+  "authorization": {
+    "prepare": true,
+    "run": false,
+    "basis": "Owner's bounded 2026-09-23 continuation conditionally authorized at most 12 locked ME-003 development cells plus two controls after ME-002 and review. All 14 retained executions completed; the finite run budget is exhausted. No confirmation, holdout or unregistered variant is authorized."
+  },
+  "review": {
+    "execution": "COMPLETED",
+    "verdict": "ACCEPT",
+    "scope": "Two bounded independent Sol-6 medium reviews accepted retained mechanical/evidence validity and the narrow simulation-internal causal/statistical development interpretation; neither launched new worlds or independently replayed every raw stream",
+    "reference": "research/program/reviews/me003-result-20260924.md"
+  },
+  "observed": {
+    "assigned_economic_worlds": 12,
+    "valid_economic_worlds": 12,
+    "technical_controls": 2,
+    "terminal_mark_available_worlds": 12,
+    "pre_arrival_recorded_pairs_aligned": 6,
+    "partial_ioc_rejected_fok_pairs": 1,
+    "paired_ioc_minus_fok_filled_fraction": [
+      {"target_abc": 0.5, "seed": 14001, "difference": 0},
+      {"target_abc": 0.5, "seed": 14011, "difference": 0},
+      {"target_abc": 0.5, "seed": 14017, "difference": 0},
+      {"target_abc": 5, "seed": 14001, "difference": 0.960790392},
+      {"target_abc": 5, "seed": 14011, "difference": 0},
+      {"target_abc": 5, "seed": 14017, "difference": 0}
+    ],
+    "median_difference_by_target": [
+      {"target_abc": 0.5, "median": 0, "min": 0, "max": 0},
+      {"target_abc": 5, "median": 0, "min": 0, "max": 0.960790392}
+    ],
+    "total_economic_evidence_bytes": 61134641,
+    "total_world_wall_seconds": 3.92,
+    "maximum_world_wall_seconds": 0.34,
+    "maximum_peak_rss_kib": 33280
+  },
+  "claims": [
+    {
+      "id": "ME003-M1",
+      "type": "MECHANICAL",
+      "text": "The two exact-C fresh-process controls are byte-identical; all 12 assigned economic streams completed, passed pinned replay and later Go all-assigned raw replay, and reconciled focal actor, fees and terminal ledgers.",
+      "evidence_ids": ["ME003-E1", "ME003-E3", "ME003-E4"],
+      "limitations": ["Retained manifests are content-bound but not cryptographically signed and do not attest shell process settings, execution order or absence of earlier attempts."]
+    },
+    {
+      "id": "ME003-D1",
+      "type": "DESCRIPTIVE",
+      "text": "At 0.5 ABC all six worlds fully filled. At 5 ABC, seed 14001 IOC filled 4.80395196 ABC and FOK filled zero; both instructions fully filled at seeds 14011 and 14017.",
+      "evidence_ids": ["ME003-E1", "ME003-E2"],
+      "limitations": ["Three development seeds do not estimate a reliable rejection frequency or risk tail."]
+    },
+    {
+      "id": "ME003-C1",
+      "type": "CAUSAL",
+      "text": "For the fixed paired IOC/FOK instruction assignment, the observed IOC-minus-FOK filled-fraction difference was 0.960790392 in one 5-ABC seed pair and zero in the other five pairs; the three-pair median was zero at each target.",
+      "evidence_ids": ["ME003-E1", "ME003-E2", "ME003-E5"],
+      "limitations": ["Recorded pre-arrival fields align but unrecorded endogenous states are not proved identical. FOK_NOT_FILLED does not identify its exact preflight cause; there is no universal instruction preference, empirical validation or trading-profit claim."]
+    },
+    {
+      "id": "ME003-D2",
+      "type": "DESCRIPTIVE",
+      "text": "Selected actor-observed cap-bounded ask quantity was 5 ABC for seed 14001 yet IOC partially filled and FOK rejected; it was 4.90497559 ABC for seed 14011 yet both 5-ABC instructions fully filled.",
+      "evidence_ids": ["ME003-E1", "ME003-E2"],
+      "limitations": ["These are sampled delayed public snapshots, not reconstructed executable depth at venue arrival."]
+    }
+  ],
+  "evidence": [
+    {
+      "id": "ME003-E1",
+      "kind": "external_verified_surface_and_raw_evidence",
+      "location": "/home/vlad/ExchangeSimulation-me003-development-ae0fc33/instruction-surface.json",
+      "identity": "SHA256 f3465897ad8f338eb3b9c9427d856687e409f04445f51b3d430e1ade0778172b; all 12 raw economic streams replayed under execution C ae0fc33"
+    },
+    {
+      "id": "ME003-E2",
+      "kind": "external_pre_arrival_and_opportunity_diagnostics",
+      "location": "/home/vlad/ExchangeSimulation-me003-development-ae0fc33/instruction-diagnostics.json",
+      "identity": "SHA256 d6137e6c4c1ca87bb9df131eaa1a45f853432d948b7d2c92073d44715db1aa02; binds surface SHA256 f3465897ad8f338eb3b9c9427d856687e409f04445f51b3d430e1ade0778172b"
+    },
+    {
+      "id": "ME003-E3",
+      "kind": "locked_protocol_and_control_gate",
+      "location": "research/program/ideas/ME-003/control-gate-20260924.md",
+      "identity": "ME-003 protocol blob a5ff309de9c9b674796273d6b7f5a447d5208b78 at execution C; exact binary/control hashes in gate"
+    },
+    {
+      "id": "ME003-E4",
+      "kind": "fresh_process_controls",
+      "location": "/home/vlad/ExchangeSimulation-me003-development-ae0fc33/control-g1",
+      "identity": "GOMAXPROCS=1/7 control evidence SHA256 bb84efd3043c3f1b402b33bcbbe29096991260cb3250646dcf6a8d8c494ee849; reconstructed result SHA256 8ab8a92a78e81df464666831d46c5ba37fc27e3975c5a6faa0b59d46c1c87a30"
+    },
+    {
+      "id": "ME003-E5",
+      "kind": "bounded_independent_post_result_reviews",
+      "location": "research/program/reviews/me003-result-20260924.md",
+      "identity": "Two Sol-6 medium COMPLETED/ACCEPT at separate retained-mechanics and causal/statistical development scopes; one model-unverified extra attempt NOT_ISSUED"
+    }
+  ]
+}

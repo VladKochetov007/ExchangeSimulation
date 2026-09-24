@@ -8,12 +8,12 @@ Strongest intended claim: **CAUSAL** (proposed, not established).
 One contrast at a time; identical economic objective; allocation and routing held fixed.
 
 Authorization and current stage: [authoritative registry](../../registry.json).
-The owner's bounded continuation permits readiness work after the reviewed
-ME-002 result. The [prospective protocol](protocol.md) is locked but execution
-remains gated on independent review and controls; this card does not authorize
-a world. The older two-seed sketch below is historical and is superseded by
-the protocol's three paired development seeds where they
-conflict.
+The [prospective protocol](protocol.md) and finite development screen are
+complete; read the [reviewed report](report.md) and [machine result](result.json)
+for the actual outcomes. Its 12-cell run budget is exhausted. The older
+two-seed sketch and readiness notes below are historical proposal context,
+superseded by the locked protocol and report where they conflict; this card
+does not authorize another world.
 
 ## Entities and readiness
 

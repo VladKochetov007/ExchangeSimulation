@@ -75,11 +75,11 @@
       "id": "ME-003",
       "title": "Execution-instruction contrast",
       "claim_type": "CAUSAL",
-      "stage": "PREPARE",
+      "stage": "REPORT",
       "idea": "research/program/ideas/ME-003/idea.md",
       "protocol": "research/program/ideas/ME-003/protocol.md",
-      "report": null,
-      "result": null,
+      "report": "research/program/ideas/ME-003/report.md",
+      "result": "research/program/ideas/ME-003/result.json",
       "dependencies": [
         "ME-000",
         "ME-001"
@@ -91,10 +91,10 @@
       ],
       "authorization": {
         "prepare": true,
-        "run": true,
-        "basis": "Owner 2026-09-23 bounded continuation conditionally authorized only the locked ME-003 12-cell development matrix after valid ME-002 completion. Sol-6 medium accepted exact ae0fc33 for controls and conditionally for development; clean tests, vet, race, pinned binary identities, fresh-process GOMAXPROCS=1/7 byte-identical controls and measured capacity passed by 2026-09-24 00:17 UTC. This releases only the registered ME-003 development cells before the owner's time stop, not confirmation or holdouts. The initial f407505 REJECT remains historical."
+        "run": false,
+        "basis": "Owner 2026-09-23 bounded continuation conditionally authorized only the locked ME-003 12-cell development matrix and two controls. All 14 retained executions completed under accepted candidate ae0fc33, with 12/12 valid economic cells and two bounded post-result reviews. The finite ME-003 run budget is exhausted. No confirmation, holdout or unregistered instruction variant is authorized; initial f407505 REJECT remains historical."
       },
-      "next_action": "Run only the 12 registered IOC/FOK × 0.5/5 ABC × 14001/14011/14017 development cells in protocol order from exact ae0fc33, then independently reconstruct all assigned outcomes and review the result. No confirmation or holdouts."
+      "next_action": "Preserve the reviewed development response map and proceed only to bounded ME-005 source/evidence readiness if wall time and the owner's continuation permit; do not rerun or confirm ME-003 under this budget."
     },
     {
       "id": "ME-004",
