@@ -1,9 +1,11 @@
 package multivenue
 
 import (
+	"context"
 	"testing"
 
 	"exchange_sim/actor"
+	"exchange_sim/analysis"
 	"exchange_sim/exchange"
 	"exchange_sim/simulation"
 	etypes "exchange_sim/types"
@@ -41,6 +43,148 @@ func TestCrossVenueQuoteBookRetainsSignedTouches(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Manufactured crossed-venue quotes exercise matching and actor receipt. The
+// optional bid withdrawal happens after observation but before venue arrival.
+func syntheticTwoVenueRouterSpotMatching(t *testing.T, withdrawSouthBid bool) (CrossVenueArbReport, map[string]*exchange.DefaultExchange) {
+	t.Helper()
+	clock := simulation.NewSimulatedClock(1_000_000_000)
+	venues := make(map[string]*exchange.DefaultExchange, 2)
+	legs := make([]CrossVenueArbLegConfig, 0, 2)
+	var southBidID uint64
+	for index, venueID := range []string{"north", "south"} {
+		venue := exchange.NewExchangeWithConfig(exchange.ExchangeConfig{
+			ID: venueID, Clock: clock, DeterministicPhases: true, EstimatedClients: 2,
+		})
+		t.Cleanup(venue.Shutdown)
+		venue.AddInstrument(exchange.NewSpotInstrument("ABC/USD", "ABC", "USD", 1, 1, 1, 1))
+		venue.ConnectNewClient(90, map[string]int64{"ABC": 20, "USD": 10_000}, nil)
+		quotes := [2]int64{99, 100}
+		if venueID == "south" {
+			quotes = [2]int64{110, 111}
+		}
+		for quoteIndex, side := range []exchange.Side{exchange.Buy, exchange.Sell} {
+			response := venue.PlaceOrder(90, &exchange.OrderRequest{
+				RequestID: uint64(quoteIndex + 1), Symbol: "ABC/USD", Side: side,
+				Type: exchange.LimitOrder, TimeInForce: exchange.GTC, Price: quotes[quoteIndex], Qty: 5,
+			})
+			if !response.Success {
+				t.Fatalf("%s fixture quote %s rejected: %#v", venueID, side, response)
+			}
+			if venueID == "south" && side == exchange.Buy {
+				southBidID = response.Data.(uint64)
+			}
+		}
+		gateway := venue.ConnectNewClient(7, map[string]int64{"ABC": 5, "USD": 1000}, nil)
+		venues[venueID] = venue
+		legs = append(legs, CrossVenueArbLegConfig{
+			VenueID: venueID, ClientID: 7, ActorID: uint64(index + 1), Gateway: gateway,
+		})
+	}
+	router, err := NewCrossVenueArb(1, CrossVenueArbConfig{
+		Symbol: "ABC/USD", LotQty: 5, BasePrecision: 1, MaxAttempts: 1,
+	}, legs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, leg := range router.legs {
+		leg.EnableDeterministicPhases()
+		if err := leg.Start(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = leg.Stop() })
+	}
+	for _, venueID := range []string{"north", "south"} {
+		if !venues[venueID].DrainIngress() || !venues[venueID].DrainDeterministicEgress() {
+			t.Fatalf("%s subscription did not reach router inbox", venueID)
+		}
+	}
+	for _, leg := range router.legs {
+		if !leg.PumpDeterministicPhase(context.Background()) {
+			t.Fatalf("%s did not consume its book snapshot", leg.venueID)
+		}
+	}
+	if router.Report().SubmittedGroups != 1 {
+		t.Fatal("manufactured quote did not open exactly one route")
+	}
+	if withdrawSouthBid {
+		response := venues["south"].CancelOrder(90, &exchange.CancelRequest{RequestID: 3, OrderID: southBidID})
+		if !response.Success {
+			t.Fatalf("fixture bid withdrawal failed: %#v", response)
+		}
+	}
+	for step := 0; step < 12; step++ {
+		progress := false
+		for _, venueID := range []string{"north", "south"} {
+			progress = venues[venueID].DrainIngress() || progress
+		}
+		for _, venueID := range []string{"north", "south"} {
+			progress = venues[venueID].DrainDeterministicEgress() || progress
+		}
+		for _, leg := range router.legs {
+			progress = leg.PumpDeterministicPhase(context.Background()) || progress
+		}
+		if !progress {
+			break
+		}
+	}
+	return router.Report(), venues
+}
+
+// The manufactured opportunity is a mechanical control, not evidence of
+// endogenous dislocation frequency or transferable arbitrage profit.
+func TestTwoVenueRouterSyntheticFOKUsesRealSpotMatching(t *testing.T) {
+	report, venues := syntheticTwoVenueRouterSpotMatching(t, false)
+	if report.SubmittedGroups != 1 || report.CompletedGroups != 1 || report.PendingGroups != 0 || report.BuyFilledQty != 5 || report.SellFilledQty != 5 || report.CompletedCashflow != 50 {
+		t.Fatalf("synthetic real-matching route = %#v", report)
+	}
+	if venues["north"].Clients[7].GetBalance("ABC") != 10 || venues["north"].Clients[7].GetBalance("USD") != 500 ||
+		venues["south"].Clients[7].GetBalance("ABC") != 0 || venues["south"].Clients[7].GetBalance("USD") != 1550 {
+		t.Fatal("venue-local router balances disagree with completed exchange fills")
+	}
+	if localValue := syntheticVenueLocalCloseout(t, venues); localValue != -10 {
+		t.Fatalf("hypothetical venue-local exit = %d, want -10 despite +50 matched cashflow", localValue)
+	}
+}
+
+func TestTwoVenueRouterSyntheticStaleSellLegRetainsResidual(t *testing.T) {
+	report, venues := syntheticTwoVenueRouterSpotMatching(t, true)
+	if report.SubmittedGroups != 1 || report.FailedGroups != 1 || report.CompletedGroups != 0 || report.PendingGroups != 0 ||
+		report.BuyFilledQty != 5 || report.SellFilledQty != 0 || report.ResidualBaseQty != 5 ||
+		len(report.Groups) != 1 || report.Groups[0].Sell.RejectReason != exchange.RejectFOKNotFilled {
+		t.Fatalf("stale non-atomic FOK route = %#v", report)
+	}
+	if venues["north"].Clients[7].GetBalance("ABC") != 10 || venues["north"].Clients[7].GetBalance("USD") != 500 ||
+		venues["south"].Clients[7].GetBalance("ABC") != 5 || venues["south"].Clients[7].GetBalance("USD") != 1000 {
+		t.Fatal("failed sell leg did not retain correct venue-local residual exposure")
+	}
+	if localValue := syntheticVenueLocalCloseout(t, venues); localValue != -5 {
+		t.Fatalf("hypothetical residual exit = %d, want -5", localValue)
+	}
+}
+
+func syntheticVenueLocalCloseout(t *testing.T, venues map[string]*exchange.DefaultExchange) int64 {
+	t.Helper()
+	closeouts := make(map[string]analysis.VenueLocalCloseout, 2)
+	for _, venueID := range []string{"north", "south"} {
+		venue := venues[venueID]
+		book := venue.Books["ABC/USD"]
+		client := venue.Clients[7]
+		closeout := analysis.ValueVenueLocalInventory(analysis.VenueLocalCloseoutInput{
+			BaseDelta: client.GetBalance("ABC") - 5, QuoteDelta: client.GetBalance("USD") - 1000,
+			BasePrecision: 1, Bids: book.Bids.GetPublicSnapshot(), Asks: book.Asks.GetPublicSnapshot(),
+		})
+		if !closeout.Available {
+			t.Fatalf("%s local exit unavailable: %#v", venueID, closeout)
+		}
+		closeouts[venueID] = closeout
+	}
+	value, err := analysis.SumVenueLocalCloseouts(closeouts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return value
 }
 
 func TestCrossVenueRouterRejectsPresentSignedQuotesByPolicy(t *testing.T) {
