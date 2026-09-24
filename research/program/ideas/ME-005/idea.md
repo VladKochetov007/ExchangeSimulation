@@ -9,6 +9,8 @@ Two venues proposed; current integrated harness uses three, so isolate wiring re
 
 Authorization and current stage: [authoritative registry](../../registry.json).
 No study execution or readiness implementation is authorized by this card.
+The source-grounded [2026-09-24 readiness assessment](readiness-20260924.md)
+ends at **READY AFTER FOUR SPECIFIC FIXES**; it is not a protocol or result.
 
 ## Entities and readiness
 
