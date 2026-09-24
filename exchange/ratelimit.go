@@ -63,7 +63,29 @@ func (e *DefaultExchange) admitRequest(clientID uint64, req Request) (RequestPer
 	if e.RequestPolicy == nil {
 		return RequestPermit{}, Response{}, true
 	}
-	return e.RequestPolicy.Admit(clientID, classifyRequest(req), e.Clock.NowUnixNano())
+	permit, rejection, admitted := e.RequestPolicy.Admit(clientID, classifyRequest(req), e.Clock.NowUnixNano())
+	if !admitted {
+		rejection.RequestID = requestIDForRejection(req)
+	}
+	return permit, rejection, admitted
+}
+
+func requestIDForRejection(req Request) uint64 {
+	switch req.Type {
+	case ReqPlaceOrder:
+		if req.OrderReq != nil {
+			return req.OrderReq.RequestID
+		}
+	case ReqCancelOrder:
+		if req.CancelReq != nil {
+			return req.CancelReq.RequestID
+		}
+	default:
+		if req.QueryReq != nil {
+			return req.QueryReq.RequestID
+		}
+	}
+	return 0
 }
 
 func (e *DefaultExchange) releasePermit(permit RequestPermit) {
