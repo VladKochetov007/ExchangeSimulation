@@ -159,3 +159,9 @@ clearer in the complete table above than in a graph. Three bounded
 accepted this no-opportunity conclusion with limitations and required precise
 wording about operational settings and duplicate-run identity. Neither C, P,
 nor the raw trajectories changed.
+
+A later [retained-evidence exploratory public-stage diagnostic](exploratory-public-stages-20260926.md)
+found that the registered two-sided public states contained no gross
+cross-venue bid/ask crossing before depth or fees. It does not change the
+registered ME-005 verdict, estimate conditional funding/delivery/profit, or
+authorize another economic world.

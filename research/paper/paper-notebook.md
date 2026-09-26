@@ -95,6 +95,40 @@ market-realism or future trading-profit claim.
   good execution. No universal TIF preference, PnL, long-run capacity,
   real-data comparison or holdout result follows.
 
+## ME-005 — two-venue first-attempt opportunity boundary
+
+- Question: did a finite prefunded router encounter a positive fee/depth-adjusted
+  one-lot two-venue ABC/USD edge in its local information, attempt a route and
+  produce a reconstructible economic closeout?
+- Exact reviewed development result: four valid five-minute economic cells
+  and one technical duplicate. Both seeds had zero registered public
+  fee-positive opportunities in OFF and ON; the ON router evaluated 783 and
+  790 local updates but submitted no group. Profit per attempt and convergence
+  were not identified. See the [ME-005 report](../program/ideas/ME-005/report.md),
+  [machine result](../program/ideas/ME-005/result.json) and
+  [bounded post-result review](../reviews/me005-post-result-review-20260924.md).
+- A separately versioned [offline public-stage diagnostic](../program/ideas/ME-005/exploratory-public-stages-20260926.md)
+  found zero *gross* cross-venue bid/ask crossings conditional on the
+  router's two-sided public-book requirement, before the one-lot depth and
+  fee filters. It is exploratory, not a replacement registered result.
+- Candidate table: the nested public-stage funnel, explicitly separating
+  directional quote-state duration from economic opportunity count; no
+  per-attempt profit point or causal convergence plot exists.
+- Limitations: two seeds/five minutes, no qualifying edge, no route, no
+  identifiable conditional funding/delivery/profit effect, no empirical
+  comparison. Do not interpret zero opportunities as strategy ineffectiveness
+  or a general impossibility result.
+
+## ME-002-B — preregistered first-action cadence question
+
+- The [prospective protocol](../program/ideas/ME-002-B/protocol.md) is a
+  separate 12-world 1/80-ms policy poll × 1/90-ms directed network screen
+  for one 5-ABC child, with zero added processing. The earlier plan and
+  source/evidence candidate are reviewed; **no result belongs in this
+  notebook until the registered worlds and independent reconstruction finish**.
+- The fixed 1-s gate makes the 80-ms first eligible tick 1.040 s; this is a
+  phase-dependent first-action question, not recurring high-frequency trading.
+
 ## Draft article architecture, not yet results text
 
 1. Why conditional market ecology requires explicit policy, actor,
@@ -105,10 +139,8 @@ market-realism or future trading-profit claim.
 4. ME-002 deployment × quantity response (reviewed development only).
 5. ME-003 IOC/FOK conditional completion and non-fill response (reviewed
    development only).
-6. Contradictory and null outcomes, fixed-clock limits, and what remains
+6. ME-005's valid no-opportunity boundary and ME-002-B's fixed-gate question,
+   with any later ME-002-B result added only after completed review.
+7. Contradictory and null outcomes, fixed-clock limits and what remains
    unconfirmed.
-7. A future separately authorized confirmation/empirical-comparison design.
-
-No ME-005 result exists at this notebook revision. Its proposed figure and
-economic claim remain placeholders until registered evidence is available;
-none should be drawn from fixtures alone.
+8. A future separately authorized confirmation/empirical-comparison design.
