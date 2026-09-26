@@ -30,11 +30,11 @@ an analysis-only correction removed an unsupported sampled-opportunity
 lifetime label without changing raw trajectories. The completed
 ME-001/002/003/002-B studies are simulation-internal
 development maps, not a freeze or empirical claim; their finite budgets are
-exhausted. This
-research branch is not automatically the published `main` baseline. The
+exhausted. Merging documentation into `main` does not relabel those
+historical worlds as `main` executions. The
 R2/SV1D closure below remains a separate completed historical boundary.
 
-The consolidated code baseline is the former scientific tip
+The historical consolidation code baseline was the former scientific tip
 `f507c7ee2b11fd05e1adb9f17fa0a66faf889ea1`, descended from the published
 `main` tip `ffe1434cfc60b5f79b5289b610d3d5137286f514`. The consolidation adds
 navigation and provenance records only; it does not enable an experimental

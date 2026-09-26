@@ -28,8 +28,8 @@ not new market worlds. The later separately pinned
 [ME-002-B first-action cadence screen](ideas/ME-002-B/report.md) completed
 12 reviewed development cells plus two technical controls under source
 `4040913`; its corrected analysis-only surface is distinct from the
-original simulator. This research branch is not automatically published
-`main` state.
+original simulator. Repository publication never relabels those
+historical worlds as runs of a later merged source tree.
 
 ## Starting queue
 
