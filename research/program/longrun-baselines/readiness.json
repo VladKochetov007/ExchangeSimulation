@@ -1,0 +1,105 @@
+{
+  "schema_version": 1,
+  "planning_baseline_commit": "ef61b4cb6e0124aa797f281e379ab143e847646e",
+  "planning_status": "DRAFT_NOT_AUTHORIZED_TO_RUN",
+  "economic_worlds_run_for_this_plan": 0,
+  "seed_ids_reserved": [],
+  "source_change_in_this_package": false,
+  "candidate_environments": [
+    {
+      "id": "E0",
+      "study_id": "ME-013",
+      "description": "One ABC/USD venue, repeated finite-resource pure and AS-style makers with recurring demand",
+      "design_file": "research/program/longrun-baselines/config-drafts/e0-repeated-spot.md",
+      "proposed_economic_world_ceiling": 15,
+      "proposed_technical_controls": 2,
+      "run_authorized": false,
+      "readiness": "BLOCKED_ON_BOUNDED_IMPLEMENTATION_AND_REVIEW"
+    },
+    {
+      "id": "E2",
+      "study_id": "ME-014",
+      "description": "Two segregated ABC spot/perp venues with repeated finite-life carry and several funding boundaries",
+      "design_file": "research/program/longrun-baselines/config-drafts/e2-two-venue-funding.md",
+      "proposed_economic_world_ceiling": 6,
+      "proposed_technical_controls": 2,
+      "run_authorized": false,
+      "readiness": "BLOCKED_ON_E0_AND_VERSIONED_FUNDING_LIFECYCLE_IMPLEMENTATION"
+    }
+  ],
+  "bounded_implementation_tasks": [
+    {
+      "id": "E0-1",
+      "scope": "Composable one-book scenario assembly with no forced derivative population",
+      "classification": "BOUNDED_ADAPTER",
+      "source": ["simulation/runner.go", "simulation/venue.go", "simulations/multivenue/sim.go"],
+      "acceptance": "An integrated fixture builds exactly one ABC/USD book and the declared roster; historical multivenue defaults remain unchanged."
+    },
+    {
+      "id": "E0-2",
+      "scope": "Finite seed-once opening orders, no refill or price anchor",
+      "classification": "NEW_ACTOR_BEHAVIOR",
+      "source": ["simulations/multivenue/bootstrap.go"],
+      "acceptance": "After either seed order fills, no replacement arrives; seed account balances and depth contribution reconcile."
+    },
+    {
+      "id": "E0-3",
+      "scope": "Equal-resource shared quote lifecycle and hard worst-case position cap for pure and AS makers",
+      "classification": "SEMANTIC_ADAPTER",
+      "source": ["simulations/multivenue/naive.go", "simulations/multivenue/stoikov.go"],
+      "acceptance": "Simultaneous live, pending and cancel-in-flight orders cannot breach the declared cap; identical target quotes do not create asymmetric churn; post-only and fee paths are matched."
+    },
+    {
+      "id": "E0-4",
+      "scope": "Delivered-past AS variance/fill exposure prior, account/PnL/observation reconstruction",
+      "classification": "ESTIMATOR_AND_MEASUREMENT",
+      "source": ["simulations/multivenue/stoikov.go", "evstream"],
+      "acceptance": "No decision reads future or venue-global state; formula agrees with normalized-inventory fixture; missing, duplicate, reordered, fee-wrong and incomplete evidence fail closed."
+    },
+    {
+      "id": "E2-1",
+      "scope": "Two venue-local spot/perp rosters and equal OFF/ON carry slots",
+      "classification": "BOUNDED_ADAPTER",
+      "source": ["simulation/venue.go", "simulations/multivenue/sim.go", "simulations/multivenue/term_carry.go"],
+      "acceptance": "Each venue has independent cash/base/perp collateral, actors receive only venue-local delayed data, OFF retains endowed idle accounts and equal background IDs."
+    },
+    {
+      "id": "E2-2",
+      "scope": "Versioned compressed funding with local averaging, phase, sub-bp precision and remainder",
+      "classification": "ECONOMIC_SEMANTIC_CHANGE",
+      "source": ["instrument/funding.go", "exchange/funding.go", "exchange/exchange.go"],
+      "acceptance": "5/8-minute clocks and +60-second phase hit exact scheduled times; the 60 timestamped t-60s..t-1s local samples and t-minus eligible position exclude same-time orders; rate and transfer arithmetic, conservation, cap, missing mark, skip-without-catch-up, overflow and repeated subunit accrual pass independent fixtures."
+    },
+    {
+      "id": "E2-3",
+      "scope": "Post-warmup recurrent finite-life term carry and independent payment/exit evidence",
+      "classification": "LIFECYCLE_AND_MEASUREMENT",
+      "source": ["simulations/multivenue/term_carry.go", "evstream"],
+      "acceptance": "A desk can enter, receive several actual funding transfers, unwind both legs and re-enter; partial legs, failed settlement and terminal residual remain separately reconstructible."
+    }
+  ],
+  "planning_review": {
+    "reviewer": "independent Sol-6 medium reviewer",
+    "execution": "COMPLETED",
+    "scope": "Two read-only, source-grounded design/readiness questions: E0 roster and E2 compressed funding/carry. No world, code change, pinned executable protocol or empirical claim was reviewed.",
+    "retention": "Conversational feedback from the earlier planning turn, not a retained signed review or review of the exact completed documents.",
+    "e0_conclusion": "Defensible question; not ready for execution. Requires shared pending-inclusive cap, one-book equal-resource assembly, finite seed, common quote lifecycle and arm-neutral evidence.",
+    "e2_conclusion": "Plausible question; compressed matched funding comparison not ready. Requires versioned interval scaling/precision/window, lifecycle-bearing term actor, equal OFF/ON accounts and payment coverage.",
+    "execution_approval_issued": false
+  },
+  "completed_package_review_attempt": {
+    "execution": "UNAVAILABLE",
+    "verdict": "NOT_ISSUED",
+    "reason": "Fresh Sol-6 medium reviewer request returned agent thread limit reached; no reviewer inspected the completed package.",
+    "required_before_economic_worlds": true
+  },
+  "proposed_resources_not_measured_for_e0_e2": {
+    "maximum_cpu_workers": 4,
+    "maximum_process_ram_gib": 8,
+    "e0_output_ceiling_gib_per_cell": 1.5,
+    "e2_output_ceiling_gib_per_cell": 4,
+    "free_disk_reserve_gib": 10,
+    "require_fresh_capacity_preflight": true
+  },
+  "next_authorizable_milestone": "PR1 one-book E0 scenario adapter and integrated contract tests only; implementation and economic worlds require a separate owner instruction."
+}

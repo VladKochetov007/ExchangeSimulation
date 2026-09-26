@@ -332,3 +332,53 @@ Historical links retain their source/config/analysis scope; none is a run of mer
 - Primary outcome: Restoration opportunities, concentration and supplier risk.
 - Confound: SV1D trading with zero registered restorations is not general supplier failure.
 - Prerequisite: [ME-009](ideas/ME-009/idea.md). HISTORY: [original report](../../research/v2-r2-sv1d-iteration-closeout.md).
+
+<a id="s28"></a>
+## S28 — Recurring random finite-resource liquidity demand
+
+- Purpose/counterparties: Supply an explicitly uninformed recurring demand benchmark to finite makers; it may pay spread/fees for an external consumption or reallocation motive.
+- Source status: **IMPLEMENTED** in [simulations/feesim/taker.go](../../simulations/feesim/taker.go); spot-only E0 composition still needs an adapter.
+- Resources/information: Own seeded side/size draws and delayed visible book depth, finite cash/base, periodic decision clock. Zero visible depth can still lead to a submitted but unfilled/rejected request in current code.
+- Minimal test: Seeded sequence, roughly half-to-one-and-a-half target quantity, depth truncation, budget rejection and no-order evidence across repeated ticks.
+- Conditional hypothesis/outcome: Recurrent demand exposes maker inventory/risk; measure request/admission/fill funnel and cost, not profitability of a supposed informed trader.
+- Confound/prerequisite: An imposed symmetric coin-flip flow is an exogenous motive, not endogenous information. [E0 plan](longrun-baselines/plan.md), [ME-013](ideas/ME-013/idea.md).
+
+<a id="s29"></a>
+## S29 — Rolling-price mean-reversion trader
+
+- Purpose/counterparties: Trade a belief that price will revert toward a reference estimated from delivered past market prices; makers supply execution.
+- Source status: **NOT_IMPLEMENTED** as a distinct recurring policy. The private-value trader [S10](policy-catalogue.md#s10) is not equivalent to a rolling-price reference.
+- Resources/information: Would need positive-domain delivered-mid history, initialized EWMA windows, finite cash/base, target/reversal and exit rules. Short/long lookbacks are parameters, not speed classes.
+- Minimal test: Constant-price abstention, displaced price with cost threshold, stale/missing book, warm-up and finite reversal.
+- Conditional hypothesis/outcome: Against a tested ecology it may earn costed benchmark-relative payoff or lose; flow and PnL must be measured separately.
+- Confound/prerequisite: The *policy's* reversion belief does not mean the simulated price is genuinely mean reverting. [E1 extension](longrun-baselines/plan.md) after [ME-013](ideas/ME-013/idea.md).
+
+<a id="s30"></a>
+## S30 — Cross-venue perpetual funding and basis carry
+
+- Purpose/counterparties: Transfer opposite perp exposure across separately funded venues under a same-horizon net funding/basis forecast.
+- Source status: **NOT_IMPLEMENTED** as a verified finite two-perp lifecycle desk; [term_carry.go](../../simulations/multivenue/term_carry.go) supplies related venue-local primitives only.
+- Resources/information: Distinct venue-local collateral, delivered quotes/rates, asynchronous settlement phases, non-atomic fills and residual closeout; no magic wallet.
+- Minimal test: Both rate signs, phase-shifted actual payments, one-leg rejection, margin exhaustion and costed exit.
+- Conditional hypothesis/outcome: Clock difference alone need not yield profit; compare realized after-cost cashflow with observed eligible opportunities.
+- Confound/prerequisite: A 5/8-minute compressed funding contract is not unchanged 8-hour economics. [E2](ideas/ME-014/idea.md) first establishes its local funding path; this cross-venue policy is deferred.
+
+<a id="s31"></a>
+## S31 — Imbalance-aware AS-style market maker
+
+- Purpose/counterparties: Add a declared directional public-book signal to an inventory-sensitive maker without changing its finite risk/fee/deployment contract.
+- Source status: **NOT_IMPLEMENTED**. Existing [ImbalanceMaker](../../simulations/multivenue/naive.go) is a fixed-distance lean/suppression policy, not an AS signal variant.
+- Resources/information: Delivered finite-level depth imbalance with explicit self-order inclusion and age, baseline AS variance/intensity state, equal cash/base and worst-case cap.
+- Minimal test: Balanced depth and zero coefficient nest AS, reversed imbalance reverses signal, stale/missing denominator abstains.
+- Conditional hypothesis/outcome: Signal may change adverse-selection cost and quote concentration; programmed tilt is not evidence of predictive information.
+- Confound/prerequisite: Different cancellation or deployment paths could masquerade as a signal benefit. E1 follows [ME-013](ideas/ME-013/idea.md).
+
+<a id="s32"></a>
+## S32 — Recurring finite-resource round-trip demand
+
+- Purpose/counterparties: Open and later close a finite ABC position for an explicit holding mandate, giving makers flow with a mean-reverting *inventory* objective.
+- Source status: **IMPLEMENTED** in [simulations/multivenue/roundtrip.go](../../simulations/multivenue/roundtrip.go); E0 spot-only roster assembly remains a bounded adapter.
+- Resources/information: Seeded opening side/probability, delivered touch/depth, finite base/cash, declared 5-minute hold and 2-second decision clock in E0 draft.
+- Minimal test: Open → partial fills → hold → close actual remaining exposure; horizon censoring and insufficient-depth abstention.
+- Conditional hypothesis/outcome: Recurrent round trips can change maker inventory drift; measure completed cycles, residual and all-in execution cost.
+- Confound/prerequisite: Actor inventory mean reversion is a **programmed mandate**, not evidence that market prices mean revert. [ME-013](ideas/ME-013/idea.md).
