@@ -34,6 +34,12 @@ exhausted. Merging documentation into `main` does not relabel those
 historical worlds as `main` executions. The
 R2/SV1D closure below remains a separate completed historical boundary.
 
+The prospective [repeated-strategy E0/E2 plan](program/longrun-baselines/plan.md)
+and its [readiness record](program/longrun-baselines/readiness.json) specify a
+future one-book maker competition and multi-period two-venue funding ecology.
+They are **planning-only**; no ME-013/014 economic world, source change,
+protocol lock, seed reservation or run authorization follows from them.
+
 The historical consolidation code baseline was the former scientific tip
 `f507c7ee2b11fd05e1adb9f17fa0a66faf889ea1`, descended from the published
 `main` tip `ffe1434cfc60b5f79b5289b610d3d5137286f514`. The consolidation adds

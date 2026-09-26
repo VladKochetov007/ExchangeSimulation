@@ -344,6 +344,42 @@
         "basis": "Owner skill-authoring task only. Study implementation and execution require separate authorization."
       },
       "next_action": "Propose adaptation and source/sink rules only after shorter payoff studies; no implementation now."
+    },
+    {
+      "id": "ME-013",
+      "title": "Repeated spot-maker competition baseline (E0)",
+      "claim_type": "CAUSAL",
+      "stage": "PLAN",
+      "idea": "research/program/ideas/ME-013/idea.md",
+      "protocol": null,
+      "report": null,
+      "result": null,
+      "dependencies": ["ME-000"],
+      "policy_ids": ["S06", "S07", "S28", "S32"],
+      "authorization": {
+        "prepare": false,
+        "run": false,
+        "basis": "Owner 2026-09-26 authorized planning documentation only. E0 implementation, protocol lock and worlds require separate decisions."
+      },
+      "next_action": "Seek bounded authorization for PR1 one-book composable repeated roster and seed-once contract tests; no economic run."
+    },
+    {
+      "id": "ME-014",
+      "title": "Two-venue repeated spot-perpetual funding baseline (E2)",
+      "claim_type": "CAUSAL",
+      "stage": "PLAN",
+      "idea": "research/program/ideas/ME-014/idea.md",
+      "protocol": null,
+      "report": null,
+      "result": null,
+      "dependencies": ["ME-013"],
+      "policy_ids": ["S06", "S07", "S18", "S28", "S32"],
+      "authorization": {
+        "prepare": false,
+        "run": false,
+        "basis": "Owner 2026-09-26 authorized a long-horizon planning package only; compressed funding semantics, implementation and worlds are not authorized."
+      },
+      "next_action": "After E0 readiness, seek a separate versioned funding/lifecycle implementation decision and independent fixtures; no ME-014 world."
     }
   ],
   "policies": [
@@ -590,6 +626,41 @@
         "simulations/multivenue/cdf_liquidity_supplier.go"
       ],
       "catalogue_anchor": "research/program/policy-catalogue.md#s27"
+    },
+    {
+      "id": "S28",
+      "title": "Recurring random finite-resource liquidity demand",
+      "source_status": "IMPLEMENTED",
+      "sources": ["simulations/feesim/taker.go"],
+      "catalogue_anchor": "research/program/policy-catalogue.md#s28"
+    },
+    {
+      "id": "S29",
+      "title": "Rolling-price mean-reversion trader",
+      "source_status": "NOT_IMPLEMENTED",
+      "sources": [],
+      "catalogue_anchor": "research/program/policy-catalogue.md#s29"
+    },
+    {
+      "id": "S30",
+      "title": "Cross-venue perpetual funding and basis carry",
+      "source_status": "NOT_IMPLEMENTED",
+      "sources": [],
+      "catalogue_anchor": "research/program/policy-catalogue.md#s30"
+    },
+    {
+      "id": "S31",
+      "title": "Imbalance-aware AS-style market maker",
+      "source_status": "NOT_IMPLEMENTED",
+      "sources": [],
+      "catalogue_anchor": "research/program/policy-catalogue.md#s31"
+    },
+    {
+      "id": "S32",
+      "title": "Recurring finite-resource round-trip demand",
+      "source_status": "IMPLEMENTED",
+      "sources": ["simulations/multivenue/roundtrip.go"],
+      "catalogue_anchor": "research/program/policy-catalogue.md#s32"
     }
   ]
 }
