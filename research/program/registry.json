@@ -75,11 +75,11 @@
       "id": "ME-002-B",
       "title": "First-decision cadence by network delay",
       "claim_type": "CAUSAL",
-      "stage": "PREPARE",
+      "stage": "REPORT",
       "idea": "research/program/ideas/ME-002-B/idea.md",
       "protocol": "research/program/ideas/ME-002-B/protocol.md",
-      "report": null,
-      "result": null,
+      "report": "research/program/ideas/ME-002-B/report.md",
+      "result": "research/program/ideas/ME-002-B/result.json",
       "dependencies": [
         "ME-000",
         "ME-002"
@@ -89,10 +89,10 @@
       ],
       "authorization": {
         "prepare": true,
-        "run": true,
-        "basis": "Owner 2026-09-26 authorized only the reviewed 12-cell ME-002-B first-action cadence development design plus two technical controls, conditional on exact candidate/protocol review, pinned binaries and resource preflight. No economic cell may start while either required preregistration review is NOT_ISSUED. No confirmation or holdout is authorized."
+        "run": false,
+        "basis": "Owner 2026-09-26 authorized at most 24 ME-002-B development worlds plus two controls; reviewed P2 fixed exactly 12 economic cells and two controls. All registered executions and the bounded post-result reviews are complete. Unused ceiling is not permission for extra arms/seeds, confirmation or holdouts."
       },
-      "next_action": "Read the prospectively amended ME-002-B protocol and review ledger. Complete two substantive independent preregistration acceptances and resource controls before any of the twelve fixed economic cells; do not treat the one-child design as repeated strategy frequency."
+      "next_action": "Preserve the reviewed 12-cell mixed-sign first-action response and versioned sampled-opportunity correction. No ME-002-B rerun or confirmation is authorized; the known-opportunity two-venue mechanical fixture is proposed separately, not launched."
     },
     {
       "id": "ME-003",
@@ -164,7 +164,7 @@
         "run": false,
         "basis": "Owner 2026-09-24 PREPARE_AND_RUN_IF_READY instruction authorized exactly four ME-005 readiness fixes and the r1c four-cell development screen plus one technical duplicate after independent review and finite-cgroup preflight. All five processes completed and the finite run budget is exhausted. No confirmation or holdout is authorized."
       },
-      "next_action": "Preserve the reviewed two-seed no-opportunity development result. Do not retune or rerun ME-005. ME-002-B remains a separately proposed, unauthorized next study."
+      "next_action": "Preserve the reviewed two-seed no-opportunity development result and its separate exploratory public-stage diagnostic; do not retune or rerun ME-005. ME-002-B has its own completed development result, not a continuation of this route."
     },
     {
       "id": "ME-006",

@@ -24,9 +24,12 @@ Its [machine result](ideas/ME-003/result.json) and
 All three are simulation-internal development response maps, not a scientific
 freeze or empirical validation. The ME-002 execution source is `e042e68`;
 the ME-003 execution source is `ae0fc33`; later report/analysis commits are
-not new market worlds. This research branch
-descends from completed ME-001 branch `a6afaa9`; check whether it has been
-normally merged before treating these documents as published `main` state.
+not new market worlds. The later separately pinned
+[ME-002-B first-action cadence screen](ideas/ME-002-B/report.md) completed
+12 reviewed development cells plus two technical controls under source
+`4040913`; its corrected analysis-only surface is distinct from the
+original simulator. This research branch is not automatically published
+`main` state.
 
 ## Starting queue
 
@@ -35,7 +38,7 @@ normally merged before treating these documents as published `main` state.
 | 1 | [ME-000](ideas/ME-000/report.md) | CLOSED: F1/F2 mechanical readiness accepted at `b25223a` |
 | 2 | [ME-001](ideas/ME-001/report.md) | REPORT: finite development screen complete; no confirmation or new run authorized |
 | 3 | [ME-002](ideas/ME-002/report.md), [ME-003](ideas/ME-003/report.md) | Both REPORT: finite reviewed development screens complete; no confirmation authorized |
-| Planning only | [ME-002-B](ideas/ME-002-B/idea.md) | Optional [reviewed first-action cadence plan](reviews/me002b-plan-20260924.md); no execution authorization or general strategy-frequency claim. |
+| 3b | [ME-002-B](ideas/ME-002-B/report.md) | REPORT: 12 valid first-action development cells; mixed-sign fills under fixed gate/phase, reviewed corrected opportunity-lifetime label, budget exhausted. No general strategy-frequency or confirmation claim. |
 | 4 | [ME-005](ideas/ME-005/report.md), [ME-007](ideas/ME-007/idea.md) | ME-005 REPORT: four valid development cells, zero registered opportunities and no route; bounded post-result review accepted the narrow claim with limitations, budget exhausted. ME-007 remains proposed. |
 | 5 | ME-004/006/008–010 | deferred allocation, interaction, payoff or derivative questions |
 | 6 | ME-011–ME-012 | restricted games and explicit capital dynamics after reliable payoffs |
@@ -80,7 +83,16 @@ contrasting limit IOC/FOK. It produced one partial-IOC/rejected-FOK 5-ABC
 pair and five zero-contrast pairs; the selected ask proxy did not establish
 at-arrival depth. See its [report](ideas/ME-003/report.md) and
 [result](ideas/ME-003/result.json). The ME-003 budget is now exhausted;
-other queue entries are not an automatic run schedule.
+the later ME-002-B screen held the one-child immediate policy and C0
+population fixed while varying first-action poll and directed network delay.
+Its 40-ms first-send shift and mixed-sign three-seed fill response are in
+the [reviewed report](ideas/ME-002-B/report.md), with a corrected
+sampled-opportunity-lifetime interpretation. The separate
+[ME-005 public-stage diagnostic](ideas/ME-005/exploratory-public-stages-20260926.md)
+found that its policy two-sided public funnel emptied at gross bid/ask
+crossings in the retained four cells, without changing the registered
+no-opportunity verdict. All these finite budgets are exhausted; other
+queue entries are not an automatic run schedule.
 
 ## Historical map (HISTORY, never new-main results)
 

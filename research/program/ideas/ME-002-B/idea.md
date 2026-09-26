@@ -1,6 +1,13 @@
-# ME-002-B — first-decision cadence × network delay (PLAN ONLY)
+# ME-002-B — first-decision cadence × network delay (original idea card)
 
-Status: **PROPOSED, NOT REGISTERED FOR EXECUTION**. This is the optional
+Current status: **REVIEWED DEVELOPMENT RESULT** under the separately authorized
+[P2 protocol](protocol.md) and [report](report.md). The text below is the
+preserved prospective idea, not a retrospective description of what ran.
+In particular, its tentative sampled-episode duration ratio was not an
+admissible continuous opportunity lifetime under P2; the [v2 analysis](report.md)
+records that limitation and the original v1 diagnostic correction.
+
+Original status: **PROPOSED, NOT REGISTERED FOR EXECUTION**. This was the optional
 ME-002B decision-cadence plan requested after the completed
 [ME-002 development screen](../ME-002/report.md). It is a separate idea,
 not an amendment, confirmation or rescue of ME-002. No source change,

@@ -23,8 +23,12 @@ four economic worlds and one technical duplicate with valid evidence but no
 registered public opportunity in either seed. It does not identify arbitrage
 profitability or convergence; bounded post-result review accepted that claim
 with stated limitations. Optional
-[ME-002-B](program/ideas/ME-002-B/idea.md)
-is planning only. The completed ME-001/002/003 studies are simulation-internal
+[ME-002-B first-action development screen](program/ideas/ME-002-B/report.md)
+completed 12 economic worlds plus two controls on its own pinned source.
+Its reviewed mixed-sign response is limited to one gate phase and one child;
+an analysis-only correction removed an unsupported sampled-opportunity
+lifetime label without changing raw trajectories. The completed
+ME-001/002/003/002-B studies are simulation-internal
 development maps, not a freeze or empirical claim; their finite budgets are
 exhausted. This
 research branch is not automatically the published `main` baseline. The

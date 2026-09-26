@@ -1,0 +1,118 @@
+{
+  "schema_version": 1,
+  "study_id": "ME-002-B",
+  "stage": "REPORT",
+  "process_status": "COMPLETED",
+  "evidence_validity": "VALID",
+  "opportunity_presence": "SAMPLED_LOCAL_PROXY_PRESENT_AT_DECISION",
+  "policy_activity": "ACTIVE",
+  "registered_activation": "NOT_APPLICABLE",
+  "scientific_verdict": "INCONCLUSIVE",
+  "causal_verdict": "BOUNDED_RESPONSE_OBSERVED",
+  "empirical_comparison": "NOT_PERFORMED",
+  "reasons": [
+    "All 12 assigned development cells and two technical controls completed with verified plan, source, evidence, actor, result and finite-resource identities. The g1/g7 controls are byte-identical, not economic replications.",
+    "The registered poll intervention shifted first send and venue arrival by 40 simulated ms at either network setting. The network assignment shifted arrival by 89 ms. Filled-fraction responses had mixed signs across the three paired seeds; this is a fixed-gate, fixed-phase, one-child development map, not a general latency law.",
+    "The original C result v1 called an interval between sampled publications a complete opportunity and emitted a delay/duration ratio. A substantive post-result rejection prompted a versioned analysis-only correction across all 12 retained streams; original evidence and v1 results remain unchanged. Continuous executable opportunity lifetime and exact pre-match book are not reconstructible.",
+    "No profit, capital capacity, repeated high-frequency policy, empirical comparison, confirmation, holdout or additional economic world is established or authorized by this result."
+  ],
+  "identities": {
+    "source": "404091350440daf8ee0d1299730a932b1bc105af; tree 0e947767e723f48c872b1945136fa9ccad57f61e",
+    "configuration": "Twelve plan JSON files under /home/vlad/ExchangeSimulation-me002b-development-4040913/plans; byte SHA-256 values prospectively recorded in development-lock-20260926.md",
+    "run": "Twelve economic run directories and two separate technical controls under /home/vlad/ExchangeSimulation-me002b-development-4040913",
+    "analyzer": "Pinned mecadence simulator/per-cell analyzer SHA256 09eb76c255f633164e033fa7b777ef4ac11abdcedd6252c11814f9366e221421 at C; corrected all-assigned Go aggregator commit b85df5eb86e7865e74de5317cc86c003249dd4f6, binary SHA256 71b5d2666c5f60295cdb5af62e0e20fd5c1d29c2acc3743a4e64b87fbe386890",
+    "protocol": "research/program/ideas/ME-002-B/protocol.md at 18dcb77147fa15b5c8880456aaa1dac8906de3cb; blob 96884a3be38d0e82c2d0f828143604bf462edabb",
+    "skill_commit": "404091350440daf8ee0d1299730a932b1bc105af",
+    "skill_tree": "60b91e73f1000a285e003bed122648636a737b2d"
+  },
+  "authorization": {
+    "prepare": true,
+    "run": false,
+    "basis": "Owner 2026-09-26 authorized at most 24 ME-002-B development worlds plus two controls, with the reviewed P2 design choosing exactly 12 economic worlds plus two controls. All registered executions are complete; unused ceiling is not permission to add arms, seeds, confirmation or holdouts."
+  },
+  "review": {
+    "execution": "COMPLETED",
+    "verdict": "ACCEPT",
+    "scope": "Independent Sol-6 medium mechanics/evidence reviewer first rejected the v1 sampled-lifetime label and then accepted the v2 analysis-only correction; separate Sol-6 medium causal/statistical fallback accepted the bounded development interpretation. The first fresh B attempt was UNAVAILABLE/NOT_ISSUED. Reviewers did not themselves run worlds, tests, holdouts or a full new raw replay.",
+    "reference": "research/program/reviews/me002b-result-20260926.md"
+  },
+  "observed": {
+    "assigned_economic_worlds": 12,
+    "valid_economic_worlds": 12,
+    "technical_controls": 2,
+    "full_fill_worlds": 5,
+    "partial_fill_worlds": 7,
+    "no_send_or_rejected_worlds": 0,
+    "horizon_simulated_seconds_per_world": 4,
+    "target_abc_per_world": 5,
+    "selected_sampled_quote_qualifying_at_publication_cells": 8,
+    "continuous_opportunity_lifetime": "NOT_RECONSTRUCTIBLE_FROM_SAMPLED_SNAPSHOTS",
+    "exact_pre_match_book": "NOT_RECONSTRUCTIBLE",
+    "first_send_seconds_by_poll": {"P1": 1, "P80": 1.04},
+    "venue_arrival_seconds_by_arm": {"P1-N1": 1.001, "P80-N1": 1.041, "P1-N90": 1.09, "P80-N90": 1.13},
+    "paired_seed_response": [
+      {"seed": 13001, "p1_n1": 1, "p80_n1": 0.99769542, "p1_n90": 1, "p80_n90": 0.92484309, "poll_n1": -0.00230458, "poll_n90": -0.07515691, "interaction": -0.07285233},
+      {"seed": 13011, "p1_n1": 1, "p80_n1": 1, "p1_n90": 0.977992752, "p80_n90": 0.96497486, "poll_n1": 0, "poll_n90": -0.013017892, "interaction": -0.013017892},
+      {"seed": 13017, "p1_n1": 0.960288758, "p80_n1": 0.999675212, "p1_n90": 0.976414594, "p80_n90": 1, "poll_n1": 0.039386454, "poll_n90": 0.023585406, "interaction": -0.015801048}
+    ],
+    "total_economic_evidence_bytes": 58017887,
+    "total_measured_world_wall_seconds": 3.7772751360000005,
+    "maximum_sampled_cgroup_memory_bytes": 37945344
+  },
+  "claims": [
+    {
+      "id": "ME002B-M1",
+      "type": "MECHANICAL",
+      "text": "The two fresh-process controls produced byte-identical evidence and results; all twelve assigned economic streams completed, passed the pinned per-cell analyzer and a later all-assigned Go raw replay with plan, actor, terminal-ledger and resource binding.",
+      "evidence_ids": ["ME002B-E1", "ME002B-E2", "ME002B-E3"],
+      "limitations": ["Retained content hashes are not cryptographic attestations of shell settings or absence of unrecorded attempts; the independent reviewers did not execute another full raw replay."]
+    },
+    {
+      "id": "ME002B-C1",
+      "type": "CAUSAL",
+      "text": "For this fixed one-second gate and phase, increasing first-action poll interval from 1 to 80 ms moved send and arrival 40 ms later in every matched world; the all-assigned filled-fraction response changed sign across the three development seeds.",
+      "evidence_ids": ["ME002B-E1", "ME002B-E3", "ME002B-E4"],
+      "limitations": ["The later action encounters a later endogenous book; three seeds and one phase do not identify an average cadence law, repeated strategy behavior, profitability or empirical latency effects."]
+    },
+    {
+      "id": "ME002B-C2",
+      "type": "CAUSAL",
+      "text": "The registered directed-network change moved venue arrival 89 ms later at each poll setting, but the filled-fraction network contrast was not uniformly signed across seeds or poll settings.",
+      "evidence_ids": ["ME002B-E1", "ME002B-E3", "ME002B-E4"],
+      "limitations": ["Synthetic directed delay is not measured geography; feed selection can also change, and equal seed labels do not prove all later background random draws remain coupled."]
+    },
+    {
+      "id": "ME002B-D1",
+      "type": "DESCRIPTIVE",
+      "text": "The corrected surface retains sampled selected-quote state but no continuous executable opportunity lifetime or exact at-arrival pre-match depth; the original v1 sampled-duration ratio is excluded from the reviewed interpretation.",
+      "evidence_ids": ["ME002B-E1", "ME002B-E4"],
+      "limitations": ["This is a measurement limitation, not evidence that the opportunity lifetime was zero or that a partial fill was caused by one specific unobserved depth state."]
+    }
+  ],
+  "evidence": [
+    {
+      "id": "ME002B-E1",
+      "kind": "external_corrected_all_assigned_surface_and_raw_evidence",
+      "location": "/home/vlad/ExchangeSimulation-me002b-development-4040913/analysis/cadence-surface-v2.json",
+      "identity": "SHA256 117db2414b2866fefb938a2a9f81b0f6273f35823b1c082a7d85dda88aac5945; twelve original C raw streams replayed by b85df5e; original v1 results preserved"
+    },
+    {
+      "id": "ME002B-E2",
+      "kind": "fresh_process_controls_and_resource_measurements",
+      "location": "/home/vlad/ExchangeSimulation-me002b-development-4040913/controls",
+      "identity": "g1/g7 evidence SHA256 8c3a4eb14032f41c8ab6170d0cefa073b8abdace9f341d91910132143943a577; result SHA256 83b7973cc05ad06456350ef05d8413955493f68c7565ddc019b3e237fffefa4e; finite cgroup records in measurements/"
+    },
+    {
+      "id": "ME002B-E3",
+      "kind": "prospective_protocol_lock_and_reviews",
+      "location": "research/program/ideas/ME-002-B/development-lock-20260926.md",
+      "identity": "P2 blob 96884a3be38d0e82c2d0f828143604bf462edabb; twelve plan SHA256 values committed before any world; prospective independent acceptances in research/program/reviews/me002b-prerun-20260926.md"
+    },
+    {
+      "id": "ME002B-E4",
+      "kind": "bounded_post_result_independent_reviews",
+      "location": "research/program/reviews/me002b-result-20260926.md",
+      "identity": "Original A substantive REJECT, correction A COMPLETED/ACCEPT, first B UNAVAILABLE/NOT_ISSUED, bounded B fallback COMPLETED/ACCEPT; exact scopes and unperformed checks recorded"
+    }
+  ]
+}

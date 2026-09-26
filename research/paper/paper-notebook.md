@@ -119,15 +119,25 @@ market-realism or future trading-profit claim.
   comparison. Do not interpret zero opportunities as strategy ineffectiveness
   or a general impossibility result.
 
-## ME-002-B — preregistered first-action cadence question
+## ME-002-B — reviewed fixed-gate development response
 
-- The [prospective protocol](../program/ideas/ME-002-B/protocol.md) is a
-  separate 12-world 1/80-ms policy poll × 1/90-ms directed network screen
-  for one 5-ABC child, with zero added processing. The earlier plan and
-  source/evidence candidate are reviewed; **no result belongs in this
-  notebook until the registered worlds and independent reconstruction finish**.
-- The fixed 1-s gate makes the 80-ms first eligible tick 1.040 s; this is a
-  phase-dependent first-action question, not recurring high-frequency trading.
+- The [reviewed report](../program/ideas/ME-002-B/report.md) and
+  [machine result](../program/ideas/ME-002-B/result.json) cover exactly
+  twelve development worlds and two technical controls. Source C is
+  `4040913`; protocol P2 is `18dcb77`; corrected analysis-only
+  aggregation is `b85df5e`. No ME-002 baseline world was rerun.
+- The 80-ms poll moves first send and venue arrival 40 simulated ms after
+  the 1-ms poll under the fixed 1-s gate; 90-ms directed network moves
+  arrival another 89 ms relative to 1-ms network. Filled-fraction effects
+  are mixed across three seeds and do not establish a general latency law.
+  The one-child policy does not test recurring high-frequency behavior.
+- A post-result reviewer rejected the v1 sampled-publication-interval
+  `complete`/delay-ratio label as a continuous executable opportunity
+  lifetime. A [versioned Go surface](../program/reviews/me002b-result-20260926.md)
+  replays all twelve immutable streams, omits that field and reports
+  `NOT_RECONSTRUCTIBLE_FROM_SAMPLED_SNAPSHOTS`; bounded mechanics and
+  causal/statistical reviews accepted the corrected interpretation. Exact
+  pre-match depth remains unknown.
 
 ## Draft article architecture, not yet results text
 
@@ -139,8 +149,8 @@ market-realism or future trading-profit claim.
 4. ME-002 deployment × quantity response (reviewed development only).
 5. ME-003 IOC/FOK conditional completion and non-fill response (reviewed
    development only).
-6. ME-005's valid no-opportunity boundary and ME-002-B's fixed-gate question,
-   with any later ME-002-B result added only after completed review.
+6. ME-005's valid no-opportunity boundary and ME-002-B's reviewed fixed-gate
+   mixed-sign development response, without pooling their seeds or ecologies.
 7. Contradictory and null outcomes, fixed-clock limits and what remains
    unconfirmed.
 8. A future separately authorized confirmation/empirical-comparison design.

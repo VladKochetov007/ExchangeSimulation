@@ -1,6 +1,6 @@
 # ME-002-B — first-action cadence × directed network delay
 
-Status: **12-CELL DEVELOPMENT RESULT; POST-RESULT CLAIM REVIEW IN PROGRESS**.
+Status: **REVIEWED 12-CELL DEVELOPMENT RESPONSE MAP**.
 This is a fixed-phase, one-child execution experiment, not a recurrent
 high-frequency policy, a profitability study, confirmation, or empirical
 validation. The registered matrix and endpoint are in [protocol P2](protocol.md);
@@ -154,8 +154,9 @@ that sampled-interval ratio. The first post-result mechanics reviewer
 substantively rejected treating it as a continuous executable
 opportunity lifetime under P2. The old result files and raw evidence
 remain unchanged. Analyzer-only commit
-`b85df5eb86e7865e74de5317cc86c003249dd4f6` independently replays
-**all 12** streams, verifies plans/manifests/file digests, actor/ledger
+`b85df5eb86e7865e74de5317cc86c003249dd4f6` replays
+**all 12** streams separately from their stored v1 result files, using
+the same Go reconstruction contract. It verifies plans/manifests/file digests, actor/ledger
 outcomes and finite resource measurements, then emits a versioned
 `cadence-surface-v2.json` with the sampled selected-state flag but
 without v1 duration/completion/ratio. Every cell explicitly states
@@ -216,8 +217,8 @@ conditional arbitrage profit was estimated. ME-002 and ME-003 retain
 their own source, protocols and development conclusions. No ME-001,
 ME-002, ME-003, ME-005, R2/SV1D or holdout world was rerun here.
 
-The next study should be chosen prospectively after bounded post-result
-review. A **known-opportunity mechanical two-venue fixture** is the
+The next study is proposed, not authorized. A **known-opportunity mechanical
+two-venue fixture** is the
 smallest useful next question because ME-005 did not exercise an
 arbitrage attempt, while ME-002-B already establishes the first-action
 timing channel for this one-child policy. Such a fixture could verify
@@ -228,9 +229,13 @@ informed-maker/arbitrage interaction remain later, separate designs.
 
 ## Post-result review status
 
-The independent mechanics reviewer issued a substantive **REJECT** of
-the original v1 secondary lifetime label. A bounded re-review of the
-versioned correction is pending. The first post-result causal/statistical
-review attempt was `UNAVAILABLE / NOT_ISSUED`, not an acceptance or a
-scientific rejection. A single permitted fallback is being sought.
-No reviewed final scientific verdict is claimed by this draft.
+The [bounded review ledger](../../reviews/me002b-result-20260926.md)
+preserves the mechanics reviewer's substantive **REJECT** of the
+original v1 secondary lifetime label and its subsequent **ACCEPT** of
+the versioned correction. A fresh causal/statistical attempt was
+`UNAVAILABLE / NOT_ISSUED`, not an acceptance or a scientific rejection.
+One permitted independent Sol-6 medium fallback then **ACCEPTED** the
+arithmetic and scope of this bounded development interpretation.
+Neither reviewer independently replayed all raw streams or ran worlds,
+tests or holdouts. Their acceptance does not authorize confirmation,
+economic retuning or the proposed next study.
