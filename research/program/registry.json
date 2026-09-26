@@ -75,9 +75,9 @@
       "id": "ME-002-B",
       "title": "First-decision cadence by network delay",
       "claim_type": "CAUSAL",
-      "stage": "PLAN",
+      "stage": "PREPARE",
       "idea": "research/program/ideas/ME-002-B/idea.md",
-      "protocol": null,
+      "protocol": "research/program/ideas/ME-002-B/protocol.md",
       "report": null,
       "result": null,
       "dependencies": [
@@ -88,11 +88,11 @@
         "S01"
       ],
       "authorization": {
-        "prepare": false,
-        "run": false,
-        "basis": "Owner 2026-09-23 bounded continuation requested an optional ME-002B cadence plan only. No readiness implementation, economic world, seed reservation, confirmation or holdout is authorized."
+        "prepare": true,
+        "run": true,
+        "basis": "Owner 2026-09-26 authorized only the reviewed 12-cell ME-002-B first-action cadence development design plus two technical controls, conditional on exact candidate/protocol review, pinned binaries and resource preflight. No economic cell may start while either required preregistration review is NOT_ISSUED. No confirmation or holdout is authorized."
       },
-      "next_action": "PROPOSED first-action cadence/network interaction screen only; it cannot locate a poll-dominates-transport threshold. Decide prospectively whether its one-child scope is useful; parameterize fail-closed coarse-poll replay, gate-adjusted wait and phase fixtures before protocol lock. Repeated adaptive strategy frequency is a different study."
+      "next_action": "Read the prospectively amended ME-002-B protocol and review ledger. Complete two substantive independent preregistration acceptances and resource controls before any of the twelve fixed economic cells; do not treat the one-child design as repeated strategy frequency."
     },
     {
       "id": "ME-003",

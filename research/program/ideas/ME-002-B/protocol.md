@@ -89,6 +89,18 @@ economic observations. Within the matrix run arm order as in the table and
 seeds ascending. Do not fill the owner's larger 24-world ceiling with new
 arms after viewing results.
 
+Before this lock, automated **mechanical fixtures** constructed short
+`executionlab` trajectories using the proposed labels `13001` and `13011`
+to test first-tick phase, evidence replay, mutation rejection and
+instrumentation neutrality. The fixture assertions inspected decision times,
+replay/actor equality and corruption handling; they did not inspect,
+tabulate, retain or choose parameters using those fixtures' filled fractions.
+Their transient trajectories are not registered economic cells, technical
+controls or untouched conditions. This disclosure prevents the three labels
+from being described as outcome-blind confirmation seeds; they remain
+development labels only. No economic ME-002-B matrix result had been read
+when the present protocol wording was fixed.
+
 ## Secondary timing and opportunity diagnostics
 
 From independently reconstructed evidence report publication/receipt,
