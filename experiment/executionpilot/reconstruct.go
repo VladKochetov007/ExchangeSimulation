@@ -297,6 +297,8 @@ type reconstructionState struct {
 	lastReceipt           int64
 	lastSnapshotEventSeq  uint64
 	lastProcessedAt       int64
+	firstUsableAt         int64
+	firstUsableSeen       bool
 	latestMessage         snapshotWire
 	latestReceipt         int64
 	latestMessageEventSeq uint64
@@ -362,21 +364,30 @@ func Reconstruct(input io.Reader, evidence EvidenceIdentity, plan LockedPlan) (R
 // ReconstructLatency independently replays the versioned deployment evidence.
 // Callers must bind effectiveWorld to a verified, pinned plan before invoking it.
 func ReconstructLatency(input io.Reader, evidence EvidenceIdentity, effectiveWorld json.RawMessage, targetQty int64) (ReconstructedOutcome, error) {
+	state, err := reconstructDeployment(input, evidence, effectiveWorld, targetQty, 1_000_000)
+	if err != nil {
+		return ReconstructedOutcome{}, err
+	}
+	return state.result, nil
+}
+
+func reconstructDeployment(input io.Reader, evidence EvidenceIdentity, effectiveWorld json.RawMessage, targetQty, pollInterval int64) (*reconstructionState, error) {
 	var contract analysisContract
 	if err := json.Unmarshal(effectiveWorld, &contract); err != nil {
-		return ReconstructedOutcome{}, fmt.Errorf("latency pilot: decode effective world: %w", err)
+		return nil, fmt.Errorf("latency pilot: decode effective world: %w", err)
 	}
 	if len(contract.Parents) != 1 || contract.Parents[0].Deployment == nil || contract.Parents[0].Latency != 0 ||
 		contract.Parents[0].Config.TargetQty != targetQty || targetQty <= 0 || contract.Parents[0].Config.Side != "BUY" ||
 		contract.Parents[0].Config.Symbol != contract.Instrument.Symbol || contract.Instrument.BasePrecision <= 0 ||
 		contract.Runner.Iterations != 4000 || contract.Runner.Step != 1_000_000 ||
-		contract.Parents[0].Config.PollInterval != 1_000_000 || contract.Parents[0].Config.DecisionAfter != 1_000_000_000 ||
+		contract.Parents[0].Config.PollInterval != pollInterval || pollInterval <= 0 ||
+		pollInterval%contract.Runner.Step != 0 || contract.Parents[0].Config.DecisionAfter != 1_000_000_000 ||
 		!contract.Config.RecordSnapshotProjectionEvidence {
-		return ReconstructedOutcome{}, errors.New("latency pilot: unsupported or inconsistent focal contract")
+		return nil, errors.New("latency pilot: unsupported or inconsistent focal contract")
 	}
 	deployment := contract.Parents[0].Deployment
 	if deployment.MarketDataLatency < 0 || deployment.RequestLatency < 0 || deployment.ResponseLatency < 0 || deployment.ProcessingDelay < 0 {
-		return ReconstructedOutcome{}, errors.New("latency pilot: negative deployment component")
+		return nil, errors.New("latency pilot: negative deployment component")
 	}
 	clientID := contract.Parents[0].ClientID
 	accountFound := false
@@ -387,7 +398,7 @@ func ReconstructLatency(input io.Reader, evidence EvidenceIdentity, effectiveWor
 		}
 	}
 	if !accountFound {
-		return ReconstructedOutcome{}, errors.New("latency pilot: focal account or fee contract missing")
+		return nil, errors.New("latency pilot: focal account or fee contract missing")
 	}
 	state := newReconstructionState(contract, clientID, targetQty)
 	state.marketDataLatency = deployment.MarketDataLatency
@@ -396,12 +407,12 @@ func ReconstructLatency(input io.Reader, evidence EvidenceIdentity, effectiveWor
 	state.processingDelay = deployment.ProcessingDelay
 	state.latencyEvidence = true
 	if err := WalkLatencyEvidence(input, evidence, state.consume); err != nil {
-		return ReconstructedOutcome{}, err
+		return nil, err
 	}
 	if err := state.finish(); err != nil {
-		return ReconstructedOutcome{}, err
+		return nil, err
 	}
-	return state.result, nil
+	return state, nil
 }
 
 // ReconstructInstruction uses the locked effective world, rather than the
@@ -547,6 +558,9 @@ func (s *reconstructionState) consumeActor(event RecordedEvent) error {
 			s.pendingProcessing[snapshot.SeqNum] = pendingReconstructionSnapshot{snapshot, event.Timestamp, event.Sequence}
 		} else if len(snapshot.Snapshot.Bids) != 0 && len(snapshot.Snapshot.Asks) != 0 {
 			s.lastSnapshot, s.lastReceipt, s.lastSnapshotEventSeq = snapshot, event.Timestamp, event.Sequence
+			if !s.firstUsableSeen {
+				s.firstUsableAt, s.firstUsableSeen = event.Timestamp, true
+			}
 		}
 	case "snapshot_processing_complete":
 		if !s.latencyEvidence {
@@ -589,6 +603,9 @@ func (s *reconstructionState) consumeActor(event RecordedEvent) error {
 		if processed.TwoSided {
 			s.lastSnapshot, s.lastReceipt, s.lastSnapshotEventSeq = pending.snapshot, pending.receivedAt, pending.receiptEventSeq
 			s.lastProcessedAt = event.Timestamp
+			if !s.firstUsableSeen {
+				s.firstUsableAt, s.firstUsableSeen = event.Timestamp, true
+			}
 		}
 	case "decision_tick":
 		if s.latencyEvidence {
@@ -598,7 +615,7 @@ func (s *reconstructionState) consumeActor(event RecordedEvent) error {
 				}
 			}
 		}
-		if event.Timestamp != (s.decisionTicks+1)*s.contract.Runner.Step {
+		if event.Timestamp != (s.decisionTicks+1)*s.contract.Parents[0].Config.PollInterval {
 			return errors.New("execution pilot: missing, duplicate or misphased focal decision tick")
 		}
 		s.decisionTicks++
@@ -1067,7 +1084,9 @@ func (s *reconstructionState) finish() error {
 			return errors.New("execution pilot: focal delivery outcome lacks venue publication")
 		}
 	}
-	if s.decisionTicks != int64(s.contract.Runner.Iterations) {
+	if s.contract.Parents[0].Config.PollInterval <= 0 ||
+		(int64(s.contract.Runner.Iterations)*s.contract.Runner.Step)%s.contract.Parents[0].Config.PollInterval != 0 ||
+		s.decisionTicks != (int64(s.contract.Runner.Iterations)*s.contract.Runner.Step)/s.contract.Parents[0].Config.PollInterval {
 		return errors.New("execution pilot: incomplete focal decision clock evidence")
 	}
 	if s.latencyEvidence {
