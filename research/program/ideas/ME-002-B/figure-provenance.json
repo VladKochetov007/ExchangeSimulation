@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "study_id": "ME-002-B",
+  "figure": "research/program/ideas/ME-002-B/figures/cadence-development-v2.png",
+  "figure_sha256": "b3c8db29a39f89e14eabdc914a06a8c999ac8a1d2acc0c716e53d3d5cd57e450",
+  "script": "research/program/ideas/ME-002-B/plot_cadence.py",
+  "script_sha256": "e6ed109b872c9722f9d34a2927dc839e5f5760921abd10ddf2c3c37c8ee8c91e",
+  "input_surface": "/home/vlad/ExchangeSimulation-me002b-development-4040913/analysis/cadence-surface-v2.json",
+  "input_surface_sha256": "117db2414b2866fefb938a2a9f81b0f6273f35823b1c082a7d85dda88aac5945",
+  "analysis_commit": "b85df5eb86e7865e74de5317cc86c003249dd4f6",
+  "execution_source": "404091350440daf8ee0d1299730a932b1bc105af",
+  "render_command": "/home/vlad/ExchangeSimulation/.venv/bin/python research/program/ideas/ME-002-B/plot_cadence.py --surface /home/vlad/ExchangeSimulation-me002b-development-4040913/analysis/cadence-surface-v2.json --out research/program/ideas/ME-002-B/figures/cadence-development-v2.png",
+  "scope": "Fixed 12-world development matrix; colors and geometry are visualization only, not a fitted market law."
+}
