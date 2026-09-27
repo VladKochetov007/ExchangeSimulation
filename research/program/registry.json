@@ -379,7 +379,7 @@
         "run": false,
         "basis": "Owner 2026-09-27 long-run goal authorizes bounded E0/E1/E2 implementation and conditional development, recorded in research/program/longrun-baselines/authorization-20260927.md. E2 runs remain gated on E0 and versioned funding/lifecycle/evidence readiness plus a fixed protocol."
       },
-      "next_action": "Pure absolute calendar/scaled-rate, fractional cash-preview, shared-window settlement-mark and whole-venue finite-reserve batch preflight are reviewed but not production-wired. The prospective contract still requires live roster/mark/position attestation, atomic posting, venue-local source/clock, same-time risk and independent evidence fixtures. E0/E1 terminal priceability and a fixed reviewed E2 protocol remain economic-run gates; no ME-014 world is authorized yet."
+      "next_action": "Pure calendar/rate, fractional preview, shared-window mark and whole-venue batch preflight are reviewed but not production-wired. An opt-in off-grid phase helper is only conditionally reviewed: the E2 world must prove exclusive clock/event-producer ownership before claiming t-minus sampling. Live roster/mark/position attestation, atomic posting, joint risk, evidence replay, E0/E1 priceability and a fixed reviewed E2 protocol remain economic-run gates; no ME-014 world is authorized yet."
     },
     {
       "id": "ME-015",

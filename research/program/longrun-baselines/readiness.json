@@ -279,7 +279,10 @@
       "pure_settlement_terms_source_commit": "113388260cd1533759fdc900dda083d71dea1155",
       "pure_settlement_terms_review": "research/program/reviews/me014-settlement-terms-20260927.md",
       "pure_batch_preview_source_commit": "0332835a78809ded0176c91db1e8bb25c92f1b7f",
-      "pure_batch_preview_review": "research/program/reviews/me014-funding-batch-preview-20260927.md"
+      "pure_batch_preview_review": "research/program/reviews/me014-funding-batch-preview-20260927.md",
+      "opt_in_pre_timestamp_phase_source_commit": "00b63ec1b80cc74275e039bdee9530be8c27643f",
+      "opt_in_pre_timestamp_phase_review": "research/program/reviews/me014-pre-timestamp-phase-20260927.md",
+      "opt_in_pre_timestamp_phase_verdict": "CONDITIONAL_HELPER_NOT_E2_T_MINUS_PROOF"
     }
   ],
   "bounded_implementation_tasks": [
