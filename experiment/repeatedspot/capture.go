@@ -56,6 +56,8 @@ func NewCapture(world *worldspot.World, stream io.Writer, receipts *simulation.M
 		return nil, errors.New("repeated spot: existing venue logger would be overwritten")
 	}
 	gateways := make([]*simulation.DelayedGateway, len(actors))
+	orderObservers := make([]interface{ SetOrderDecisionObserver(func(exchange.Request)) }, len(actors))
+	cancelObservers := make([]interface{ SetCancelDecisionObserver(func(exchange.Request)) }, len(actors))
 	for index, participant := range contract.Participants {
 		if participant.ActorID != actors[index].ID() || participant.ClientID == 0 || participant.Role == "" {
 			return nil, fmt.Errorf("repeated spot: actor/contract identity mismatch at slot %d", index)
@@ -65,6 +67,16 @@ func NewCapture(world *worldspot.World, stream io.Writer, receipts *simulation.M
 			return nil, fmt.Errorf("repeated spot: actor %d has no deterministic delayed gateway", participant.ActorID)
 		}
 		gateways[index] = gateway
+		observer, ok := actors[index].(interface{ SetOrderDecisionObserver(func(exchange.Request)) })
+		if !ok {
+			return nil, fmt.Errorf("repeated spot: actor %d cannot expose outbound order decisions", participant.ActorID)
+		}
+		orderObservers[index] = observer
+		cancelObserver, ok := actors[index].(interface{ SetCancelDecisionObserver(func(exchange.Request)) })
+		if !ok {
+			return nil, fmt.Errorf("repeated spot: actor %d cannot expose outbound cancellations", participant.ActorID)
+		}
+		cancelObservers[index] = cancelObserver
 	}
 
 	capture := &Capture{world: world, recorder: NewRecorder(stream), receipts: receipts, symbol: contract.Instrument.Symbol}
@@ -72,10 +84,15 @@ func NewCapture(world *worldspot.World, stream io.Writer, receipts *simulation.M
 	world.Venue().SetLogger("_global", ExchangeLogger{Recorder: capture.recorder, Route: "_global"})
 	for index, participant := range contract.Participants {
 		gateway := gateways[index]
+		clientID := participant.ClientID
+		recordOutbound := func(request exchange.Request) {
+			capture.recorder.Record(world.SimulatedNowUnixNano(), clientID, "actor", "order_send", contract.Instrument.Symbol, request)
+		}
+		orderObservers[index].SetOrderDecisionObserver(recordOutbound)
+		cancelObservers[index].SetCancelDecisionObserver(recordOutbound)
 		gateway.SetMarketDataReceiptRecorder(receipts, contract.VenueID,
 			fmt.Sprintf("%s/client/%d", contract.VenueID, participant.ClientID), participant.Role)
 		if maker, ok := actors[index].(*worldspot.RecurringMaker); ok {
-			clientID := participant.ClientID
 			maker.SetDecisionObserver(func(decision worldspot.MakerDecision) {
 				capture.recorder.Record(decision.DecisionAt, clientID, "actor", "maker_decision", contract.Instrument.Symbol, decision)
 			})

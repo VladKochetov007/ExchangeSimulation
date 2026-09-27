@@ -16,8 +16,8 @@ import (
 )
 
 const (
-	EvidenceSchemaID    = "repeated-spot-opaque-v1"
-	evidenceSchemaEpoch = 0x45300001
+	EvidenceSchemaID    = "repeated-spot-opaque-v2"
+	evidenceSchemaEpoch = 0x45300002
 )
 
 type EvidenceIdentity struct {

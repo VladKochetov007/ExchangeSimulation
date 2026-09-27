@@ -36,7 +36,10 @@ type replayParticipant struct {
 	ClientID uint64           `json:"client_id"`
 	Role     string           `json:"role"`
 	Balances map[string]int64 `json:"balances"`
-	Policy   struct {
+	Latency  struct {
+		RequestNanos int64 `json:"request_latency_ns"`
+	} `json:"latency"`
+	Policy struct {
 		Name       string          `json:"name"`
 		Parameters json.RawMessage `json:"parameters"`
 	} `json:"policy"`
@@ -51,6 +54,7 @@ type AccountResult struct {
 	FeePaidQuote  int64            `json:"fee_paid_quote"`
 	FillCount     int              `json:"fill_count"`
 	BenchmarkGain *int64           `json:"benchmark_gain_quote,omitempty"`
+	Outbound      OutboundSummary  `json:"outbound"`
 }
 
 type EconomicReplay struct {
@@ -76,9 +80,12 @@ type accountState struct {
 	startSeen    bool
 	endSeen      bool
 	workingLimit int64
+	requestDelay int64
 	maker        *makerParameters
 	variance     deliveredVariance
 	decisions    int64
+	pendingSends []*sentOrder
+	outbound     OutboundSummary
 }
 
 type replayState struct {
@@ -97,6 +104,7 @@ type replayState struct {
 	publicSnapshots     map[uint64]publicSnapshot
 	makerObservations   []makerObservationRecord
 	latestMakerSnapshot map[uint64]worldspot.MakerObservation
+	sentRequests        map[requestKey]*sentOrder
 }
 
 type publicSnapshot struct {
@@ -130,9 +138,11 @@ func Replay(contractBytes []byte, stream io.Reader, identity EvidenceIdentity, r
 	state := &replayState{contract: contract, contractHash: hex.EncodeToString(hash[:]), phase: "before_begin",
 		accounts: make(map[uint64]*accountState), venue: make(map[string]int64), trades: newTradeAudit(contract.Instrument),
 		market:          newPublicBookSeries(contract.StartUnixNano, contract.Instrument.TickSize),
+		sentRequests:    make(map[requestKey]*sentOrder),
 		publicSnapshots: make(map[uint64]publicSnapshot), latestMakerSnapshot: make(map[uint64]worldspot.MakerObservation)}
 	for _, participant := range contract.Participants {
-		if participant.ClientID == 0 || participant.ActorID == 0 || participant.Role == "" || state.accounts[participant.ClientID] != nil {
+		if participant.ClientID == 0 || participant.ActorID == 0 || participant.Role == "" ||
+			participant.Latency.RequestNanos < 0 || state.accounts[participant.ClientID] != nil {
 			return nil, errors.New("repeated spot: duplicate or incomplete participant identity")
 		}
 		initial := make(map[string]int64, len(participant.Balances))
@@ -154,7 +164,7 @@ func Replay(contractBytes []byte, stream io.Reader, identity EvidenceIdentity, r
 		}
 		state.accounts[participant.ClientID] = &accountState{actorID: participant.ActorID, clientID: participant.ClientID,
 			role: participant.Role, initial: initial, current: copyBalances(initial), workingLimit: workingLimit,
-			maker: maker, variance: variance}
+			maker: maker, variance: variance, requestDelay: participant.Latency.RequestNanos}
 	}
 	if err := WalkEvidence(stream, identity, state.visit); err != nil {
 		return nil, err
@@ -169,6 +179,9 @@ func Replay(contractBytes []byte, stream io.Reader, identity EvidenceIdentity, r
 		if account.maker != nil && account.decisions != int64(contract.Iterations)*contract.Step/account.maker.quoteIntervalNanos {
 			return nil, fmt.Errorf("repeated spot: incomplete maker decision schedule for client %d", account.clientID)
 		}
+		if len(account.pendingSends) != 0 {
+			return nil, fmt.Errorf("repeated spot: maker %d has unassigned outbound requests", account.clientID)
+		}
 	}
 	if err := state.trades.finish(state); err != nil {
 		return nil, err
@@ -182,6 +195,16 @@ func Replay(contractBytes []byte, stream io.Reader, identity EvidenceIdentity, r
 	}
 	if err := state.verifyMakerReceipts(receiptDir); err != nil {
 		return nil, err
+	}
+	for key, sent := range state.sentRequests {
+		if !sent.resolved {
+			account := state.accounts[key.clientID]
+			end := contract.StartUnixNano + int64(contract.Iterations)*contract.Step
+			if account.requestDelay <= end-sent.at {
+				return nil, fmt.Errorf("repeated spot: client %d request %d reached its venue window without outcome", key.clientID, key.requestID)
+			}
+			account.outbound.UnresolvedAtEnd++
+		}
 	}
 	market := state.market.summary()
 	tradeVolume, tradeNotional := state.trades.totals()
@@ -200,7 +223,7 @@ func Replay(contractBytes []byte, stream io.Reader, identity EvidenceIdentity, r
 		account := state.accounts[clientID]
 		result := AccountResult{ActorID: account.actorID, ClientID: clientID, Role: account.role,
 			Initial: copyBalances(account.initial), Terminal: copyBalances(account.current),
-			FeePaidQuote: account.feePaidQuote, FillCount: account.fillCount}
+			FeePaidQuote: account.feePaidQuote, FillCount: account.fillCount, Outbound: account.outbound}
 		if state.terminalMid != nil {
 			gain, err := benchmarkGain(account, contract.Instrument, *state.terminalMid)
 			if err != nil {
@@ -236,6 +259,9 @@ func (state *replayState) visit(event Event) error {
 	if event.Source == "actor" && event.Name == "maker_observation" {
 		return state.makerObservation(event)
 	}
+	if event.Source == "actor" && event.Name == "order_send" {
+		return state.orderSend(event)
+	}
 	if event.Source != "exchange" || event.Route != state.contract.Instrument.Symbol && event.Route != "_global" {
 		return fmt.Errorf("repeated spot: unexpected event source/route %s/%s", event.Source, event.Route)
 	}
@@ -255,6 +281,9 @@ func (state *replayState) visit(event Event) error {
 			if err := state.publicDelta(event); err != nil {
 				return err
 			}
+		}
+		if err := state.checkOrderOutcome(event); err != nil {
+			return err
 		}
 		return state.trades.visit(event)
 	default:
@@ -454,6 +483,9 @@ func (state *replayState) makerDecision(event Event) error {
 		if decision.TargetBid != 0 || decision.TargetAsk != 0 {
 			return errors.New("repeated spot: maker reported a target while no quote was calculated")
 		}
+	}
+	if err := account.verifyMakerSends(decision, event.Timestamp); err != nil {
+		return err
 	}
 	account.decisions++
 	return nil

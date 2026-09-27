@@ -93,6 +93,34 @@ func TestIndependentReplayRejectsRehashedSemanticCorruption(t *testing.T) {
 			replacePayloadField(t, &events[index], "fee_amount", 2)
 			return events
 		},
+		"missing outbound placement": func(t *testing.T, events []Event) []Event {
+			index := firstEvent(t, events, "order_send")
+			return append(events[:index], events[index+1:]...)
+		},
+		"missing venue admission outcome": func(t *testing.T, events []Event) []Event {
+			index := firstEvent(t, events, "OrderAccepted")
+			return append(events[:index], events[index+1:]...)
+		},
+		"outbound placement price differs from venue admission": func(t *testing.T, events []Event) []Event {
+			for index := range events {
+				if events[index].Name != "order_send" {
+					continue
+				}
+				var payload map[string]json.RawMessage
+				if err := json.Unmarshal(events[index].Payload, &payload); err != nil {
+					t.Fatal(err)
+				}
+				var order map[string]any
+				if err := json.Unmarshal(payload["OrderReq"], &order); err != nil {
+					t.Fatal(err)
+				}
+				order["price"] = order["price"].(float64) + 1
+				replacePayloadField(t, &events[index], "OrderReq", order)
+				return events
+			}
+			t.Fatal("fixture lacks outbound order")
+			return nil
+		},
 		"forged cumulative maker fill": func(t *testing.T, events []Event) []Event {
 			for index := range events {
 				if events[index].Name != "OrderFill" {
@@ -341,7 +369,7 @@ func TestIndependentReplayReconstructsProductionStoikovQuote(t *testing.T) {
 
 func TestIndependentReplayKeepsOneSidedTerminalMarkUnavailable(t *testing.T) {
 	contract, events, directory := capturedFixtureWorld(t,
-		fixtureWorldWithBook(t, true, false, 1, 20*time.Second))
+		fixtureWorldWithBook(t, true, false, 1, 20*time.Second, false))
 	report, err := replayMutated(t, contract, events, directory)
 	if err != nil {
 		t.Fatal(err)

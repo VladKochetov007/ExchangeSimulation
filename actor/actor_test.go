@@ -104,6 +104,36 @@ func TestBaseActorOrderDecisionObserverRunsBeforeGatewaySend(t *testing.T) {
 	}
 }
 
+func TestBaseActorCancelDecisionObserverRunsBeforeGatewaySend(t *testing.T) {
+	gateway := exchange.NewClientGateway(1)
+	base := NewBaseActor(1, gateway)
+	seen := false
+	base.SetOrderDecisionObserver(func(exchange.Request) {
+		t.Fatal("historical placement observer received a cancellation")
+	})
+	base.SetCancelDecisionObserver(func(request exchange.Request) {
+		seen = true
+		if request.Type != exchange.ReqCancelOrder || request.CancelReq == nil || request.CancelReq.OrderID != 42 {
+			t.Fatalf("observer received wrong cancellation: %+v", request)
+		}
+		if len(gateway.RequestCh) != 0 {
+			t.Fatal("gateway received cancel before decision observer")
+		}
+	})
+	requestID := base.CancelOrder(42)
+	if !seen || requestID == 0 {
+		t.Fatal("cancel decision was not observed")
+	}
+	select {
+	case request := <-gateway.RequestCh:
+		if request.CancelReq == nil || request.CancelReq.RequestID != requestID {
+			t.Fatalf("cancel request changed after observation: %+v", request)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("observer prevented cancellation from reaching gateway")
+	}
+}
+
 func TestBaseActorDeterministicAuxiliaryFeedIsOrderedAndReadOnly(t *testing.T) {
 	trading := exchange.NewClientGateway(1)
 	feed := exchange.NewClientGateway(2)

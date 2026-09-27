@@ -13,6 +13,7 @@ import (
 type makerParameters struct {
 	kind                string
 	workingLimit        int64
+	quoteQty            int64
 	quoteIntervalNanos  int64
 	tickSize            int64
 	initialVariance     float64
@@ -41,6 +42,7 @@ func parseMakerParameters(participant replayParticipant) (*makerParameters, erro
 	var raw struct {
 		Maker struct {
 			WorkingLimit                int64   `json:"working_limit"`
+			QuoteQty                    int64   `json:"quote_qty"`
 			QuoteInterval               int64   `json:"quote_interval_ns"`
 			TickSize                    int64   `json:"tick_size"`
 			InitialLogVariancePerSecond float64 `json:"initial_log_variance_per_second"`
@@ -59,15 +61,16 @@ func parseMakerParameters(participant replayParticipant) (*makerParameters, erro
 		return nil, err
 	}
 	parameters := &makerParameters{kind: participant.Policy.Name,
-		workingLimit: raw.Maker.WorkingLimit, quoteIntervalNanos: raw.Maker.QuoteInterval,
-		tickSize:        raw.Maker.TickSize,
-		initialVariance: raw.Maker.InitialLogVariancePerSecond,
-		halfLifeNanos:   raw.Maker.VolatilityHalfLife, sampleIntervalNanos: raw.Maker.VolatilitySampleInterval,
+		workingLimit: raw.Maker.WorkingLimit, quoteQty: raw.Maker.QuoteQty,
+		quoteIntervalNanos: raw.Maker.QuoteInterval,
+		tickSize:           raw.Maker.TickSize,
+		initialVariance:    raw.Maker.InitialLogVariancePerSecond,
+		halfLifeNanos:      raw.Maker.VolatilityHalfLife, sampleIntervalNanos: raw.Maker.VolatilitySampleInterval,
 		maxVarianceMultiple: raw.Maker.MaxLogVarianceMultiple, spreadBps: raw.SpreadBps,
 		quotePrecision: raw.QuotePrecision, riskAversion: raw.RelativeRisk,
 		fillDecay: raw.RelativeFillDecay, horizonNanos: raw.InventoryHorizon,
 		minHalfSpreadTicks: raw.MinHalfSpreadTicks}
-	if parameters.workingLimit <= 0 || parameters.quoteIntervalNanos <= 0 || parameters.tickSize <= 0 ||
+	if parameters.workingLimit <= 0 || parameters.quoteQty <= 0 || parameters.quoteIntervalNanos <= 0 || parameters.tickSize <= 0 ||
 		!finiteNumber(parameters.initialVariance) || parameters.initialVariance < 0 ||
 		parameters.halfLifeNanos < 0 || parameters.sampleIntervalNanos < 0 ||
 		!finiteNumber(parameters.maxVarianceMultiple) || parameters.maxVarianceMultiple < 0 ||

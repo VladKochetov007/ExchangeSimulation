@@ -77,8 +77,9 @@ type BaseActor struct {
 	// evidence recorder can bind the decision to the actor's local feed
 	// frontier. It must be installed before Start and must never feed a value
 	// back to the actor; nil is the normal, zero-cost path.
-	orderDecisionObserver func(exchange.Request)
-	marketDataFeeds       []marketDataFeed
+	orderDecisionObserver  func(exchange.Request)
+	cancelDecisionObserver func(exchange.Request)
+	marketDataFeeds        []marketDataFeed
 
 	// phaseMode is an opt-in single-threaded execution mode used by the
 	// simulation runner. It keeps the ordinary asynchronous actor path intact,
@@ -161,6 +162,12 @@ func (a *BaseActor) SetHandler(h EventHandler) { a.handler = h }
 // scheduling, or the request sent to the venue.
 func (a *BaseActor) SetOrderDecisionObserver(observer func(exchange.Request)) {
 	a.orderDecisionObserver = observer
+}
+
+// SetCancelDecisionObserver is separate from the historical placement hook so
+// enabling cancellation evidence does not change existing order-only streams.
+func (a *BaseActor) SetCancelDecisionObserver(observer func(exchange.Request)) {
+	a.cancelDecisionObserver = observer
 }
 
 // AddMarketDataFeed adds an actor-owned, read-only public-feed session. The
@@ -727,13 +734,17 @@ func (a *BaseActor) sendOrderDecision(request exchange.Request) {
 func (a *BaseActor) CancelOrder(orderID uint64) uint64 {
 	reqID := atomic.AddUint64(&a.requestSeq, 1)
 	a.cancelRequests.Store(reqID, orderID)
-	a.gateway.Send(exchange.Request{
+	request := exchange.Request{
 		Type: exchange.ReqCancelOrder,
 		CancelReq: &exchange.CancelRequest{
 			RequestID: reqID,
 			OrderID:   orderID,
 		},
-	})
+	}
+	if a.cancelDecisionObserver != nil {
+		a.cancelDecisionObserver(request)
+	}
+	a.gateway.Send(request)
 	return reqID
 }
 

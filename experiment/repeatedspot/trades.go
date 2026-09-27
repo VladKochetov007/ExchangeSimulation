@@ -11,12 +11,21 @@ import (
 )
 
 type acceptedOrder struct {
-	OrderID   uint64 `json:"order_id"`
-	RequestID uint64 `json:"request_id"`
-	ClientID  uint64 `json:"client_id"`
-	Side      string `json:"side"`
-	Qty       int64  `json:"qty"`
-	Price     int64  `json:"price"`
+	OrderID      uint64 `json:"order_id"`
+	RequestID    uint64 `json:"request_id"`
+	ClientID     uint64 `json:"client_id"`
+	Side         string `json:"side"`
+	Qty          int64  `json:"qty"`
+	Price        int64  `json:"price"`
+	Type         string `json:"type"`
+	TimeInForce  string `json:"time_in_force"`
+	PostOnly     bool   `json:"post_only"`
+	Visibility   string `json:"visibility"`
+	IcebergQty   int64  `json:"iceberg_qty"`
+	PositionSide uint8  `json:"position_side"`
+	FilledQty    int64  `json:"filled_qty"`
+	Status       uint8  `json:"status"`
+	Timestamp    int64  `json:"timestamp"`
 }
 
 type recordedTrade struct {

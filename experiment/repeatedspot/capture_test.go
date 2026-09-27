@@ -17,6 +17,7 @@ type testAggressor struct {
 	*actor.BaseActor
 	sent    bool
 	enabled bool
+	market  bool
 }
 
 func (aggressor *testAggressor) HandleEvent(context.Context, *actor.Event) {}
@@ -26,7 +27,11 @@ func (aggressor *testAggressor) onTick(time.Time) {
 		return
 	}
 	aggressor.sent = true
-	aggressor.SubmitOrder("ABC/USD", exchange.Buy, exchange.LimitOrder, 101, 1)
+	if aggressor.market {
+		aggressor.SubmitOrder("ABC/USD", exchange.Buy, exchange.Market, 0, 1)
+	} else {
+		aggressor.SubmitOrder("ABC/USD", exchange.Buy, exchange.LimitOrder, 101, 1)
+	}
 }
 
 func fixtureWorld(t *testing.T) *worldspot.World {
@@ -38,10 +43,10 @@ func fixtureWorldWithAggression(t *testing.T, enabled bool) *worldspot.World {
 }
 
 func fixtureWorldWithMaker(t *testing.T, enabled, stoikov bool) *worldspot.World {
-	return fixtureWorldWithBook(t, enabled, stoikov, 2, 2*time.Second)
+	return fixtureWorldWithBook(t, enabled, stoikov, 2, 2*time.Second, false)
 }
 
-func fixtureWorldWithBook(t *testing.T, enabled, stoikov bool, seedAskQty int64, quoteInterval time.Duration) *worldspot.World {
+func fixtureWorldWithBook(t *testing.T, enabled, stoikov bool, seedAskQty int64, quoteInterval time.Duration, marketOrder bool) *worldspot.World {
 	t.Helper()
 	seed, err := worldspot.NewSeedOncePolicy(worldspot.SeedOnceConfig{Symbol: "ABC/USD", BidPrice: 99, AskPrice: 101, BidQty: 2, AskQty: seedAskQty})
 	if err != nil {
@@ -68,11 +73,13 @@ func fixtureWorldWithBook(t *testing.T, enabled, stoikov bool, seedAskQty int64,
 	}
 	params := struct {
 		Enabled bool `json:"enabled"`
-	}{enabled}
+		Market  bool `json:"market"`
+	}{enabled, marketOrder}
 	aggressor, err := worldspot.DefinePolicy("fixture_aggressor", params, func(id uint64, gateway actor.Gateway, _ exchange.TickerFactory, decoded struct {
 		Enabled bool `json:"enabled"`
+		Market  bool `json:"market"`
 	}) (actor.Actor, error) {
-		result := &testAggressor{BaseActor: actor.NewBaseActor(id, gateway), enabled: decoded.Enabled}
+		result := &testAggressor{BaseActor: actor.NewBaseActor(id, gateway), enabled: decoded.Enabled, market: decoded.Market}
 		result.SetHandler(result)
 		result.AddTicker(3*time.Second, result.onTick)
 		return result, nil
@@ -124,7 +131,7 @@ func TestCaptureProductionPathAndInformationSidecars(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"control/world_begin", "control/world_run_start", "control/world_end", "exchange/balance_snapshot", "exchange/balance_change", "exchange/venue_balance_change", "exchange/fee_revenue", "exchange/Trade", "exchange/OrderFill", "actor/maker_decision"} {
+	for _, name := range []string{"control/world_begin", "control/world_run_start", "control/world_end", "exchange/balance_snapshot", "exchange/balance_change", "exchange/venue_balance_change", "exchange/fee_revenue", "exchange/Trade", "exchange/OrderFill", "actor/order_send", "actor/maker_decision"} {
 		if counts[name] == 0 {
 			t.Fatalf("production capture missing %s: %+v", name, counts)
 		}
@@ -139,6 +146,10 @@ func TestCaptureProductionPathAndInformationSidecars(t *testing.T) {
 	}
 	if replay.TradeCount != 1 || len(replay.Accounts) != 3 || replay.TerminalMarkStatus == "" || replay.VenueFeeRevenue["USD"] != 1 {
 		t.Fatalf("incomplete independent economic replay: %+v", replay)
+	}
+	if replay.Accounts[0].Outbound.PlaceSent != 2 || replay.Accounts[0].Outbound.PlaceAccepted != 2 ||
+		replay.Accounts[2].Outbound.PlaceSent != 1 || replay.Accounts[2].Outbound.PlaceAccepted != 1 {
+		t.Fatalf("outbound-to-exchange placement funnel did not reconstruct: %+v", replay.Accounts)
 	}
 	market := replay.Market
 	if market.HorizonNanos != 12*int64(time.Second) || market.PublicSnapshotMessages == 0 ||
@@ -177,5 +188,31 @@ func TestValidNoTradeWorldIsNotEvidenceFailure(t *testing.T) {
 				t.Fatalf("unchanged no-trade account has nonzero or unavailable benchmark gain: %+v", account)
 			}
 		}
+	}
+}
+
+func TestIndependentReplayJoinsMarketOrderToActualFill(t *testing.T) {
+	world := fixtureWorldWithBook(t, true, false, 2, 2*time.Second, true)
+	directory := t.TempDir()
+	receipts, err := simulation.NewMarketDataReceiptRecorder(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var raw bytes.Buffer
+	capture, err := NewCapture(world, &raw, receipts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity, err := capture.Run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	replay, err := Replay(world.ContractJSON(), bytes.NewReader(raw.Bytes()), identity, directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if replay.TradeCount != 1 || replay.Accounts[2].Outbound.PlaceSent != 1 ||
+		replay.Accounts[2].Outbound.PlaceAccepted != 1 || replay.Accounts[2].FillCount != 1 {
+		t.Fatalf("market-order request/fill path did not reconcile: %+v", replay)
 	}
 }
