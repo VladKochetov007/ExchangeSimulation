@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"io"
 	"math"
 	"os"
 	"path/filepath"
@@ -20,6 +22,38 @@ type fundingEndowmentClock struct{}
 
 func (fundingEndowmentClock) NowUnixNano() int64 { return 0 }
 func (fundingEndowmentClock) NowUnix() int64     { return 0 }
+
+type reserveFaultOutput struct {
+	bytes.Buffer
+	calls    int
+	failCall int
+	failure  error
+}
+
+func (output *reserveFaultOutput) Write(data []byte) (int, error) {
+	output.calls++
+	if output.calls == output.failCall {
+		return 0, output.failure
+	}
+	return output.Buffer.Write(data)
+}
+
+func reserveFaultSink(output io.Writer) *checkpointSink {
+	return &checkpointSink{binary: &binaryEvidence{writer: evstream.NewWriter(output, evstream.WriterOptions{
+		SchemaEpoch: binaryEvidenceSchemaEpoch, BlockBytes: 1,
+	})}, includeEvidenceOnly: true, replaceRaw: true, firstEvent: true}
+}
+
+func reserveJournalExchange(t *testing.T) *exchange.DefaultExchange {
+	t.Helper()
+	ex := exchange.NewExchangeWithConfig(exchange.ExchangeConfig{ID: "N", Clock: fundingEndowmentClock{}})
+	t.Cleanup(ex.Shutdown)
+	ex.AddInstrument(exchange.NewPerpFutures("ABC-PERP", "ABC", "USD", 1, 1, 1, 1))
+	for clientID := uint64(1); clientID <= 2; clientID++ {
+		ex.ConnectNewClient(clientID, nil, &exchange.FixedFee{})
+	}
+	return ex
+}
 
 func fundingReserveJournalFixture() (exchange.FundingReserveEndowment, exchange.VenueBalanceEvent) {
 	endowment := exchange.FundingReserveEndowment{
@@ -105,12 +139,7 @@ func TestFundingReserveExchangeUsesRequiredBinaryJournal(t *testing.T) {
 	localSequence := uint64(0)
 	logger := venueLogger{venueID: "N", route: fundingReserveRoute, sink: sink,
 		sequence: &localSequence, sequenceMu: &sync.Mutex{}}
-	ex := exchange.NewExchangeWithConfig(exchange.ExchangeConfig{ID: "N", Clock: fundingEndowmentClock{}})
-	t.Cleanup(ex.Shutdown)
-	ex.AddInstrument(exchange.NewPerpFutures("ABC-PERP", "ABC", "USD", 1, 1, 1, 1))
-	for clientID := uint64(1); clientID <= 2; clientID++ {
-		ex.ConnectNewClient(clientID, nil, &exchange.FixedFee{})
-	}
+	ex := reserveJournalExchange(t)
 	endowment, _ := fundingReserveJournalFixture()
 	if err := ex.EndowFundingRoundingReserve(endowment, logger); err != nil {
 		t.Fatal(err)
@@ -208,6 +237,94 @@ func TestFundingReserveExchangeUsesRequiredBinaryJournal(t *testing.T) {
 		audit.Deltas.VenueChainMismatches != 0 || audit.Deltas.MalformedVenueRecords != 0 ||
 		audit.Deltas.MalformedVenueLedgers != 0 {
 		t.Fatalf("binary-rendered reserve did not independently reconcile: %+v", audit.Deltas)
+	}
+}
+
+func TestFundingReserveJournalFailsClosedAcrossBothRequiredAppends(t *testing.T) {
+	endowment, _ := fundingReserveJournalFixture()
+	calibration := &reserveFaultOutput{}
+	calibrationSink := reserveFaultSink(calibration)
+	if _, err := calibrationSink.observeRequiredCanonicalEvent(endowment.TimestampNano,
+		"funding_reserve_endowment", endowment.VenueID, endowment, fundingReserveRoute, 1); err != nil {
+		t.Fatal(err)
+	}
+	if calibration.calls == 0 {
+		t.Fatal("first required record never reached the underlying writer")
+	}
+	want := errors.New("injected required binary write failure")
+	for _, test := range []struct {
+		name     string
+		failCall int
+		wantSeq  uint64
+	}{
+		{"source-record", 1, 1},
+		{"movement-record", calibration.calls + 1, 2},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			output := &reserveFaultOutput{failCall: test.failCall, failure: want}
+			sink := reserveFaultSink(output)
+			localSequence := uint64(0)
+			logger := venueLogger{venueID: "N", route: fundingReserveRoute, sink: sink,
+				sequence: &localSequence, sequenceMu: &sync.Mutex{}}
+			ex := reserveJournalExchange(t)
+			if err := ex.EndowFundingRoundingReserve(endowment, logger); !errors.Is(err, want) {
+				t.Fatalf("failed required append accepted: %v", err)
+			}
+			if localSequence != test.wantSeq || output.calls != test.failCall ||
+				len(ex.ExchangeBalance.FundingRoundingReserves) != 0 ||
+				ex.VenueBalanceSequenceForReport() != 0 || len(ex.VerifyConservation()) != 0 {
+				t.Fatalf("failed source became spendable: local=%d calls=%d reserves=%v",
+					localSequence, output.calls, ex.ExchangeBalance.FundingRoundingReserves)
+			}
+			if err := ex.EndowFundingRoundingReserve(endowment, logger); err == nil || output.calls != test.failCall {
+				t.Fatalf("ambiguous failed construction was retried: %v", err)
+			}
+			if err := sink.close(); err == nil {
+				t.Fatal("failed canonical stream was sealed successfully")
+			}
+			reader, err := evstream.NewReader(bytes.NewReader(output.Bytes()), evstream.ReaderOptions{VerifyHash: true})
+			if err == nil {
+				err = reader.Range(func(evstream.Frame) error { return nil })
+			}
+			if err == nil {
+				t.Fatal("failed required stream was accepted as complete evidence")
+			}
+		})
+	}
+}
+
+func TestFundingReserveJournalFinalSealFailureInvalidatesConstructionEvidence(t *testing.T) {
+	endowment, movement := fundingReserveJournalFixture()
+	calibration := &reserveFaultOutput{}
+	calibrationSink := reserveFaultSink(calibration)
+	calibrationSequence := uint64(0)
+	calibrationLogger := venueLogger{venueID: "N", route: fundingReserveRoute, sink: calibrationSink,
+		sequence: &calibrationSequence, sequenceMu: &sync.Mutex{}}
+	if _, err := calibrationLogger.AppendFundingEndowment(endowment, movement); err != nil {
+		t.Fatal(err)
+	}
+	want := errors.New("injected completion trailer failure")
+	output := &reserveFaultOutput{failCall: calibration.calls + 1, failure: want}
+	sink := reserveFaultSink(output)
+	localSequence := uint64(0)
+	logger := venueLogger{venueID: "N", route: fundingReserveRoute, sink: sink,
+		sequence: &localSequence, sequenceMu: &sync.Mutex{}}
+	ex := reserveJournalExchange(t)
+	if err := ex.EndowFundingRoundingReserve(endowment, logger); err != nil {
+		t.Fatalf("source pair should append before final seal: %v", err)
+	}
+	if err := sink.close(); !errors.Is(err, want) || output.calls != output.failCall {
+		t.Fatalf("failed final seal reported success: calls=%d err=%v", output.calls, err)
+	}
+	reader, err := evstream.NewReader(bytes.NewReader(output.Bytes()), evstream.ReaderOptions{VerifyHash: true})
+	if err == nil {
+		err = reader.Range(func(evstream.Frame) error { return nil })
+	}
+	if err == nil {
+		t.Fatal("unsealed endowed source was accepted as a complete trajectory")
+	}
+	if ex.ExchangeBalance.FundingRoundingReserves["ABC-PERP"].Balance != 2 {
+		t.Fatal("final-seal failure was incorrectly modeled as an economic rollback")
 	}
 }
 

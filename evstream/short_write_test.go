@@ -10,20 +10,36 @@ import (
 )
 
 type shortWriteAtCall struct {
-	output bytes.Buffer
-	calls  int
-	short  int
+	output  bytes.Buffer
+	calls   int
+	short   int
+	failure error
 }
 
 func (writer *shortWriteAtCall) Write(data []byte) (int, error) {
 	writer.calls++
 	if writer.calls == writer.short {
+		if writer.failure != nil {
+			return 0, writer.failure
+		}
 		if len(data) == 0 {
 			return 0, nil
 		}
 		return writer.output.Write(data[:len(data)-1])
 	}
 	return writer.output.Write(data)
+}
+
+func TestWriterPreservesUnderlyingWriteError(t *testing.T) {
+	want := errors.New("injected block payload write failure")
+	output := &shortWriteAtCall{short: 3, failure: want}
+	writer := evstream.NewWriter(output, evstream.WriterOptions{BlockBytes: 1})
+	if err := writer.Append(1, 1, 0, corruptionProbe{value: 7}); !errors.Is(err, want) {
+		t.Fatalf("underlying writer failure was replaced: %v", err)
+	}
+	if err := writer.Close(); !errors.Is(err, want) || output.calls != 3 {
+		t.Fatalf("failed writer was retried or sealed: calls=%d err=%v", output.calls, err)
+	}
 }
 
 func TestWriterRejectsShortWritesAtEveryStreamBoundary(t *testing.T) {
