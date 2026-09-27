@@ -108,10 +108,10 @@ Displayed depth includes the maker's own orders; predictive signal value,
 fee-net maker gain and empirical relevance are not identified. Its exact
 protocol is exhausted. The next program work is the separately scoped
 [ME-014/E2 mechanical funding/lifecycle gate](ideas/ME-014/readiness-20260927.md),
-not an ME-016 outcome rescue. Its first reviewed source increment is a pure,
-opt-in funding calendar and scaled rate calculation; production sample,
-payment, actor and evidence binding and a priceable repeated foundation remain
-unproven. No E2 economic world has run.
+not an ME-016 outcome rescue. Its two reviewed, opt-in source increments are
+pure calendar/rate arithmetic and fractional funding-cash preview;
+production venue-local samples, atomic payment, actor/evidence binding and a
+priceable repeated foundation remain unproven. No E2 economic world has run.
 
 ME-001's fixed initial endowments and class-replacement intervention changed
 the delivered local ask book, then the immediate buyer's fill and marked
