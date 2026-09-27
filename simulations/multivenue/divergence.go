@@ -12,6 +12,8 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+
+	"exchange_sim/exchange"
 )
 
 // Divergence locator.
@@ -39,10 +41,11 @@ import (
 // checkpointSink records a rolling digest and, optionally, a narrow trace.
 type checkpointSink struct {
 	// binary, when set, replaces the JSON encode-and-hash path entirely.
-	binary     *binaryEvidence
-	binaryFile *os.File
-	binaryBuf  *bufio.Writer
-	replaceRaw bool
+	binary        *binaryEvidence
+	binaryFile    *os.File
+	binaryBuf     *bufio.Writer
+	discardBinary bool
+	replaceRaw    bool
 	// includeEvidenceOnly is enabled only by the versioned successor contract.
 	// It makes LogEvidenceOnly rows part of the same ordered stream instead of
 	// leaving participant-state evidence in an unordered JSON sidecar.
@@ -167,6 +170,7 @@ func newCheckpointSinkWithBinary(dir string, intervalSeconds int, traceFrom, tra
 		// I/O — an unfair comparison in the binary path's disfavour. Discarding
 		// makes the two paths do the same amount of writing, which is none.
 		if discard {
+			sink.discardBinary = true
 			sink.binary = newBinaryEvidence(io.Discard)
 		} else {
 			file, err := os.Create(filepath.Join(dir, "events.evs"))
@@ -201,16 +205,7 @@ func (s *checkpointSink) observe(simTime int64, clientID uint64, eventName, venu
 		if s.closed {
 			return
 		}
-		s.lastSimTime = simTime
-		s.events++
-		if s.firstEvent && s.intervalNano > 0 {
-			s.nextBound = simTime - simTime%s.intervalNano + s.intervalNano
-			s.firstEvent = false
-		}
-		if s.shouldWriteScheduledCheckpoint(simTime) {
-			s.writeCheckpointLocked(s.nextBound)
-			s.nextBound = simTime - simTime%s.intervalNano + s.intervalNano
-		}
+		s.observeCompletedBinaryRecordLocked(simTime)
 		return
 	}
 
@@ -264,6 +259,52 @@ func (s *checkpointSink) observe(simTime int64, clientID uint64, eventName, venu
 		}
 	}
 
+	if s.shouldWriteScheduledCheckpoint(simTime) {
+		s.writeCheckpointLocked(s.nextBound)
+		s.nextBound = simTime - simTime%s.intervalNano + s.intervalNano
+	}
+}
+
+// observeRequiredFundingSource records one canonical book observation and
+// returns its actual global frame-header sequence. A missing binary successor
+// sink or any write error is fatal to this opt-in source contract.
+func (s *checkpointSink) observeRequiredFundingSource(observation exchange.FundingBookObservation, route string, venueSequence uint64) (uint64, error) {
+	if s == nil || s.binary == nil || s.discardBinary || !s.includesEvidenceOnly() || route == "" || venueSequence == 0 {
+		return 0, fmt.Errorf("funding source evidence requires a sequenced canonical binary sink")
+	}
+	s.mu.Lock()
+	if s.closed || s.err != nil {
+		err := errors.Join(s.err, fmt.Errorf("funding source evidence sink is closed or already failed"))
+		s.mu.Unlock()
+		return 0, err
+	}
+	s.mu.Unlock()
+	frameSeq, recordErr := s.binary.recordRequired(observation.TimestampNano, 0,
+		"funding_book_observation", observation.VenueID, observation, route, venueSequence)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if recordErr != nil {
+		s.failLocked(fmt.Errorf("record funding source evidence: %w", recordErr))
+		return 0, recordErr
+	}
+	if s.closed {
+		s.failLocked(fmt.Errorf("funding source evidence appended after sink close"))
+		return 0, s.err
+	}
+	s.observeCompletedBinaryRecordLocked(observation.TimestampNano)
+	if s.err != nil {
+		return 0, s.err
+	}
+	return frameSeq, nil
+}
+
+func (s *checkpointSink) observeCompletedBinaryRecordLocked(simTime int64) {
+	s.lastSimTime = simTime
+	s.events++
+	if s.firstEvent && s.intervalNano > 0 {
+		s.nextBound = simTime - simTime%s.intervalNano + s.intervalNano
+		s.firstEvent = false
+	}
 	if s.shouldWriteScheduledCheckpoint(simTime) {
 		s.writeCheckpointLocked(s.nextBound)
 		s.nextBound = simTime - simTime%s.intervalNano + s.intervalNano

@@ -55,6 +55,17 @@ type VenueRule struct {
 	FundingIntervalSeconds int64 `json:"funding_interval_seconds"`
 }
 
+// FundingSourceObservationConfig enables only the E2 public-book source
+// recorder. It does not replace the legacy funding settlement or authorize an
+// E2 economic run; those require a separately reviewed opt-in payment path.
+type FundingSourceObservationConfig struct {
+	SpotSymbol                 string `json:"spot_symbol"`
+	PerpSymbol                 string `json:"perp_symbol"`
+	FirstBoundaryOffsetSeconds int64  `json:"first_boundary_offset_seconds"`
+	SampleSpacingSeconds       int64  `json:"sample_spacing_seconds"`
+	SampleCount                int    `json:"sample_count"`
+}
+
 // RemoteMakerFeedConfig is the one-maker V2-1 smoke treatment. It creates a
 // feed-only account on SourceVenue and binds it to the first ABC/USD maker on
 // TargetVenue. It is deliberately not a roster language: heterogeneous source
@@ -109,7 +120,8 @@ type Config struct {
 	// from the successor contract that includes evidence-only participant
 	// telemetry in the canonical ordered stream. Zero retains the prototype
 	// version for configurations that predate the promoted contract.
-	EvidenceContractVersion int `json:"evidence_contract_version,omitempty"`
+	EvidenceContractVersion   int                             `json:"evidence_contract_version,omitempty"`
+	FundingSourceObservations *FundingSourceObservationConfig `json:"funding_source_observations,omitempty"`
 	// DatedFutureDeliveryFeePolicy is an analyzer-side declaration retained in
 	// the run config so the strict settlement audit can reconstruct the fee
 	// contract without importing simulator implementation details.
@@ -1490,6 +1502,18 @@ func (c *Config) normalize() error {
 			return fmt.Errorf("multivenue: step %s exceeds configured cadence %s", c.Step, cadence)
 		}
 	}
+	if source := c.FundingSourceObservations; source != nil {
+		spacingNano, spacingFits := etypes.TryMulDiv(source.SampleSpacingSeconds, int64(time.Second), 1)
+		offsetNano, offsetFits := etypes.TryMulDiv(source.FirstBoundaryOffsetSeconds, int64(time.Second), 1)
+		if c.LogMode != "full" || c.EvidenceFormat != binaryRepresentation || c.EvidenceContractVersion < 2 ||
+			len(c.VenueIDs) != 2 || source.SpotSymbol == "" || source.PerpSymbol == "" ||
+			source.SpotSymbol == source.PerpSymbol || source.SampleCount <= 0 ||
+			source.SampleSpacingSeconds <= 0 || source.FirstBoundaryOffsetSeconds < 0 ||
+			c.Step <= 0 || c.Step > time.Second || time.Second%c.Step != 0 ||
+			!spacingFits || !offsetFits || spacingNano%int64(c.Step) != 0 || offsetNano%int64(c.Step) != 0 {
+			return errors.New("multivenue: funding source observations require two venues, complete successor binary evidence and a representable boundary grid")
+		}
+	}
 	return nil
 }
 
@@ -1933,22 +1957,23 @@ type VenueRiskCaptureDiagnostic struct {
 // Sim owns the three venue ecology and every log file created for it.
 
 type Sim struct {
-	Config             Config
-	Runner             *simulation.Runner
-	Venues             []*Venue
-	Routers            []*CrossVenueArb
-	SpotIndex          *spotIndexProvider
-	InitialAccounts    []ParticipantAccountSnapshot
-	TerminalAccounts   []ParticipantAccountSnapshot
-	loggers            []*feesim.JSONLinesLogger
-	checkpoints        *checkpointSink
-	latencyTelemetry   *simulation.LatencyStats
-	marketDataReceipts *simulation.MarketDataReceiptRecorder
-	frontierVectors    *simulation.DecisionFrontierVectorRecorder
-	terminalNano       int64
-	closeMu            sync.Mutex
-	closed             bool
-	closeErr           error
+	Config                 Config
+	Runner                 *simulation.Runner
+	Venues                 []*Venue
+	Routers                []*CrossVenueArb
+	SpotIndex              *spotIndexProvider
+	InitialAccounts        []ParticipantAccountSnapshot
+	TerminalAccounts       []ParticipantAccountSnapshot
+	loggers                []*feesim.JSONLinesLogger
+	checkpoints            *checkpointSink
+	latencyTelemetry       *simulation.LatencyStats
+	marketDataReceipts     *simulation.MarketDataReceiptRecorder
+	frontierVectors        *simulation.DecisionFrontierVectorRecorder
+	fundingSourceRecorders []*exchange.FundingWindowRecorder
+	terminalNano           int64
+	closeMu                sync.Mutex
+	closed                 bool
+	closeErr               error
 }
 
 // Run starts all venue automation under one context and drives the common
@@ -2214,6 +2239,19 @@ func (l venueLogger) LogEvidenceOnly(simTime int64, clientID uint64, eventName s
 	l.inner.LogEvent(simTime, clientID, eventName, venueLogEvent{VenueID: l.venueID, Payload: event})
 }
 
+// AppendFundingObservation is the opt-in E2 source adapter. The returned
+// identity is the binary frame's global sequence, not the venue route number.
+func (l venueLogger) AppendFundingObservation(observation exchange.FundingBookObservation) (uint64, error) {
+	if l.sequenceMu == nil || l.sequence == nil || !l.sink.includesEvidenceOnly() ||
+		l.venueID != observation.VenueID || l.route == "" {
+		return 0, fmt.Errorf("multivenue: funding observation has no matching sequenced venue route")
+	}
+	l.sequenceMu.Lock()
+	defer l.sequenceMu.Unlock()
+	(*l.sequence)++
+	return l.sink.observeRequiredFundingSource(observation, l.route, *l.sequence)
+}
+
 type manifest struct {
 	SchemaVersion int       `json:"schema_version"`
 	VenueIDs      []string  `json:"venue_ids"`
@@ -2273,6 +2311,9 @@ func NewSim(simTime time.Duration, cfg Config) (*Sim, error) {
 	if binaryEvidenceEnabled() {
 		cfg.EvidenceFormat = binaryRepresentation
 	}
+	if cfg.FundingSourceObservations != nil && binaryEvidenceDiscards() {
+		return nil, fmt.Errorf("multivenue: required funding source observations cannot discard canonical evidence")
+	}
 	if simTime <= 0 || simTime%cfg.Step != 0 {
 		return nil, fmt.Errorf("multivenue: simulation duration %s must be a positive multiple of step %s", simTime, cfg.Step)
 	}
@@ -2317,19 +2358,50 @@ func NewSim(simTime time.Duration, cfg Config) (*Sim, error) {
 	}
 
 	start := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC).UnixNano()
+	terminalNano, terminalFits := etypes.TryAdd(start, int64(simTime))
+	if !terminalFits {
+		return nil, fmt.Errorf("multivenue: terminal simulated time overflows")
+	}
 	clock := simulation.NewSimulatedClock(start)
 	scheduler := simulation.NewEventScheduler(clock)
 	clock.SetScheduler(scheduler)
 	timers := simulation.NewSimTimerFactory(scheduler)
-	runner := simulation.NewRunner(clock, simulation.RunnerConfig{
+	runnerConfig := simulation.RunnerConfig{
 		Iterations:          int(simTime / cfg.Step),
 		Step:                cfg.Step,
 		Quiesce:             true,
 		DeterministicPhases: true,
-	})
+	}
+	var sourceFirstNano, sourceSpacingNano int64
+	var sourceRecorders []*exchange.FundingWindowRecorder
+	if source := cfg.FundingSourceObservations; source != nil {
+		offsetNano, _ := etypes.TryMulDiv(source.FirstBoundaryOffsetSeconds, int64(time.Second), 1)
+		sourceSpacingNano, _ = etypes.TryMulDiv(source.SampleSpacingSeconds, int64(time.Second), 1)
+		var firstFits bool
+		sourceFirstNano, firstFits = etypes.TryAdd(start, offsetNano)
+		if !firstFits || sourceFirstNano > terminalNano {
+			return nil, fmt.Errorf("multivenue: funding source first boundary lies beyond the world")
+		}
+		runnerConfig.DrainIntermediateEvents = true
+		runnerConfig.BeforeTimestampPhase = func(atNano int64) error {
+			if atNano < sourceFirstNano || (atNano-sourceFirstNano)%sourceSpacingNano != 0 {
+				return nil
+			}
+			if len(sourceRecorders) != len(cfg.VenueIDs) {
+				return fmt.Errorf("multivenue: funding source roster is incomplete at boundary %d", atNano)
+			}
+			for _, recorder := range sourceRecorders {
+				if _, err := recorder.ObserveAt(atNano); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}
+	runner := simulation.NewRunner(clock, runnerConfig)
 	runner.AddIdler(timers)
 
-	sim := &Sim{Config: cfg, Runner: runner, terminalNano: start + int64(simTime),
+	sim := &Sim{Config: cfg, Runner: runner, terminalNano: terminalNano,
 		SpotIndex: newSpotIndexProvider(cfg.MakerAnchor, "ABC/USD", "ABC-PERP", "CDF/USD", "ABC/CDF"),
 		Venues:    make([]*Venue, 0, len(cfg.VenueIDs)), latencyTelemetry: simulation.NewLatencyStats()}
 	// Built before any venue, because every venue logger carries it.
@@ -2374,6 +2446,29 @@ func NewSim(simTime time.Duration, cfg Config) (*Sim, error) {
 			return nil, err
 		}
 		sim.Venues = append(sim.Venues, venue)
+		if source := cfg.FundingSourceObservations; source != nil {
+			_, sourceErr := venue.Exchange.CaptureFundingBookPair(exchange.FundingBookPairRequest{
+				VenueID: id, SpotSymbol: source.SpotSymbol, PerpSymbol: source.PerpSymbol,
+				TimestampNano: start,
+			})
+			if sourceErr != nil && !errors.Is(sourceErr, exchange.ErrFundingBookUnavailable) {
+				sim.Close()
+				return nil, fmt.Errorf("multivenue: funding source preflight at %s: %w", id, sourceErr)
+			}
+			logger := venue.makerStateLog
+			logger.route = fundingSourceRoute
+			recorder, err := exchange.NewFundingWindowRecorder(exchange.FundingWindowSourceConfig{
+				VenueID: id, SpotSymbol: source.SpotSymbol, PerpSymbol: source.PerpSymbol,
+				FirstBoundaryNano: sourceFirstNano, SampleSpacingNano: sourceSpacingNano,
+				SampleCount: source.SampleCount,
+			}, venue.Exchange, logger)
+			if err != nil {
+				sim.Close()
+				return nil, err
+			}
+			sourceRecorders = append(sourceRecorders, recorder)
+			sim.fundingSourceRecorders = sourceRecorders
+		}
 		runner.AddMount(venue.Mount)
 		// Every class with its own link reaches the exchange through a mount of
 		// its own, and a mount the runner does not know about never has its

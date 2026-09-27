@@ -3,6 +3,7 @@ package multivenue
 import (
 	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"os"
 	"sync"
 
@@ -85,12 +86,28 @@ func (e sinkEnvelope) AppendPayloadInterning(dst []byte, in evstream.Interner) (
 // raised one family at a time without the sink ever being partly JSON and
 // partly binary at the file level.
 func (b *binaryEvidence) record(simTime int64, clientID uint64, eventName, venueID string, payload any, route string, sequence uint64) error {
+	_, err := b.recordFrame(simTime, clientID, eventName, venueID, payload, route, sequence, false)
+	return err
+}
+
+// recordRequired returns the exact committed frame-header sequence. Unlike
+// ordinary legacy logging, required E2 source evidence cannot be replaced by
+// an opaque "unencodable" sentinel after an encoding failure.
+func (b *binaryEvidence) recordRequired(simTime int64, clientID uint64, eventName, venueID string, payload any, route string, sequence uint64) (uint64, error) {
+	return b.recordFrame(simTime, clientID, eventName, venueID, payload, route, sequence, true)
+}
+
+func (b *binaryEvidence) recordFrame(simTime int64, clientID uint64, eventName, venueID string, payload any, route string, sequence uint64, required bool) (uint64, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.err != nil {
-		return b.err
+		return 0, b.err
 	}
 	canonicalPayload, marshalErr := json.Marshal(payload)
+	if marshalErr != nil && required {
+		b.err = fmt.Errorf("required evidence payload cannot be encoded: %w", marshalErr)
+		return 0, b.err
+	}
 	payloadDigest := sha256.Sum256(canonicalPayload)
 	if marshalErr != nil {
 		canonicalPayload = []byte(`"unencodable"`)
@@ -100,20 +117,20 @@ func (b *binaryEvidence) record(simTime int64, clientID uint64, eventName, venue
 	eventRef, err := b.writer.Intern(eventName)
 	if err != nil {
 		b.err = err
-		return err
+		return 0, err
 	}
 	venueRef := uint32(0)
 	if venueID != "" {
 		if venueRef, err = b.writer.Intern(venueID); err != nil {
 			b.err = err
-			return err
+			return 0, err
 		}
 	}
 	routeRef := uint32(0)
 	if route != "" {
 		if routeRef, err = b.writer.Intern(route); err != nil {
 			b.err = err
-			return err
+			return 0, err
 		}
 	}
 
@@ -130,6 +147,10 @@ func (b *binaryEvidence) record(simTime int64, clientID uint64, eventName, venue
 	}
 	unencodable := marshalErr != nil
 	if err := b.writer.AppendInterning(simTime, clientID, venueRef, frame); err != nil {
+		if required {
+			b.err = err
+			return 0, err
+		}
 		// Preserve the event slot when a payload cannot be encoded. The
 		// substitute is itself canonical and keeps sequence continuity; the
 		// failed payload is counted so the run cannot hide its information loss.
@@ -137,7 +158,7 @@ func (b *binaryEvidence) record(simTime int64, clientID uint64, eventName, venue
 		frame.payloadDigest = sha256.Sum256([]byte(`"unencodable"`))
 		if retryErr := b.writer.AppendInterning(simTime, clientID, venueRef, frame); retryErr != nil {
 			b.err = retryErr
-			return retryErr
+			return 0, retryErr
 		}
 		unencodable = true
 	}
@@ -145,7 +166,10 @@ func (b *binaryEvidence) record(simTime int64, clientID uint64, eventName, venue
 		b.unencodable++
 	}
 	b.events++
-	return nil
+	// Count is the writer's frame sequence, including any dictionary frames
+	// interned immediately before this event. The binaryEvidence lock prevents
+	// another append between the event and this read.
+	return b.writer.Count(), nil
 }
 
 // executionHash returns the digest over the canonical uncompressed frames. It
