@@ -57,6 +57,19 @@
     "go_vet_all": "PASS",
     "known_gap": "Actor-local filled inventory is not independently joined to delayed response receipt and processing"
   },
+  "e0_local_response_checkpoint": {
+    "candidate_commit": "cbe956d2d3b32f1b218f1054880bd3dec31a5f44",
+    "report": "research/program/longrun-baselines/e0-local-response-checkpoint-20260927.md",
+    "scope": "E0 v3 gateway-delivered and maker-processed response timeline, exchange identity joins, independent local net-fill reconstruction and due-response completeness",
+    "status": "MECHANICALLY_TESTED_UNREVIEWED_DEVELOPMENT",
+    "review_execution": "NOT_ATTEMPTED_AFTER_PRIOR_SERVICE_CAPACITY_FAILURE",
+    "review_verdict": "NOT_ISSUED",
+    "economic_worlds_run": 0,
+    "clean_make_test": "PASS_AT_cbe956d_GO_1_27_0",
+    "targeted_race": "PASS",
+    "go_vet_all": "PASS",
+    "known_gap": "Risk/wealth/quote-coverage summaries, locked E0 protocol and measured binary-evidence capacity remain missing"
+  },
   "candidate_environments": [
     {
       "id": "E0",
@@ -66,7 +79,7 @@
       "proposed_economic_world_ceiling": 15,
       "proposed_technical_controls": 2,
       "run_authorized": false,
-      "readiness": "E0_FIXTURE_TESTED_BLOCK_LOCAL_FILL_TIMELINE_PROTOCOL_CAPACITY"
+      "readiness": "E0_FIXTURE_TESTED_BLOCK_RISK_SUMMARIES_PROTOCOL_CAPACITY"
     },
     {
       "id": "E2",
@@ -108,7 +121,7 @@
       "classification": "ESTIMATOR_AND_MEASUREMENT",
       "source": ["simulations/multivenue/stoikov.go", "evstream"],
       "acceptance": "No decision reads future or venue-global state; formula agrees with normalized-inventory fixture; missing, duplicate, reordered, fee-wrong and incomplete evidence fail closed.",
-      "current_status": "QUOTE_LEDGER_OUTBOUND_MARKET_REPLAY_FIXTURE_TESTED_LOCAL_FILL_TIMELINE_MISSING"
+      "current_status": "QUOTE_LEDGER_OUTBOUND_MARKET_LOCAL_FILL_REPLAY_FIXTURE_TESTED_RISK_SUMMARIES_MISSING"
     },
     {
       "id": "E2-1",
@@ -155,5 +168,5 @@
     "free_disk_reserve_gib": 10,
     "require_fresh_capacity_preflight": true
   },
-  "next_authorized_milestone": "Reconstruct maker-local fill inventory from delayed response receipt and processing, test the resulting economic/risk summaries, then lock a finite E0 protocol and measure actual binary-evidence capacity before any economic world. Preserve UNREVIEWED DEVELOPMENT and the confirmation review gate."
+  "next_authorized_milestone": "Independently reconstruct E0 maker risk/wealth/quote-coverage summaries from the mechanically checked v3 evidence contract, lock a finite numerical protocol, and measure real binary-evidence capacity before any economic world. Preserve UNREVIEWED DEVELOPMENT and the confirmation review gate."
 }
