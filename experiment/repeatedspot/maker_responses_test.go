@@ -11,10 +11,12 @@ import (
 
 func TestBufferedFillReceiptMayPrecedeProcessedAcceptance(t *testing.T) {
 	account := &accountState{actorID: 7, clientID: 2, maker: &makerParameters{}, workingLimit: 5,
-		acceptedLocally: make(map[uint64]bool), localRisk: newInventoryRiskSeries(0, MeasurementWindow{StartAt: 0, EndAt: 10}, 5)}
+		acceptedLocally: make(map[uint64]bool), localRisk: newInventoryRiskSeries(0, MeasurementWindow{StartAt: 0, EndAt: 10}, 5),
+		envelope: newMakerEnvelopeReplay(0, MeasurementWindow{StartAt: 0, EndAt: 10}, 5)}
+	account.envelope.byRequest[8] = &envelopeOrder{requestID: 8, side: "BUY", remaining: 1}
 	accepted := worldspot.MakerProcessedResponse{ActorID: 7, Kind: "accepted", RequestID: 8, OrderID: 10}
 	fill := worldspot.MakerProcessedResponse{ActorID: 7, Kind: "fill", OrderID: 10, TradeID: 0,
-		Symbol: "ABC/USD", Qty: 1, Price: 101, Side: "BUY", ExchangeAt: 1}
+		Symbol: "ABC/USD", Qty: 1, Price: 101, Side: "BUY", IsFull: true, ExchangeAt: 1}
 	state := &replayState{accounts: map[uint64]*accountState{2: account}, makerReceipts: map[makerReceiptKey]*makerReceipt{},
 		contract: replayContract{Instrument: worldspot.InstrumentConfig{Symbol: "ABC/USD"}}}
 	state.makerReceipts[makerKey(2, fill)] = &makerReceipt{response: fill, deliveredAt: 2, sequence: 1}
@@ -37,7 +39,8 @@ func TestBufferedFillReceiptMayPrecedeProcessedAcceptance(t *testing.T) {
 	if err := process(fill, 4); err != nil {
 		t.Fatal(err)
 	}
-	if account.localResponses.NetProcessedFillBase != 1 || !state.makerReceipts[makerKey(2, fill)].consumed {
+	if account.localResponses.NetProcessedFillBase != 1 || account.envelope.filled != 1 ||
+		!state.makerReceipts[makerKey(2, fill)].consumed {
 		t.Fatal("queued first fill was not attributed after acceptance")
 	}
 }

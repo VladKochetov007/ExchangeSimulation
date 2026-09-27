@@ -102,6 +102,11 @@ func (state *replayState) orderSend(event Event) error {
 		return errors.New("repeated spot: duplicate actor request identity")
 	}
 	sent := &sentOrder{request: request, at: event.Timestamp}
+	if account.envelope != nil {
+		if err := account.envelope.sent(event.Timestamp, request); err != nil {
+			return err
+		}
+	}
 	state.sentRequests[key] = sent
 	if account.maker != nil {
 		account.pendingSends = append(account.pendingSends, sent)

@@ -59,6 +59,7 @@ type AccountResult struct {
 	LocalResponses *MakerResponseSummary `json:"maker_local_responses,omitempty"`
 	InventoryRisk  AccountInventoryRisk  `json:"inventory_risk"`
 	RestingDepth   RestingDepthSummary   `json:"resting_depth"`
+	MakerEnvelope  *MakerEnvelopeSummary `json:"maker_envelope,omitempty"`
 }
 
 type EconomicReplay struct {
@@ -99,6 +100,8 @@ type accountState struct {
 	inventoryRisk   AccountInventoryRisk
 	restingDepth    *restingDepthSeries
 	restingSummary  RestingDepthSummary
+	envelope        *makerEnvelopeReplay
+	envelopeSummary *MakerEnvelopeSummary
 }
 
 type replayState struct {
@@ -209,6 +212,7 @@ func replayWithWindow(contractBytes []byte, stream io.Reader, identity EvidenceI
 			restingDepth:    newRestingDepthSeries(contract.StartUnixNano, window)}
 		if maker != nil {
 			state.accounts[participant.ClientID].localRisk = newInventoryRiskSeries(contract.StartUnixNano, window, workingLimit)
+			state.accounts[participant.ClientID].envelope = newMakerEnvelopeReplay(contract.StartUnixNano, window, workingLimit)
 		}
 	}
 	if err := WalkEvidence(stream, identity, state.visit); err != nil {
@@ -239,6 +243,19 @@ func replayWithWindow(contractBytes []byte, stream io.Reader, identity EvidenceI
 	}
 	if err := state.finishRestingDepth(terminalAt); err != nil {
 		return nil, err
+	}
+	for _, account := range state.accounts {
+		if account.envelope == nil {
+			continue
+		}
+		summary, err := account.envelope.finish(terminalAt)
+		if err != nil {
+			return nil, fmt.Errorf("repeated spot: maker %d envelope: %w", account.clientID, err)
+		}
+		if account.envelope.filled != account.localResponses.NetProcessedFillBase {
+			return nil, fmt.Errorf("repeated spot: maker %d envelope fill differs from local responses", account.clientID)
+		}
+		account.envelopeSummary = &summary
 	}
 	if err := state.checkConservation(); err != nil {
 		return nil, err
@@ -281,6 +298,7 @@ func replayWithWindow(contractBytes []byte, stream io.Reader, identity EvidenceI
 		}
 		if account.maker != nil {
 			result.LocalResponses = &account.localResponses
+			result.MakerEnvelope = account.envelopeSummary
 		}
 		result.InventoryRisk = account.inventoryRisk
 		result.RestingDepth = account.restingSummary
@@ -548,6 +566,9 @@ func (state *replayState) makerDecision(event Event) error {
 	}
 	if decision.FilledInventory != account.localResponses.NetProcessedFillBase {
 		return errors.New("repeated spot: maker decision used inventory absent from processed fill responses")
+	}
+	if err := account.envelope.decision(event.Timestamp, decision, account.pendingSends, account.maker); err != nil {
+		return err
 	}
 	switch decision.Action {
 	case "keep_quotes", "cancel_quotes", "evaluate_placements", "no_usable_quote":

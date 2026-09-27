@@ -284,6 +284,9 @@ func (state *replayState) makerProcessedResponse(event Event) error {
 	if processed.FilledInventory != account.localResponses.NetProcessedFillBase {
 		return errors.New("repeated spot: maker-local inventory disagrees with processed fill sequence")
 	}
+	if err := account.envelope.processed(event.Timestamp, processed); err != nil {
+		return err
+	}
 	receipt.consumed = true
 	account.localResponses.Processed++
 	return nil
