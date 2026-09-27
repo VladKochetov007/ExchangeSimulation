@@ -385,19 +385,19 @@
       "id": "ME-015",
       "title": "Finite actor-local reference for repeated spot makers (E0 successor)",
       "claim_type": "CAUSAL",
-      "stage": "DEVELOPMENT",
+      "stage": "REPORT",
       "idea": "research/program/ideas/ME-015/idea.md",
       "protocol": "research/program/ideas/ME-015/protocol.md",
-      "report": null,
-      "result": null,
+      "report": "research/program/ideas/ME-015/report.md",
+      "result": "research/program/ideas/ME-015/result.json",
       "dependencies": ["ME-013"],
       "policy_ids": ["S06", "S07", "S28", "S32"],
       "authorization": {
         "prepare": true,
-        "run": true,
-        "basis": "Owner 2026-09-27 long-run E0/E1/E2 development authorization, subject to the prospectively locked ME-015 development protocol: at most 24 assigned worlds plus two counted technical duplicates. Only ON/P/18101 may launch after clean pinned build, exact plan and finite-cgroup/disk guards; the rest depend on valid measured first-cell capacity and evidence, not a favorable economic outcome. No confirmation, E1/E2 or holdout authorization follows."
+        "run": false,
+        "basis": "Owner 2026-09-27 long-run E0/E1/E2 authorization and prospectively locked ME-015 development protocol authorized this exact 24-cell matrix plus two counted technical duplicates. All 26 ME-015 process executions completed from clean C=4cc34e40 and received scoped independent result review. This protocol is exhausted; no ME-015 rerun, third E0 economic design iteration, confirmation or holdout follows automatically."
       },
-      "next_action": "Retain the valid counted ON/P/18101 preflight and its scoped review; run only the other 23 fixed ME-015 economic cells plus two registered worker controls from pinned C=4cc34e40, then score the complete surface. Do not choose cells by observed economic sign."
+      "next_action": "Preserve the bounded public two-sided-time response and strict gain non-identification. Continue only independently feasible E1/E2 mechanical readiness; any new E0 economic design or confirmation needs its own prospective contract and gate."
     }
   ],
   "policies": [

@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
   "planning_baseline_commit": "ef61b4cb6e0124aa797f281e379ab143e847646e",
-  "planning_status": "E0_R1_CLOSED_ME015_FIRST_CELL_VALID_FIXED_MATRIX_PENDING_E1_E2_PENDING",
+  "planning_status": "E0_R1_AND_ME015_DEVELOPMENT_REPORTED_GAIN_NOT_IDENTIFIED_E1_E2_PENDING",
   "current_authorization": "research/program/longrun-baselines/authorization-20260927.md",
   "economic_world_ceiling_by_environment": {"E0": 120, "E1": 120, "E2": 120},
   "calibration_world_ceiling_by_environment": {"E0": 12, "E1": 12, "E2": 12},
-  "economic_worlds_run_for_this_plan": 24,
+  "economic_worlds_run_for_this_plan": 48,
   "seed_ids_reserved": [],
   "source_change_in_this_package": true,
   "implementation_checkpoint": {
@@ -159,7 +159,7 @@
     "invalid_pre_start_attempts_retained": 1,
     "total_process_attempts": 27,
     "e0_owner_ceiling_process_attempts_conservatively_consumed": 27,
-    "e0_owner_ceiling_process_attempts_remaining": 93,
+    "e0_owner_ceiling_process_attempts_remaining_after_r1": 93,
     "primary_gain_contrast": "NOT_IDENTIFIED_ZERO_AVAILABLE_PAIRS",
     "terminal_marks": "UNAVAILABLE_IN_ALL_24_CELLS",
     "final_empty_book_onset_simulated_seconds": "16_TO_36_IN_ALL_CELLS",
@@ -171,39 +171,54 @@
     "e1_e2_economic_worlds_run": 0
   },
   "e0_me015_local_reference_successor": {
-    "stage": "DEVELOPMENT_FIRST_CELL_VALID_REMAINING_MATRIX_PENDING",
+    "stage": "REVIEWED_DEVELOPMENT_RESULT_PRIMARY_OCCUPANCY_RESPONSE_MAKER_GAIN_NOT_IDENTIFIED",
     "study_id": "ME-015",
     "idea": "research/program/ideas/ME-015/idea.md",
     "locked_protocol": "research/program/ideas/ME-015/protocol.md",
     "prospective_economic_cells": 24,
     "prospective_technical_controls": 2,
-    "economic_worlds_run": 1,
-    "valid_economic_worlds": 1,
-    "technical_duplicates_run": 0,
+    "economic_worlds_run": 24,
+    "valid_economic_worlds": 24,
+    "technical_duplicates_run": 2,
     "candidate_source_commit": "4cc34e402d2ad3fd359a3bb8fb928f36fe779b1d",
     "candidate_source_tree": "845e5417fab0f67a566dae241acc10609a81028e",
     "external_retained_root": "/home/vlad/e0-me015-candidate-4cc34e40-f5DrAN",
+    "report": "research/program/ideas/ME-015/report.md",
+    "result": "research/program/ideas/ME-015/result.json",
+    "surface": "research/program/ideas/ME-015/surface.json",
+    "surface_sha256": "3f8bf07e7dc119f373ca9e626a556dc523e7448d09c438179b0184835cd69024",
+    "complete_result_review": "research/program/reviews/me015-result-20260927.md",
+    "primary_p_on_minus_off_two_sided_delta_ns_by_seed": [1102000000000, 1069000000000, 1134000000000],
+    "primary_p_contrast_status": "ESTIMATED_DEVELOPMENT_ONLY",
+    "p_vs_a_gain_status_both_modes": "NOT_IDENTIFIED_ALL_TERMINAL_MARKS_UNAVAILABLE",
+    "e0_owner_ceiling_process_attempts_conservatively_consumed_with_me013": 53,
+    "e0_owner_ceiling_process_attempts_remaining": 67,
     "first_cell_review": "research/program/reviews/me015-preoutcome-and-first-cell-20260927.md",
     "first_cell_terminal_mark_status": "UNAVAILABLE_ONE_SIDED_OR_EMPTY",
     "first_cell_window_two_sided_ns": 1102000000000,
     "first_cell_window_denominator_ns": 2700000000000,
     "run_authorized_by_locked_protocol": true,
+    "further_me015_run_authorized_after_matrix_completion": false,
     "pre_outcome_source_review_execution": "COMPLETED",
     "pre_outcome_source_review_verdict": "ACCEPT_SCOPED_AT_C90F70DF_SOURCE_AND_EVIDENCE",
     "pre_outcome_design_review_execution": "COMPLETED",
     "pre_outcome_design_review_verdict": "ACCEPT_SCOPED_AT_C90F70DF_PROTOCOL",
-    "historical_r1_source_and_result_unchanged": true
+    "historical_r1_source_and_result_unchanged": true,
+    "post_result_review_execution": "COMPLETED",
+    "post_result_review_verdict": "ACCEPT_SCOPED",
+    "confirmation_authorized": false
   },
   "candidate_environments": [
     {
       "id": "E0",
       "study_id": "ME-013",
+      "successor_study_id": "ME-015",
       "description": "One ABC/USD venue, repeated finite-resource pure and AS-style makers with recurring demand",
       "design_file": "research/program/longrun-baselines/config-drafts/e0-repeated-spot.md",
       "proposed_economic_world_ceiling": 24,
       "proposed_technical_controls": 2,
       "run_authorized": false,
-      "readiness": "E0_R1_DEVELOPMENT_COMPLETE_PRIMARY_NOT_IDENTIFIED_ME015_FIRST_CELL_VALID_MATRIX_PENDING"
+      "readiness": "E0_R1_AND_ME015_REVIEWED_DEVELOPMENT_COMPLETE_STRICT_MAKER_GAIN_NOT_IDENTIFIED"
     },
     {
       "id": "E2",
@@ -213,7 +228,7 @@
       "proposed_economic_world_ceiling": 6,
       "proposed_technical_controls": 2,
       "run_authorized": false,
-      "readiness": "E2_ECONOMIC_WORLDS_BLOCKED_ON_USABLE_E0_FOUNDATION_AND_VERSIONED_FUNDING_LIFECYCLE_IMPLEMENTATION"
+      "readiness": "E2_ECONOMIC_WORLDS_BLOCKED_ON_PRICEABLE_REPEATED_FOUNDATION_AND_VERSIONED_FUNDING_LIFECYCLE_IMPLEMENTATION"
     }
   ],
   "bounded_implementation_tasks": [
@@ -292,5 +307,5 @@
     "free_disk_reserve_gib": 10,
     "require_fresh_capacity_preflight": true
   },
-  "next_authorized_milestone": "Run only the remaining 23 fixed ME-015 economic assignments and two counted worker controls from pinned C=4cc34e40 under the unchanged finite-cgroup/disk guards. Then score the complete matrix with missing marks retained. No r1 rerun, E1/E2 world, confirmation or holdout is authorized."
+  "next_authorized_milestone": "Close ME-015 at the reviewed bounded occupancy effect and strict maker-gain non-identification. No third E0 design iteration is automatic. Continue only independently feasible E1/E2 mechanical implementation and acceptance fixtures under the owner goal; integrated E1/E2 payoff worlds require a prospectively priceable repeated foundation and their own gates. No confirmation or historical holdout is authorized from this result."
 }
