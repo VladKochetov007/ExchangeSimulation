@@ -1,0 +1,113 @@
+{
+  "schema_version": 1,
+  "study_id": "ME-015",
+  "stage": "REPORT",
+  "process_status": "COMPLETED",
+  "evidence_validity": "VALID",
+  "opportunity_presence": "PRESENT",
+  "policy_activity": "ACTIVE",
+  "registered_activation": "NOT_APPLICABLE",
+  "scientific_verdict": "SUPPORTED",
+  "causal_verdict": "BOUNDED_RESPONSE_OBSERVED",
+  "empirical_comparison": "NOT_PERFORMED",
+  "reasons": [
+    "All 24 fixed development assignments and two technical duplicate processes completed from clean C=4cc34e40 with valid strict replay, independent window diagnostics and finite resource records. Technical duplicates are not economic replications.",
+    "In the three registered P seed pairs, whole-world reference ON minus OFF public two-sided occupancy in the exclusive [10,55 min) window was 40.8148, 39.5926 and 42.0000 percentage points. The median is 40.8148 points; this is a development-only assignment contrast, not confirmation or empirical validation.",
+    "ON cells contain eligible local-reference decisions and maker-contributed resting depth. Every OFF cell has zero in-window shadow-eligible decisions; the result cannot attribute a specific in-window restoration to a particular order. Maker quotes can refresh their own delivered reference.",
+    "All 24 strict terminal marks are unavailable. Both ON and OFF P-versus-A fee-net maker-gain contrasts are NOT_IDENTIFIED, not zero. No maker profitability, strategy capacity, absolute price discovery, full market survival or E1/E2 economic claim is established.",
+    "Independent technical and economic reviewers accepted the bounded complete-result interpretation. Retained control artifacts are byte-equal, but resource command records do not independently attest their labeled Go worker counts."
+  ],
+  "identities": {
+    "source": "4cc34e402d2ad3fd359a3bb8fb928f36fe779b1d; tree 845e5417fab0f67a566dae241acc10609a81028e; Go 1.27.0; repeated-spot-opaque-v4",
+    "configuration": "Locked ME-015 24-cell OFF/ON × P/A/M1/M2 × seeds 18101/18111/18117 at 0.1 ABC, 55-minute horizon with [10,55 min) measurement; per-cell raw/typed plan digests are bound by manifests in surface.json",
+    "run": "/home/vlad/e0-me015-candidate-4cc34e40-f5DrAN; 24 strict replay results, two bit-equal technical duplicates, per-cell evidence and resource digests indexed by surface.json SHA256 3f8bf07e7dc119f373ca9e626a556dc523e7448d09c438179b0184835cd69024",
+    "analyzer": "C mespotanalyze SHA256 d20c5011af4d274fc1bc5f72ed4e2a57a1b385f82e8c59e4b7deaf7908774c51; C mespotdiagnose SHA256 c3727d5fce66fbfb400a8dbd70980d0dfc41b091eb00f0d5c8da6b05e2d984f2; C mespotsurface SHA256 0fc8f113037a2c51beee29bea3f0c8574f77658ab7d175be52214036ebc40023",
+    "protocol": "research/program/ideas/ME-015/protocol.md SHA256 08f38eb6f1642bab459c83244187b7eb24946ea7ea1619f39d0ae85ea2ad60ad; locked before first ME-015 outcome",
+    "skill_commit": "608e815bbc3e7545b996f648b596bceed6d7b809",
+    "skill_tree": "60b91e73f1000a285e003bed122648636a737b2d"
+  },
+  "authorization": {
+    "prepare": true,
+    "run": false,
+    "basis": "Owner 2026-09-27 long-run E0/E1/E2 authorization and locked ME-015 protocol authorized this exact 24-world development matrix plus two technical controls after gates. All 26 ME-015 process executions are complete; no ME-015 rerun, third E0 economic design iteration, confirmation or historical holdout is authorized by this completed protocol."
+  },
+  "review": {
+    "execution": "COMPLETED",
+    "verdict": "ACCEPT",
+    "scope": "Independent Sol-6 medium reviewer A checked complete surface against retained artifacts and accepted exact endpoint/missingness with a worker-label limitation; separate Sol-6 medium reviewer B accepted only the bounded whole-world assignment interpretation. Neither reran worlds or certified external realism.",
+    "reference": "research/program/reviews/me015-result-20260927.md"
+  },
+  "observed": {
+    "valid_economic_cells": 24,
+    "technical_duplicate_processes": 2,
+    "total_me015_process_attempts": 26,
+    "total_e0_process_attempts_including_me013": 53,
+    "window_denominator_ns": 2700000000000,
+    "primary_paired_on_minus_off_two_sided_ns": [1102000000000, 1069000000000, 1134000000000],
+    "primary_median_delta_ns": 1102000000000,
+    "primary_range_delta_ns": [1069000000000, 1134000000000],
+    "terminal_marks_available": 0,
+    "treatment_p_vs_a_gain_status": "NOT_IDENTIFIED",
+    "control_p_vs_a_gain_status": "NOT_IDENTIFIED",
+    "off_cells_in_window_shadow_eligible_decisions": 0,
+    "all_on_window_public_depth_from_makers": true,
+    "complete_surface": "research/program/ideas/ME-015/surface.json",
+    "complete_surface_sha256": "3f8bf07e7dc119f373ca9e626a556dc523e7448d09c438179b0184835cd69024"
+  },
+  "claims": [
+    {
+      "id": "ME015-M1",
+      "type": "MECHANICAL",
+      "text": "All 24 assigned economic worlds completed with valid strict replay and independent window diagnostics; two technical duplicate outputs match the first-cell output bytes.",
+      "evidence_ids": ["ME015-E1", "ME015-E2", "ME015-E4"],
+      "limitations": ["Technical duplicates are not independent seeds; the resource command records do not independently attest their labeled Go worker counts; passing replay does not imply empirical validity."]
+    },
+    {
+      "id": "ME015-C1",
+      "type": "CAUSAL",
+      "text": "For all-pure-maker P, assigning the finite local reference from world start increased registered public two-sided window time by 39.5926–42.0000 percentage points across three development seed pairs.",
+      "evidence_ids": ["ME015-E1", "ME015-E3", "ME015-E4"],
+      "limitations": ["This is a whole-world assignment effect in one simulated ecology, not an isolated in-window order restoration, confirmation or empirical comparison. The range is descriptive, not a confidence interval."]
+    },
+    {
+      "id": "ME015-A1",
+      "type": "ACTIVATION",
+      "text": "The ON local-reference option was selected under a finite age bound and makers contributed all measured ON window resting depth; OFF had zero in-window shadow-eligible decisions.",
+      "evidence_ids": ["ME015-E1", "ME015-E2"],
+      "limitations": ["No binary mechanism-activation threshold was preregistered; maker quotes may refresh their own reference; individual order-level restoration and independent absolute price discovery are not established."]
+    },
+    {
+      "id": "ME015-D1",
+      "type": "DESCRIPTIVE",
+      "text": "All 24 terminal public books were one-sided or empty, making both registered P-versus-A fee-net maker-gain contrasts unavailable under the strict terminal-midpoint rule.",
+      "evidence_ids": ["ME015-E1", "ME015-E3"],
+      "limitations": ["Undefined maker gains are not zero, losses or policy equivalence. No maker return-risk ranking or strategy-capacity frontier follows."]
+    }
+  ],
+  "evidence": [
+    {
+      "id": "ME015-E1",
+      "kind": "complete_machine_surface",
+      "location": "research/program/ideas/ME-015/surface.json",
+      "identity": "SHA256 3f8bf07e7dc119f373ca9e626a556dc523e7448d09c438179b0184835cd69024; all 24 registered cells, exact hashes and integer window durations, plus two technical controls"
+    },
+    {
+      "id": "ME015-E2",
+      "kind": "external_raw_manifests_replay_diagnostics_resources",
+      "location": "/home/vlad/e0-me015-candidate-4cc34e40-f5DrAN",
+      "identity": "Clean source C=4cc34e40; per-cell plan, manifest, raw canonical evidence, four market-data sidecars, strict replay, window diagnostic and run/analysis resource digests indexed by surface.json; external location is not an off-machine backup"
+    },
+    {
+      "id": "ME015-E3",
+      "kind": "prospective_registered_protocol",
+      "location": "research/program/ideas/ME-015/protocol.md",
+      "identity": "SHA256 08f38eb6f1642bab459c83244187b7eb24946ea7ea1619f39d0ae85ea2ad60ad; primary whole-world contrast, strict terminal-mark missingness and bounded age set before outcomes"
+    },
+    {
+      "id": "ME015-E4",
+      "kind": "scoped_independent_reviews",
+      "location": "research/program/reviews/me015-result-20260927.md",
+      "identity": "Independent Sol-6 medium A COMPLETED/ACCEPT retained surface/artifacts; B COMPLETED/ACCEPT bounded causal interpretation; scopes and worker-label qualification recorded"
+    }
+  ]
+}
