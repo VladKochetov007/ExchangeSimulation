@@ -28,7 +28,7 @@ func LockE0Plan(cell E0Cell, identity executionpilot.Identity) (E0LockedPlan, er
 	if err := executionpilot.ValidateIdentityForSchema(identity, EvidenceSchemaID); err != nil {
 		return E0LockedPlan{}, err
 	}
-	world, err := BuildE0World(cell)
+	world, err := buildRegisteredE0World(cell)
 	if err != nil {
 		return E0LockedPlan{}, err
 	}
@@ -47,7 +47,7 @@ func VerifyE0Plan(plan E0LockedPlan, actual executionpilot.Identity) (*worldspot
 	if err := executionpilot.ValidateIdentityForSchema(actual, EvidenceSchemaID); err != nil {
 		return nil, err
 	}
-	world, err := BuildE0World(plan.Cell)
+	world, err := buildRegisteredE0World(plan.Cell)
 	if err != nil {
 		return nil, err
 	}

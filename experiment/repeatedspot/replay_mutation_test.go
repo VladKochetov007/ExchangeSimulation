@@ -85,6 +85,52 @@ func replacePayloadField(t *testing.T, event *Event, field string, value any) {
 	}
 }
 
+func TestProductionLocalReferenceEvidenceRejectsRehashedForgedSource(t *testing.T) {
+	world := fixtureWorldWithReferencePolicy(t, true, false, 1, 2*time.Second,
+		true, 2, 5*time.Second, true, 15*time.Second)
+	contract, original, directory := capturedFixtureWorld(t, world)
+	if _, err := replayMutated(t, contract, original, directory); err != nil {
+		t.Fatalf("valid versioned local-reference fixture did not replay: %v", err)
+	}
+	selected := -1
+	for index, event := range original {
+		if event.Name != "maker_decision" {
+			continue
+		}
+		var decision worldspot.MakerDecision
+		if err := json.Unmarshal(event.Payload, &decision); err != nil {
+			t.Fatal(err)
+		}
+		if decision.ReferenceMode == "cached_two_sided" {
+			selected = index
+			break
+		}
+	}
+	if selected < 0 {
+		t.Fatal("synthetic one-sided production path did not exercise the cached-reference decision")
+	}
+	for name, mutate := range map[string]func(*Event){
+		"price": func(event *Event) {
+			var decision worldspot.MakerDecision
+			if err := json.Unmarshal(event.Payload, &decision); err != nil {
+				t.Fatal(err)
+			}
+			replacePayloadField(t, event, "reference_mid", decision.ReferenceMid+1)
+		},
+		"source sequence": func(event *Event) { replacePayloadField(t, event, "reference_sequence", 999999) },
+		"missing mode":    func(event *Event) { replacePayloadField(t, event, "reference_mode", "") },
+	} {
+		t.Run(name, func(t *testing.T) {
+			changed := append([]Event(nil), original...)
+			changed[selected].Payload = bytes.Clone(changed[selected].Payload)
+			mutate(&changed[selected])
+			if _, err := replayMutated(t, contract, changed, directory); err == nil {
+				t.Fatal("rehashed forged local reference passed independent replay")
+			}
+		})
+	}
+}
+
 func TestIndependentReplayRejectsRehashedSemanticCorruption(t *testing.T) {
 	contract, original, directory := capturedFixture(t)
 	for name, mutate := range map[string]func(*testing.T, []Event) []Event{

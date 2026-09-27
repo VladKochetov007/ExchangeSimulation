@@ -22,6 +22,7 @@ func main() {
 	measurementStart := flag.Int64("measurement-start-ns", -1, "registered measurement start")
 	measurementEnd := flag.Int64("measurement-end-ns", -1, "exclusive registered measurement end")
 	tickSize := flag.Int64("tick-size", 0, "registered instrument tick size")
+	shadowAge := flag.Int64("shadow-reference-max-age-ns", 0, "registered shadow cache age for opportunity accounting")
 	flag.Parse()
 	if *manifestPath == "" || *resultPath == "" || *evidencePath == "" || *outputPath == "" ||
 		*measurementStart < 0 || *measurementEnd <= *measurementStart || *tickSize <= 0 || flag.NArg() != 0 {
@@ -34,6 +35,10 @@ func main() {
 	var manifest repeatedspot.E0RunManifest
 	if err := decodeJSON(manifestRaw, &manifest); err != nil {
 		fail(err)
+	}
+	if manifest.Cell.ReferenceMode == "" && *shadowAge != 0 ||
+		manifest.Cell.ReferenceMode != "" && *shadowAge != int64(repeatedspot.E0LocalReferenceMaxAge) {
+		fail(errors.New("shadow reference age differs from the registered cell contract"))
 	}
 	resultRaw, err := os.ReadFile(*resultPath)
 	if err != nil {
@@ -59,8 +64,8 @@ func main() {
 	}
 	defer input.Close()
 	rawHasher := sha256.New()
-	diagnostic, err := repeatedspot.DiagnoseE0LiquidityEvidence(io.TeeReader(input, rawHasher), manifest.Evidence,
-		repeatedspot.MeasurementWindow{StartAt: *measurementStart, EndAt: *measurementEnd}, *tickSize)
+	diagnostic, err := repeatedspot.DiagnoseE0LiquidityEvidenceWithReference(io.TeeReader(input, rawHasher), manifest.Evidence,
+		repeatedspot.MeasurementWindow{StartAt: *measurementStart, EndAt: *measurementEnd}, *tickSize, *shadowAge)
 	if err != nil {
 		fail(err)
 	}
@@ -73,6 +78,13 @@ func main() {
 		book.BidOnlyNanos != market.BidOnlyNanos || book.AskOnlyNanos != market.AskOnlyNanos ||
 		book.EmptyNanos != market.EmptyNanos || diagnostic.TradeCount != int64(result.EconomicReconstruction.TradeCount) {
 		fail(errors.New("diagnostic disagrees with accepted strict replay"))
+	}
+	measured := diagnostic.MeasurementBookDurations
+	public := result.EconomicReconstruction.PublicWindowDepth
+	if public.WindowNanos != measured.HorizonNanos || public.TwoSidedNanos != measured.TwoSidedNanos ||
+		public.BidPresentNanos != measured.TwoSidedNanos+measured.BidOnlyNanos ||
+		public.AskPresentNanos != measured.TwoSidedNanos+measured.AskOnlyNanos {
+		fail(errors.New("windowed public book disagrees with independently replayed resting orders"))
 	}
 	output, err := os.OpenFile(*outputPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0644)
 	if err != nil {

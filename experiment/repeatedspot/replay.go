@@ -77,6 +77,8 @@ type EconomicReplay struct {
 	InformationAudit   *analysis.MarketDataReceiptAudit `json:"information_audit"`
 	Market             MarketSummary                    `json:"market"`
 	MeasurementWindow  MeasurementWindow                `json:"measurement_window"`
+	PublicWindowDepth  RestingDepthSummary              `json:"public_window_resting_depth"`
+	MakerWindowDepth   RestingDepthSummary              `json:"maker_window_resting_depth"`
 }
 
 type accountState struct {
@@ -125,10 +127,15 @@ type replayState struct {
 	publicSnapshots     map[uint64]publicSnapshot
 	makerObservations   []makerObservationRecord
 	latestMakerSnapshot map[uint64]worldspot.MakerObservation
+	lastTwoSidedMaker   map[uint64]worldspot.MakerObservation
 	sentRequests        map[requestKey]*sentOrder
 	makerReceipts       map[makerReceiptKey]*makerReceipt
 	measurementWindow   MeasurementWindow
 	resting             *restingBook
+	publicResting       *restingDepthSeries
+	makerResting        *restingDepthSeries
+	publicWindowDepth   RestingDepthSummary
+	makerWindowDepth    RestingDepthSummary
 }
 
 type publicSnapshot struct {
@@ -183,7 +190,10 @@ func replayWithWindow(contractBytes []byte, stream io.Reader, identity EvidenceI
 		sentRequests:  make(map[requestKey]*sentOrder),
 		makerReceipts: make(map[makerReceiptKey]*makerReceipt), measurementWindow: window,
 		resting:         &restingBook{orders: make(map[uint64]*restingOrder)},
-		publicSnapshots: make(map[uint64]publicSnapshot), latestMakerSnapshot: make(map[uint64]worldspot.MakerObservation)}
+		publicResting:   newRestingDepthSeries(contract.StartUnixNano, window),
+		makerResting:    newRestingDepthSeries(contract.StartUnixNano, window),
+		publicSnapshots: make(map[uint64]publicSnapshot), latestMakerSnapshot: make(map[uint64]worldspot.MakerObservation),
+		lastTwoSidedMaker: make(map[uint64]worldspot.MakerObservation)}
 	for _, participant := range contract.Participants {
 		if participant.ClientID == 0 || participant.ActorID == 0 || participant.Role == "" ||
 			participant.Latency.RequestNanos < 0 || participant.Latency.ResponseNanos == nil ||
@@ -293,7 +303,8 @@ func replayWithWindow(contractBytes []byte, stream io.Reader, identity EvidenceI
 	report := &EconomicReplay{ContractSHA256: state.contractHash, Evidence: identity,
 		VenueFeeRevenue: copyBalances(state.venue), TradeCount: len(state.trades.trades),
 		TerminalMarkStatus: state.markStatus, TerminalMidQuote: state.terminalMid, InformationAudit: info,
-		Market: market, MeasurementWindow: window}
+		Market: market, MeasurementWindow: window,
+		PublicWindowDepth: state.publicWindowDepth, MakerWindowDepth: state.makerWindowDepth}
 	ids := make([]uint64, 0, len(state.accounts))
 	for clientID := range state.accounts {
 		ids = append(ids, clientID)
@@ -581,7 +592,11 @@ func (state *replayState) makerDecision(event Event) error {
 	}
 	switch decision.Action {
 	case "keep_quotes", "cancel_quotes", "evaluate_placements", "no_usable_quote":
-		bid, ask, usable := expectedMakerQuote(account.maker, decision)
+		referenceMid, err := state.verifiedMakerReference(account, decision)
+		if err != nil {
+			return err
+		}
+		bid, ask, usable := expectedMakerQuote(account.maker, decision, referenceMid)
 		if (decision.Action == "no_usable_quote" && usable) ||
 			(decision.Action == "keep_quotes" || decision.Action == "evaluate_placements") && !usable ||
 			decision.TargetBid != bid || decision.TargetAsk != ask {
@@ -590,8 +605,12 @@ func (state *replayState) makerDecision(event Event) error {
 				decision.FilledInventory, decision.TargetBid, decision.TargetAsk, bid, ask, usable)
 		}
 	case "subscribe", "await_response":
-		if decision.TargetBid != 0 || decision.TargetAsk != 0 {
+		if decision.TargetBid != 0 || decision.TargetAsk != 0 || hasMakerReferenceEvidence(decision) {
 			return errors.New("repeated spot: maker reported a target while no quote was calculated")
+		}
+	case "fault":
+		if hasMakerReferenceEvidence(decision) {
+			return errors.New("repeated spot: faulted maker reported a selected reference")
 		}
 	}
 	if err := account.verifyMakerSends(decision, event.Timestamp); err != nil {
@@ -599,6 +618,45 @@ func (state *replayState) makerDecision(event Event) error {
 	}
 	account.decisions++
 	return nil
+}
+
+func hasMakerReferenceEvidence(decision worldspot.MakerDecision) bool {
+	return decision.ReferenceMode != "" || decision.ReferenceMid != 0 ||
+		decision.ReferenceSourceAt != 0 || decision.ReferenceSequence != 0
+}
+
+func (state *replayState) verifiedMakerReference(account *accountState, decision worldspot.MakerDecision) (int64, error) {
+	if !account.maker.trackReference {
+		if hasMakerReferenceEvidence(decision) {
+			return 0, errors.New("repeated spot: legacy maker reported unsupported reference evidence")
+		}
+		if decision.BestBid <= 0 || decision.BestAsk <= decision.BestBid {
+			return 0, nil
+		}
+		return decision.BestBid + (decision.BestAsk-decision.BestBid)/2, nil
+	}
+	mode := "unavailable"
+	var mid, sourceAt int64
+	var sequence uint64
+	latest, seen := state.latestMakerSnapshot[account.clientID]
+	if seen && latest.BestBid > 0 && latest.BestAsk > latest.BestBid {
+		mode = "live_two_sided"
+		mid = latest.BestBid + (latest.BestAsk-latest.BestBid)/2
+		sourceAt, sequence = latest.SourceAt, latest.SourceSequence
+	} else if seen && (latest.BestBid <= 0 || latest.BestAsk <= 0) && account.maker.localReferenceAge > 0 {
+		prior, available := state.lastTwoSidedMaker[account.clientID]
+		if available && decision.DecisionAt >= prior.SourceAt &&
+			decision.DecisionAt-prior.SourceAt < account.maker.localReferenceAge {
+			mode = "cached_two_sided"
+			mid = prior.BestBid + (prior.BestAsk-prior.BestBid)/2
+			sourceAt, sequence = prior.SourceAt, prior.SourceSequence
+		}
+	}
+	if decision.ReferenceMode != mode || decision.ReferenceMid != mid ||
+		decision.ReferenceSourceAt != sourceAt || decision.ReferenceSequence != sequence {
+		return 0, errors.New("repeated spot: selected maker reference disagrees with delivered local book")
+	}
+	return mid, nil
 }
 
 func (state *replayState) makerObservation(event Event) error {
@@ -615,11 +673,16 @@ func (state *replayState) makerObservation(event Event) error {
 	}
 	if observation.Kind == "snapshot" {
 		source, exists := state.publicSnapshots[observation.SourceSequence]
+		prior, priorSeen := state.latestMakerSnapshot[event.ClientID]
 		if !exists || source.timestamp != observation.SourceAt ||
-			observation.BestBid != firstLevelPrice(source.bids) || observation.BestAsk != firstLevelPrice(source.asks) {
+			observation.BestBid != firstLevelPrice(source.bids) || observation.BestAsk != firstLevelPrice(source.asks) ||
+			priorSeen && observation.SourceAt < prior.SourceAt {
 			return errors.New("repeated spot: maker snapshot disagrees with published public book")
 		}
 		state.latestMakerSnapshot[event.ClientID] = observation
+		if observation.BestBid > 0 && observation.BestAsk > observation.BestBid {
+			state.lastTwoSidedMaker[event.ClientID] = observation
+		}
 	} else {
 		trade := state.trades.trades[observation.TradeID]
 		if trade == nil || trade.timestamp != observation.SourceAt ||

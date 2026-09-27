@@ -44,3 +44,40 @@ func TestRestingOrdersIndependentlyReconstructPublicLevels(t *testing.T) {
 		t.Fatal("published depth concealed one resting client's quantity")
 	}
 }
+
+func TestPublicAndMakerOnlyDepthHaveDistinctExclusiveWindowNumerators(t *testing.T) {
+	window := MeasurementWindow{StartAt: 10, EndAt: 20}
+	state := &replayState{
+		accounts: map[uint64]*accountState{
+			1: {restingDepth: newRestingDepthSeries(0, window)},
+			2: {maker: &makerParameters{}, restingDepth: newRestingDepthSeries(0, window)},
+		},
+		publicResting: newRestingDepthSeries(0, window),
+		makerResting:  newRestingDepthSeries(0, window),
+	}
+	for _, change := range []struct {
+		at       int64
+		clientID uint64
+		side     string
+		delta    int64
+	}{
+		{0, 2, "BUY", 5},
+		{0, 1, "SELL", 5},
+		{12, 2, "SELL", 5},
+		{20, 2, "SELL", -5},
+	} {
+		if err := state.changeRestingDepth(change.at, change.clientID, change.side, change.delta); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := state.finishRestingDepth(20); err != nil {
+		t.Fatal(err)
+	}
+	if state.publicWindowDepth.WindowNanos != 10 || state.publicWindowDepth.TwoSidedNanos != 10 ||
+		state.makerWindowDepth.TwoSidedNanos != 8 ||
+		state.publicWindowDepth.BidDepthBaseUnitNanos != "50" ||
+		state.makerWindowDepth.AskDepthBaseUnitNanos != "40" {
+		t.Fatalf("public/maker-only depth or exclusive endpoint is wrong: public=%+v maker=%+v",
+			state.publicWindowDepth, state.makerWindowDepth)
+	}
+}

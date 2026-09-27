@@ -120,7 +120,7 @@ func (state *replayState) restingOrderEvent(event Event) error {
 		}
 		state.resting.orders[order.OrderID] = &restingOrder{clientID: event.ClientID,
 			price: order.Price, side: order.Side, qty: order.Qty}
-		return state.accounts[event.ClientID].restingDepth.change(event.Timestamp, order.Side, order.Qty)
+		return state.changeRestingDepth(event.Timestamp, event.ClientID, order.Side, order.Qty)
 	case "OrderFill":
 		var fill recordedFill
 		if err := json.Unmarshal(event.Payload, &fill); err != nil {
@@ -134,7 +134,7 @@ func (state *replayState) restingOrderEvent(event Event) error {
 			return errors.New("repeated spot: fill exceeds resting client order")
 		}
 		order.qty -= fill.Qty
-		if err := state.accounts[event.ClientID].restingDepth.change(event.Timestamp, order.side, -fill.Qty); err != nil {
+		if err := state.changeRestingDepth(event.Timestamp, event.ClientID, order.side, -fill.Qty); err != nil {
 			return err
 		}
 		if order.qty == 0 {
@@ -155,7 +155,24 @@ func (state *replayState) restingOrderEvent(event Event) error {
 			return errors.New("repeated spot: cancellation owns another client's resting order")
 		}
 		delete(state.resting.orders, cancelled.OrderID)
-		return state.accounts[event.ClientID].restingDepth.change(event.Timestamp, order.side, -order.qty)
+		return state.changeRestingDepth(event.Timestamp, event.ClientID, order.side, -order.qty)
+	}
+	return nil
+}
+
+func (state *replayState) changeRestingDepth(at int64, clientID uint64, side string, delta int64) error {
+	account := state.accounts[clientID]
+	if account == nil {
+		return errors.New("repeated spot: resting order belongs to an unknown account")
+	}
+	if err := account.restingDepth.change(at, side, delta); err != nil {
+		return err
+	}
+	if err := state.publicResting.change(at, side, delta); err != nil {
+		return err
+	}
+	if account.maker != nil {
+		return state.makerResting.change(at, side, delta)
 	}
 	return nil
 }
@@ -188,6 +205,20 @@ func (state *replayState) finishRestingDepth(terminalAt int64) error {
 			return err
 		}
 		account.restingSummary = summary
+	}
+	var err error
+	state.publicWindowDepth, err = state.publicResting.finish(terminalAt)
+	if err != nil {
+		return err
+	}
+	state.makerWindowDepth, err = state.makerResting.finish(terminalAt)
+	if err != nil {
+		return err
+	}
+	if state.makerWindowDepth.BidPresentNanos > state.publicWindowDepth.BidPresentNanos ||
+		state.makerWindowDepth.AskPresentNanos > state.publicWindowDepth.AskPresentNanos ||
+		state.makerWindowDepth.TwoSidedNanos > state.publicWindowDepth.TwoSidedNanos {
+		return errors.New("repeated spot: maker-only depth exceeds public depth")
 	}
 	return nil
 }

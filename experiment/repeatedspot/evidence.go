@@ -16,7 +16,7 @@ import (
 )
 
 const (
-	EvidenceSchemaID    = "repeated-spot-opaque-v3"
+	EvidenceSchemaID    = "repeated-spot-opaque-v4"
 	evidenceSchemaEpoch = 0x45300003
 )
 

@@ -53,6 +53,13 @@ func fixtureWorldWithBook(t *testing.T, enabled, stoikov bool, seedAskQty int64,
 }
 
 func fixtureWorldWithAggressorSchedule(t *testing.T, enabled, stoikov bool, seedAskQty int64, quoteInterval time.Duration, marketOrder bool, qty int64, aggressorInterval time.Duration) *worldspot.World {
+	return fixtureWorldWithReferencePolicy(t, enabled, stoikov, seedAskQty, quoteInterval,
+		marketOrder, qty, aggressorInterval, false, 0)
+}
+
+func fixtureWorldWithReferencePolicy(t *testing.T, enabled, stoikov bool, seedAskQty int64,
+	quoteInterval time.Duration, marketOrder bool, qty int64, aggressorInterval time.Duration,
+	localReference bool, referenceAge time.Duration) *worldspot.World {
 	t.Helper()
 	seed, err := worldspot.NewSeedOncePolicy(worldspot.SeedOnceConfig{Symbol: "ABC/USD", BidPrice: 99, AskPrice: 101, BidQty: 2, AskQty: seedAskQty})
 	if err != nil {
@@ -63,7 +70,21 @@ func fixtureWorldWithAggressorSchedule(t *testing.T, enabled, stoikov bool, seed
 		InitialLogVariancePerSecond: 1e-8, VolatilityHalfLife: 4 * time.Second,
 		VolatilitySampleInterval: time.Second, MaxLogVarianceMultiple: 4}
 	var maker worldspot.PolicyDefinition
-	if stoikov {
+	if localReference && stoikov {
+		maker, err = worldspot.NewLocalReferenceStoikovMakerPolicy(worldspot.LocalReferenceStoikovMakerConfig{
+			BoundedStoikovMakerConfig: worldspot.BoundedStoikovMakerConfig{
+				Maker: makerConfig, QuotePrecision: 1, RelativeRiskAversion: 50,
+				RelativeFillDecay: 20_000, InventoryHorizon: 10 * time.Second,
+				MinHalfSpreadTicks: 1,
+			}, MaxAge: referenceAge,
+		})
+	} else if localReference {
+		maker, err = worldspot.NewLocalReferenceFixedMakerPolicy(worldspot.LocalReferenceFixedMakerConfig{
+			BoundedFixedMakerConfig: worldspot.BoundedFixedMakerConfig{
+				Maker: makerConfig, SpreadBps: 100,
+			}, MaxAge: referenceAge,
+		})
+	} else if stoikov {
 		maker, err = worldspot.NewBoundedStoikovMakerPolicy(worldspot.BoundedStoikovMakerConfig{
 			Maker: makerConfig, QuotePrecision: 1, RelativeRiskAversion: 50,
 			RelativeFillDecay: 20_000, InventoryHorizon: 10 * time.Second,
@@ -168,6 +189,42 @@ func TestCaptureProductionPathAndInformationSidecars(t *testing.T) {
 	if replay.Accounts[0].RestingDepth.BidPresentNanos == 0 ||
 		replay.Accounts[0].RestingDepth.AskPresentNanos == 0 {
 		t.Fatalf("finite seed-once book contribution was not reconstructed: %+v", replay.Accounts[0].RestingDepth)
+	}
+}
+
+func TestWindowedPublicRestingDepthAgreesWithIndependentBookDeltas(t *testing.T) {
+	world := fixtureWorld(t)
+	directory := t.TempDir()
+	receipts, err := simulation.NewMarketDataReceiptRecorder(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var raw bytes.Buffer
+	capture, err := NewCapture(world, &raw, receipts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity, err := capture.Run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	window := MeasurementWindow{StartAt: int64(2 * time.Second), EndAt: int64(12 * time.Second)}
+	replay, err := ReplayWindow(world.ContractJSON(), bytes.NewReader(raw.Bytes()), identity, directory, window)
+	if err != nil {
+		t.Fatal(err)
+	}
+	diagnostic, err := DiagnoseE0LiquidityEvidence(bytes.NewReader(raw.Bytes()), identity, window, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	public := replay.PublicWindowDepth
+	measured := diagnostic.MeasurementBookDurations
+	if public.WindowNanos != measured.HorizonNanos || public.TwoSidedNanos != measured.TwoSidedNanos ||
+		public.BidPresentNanos != measured.TwoSidedNanos+measured.BidOnlyNanos ||
+		public.AskPresentNanos != measured.TwoSidedNanos+measured.AskOnlyNanos ||
+		replay.MakerWindowDepth.TwoSidedNanos > public.TwoSidedNanos {
+		t.Fatalf("windowed public/maker order replay differs from public deltas: public=%+v maker=%+v delta=%+v",
+			public, replay.MakerWindowDepth, measured)
 	}
 }
 

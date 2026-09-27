@@ -27,6 +27,8 @@ type makerParameters struct {
 	fillDecay           float64
 	horizonNanos        int64
 	minHalfSpreadTicks  int64
+	localReferenceAge   int64
+	trackReference      bool
 }
 
 type deliveredVariance struct {
@@ -37,7 +39,9 @@ type deliveredVariance struct {
 }
 
 func parseMakerParameters(participant replayParticipant) (*makerParameters, error) {
-	if participant.Policy.Name != "bounded_fixed_maker_v2" && participant.Policy.Name != "bounded_stoikov_maker_v2" {
+	switch participant.Policy.Name {
+	case "bounded_fixed_maker_v2", "bounded_stoikov_maker_v2", "bounded_fixed_maker_v3", "bounded_stoikov_maker_v3":
+	default:
 		return nil, nil
 	}
 	var raw struct {
@@ -58,9 +62,20 @@ func parseMakerParameters(participant replayParticipant) (*makerParameters, erro
 		RelativeFillDecay  float64 `json:"relative_fill_decay"`
 		InventoryHorizon   int64   `json:"inventory_horizon_ns"`
 		MinHalfSpreadTicks int64   `json:"min_half_spread_ticks"`
+		LocalReferenceAge  int64   `json:"local_reference_max_age_ns"`
 	}
 	if err := json.Unmarshal(participant.Policy.Parameters, &raw); err != nil {
 		return nil, err
+	}
+	trackReference := participant.Policy.Name == "bounded_fixed_maker_v3" || participant.Policy.Name == "bounded_stoikov_maker_v3"
+	if trackReference {
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(participant.Policy.Parameters, &fields); err != nil {
+			return nil, err
+		}
+		if _, present := fields["local_reference_max_age_ns"]; !present {
+			return nil, errors.New("repeated spot: versioned maker omitted local reference lifetime")
+		}
 	}
 	parameters := &makerParameters{kind: participant.Policy.Name,
 		workingLimit: raw.Maker.WorkingLimit, quoteQty: raw.Maker.QuoteQty, minQuoteQty: raw.Maker.MinQuoteQty,
@@ -71,19 +86,22 @@ func parseMakerParameters(participant replayParticipant) (*makerParameters, erro
 		maxVarianceMultiple: raw.Maker.MaxLogVarianceMultiple, spreadBps: raw.SpreadBps,
 		quotePrecision: raw.QuotePrecision, riskAversion: raw.RelativeRisk,
 		fillDecay: raw.RelativeFillDecay, horizonNanos: raw.InventoryHorizon,
-		minHalfSpreadTicks: raw.MinHalfSpreadTicks}
+		minHalfSpreadTicks: raw.MinHalfSpreadTicks, localReferenceAge: raw.LocalReferenceAge,
+		trackReference: trackReference}
 	if parameters.workingLimit <= 0 || parameters.quoteQty <= 0 || parameters.minQuoteQty <= 0 ||
 		parameters.minQuoteQty > parameters.quoteQty || parameters.quoteIntervalNanos <= 0 || parameters.tickSize <= 0 ||
 		!finiteNumber(parameters.initialVariance) || parameters.initialVariance < 0 ||
 		parameters.halfLifeNanos < 0 || parameters.sampleIntervalNanos < 0 ||
 		!finiteNumber(parameters.maxVarianceMultiple) || parameters.maxVarianceMultiple < 0 ||
-		!finiteNumber(parameters.initialVariance*parameters.maxVarianceMultiple) {
+		!finiteNumber(parameters.initialVariance*parameters.maxVarianceMultiple) || parameters.localReferenceAge < 0 ||
+		!parameters.trackReference && parameters.localReferenceAge != 0 {
 		return nil, errors.New("repeated spot: malformed maker estimator parameters")
 	}
-	if parameters.kind == "bounded_fixed_maker_v2" && (parameters.spreadBps < 0 || parameters.spreadBps >= 10_000) {
+	if (parameters.kind == "bounded_fixed_maker_v2" || parameters.kind == "bounded_fixed_maker_v3") &&
+		(parameters.spreadBps < 0 || parameters.spreadBps >= 10_000) {
 		return nil, errors.New("repeated spot: malformed fixed-maker spread")
 	}
-	if parameters.kind == "bounded_stoikov_maker_v2" &&
+	if (parameters.kind == "bounded_stoikov_maker_v2" || parameters.kind == "bounded_stoikov_maker_v3") &&
 		(parameters.quotePrecision <= 0 || parameters.riskAversion <= 0 || parameters.fillDecay <= 0 ||
 			parameters.horizonNanos <= 0 || parameters.minHalfSpreadTicks <= 0 ||
 			!finiteNumber(parameters.riskAversion) || !finiteNumber(parameters.fillDecay)) {
@@ -130,12 +148,11 @@ func (estimate deliveredVariance) verifyDecision(decision worldspot.MakerDecisio
 	return nil
 }
 
-func expectedMakerQuote(parameters *makerParameters, decision worldspot.MakerDecision) (int64, int64, bool) {
-	if decision.BestBid <= 0 || decision.BestAsk <= decision.BestBid {
+func expectedMakerQuote(parameters *makerParameters, decision worldspot.MakerDecision, mid int64) (int64, int64, bool) {
+	if mid <= 0 {
 		return 0, 0, false
 	}
-	mid := decision.BestBid + (decision.BestAsk-decision.BestBid)/2
-	if parameters.kind == "bounded_fixed_maker_v2" {
+	if parameters.kind == "bounded_fixed_maker_v2" || parameters.kind == "bounded_fixed_maker_v3" {
 		halfSpread := new(big.Int).Mul(big.NewInt(mid), big.NewInt(parameters.spreadBps))
 		halfSpread.Quo(halfSpread, big.NewInt(10_000))
 		if !halfSpread.IsInt64() || halfSpread.Int64() >= mid {

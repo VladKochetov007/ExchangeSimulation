@@ -20,9 +20,10 @@ var e0DevelopmentSeeds = [...]int64{18_001, 18_011, 18_017}
 // E0Cell is a finite study assignment, not a generic policy-registration type.
 // External callers can still compose arbitrary policies with repeatedspot.Build.
 type E0Cell struct {
-	Composition string `json:"composition"`
-	QuoteQty    int64  `json:"quote_qty_base_units"`
-	Seed        int64  `json:"seed"`
+	Composition   string `json:"composition"`
+	QuoteQty      int64  `json:"quote_qty_base_units"`
+	Seed          int64  `json:"seed"`
+	ReferenceMode string `json:"reference_mode,omitempty"`
 }
 
 func E0DevelopmentCells() []E0Cell {
@@ -40,11 +41,15 @@ func E0DevelopmentCells() []E0Cell {
 }
 
 func (cell E0Cell) ID() string {
+	if cell.ReferenceMode != "" {
+		return fmt.Sprintf("R2-%s-%s-q%d-s%d", cell.ReferenceMode, cell.Composition, cell.QuoteQty, cell.Seed)
+	}
 	return fmt.Sprintf("%s-q%d-s%d", cell.Composition, cell.QuoteQty, cell.Seed)
 }
 
 func validateE0Cell(cell E0Cell) error {
-	if cell.Composition != "P" && cell.Composition != "A" && cell.Composition != "M1" && cell.Composition != "M2" ||
+	if cell.ReferenceMode != "" ||
+		cell.Composition != "P" && cell.Composition != "A" && cell.Composition != "M1" && cell.Composition != "M2" ||
 		cell.QuoteQty != e0QuoteSmall && cell.QuoteQty != e0QuoteLarge {
 		return fmt.Errorf("repeated spot: cell outside the E0 development matrix")
 	}

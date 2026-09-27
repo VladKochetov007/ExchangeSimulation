@@ -25,10 +25,22 @@ func run(arguments []string) error {
 	}
 	switch arguments[0] {
 	case "cells":
-		if len(arguments) != 1 {
-			return errors.New("cells takes no arguments")
+		flags := flag.NewFlagSet("cells", flag.ContinueOnError)
+		study := flags.String("study", "ME-013", "registered development study: ME-013 or ME-015")
+		if err := flags.Parse(arguments[1:]); err != nil {
+			return err
 		}
-		return json.NewEncoder(os.Stdout).Encode(repeatedspot.E0DevelopmentCells())
+		if flags.NArg() != 0 {
+			return errors.New("cells takes only -study")
+		}
+		switch *study {
+		case "ME-013":
+			return json.NewEncoder(os.Stdout).Encode(repeatedspot.E0DevelopmentCells())
+		case "ME-015":
+			return json.NewEncoder(os.Stdout).Encode(repeatedspot.E0LocalReferenceDevelopmentCells())
+		default:
+			return fmt.Errorf("unknown registered study %q", *study)
+		}
 	case "plan":
 		flags := flag.NewFlagSet("plan", flag.ContinueOnError)
 		repository := flags.String("repo", "", "clean pinned E0 source checkout")
@@ -37,6 +49,7 @@ func run(arguments []string) error {
 		composition := flags.String("composition", "", "P, A, M1 or M2")
 		quantity := flags.Int64("quote-qty", 0, "maker base atoms per side")
 		seed := flags.Int64("seed", 0, "registered E0 development seed")
+		referenceMode := flags.String("reference-mode", "", "empty for ME-013; OFF or ON for ME-015")
 		if err := flags.Parse(arguments[1:]); err != nil {
 			return err
 		}
@@ -44,7 +57,8 @@ func run(arguments []string) error {
 			return errors.New("plan requires -repo, -analyzer, -out, -composition, -quote-qty and -seed")
 		}
 		return repeatedspot.WriteE0Plan(*repository, *analyzer, *output,
-			repeatedspot.E0Cell{Composition: *composition, QuoteQty: *quantity, Seed: *seed})
+			repeatedspot.E0Cell{Composition: *composition, QuoteQty: *quantity,
+				Seed: *seed, ReferenceMode: *referenceMode})
 	case "run":
 		flags := flag.NewFlagSet("run", flag.ContinueOnError)
 		repository := flags.String("repo", "", "clean pinned E0 source checkout")

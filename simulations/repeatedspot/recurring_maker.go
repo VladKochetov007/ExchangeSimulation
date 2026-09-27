@@ -38,6 +38,10 @@ type MakerDecision struct {
 	LatestBookProcessedAt int64   `json:"latest_book_processed_at"`
 	BestBid               int64   `json:"best_bid"`
 	BestAsk               int64   `json:"best_ask"`
+	ReferenceMode         string  `json:"reference_mode,omitempty"`
+	ReferenceMid          int64   `json:"reference_mid,omitempty"`
+	ReferenceSourceAt     int64   `json:"reference_source_at,omitempty"`
+	ReferenceSequence     uint64  `json:"reference_sequence,omitempty"`
 	FilledInventory       int64   `json:"filled_inventory"`
 	WorkingLower          int64   `json:"working_lower"`
 	WorkingUpper          int64   `json:"working_upper"`
@@ -115,6 +119,11 @@ type RecurringMaker struct {
 	latestBookSequence    uint64
 	latestBookProcessedAt int64
 	bookSeen              bool
+	referenceMaxAge       time.Duration
+	recordReference       bool
+	lastTwoSidedMid       int64
+	lastTwoSidedAt        int64
+	lastTwoSidedSequence  uint64
 	activeBid             uint64
 	activeAsk             uint64
 	quotedBid             int64
@@ -134,13 +143,21 @@ type RecurringMaker struct {
 }
 
 func NewRecurringMaker(id uint64, gateway actor.Gateway, config RecurringMakerConfig, quoteRule MakerQuoteRule) (*RecurringMaker, error) {
+	return newRecurringMaker(id, gateway, config, quoteRule, 0, false)
+}
+
+func NewRecurringMakerWithLocalReference(id uint64, gateway actor.Gateway, config RecurringMakerConfig, quoteRule MakerQuoteRule, maxAge time.Duration) (*RecurringMaker, error) {
+	return newRecurringMaker(id, gateway, config, quoteRule, maxAge, true)
+}
+
+func newRecurringMaker(id uint64, gateway actor.Gateway, config RecurringMakerConfig, quoteRule MakerQuoteRule, maxAge time.Duration, recordReference bool) (*RecurringMaker, error) {
 	if gateway == nil || config.Symbol == "" || config.QuoteQty <= 0 || config.MinQuoteQty <= 0 ||
 		config.MinQuoteQty > config.QuoteQty || config.WorkingLimit <= 0 || config.TickSize <= 0 ||
 		config.QuoteInterval <= 0 || config.RequoteBps < 0 || quoteRule == nil ||
 		math.IsNaN(config.InitialLogVariancePerSecond) || math.IsInf(config.InitialLogVariancePerSecond, 0) ||
 		config.InitialLogVariancePerSecond < 0 || config.VolatilityHalfLife < 0 || config.VolatilitySampleInterval < 0 ||
 		math.IsNaN(config.MaxLogVarianceMultiple) || math.IsInf(config.MaxLogVarianceMultiple, 0) || config.MaxLogVarianceMultiple < 0 ||
-		math.IsInf(config.InitialLogVariancePerSecond*config.MaxLogVarianceMultiple, 0) {
+		math.IsInf(config.InitialLogVariancePerSecond*config.MaxLogVarianceMultiple, 0) || maxAge < 0 {
 		return nil, fmt.Errorf("repeatedspot: invalid recurring maker contract")
 	}
 	inventory, err := newWorkingInventory(0, config.WorkingLimit)
@@ -149,7 +166,8 @@ func NewRecurringMaker(id uint64, gateway actor.Gateway, config RecurringMakerCo
 	}
 	maker := &RecurringMaker{BaseActor: actor.NewBaseActor(id, gateway), config: config,
 		quoteRule: quoteRule, inventory: inventory, cancelRequested: make(map[uint64]struct{}),
-		unresolvedEnd: make(map[uint64]struct{}), logVariancePerSecond: config.InitialLogVariancePerSecond}
+		unresolvedEnd: make(map[uint64]struct{}), logVariancePerSecond: config.InitialLogVariancePerSecond,
+		referenceMaxAge: maxAge, recordReference: recordReference}
 	maker.SetHandler(maker)
 	maker.AddTicker(config.QuoteInterval, maker.onTick)
 	return maker, nil
@@ -254,14 +272,15 @@ func (maker *RecurringMaker) onSnapshot(event actor.BookSnapshotEvent) {
 	if event.Symbol != maker.config.Symbol {
 		return
 	}
-	if event.Timestamp < 0 || maker.bookSeen && event.Timestamp < maker.latestBookAt {
-		maker.fault = fmt.Errorf("repeatedspot: delivered book source time regressed")
+	processedAt := maker.localNow(event.Timestamp)
+	if event.Timestamp < 0 || event.Timestamp > processedAt || maker.bookSeen && event.Timestamp < maker.latestBookAt {
+		maker.fault = fmt.Errorf("repeatedspot: delivered book source time invalid or future-dated")
 		return
 	}
 	maker.bookSeen = true
 	maker.latestBookAt = event.Timestamp
 	maker.latestBookSequence = event.SeqNum
-	maker.latestBookProcessedAt = maker.localNow(event.Timestamp)
+	maker.latestBookProcessedAt = processedAt
 	maker.bestBid, maker.bestAsk = 0, 0
 	if event.Snapshot != nil {
 		if len(event.Snapshot.Bids) != 0 {
@@ -270,6 +289,11 @@ func (maker *RecurringMaker) onSnapshot(event actor.BookSnapshotEvent) {
 		if len(event.Snapshot.Asks) != 0 {
 			maker.bestAsk = event.Snapshot.Asks[0].Price
 		}
+	}
+	if maker.bestBid > 0 && maker.bestAsk > maker.bestBid {
+		maker.lastTwoSidedMid = maker.bestBid + (maker.bestAsk-maker.bestBid)/2
+		maker.lastTwoSidedAt = event.Timestamp
+		maker.lastTwoSidedSequence = event.SeqNum
 	}
 	if maker.observationObserver != nil {
 		maker.observationObserver(MakerObservation{ActorID: maker.ID(), Kind: "snapshot",
@@ -404,7 +428,8 @@ func (maker *RecurringMaker) clearActive(orderID uint64) {
 func (maker *RecurringMaker) onTick(scheduled time.Time) {
 	action := "fault"
 	var quote MakerQuote
-	defer func() { maker.observeDecision(scheduled, quote, action) }()
+	var reference makerReference
+	defer func() { maker.observeDecision(scheduled, quote, reference, action) }()
 	if maker.fault != nil {
 		return
 	}
@@ -419,7 +444,7 @@ func (maker *RecurringMaker) onTick(scheduled time.Time) {
 		return
 	}
 	var usable bool
-	quote, usable = maker.targetQuote()
+	quote, reference, usable = maker.targetQuote(maker.localNow(scheduled.UnixNano()))
 	if maker.activeBid != 0 || maker.activeAsk != 0 {
 		if usable && maker.matchesCurrentQuote(quote) {
 			action = "keep_quotes"
@@ -440,7 +465,7 @@ func (maker *RecurringMaker) onTick(scheduled time.Time) {
 	}
 }
 
-func (maker *RecurringMaker) observeDecision(scheduled time.Time, quote MakerQuote, action string) {
+func (maker *RecurringMaker) observeDecision(scheduled time.Time, quote MakerQuote, reference makerReference, action string) {
 	if maker.decisionObserver == nil {
 		return
 	}
@@ -450,7 +475,7 @@ func (maker *RecurringMaker) observeDecision(scheduled time.Time, quote MakerQuo
 		maker.fault = err
 		return
 	}
-	maker.decisionObserver(MakerDecision{
+	decision := MakerDecision{
 		ActorID: maker.ID(), ScheduledAt: scheduled.UnixNano(), DecisionAt: decisionAt,
 		BookSeen: maker.bookSeen, LatestBookSourceAt: maker.latestBookAt,
 		LatestBookSequence: maker.latestBookSequence, LatestBookProcessedAt: maker.latestBookProcessedAt,
@@ -458,7 +483,14 @@ func (maker *RecurringMaker) observeDecision(scheduled time.Time, quote MakerQuo
 		FilledInventory: maker.inventory.filled, WorkingLower: lower, WorkingUpper: upper,
 		LogVariancePerSecond: maker.logVariancePerSecond, DeliveredTradeSamples: maker.tradeSamples,
 		TargetBid: quote.BidPrice, TargetAsk: quote.AskPrice, Action: action,
-	})
+	}
+	if maker.recordReference {
+		decision.ReferenceMode = reference.mode
+		decision.ReferenceMid = reference.mid
+		decision.ReferenceSourceAt = reference.sourceAt
+		decision.ReferenceSequence = reference.sequence
+	}
+	maker.decisionObserver(decision)
 }
 
 func (maker *RecurringMaker) localNow(fallback int64) int64 {
@@ -477,21 +509,42 @@ func (maker *RecurringMaker) hasPendingPlacement() bool {
 	return false
 }
 
-func (maker *RecurringMaker) targetQuote() (MakerQuote, bool) {
-	if maker.bestBid <= 0 || maker.bestAsk <= maker.bestBid {
-		return MakerQuote{}, false
+type makerReference struct {
+	mode     string
+	mid      int64
+	sourceAt int64
+	sequence uint64
+}
+
+func (maker *RecurringMaker) quoteReference(decisionAt int64) makerReference {
+	if maker.bestBid > 0 && maker.bestAsk > maker.bestBid {
+		return makerReference{mode: "live_two_sided", mid: maker.bestBid + (maker.bestAsk-maker.bestBid)/2,
+			sourceAt: maker.latestBookAt, sequence: maker.latestBookSequence}
 	}
-	mid := maker.bestBid + (maker.bestAsk-maker.bestBid)/2
-	quote, ok := maker.quoteRule(MakerQuoteInput{MidPrice: mid, FilledInventory: maker.inventory.filled,
+	if maker.bestBid > 0 && maker.bestAsk > 0 || maker.referenceMaxAge <= 0 ||
+		maker.lastTwoSidedMid <= 0 || decisionAt < maker.lastTwoSidedAt ||
+		decisionAt-maker.lastTwoSidedAt >= int64(maker.referenceMaxAge) {
+		return makerReference{mode: "unavailable"}
+	}
+	return makerReference{mode: "cached_two_sided", mid: maker.lastTwoSidedMid,
+		sourceAt: maker.lastTwoSidedAt, sequence: maker.lastTwoSidedSequence}
+}
+
+func (maker *RecurringMaker) targetQuote(decisionAt int64) (MakerQuote, makerReference, bool) {
+	reference := maker.quoteReference(decisionAt)
+	if reference.mid <= 0 {
+		return MakerQuote{}, reference, false
+	}
+	quote, ok := maker.quoteRule(MakerQuoteInput{MidPrice: reference.mid, FilledInventory: maker.inventory.filled,
 		WorkingLimit: maker.config.WorkingLimit, LogVariancePerSecond: maker.logVariancePerSecond,
 		DeliveredTradeSamples: maker.tradeSamples})
 	if !ok || quote.BidPrice < 0 || quote.AskPrice < 0 ||
 		(quote.BidPrice == 0 && quote.AskPrice == 0) ||
 		(quote.BidPrice > 0 && quote.AskPrice > 0 && quote.AskPrice <= quote.BidPrice) ||
 		quote.BidPrice%maker.config.TickSize != 0 || quote.AskPrice%maker.config.TickSize != 0 {
-		return MakerQuote{}, false
+		return MakerQuote{}, reference, false
 	}
-	return quote, true
+	return quote, reference, true
 }
 
 func (maker *RecurringMaker) matchesCurrentQuote(quote MakerQuote) bool {
