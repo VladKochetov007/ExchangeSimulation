@@ -268,7 +268,7 @@
       "proposed_economic_world_ceiling": 6,
       "proposed_technical_controls": 2,
       "run_authorized": false,
-      "readiness": "PURE_CALENDAR_RATE_CBA54855_CASH_PREVIEW_F0DF3D3E_SETTLEMENT_TERMS_11338826_AND_BATCH_PREFLIGHT_0332835A_REVIEWED; PRODUCTION_SOURCE_ATOMIC_COMMIT_POLICY_EVIDENCE_AND_PRICEABLE_REPEATED_FOUNDATION_NOT_READY",
+      "readiness": "PURE_CALENDAR_RATE_CBA54855_CASH_PREVIEW_F0DF3D3E_SETTLEMENT_TERMS_11338826_BATCH_PREFLIGHT_0332835A_AND_ISOLATED_BOOK_SOURCE_3A43B1BD_REVIEWED; ASSEMBLED_PHASE_WINDOW_ATOMIC_COMMIT_POLICY_EVIDENCE_AND_PRICEABLE_REPEATED_FOUNDATION_NOT_READY",
       "mechanical_checkpoint": "research/program/ideas/ME-014/readiness-20260927.md",
       "source_commit": "cba548552295d748d1c8c922fb7daca4b41a9c58",
       "independent_review": "research/program/reviews/me014-funding-primitive-20260927.md",
@@ -280,6 +280,9 @@
       "pure_settlement_terms_review": "research/program/reviews/me014-settlement-terms-20260927.md",
       "pure_batch_preview_source_commit": "0332835a78809ded0176c91db1e8bb25c92f1b7f",
       "pure_batch_preview_review": "research/program/reviews/me014-funding-batch-preview-20260927.md",
+      "book_pair_source_commit": "3a43b1bd6009d93e1652a3687816724111e4590d",
+      "book_pair_source_review": "research/program/reviews/me014-funding-book-source-20260927.md",
+      "book_pair_source_verdict": "SCOPED_ACCEPT_SOURCE_ONLY_NOT_PHASE_OR_EVIDENCE",
       "opt_in_pre_timestamp_phase_source_commit": "00b63ec1b80cc74275e039bdee9530be8c27643f",
       "opt_in_pre_timestamp_phase_review": "research/program/reviews/me014-pre-timestamp-phase-20260927.md",
       "opt_in_pre_timestamp_phase_verdict": "CONDITIONAL_HELPER_NOT_E2_T_MINUS_PROOF"
