@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "planning_baseline_commit": "ef61b4cb6e0124aa797f281e379ab143e847646e",
-  "planning_status": "E0_R1_CLOSED_ME015_REFERENCE_SUCCESSOR_IN_READINESS_E1_E2_PENDING",
+  "planning_status": "E0_R1_CLOSED_ME015_FIRST_CELL_VALID_FIXED_MATRIX_PENDING_E1_E2_PENDING",
   "current_authorization": "research/program/longrun-baselines/authorization-20260927.md",
   "economic_world_ceiling_by_environment": {"E0": 120, "E1": 120, "E2": 120},
   "calibration_world_ceiling_by_environment": {"E0": 12, "E1": 12, "E2": 12},
@@ -171,13 +171,22 @@
     "e1_e2_economic_worlds_run": 0
   },
   "e0_me015_local_reference_successor": {
-    "stage": "PROSPECTIVE_DEVELOPMENT_PROTOCOL_LOCKED_FIRST_CELL_GATED",
+    "stage": "DEVELOPMENT_FIRST_CELL_VALID_REMAINING_MATRIX_PENDING",
     "study_id": "ME-015",
     "idea": "research/program/ideas/ME-015/idea.md",
     "locked_protocol": "research/program/ideas/ME-015/protocol.md",
     "prospective_economic_cells": 24,
     "prospective_technical_controls": 2,
-    "economic_worlds_run": 0,
+    "economic_worlds_run": 1,
+    "valid_economic_worlds": 1,
+    "technical_duplicates_run": 0,
+    "candidate_source_commit": "4cc34e402d2ad3fd359a3bb8fb928f36fe779b1d",
+    "candidate_source_tree": "845e5417fab0f67a566dae241acc10609a81028e",
+    "external_retained_root": "/home/vlad/e0-me015-candidate-4cc34e40-f5DrAN",
+    "first_cell_review": "research/program/reviews/me015-preoutcome-and-first-cell-20260927.md",
+    "first_cell_terminal_mark_status": "UNAVAILABLE_ONE_SIDED_OR_EMPTY",
+    "first_cell_window_two_sided_ns": 1102000000000,
+    "first_cell_window_denominator_ns": 2700000000000,
     "run_authorized_by_locked_protocol": true,
     "pre_outcome_source_review_execution": "COMPLETED",
     "pre_outcome_source_review_verdict": "ACCEPT_SCOPED_AT_C90F70DF_SOURCE_AND_EVIDENCE",
@@ -194,7 +203,7 @@
       "proposed_economic_world_ceiling": 24,
       "proposed_technical_controls": 2,
       "run_authorized": false,
-      "readiness": "E0_R1_DEVELOPMENT_COMPLETE_PRIMARY_NOT_IDENTIFIED_ME015_PROSPECTIVE_FIRST_CELL_GATED"
+      "readiness": "E0_R1_DEVELOPMENT_COMPLETE_PRIMARY_NOT_IDENTIFIED_ME015_FIRST_CELL_VALID_MATRIX_PENDING"
     },
     {
       "id": "E2",
@@ -283,5 +292,5 @@
     "free_disk_reserve_gib": 10,
     "require_fresh_capacity_preflight": true
   },
-  "next_authorized_milestone": "Bind the locked ME-015 protocol to its clean exact execution commit, verify Go 1.27.0 binaries and immutable ON/P/18101 plan, then run only that assigned first cell under the finite-cgroup and disk guards. Continue the registered matrix only after process/evidence and measured capacity are valid; no r1 rerun, E1/E2 world, confirmation or holdout is authorized."
+  "next_authorized_milestone": "Run only the remaining 23 fixed ME-015 economic assignments and two counted worker controls from pinned C=4cc34e40 under the unchanged finite-cgroup/disk guards. Then score the complete matrix with missing marks retained. No r1 rerun, E1/E2 world, confirmation or holdout is authorized."
 }

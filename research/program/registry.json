@@ -385,7 +385,7 @@
       "id": "ME-015",
       "title": "Finite actor-local reference for repeated spot makers (E0 successor)",
       "claim_type": "CAUSAL",
-      "stage": "PREPARE",
+      "stage": "DEVELOPMENT",
       "idea": "research/program/ideas/ME-015/idea.md",
       "protocol": "research/program/ideas/ME-015/protocol.md",
       "report": null,
@@ -397,7 +397,7 @@
         "run": true,
         "basis": "Owner 2026-09-27 long-run E0/E1/E2 development authorization, subject to the prospectively locked ME-015 development protocol: at most 24 assigned worlds plus two counted technical duplicates. Only ON/P/18101 may launch after clean pinned build, exact plan and finite-cgroup/disk guards; the rest depend on valid measured first-cell capacity and evidence, not a favorable economic outcome. No confirmation, E1/E2 or holdout authorization follows."
       },
-      "next_action": "Record exact candidate and scoped review identities; build clean Go 1.27.0 binaries and verify the first locked plan/resource namespace before the counted ON/P/18101 preflight."
+      "next_action": "Retain the valid counted ON/P/18101 preflight and its scoped review; run only the other 23 fixed ME-015 economic cells plus two registered worker controls from pinned C=4cc34e40, then score the complete surface. Do not choose cells by observed economic sign."
     }
   ],
   "policies": [

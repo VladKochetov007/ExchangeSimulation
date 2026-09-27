@@ -1,6 +1,6 @@
 # ME-015 — Finite actor-local reference for repeated spot makers
 
-Stage: **PREPARE / prospective protocol locked**. This is a new E0 development successor, not a repair, rescore or confirmation of [ME-013 r1](../ME-013/report.md). No ME-015 economic world has run.
+Stage: **DEVELOPMENT / first assigned cell valid; remaining fixed matrix pending**. This is a new E0 development successor, not a repair, rescore or confirmation of [ME-013 r1](../ME-013/report.md). The exact simulator candidate remains `4cc34e40`; later status commits are not simulator runs. The [first-cell gate](../../reviews/me015-preoutcome-and-first-cell-20260927.md) records one valid ON/P/18101 trajectory without claiming a paired result.
 
 Question: when a maker's latest delayed ABC/USD snapshot becomes one-sided or empty, can it use a recently **delivered** two-sided snapshot for a short, finite period to make an ordinary risk-bounded quote decision? Does that change observed two-sided market time without imposing a price path or a standing liquidity obligation?
 
@@ -10,4 +10,4 @@ The local reference is an actor belief formed from delayed public data. It expir
 
 Dependencies: accepted [ME-013 r1 boundary](../ME-013/report.md), the existing recurring maker in `simulations/repeatedspot/recurring_maker.go`, strict delayed-observation replay in `experiment/repeatedspot/replay.go`, and the existing immutable-plan/evidence workflow. Neither historical R2/SV1D nor ME-001/002/003/005 is reopened.
 
-Next action: verify the locked candidate and resource guard, then execute only the assigned ON/P/18101 first cell in a fresh external namespace. Continue the fixed matrix only if the first cell's process/evidence and measured capacity are valid; its economic sign is not a continuation gate.
+Next action: execute only the remaining 23 fixed economic assignments and two registered worker controls from the clean pinned candidate, then independently score the complete matrix. The first-cell resource/evidence gate passed; its economic sign is not a continuation gate.
