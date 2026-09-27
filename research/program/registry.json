@@ -359,9 +359,9 @@
       "authorization": {
         "prepare": true,
         "run": true,
-        "basis": "Owner 2026-09-27 long-run goal and ME-013 r1 authorize only the first assigned P/0.1/18001 cell as counted resource preflight at pinned 075dda1; clean build/tests and bounded mechanics/design reviews passed. Remaining registered cells require valid first-cell evidence and measured capacity; confirmation is not authorized. See research/program/longrun-baselines/e0-r1-launch-gate-20260927.md."
+        "basis": "Owner 2026-09-27 long-run goal and ME-013 r1 authorize only the first assigned P/0.1/18001 cell as counted resource preflight. C2=075dda1 failed before World.Run and any market event; the preserved invalid attempt and reviewed C3=17b9e8a replacement are recorded in research/program/longrun-baselines/e0-r1-plan-roundtrip-amendment-20260927.md. Remaining registered cells require valid first-cell evidence and measured capacity; confirmation is not authorized."
       },
-      "next_action": "Execute and strictly analyze the first registered P/0.1/18001 cell from pinned 075dda1 under finite cgroup limits. Stop if the resource or evidence contract fails; otherwise decide whether the remaining fixed r1 cells fit."
+      "next_action": "Retry and strictly analyze the unchanged first registered P/0.1/18001 cell from pinned C3=17b9e8a in a fresh finite-cgroup namespace. Preserve the C2 failed attempt; stop again if the new resource or evidence contract fails."
     },
     {
       "id": "ME-014",

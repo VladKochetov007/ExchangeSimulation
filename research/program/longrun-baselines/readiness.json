@@ -127,6 +127,27 @@
     "actual_e0_capacity": "PENDING_FIRST_REGISTERED_CELL",
     "confirmation_authorized": false
   },
+  "e0_r1_plan_roundtrip_successor": {
+    "candidate_commit": "17b9e8a05415dcee05130b09a4a478d458c314c9",
+    "candidate_tree": "1eabae0484e5afd97c687a07470980e74d1e0a03",
+    "amendment": "research/program/longrun-baselines/e0-r1-plan-roundtrip-amendment-20260927.md",
+    "prior_candidate": "075dda144b0bbab57219dd3048c2496b9e1a479c",
+    "prior_first_cell_attempt": "INVALID_PRE_RUN_PLAN_ROUNDTRIP_NO_MARKET_EVENTS",
+    "prior_attempt_resource_sha256": "e36baccc3bc56f4c5ff69ae58cd132c9d7150d20b54cdbb6d1c20bc80816fb9b",
+    "economic_worlds_completed": 0,
+    "process_attempts": 1,
+    "amended_maximum_process_attempts": 27,
+    "clean_make_test": "PASS",
+    "go_vet_all": "PASS",
+    "targeted_race": "PASS",
+    "mechanics_review_execution": "COMPLETED",
+    "mechanics_review_verdict": "ACCEPT_SCOPED_PLAN_ROUNDTRIP",
+    "economic_design_review_execution": "COMPLETED",
+    "economic_design_review_verdict": "ACCEPT_CARRY_FORWARD",
+    "next_allowed_cell": "P-q10000000-s18001",
+    "actual_e0_capacity": "PENDING_VALID_FIRST_CELL",
+    "confirmation_authorized": false
+  },
   "candidate_environments": [
     {
       "id": "E0",
@@ -136,7 +157,7 @@
       "proposed_economic_world_ceiling": 24,
       "proposed_technical_controls": 2,
       "run_authorized": false,
-      "readiness": "E0_FIRST_REGISTERED_CELL_PREFLIGHT_READY_REMAINING_BATCH_CAPACITY_PENDING"
+      "readiness": "E0_C3_FIRST_REGISTERED_CELL_RETRY_READY_REMAINING_BATCH_CAPACITY_PENDING"
     },
     {
       "id": "E2",
@@ -225,5 +246,5 @@
     "free_disk_reserve_gib": 10,
     "require_fresh_capacity_preflight": true
   },
-  "next_authorized_milestone": "Run and independently analyze only the first registered E0 r1 development cell as counted resource preflight from pinned 075dda1; decide the remaining fixed batch from its real footprint and valid evidence. Confirmation remains separately gated."
+  "next_authorized_milestone": "Retain the failed C2 pre-start attempt; run and independently analyze only the same first registered E0 r1 cell from pinned C3=17b9e8a in a fresh namespace as counted resource preflight. Decide the remaining fixed batch from valid measured capacity. Confirmation remains separately gated."
 }
