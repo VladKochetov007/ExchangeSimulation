@@ -380,6 +380,24 @@
         "basis": "Owner 2026-09-27 long-run goal authorizes bounded E0/E1/E2 implementation and conditional development, recorded in research/program/longrun-baselines/authorization-20260927.md. E2 runs remain gated on E0 and versioned funding/lifecycle/evidence readiness plus a fixed protocol."
       },
       "next_action": "After E0 readiness, implement versioned funding/lifecycle and independent multi-payment fixtures; lock and validate an E2 protocol before any ME-014 world."
+    },
+    {
+      "id": "ME-015",
+      "title": "Finite actor-local reference for repeated spot makers (E0 successor)",
+      "claim_type": "CAUSAL",
+      "stage": "PLAN",
+      "idea": "research/program/ideas/ME-015/idea.md",
+      "protocol": "research/program/ideas/ME-015/protocol.md",
+      "report": null,
+      "result": null,
+      "dependencies": ["ME-013"],
+      "policy_ids": ["S06", "S07", "S28", "S32"],
+      "authorization": {
+        "prepare": true,
+        "run": false,
+        "basis": "Owner 2026-09-27 long-run E0/E1/E2 development authorization permits a bounded prospective E0 successor within the remaining environment budget. The ME-015 protocol is still a draft; source/evidence, independent review, immutable-plan and resource gates have not passed. No ME-015 world or confirmation is authorized by this registry entry alone."
+      },
+      "next_action": "Review the finite delivered-local-reference design, then implement focused actor/evidence tests and pin a clean candidate. Do not run until the final prospective protocol and gates are complete."
     }
   ],
   "policies": [
