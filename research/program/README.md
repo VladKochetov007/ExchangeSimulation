@@ -42,7 +42,7 @@ historical worlds as runs of a later merged source tree.
 | 4 | [ME-005](ideas/ME-005/report.md), [ME-007](ideas/ME-007/idea.md) | ME-005 REPORT: four valid development cells, zero registered opportunities and no route; bounded post-result review accepted the narrow claim with limitations, budget exhausted. ME-007 remains proposed. |
 | 5 | ME-004/006/008–010 | deferred allocation, interaction, payoff or derivative questions |
 | 6 | ME-011–ME-012 | restricted games and explicit capital dynamics after reliable payoffs |
-| Preparation | [ME-013](ideas/ME-013/idea.md), [ME-014](ideas/ME-014/idea.md) | Owner-authorized bounded E0/E1/E2 implementation/development; E0 maker, ledger, policy/outbound, local-response and [risk/depth](longrun-baselines/e0-risk-series-checkpoint-20260927.md) checkpoints are mechanical only. Pending-envelope coverage, protocol, runner and capacity still block economic worlds. See the [current authorization and gates](longrun-baselines/authorization-20260927.md). |
+| Preparation | [ME-013](ideas/ME-013/idea.md), [ME-014](ideas/ME-014/idea.md) | Owner-authorized bounded E0/E1/E2 implementation/development; E0 maker, ledger, policy/outbound, local-response, [risk/depth](longrun-baselines/e0-risk-series-checkpoint-20260927.md), and [working-envelope](longrun-baselines/e0-envelope-checkpoint-20260927.md) checkpoints are mechanically tested only. Protocol, runner, capacity and the review/fallback gate still block economic worlds. See the [current authorization and gates](longrun-baselines/authorization-20260927.md). |
 
 This is dependency order, not a run queue. ME-010 is a planning umbrella and needs
 a named child protocol; an umbrella cannot authorize a combined derivative campaign.

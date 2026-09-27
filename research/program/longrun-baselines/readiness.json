@@ -83,6 +83,19 @@
     "go_vet_all": "PASS",
     "known_gap": "Pending-inclusive envelope occupancy and denied actions, locked E0 protocol/runner and measured binary-evidence capacity remain missing"
   },
+  "e0_envelope_checkpoint": {
+    "candidate_commit": "cb08d5857be68334818b0876edad2e799674af4f",
+    "report": "research/program/longrun-baselines/e0-envelope-checkpoint-20260927.md",
+    "scope": "Offline actor-local pending-inclusive maker envelope and windowed working-limit clipping/placement-denial reconstruction from outbound sends and processed responses; no new evidence schema or economic semantics",
+    "status": "MECHANICALLY_TESTED_UNREVIEWED_DEVELOPMENT",
+    "review_execution": "NOT_ATTEMPTED_AFTER_PRIOR_SERVICE_CAPACITY_FAILURE",
+    "review_verdict": "NOT_ISSUED",
+    "economic_worlds_run": 0,
+    "clean_make_test": "PASS_AT_cb08d58_GO_1_27_0",
+    "targeted_race": "PASS",
+    "go_vet_all": "PASS",
+    "known_gap": "Locked E0 numeric protocol, pinned runner/analyzer/build identities, measured binary-evidence capacity and bounded review/fallback record remain missing"
+  },
   "candidate_environments": [
     {
       "id": "E0",
@@ -92,7 +105,7 @@
       "proposed_economic_world_ceiling": 15,
       "proposed_technical_controls": 2,
       "run_authorized": false,
-      "readiness": "E0_FIXTURE_TESTED_BLOCK_ENVELOPE_PROTOCOL_RUNNER_CAPACITY"
+      "readiness": "E0_FIXTURE_TESTED_BLOCK_PROTOCOL_RUNNER_CAPACITY_REVIEW"
     },
     {
       "id": "E2",
@@ -134,7 +147,7 @@
       "classification": "ESTIMATOR_AND_MEASUREMENT",
       "source": ["simulations/multivenue/stoikov.go", "evstream"],
       "acceptance": "No decision reads future or venue-global state; formula agrees with normalized-inventory fixture; missing, duplicate, reordered, fee-wrong and incomplete evidence fail closed.",
-      "current_status": "QUOTE_LEDGER_OUTBOUND_MARKET_LOCAL_FILL_RISK_DEPTH_REPLAY_FIXTURE_TESTED_ENVELOPE_ACTION_COVERAGE_MISSING"
+      "current_status": "QUOTE_LEDGER_OUTBOUND_MARKET_LOCAL_FILL_RISK_DEPTH_ENVELOPE_REPLAY_FIXTURE_TESTED_PROTOCOL_NOT_LOCKED"
     },
     {
       "id": "E2-1",
@@ -181,5 +194,5 @@
     "free_disk_reserve_gib": 10,
     "require_fresh_capacity_preflight": true
   },
-  "next_authorized_milestone": "Independently reconstruct pending-inclusive maker envelope/denied-action observability, then lock one finite E0 numerical protocol, pin runner/analyzer binaries and measure real binary-evidence capacity before an economic world. Preserve UNREVIEWED DEVELOPMENT and the confirmation review gate."
+  "next_authorized_milestone": "Lock one finite E0 numerical protocol and missing-mark rule, pin runner/analyzer binaries, and measure real binary-evidence capacity before an economic world. Preserve UNREVIEWED DEVELOPMENT and the confirmation review gate."
 }
