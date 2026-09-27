@@ -101,6 +101,12 @@ func (e *DefaultExchange) CaptureFundingAccountSnapshot(request FundingAccountSn
 	}
 	e.mu.RLock()
 	defer e.mu.RUnlock()
+	return e.captureFundingAccountSnapshotLocked(request)
+}
+
+// captureFundingAccountSnapshotLocked is shared with the future joint-venue
+// preflight, which must hold both venue locks without reacquiring either one.
+func (e *DefaultExchange) captureFundingAccountSnapshotLocked(request FundingAccountSnapshotRequest) (FundingAccountSnapshot, error) {
 	if e.ID != request.VenueID || e.Clock.NowUnixNano() != request.TimestampNano {
 		return FundingAccountSnapshot{}, fmt.Errorf("funding accounts: venue or live clock does not match requested source")
 	}
