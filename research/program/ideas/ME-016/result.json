@@ -1,0 +1,122 @@
+{
+  "schema_version": 1,
+  "study_id": "ME-016",
+  "stage": "REPORT",
+  "process_status": "COMPLETED",
+  "evidence_validity": "VALID",
+  "opportunity_presence": "PRESENT",
+  "policy_activity": "ACTIVE",
+  "registered_activation": "NOT_APPLICABLE",
+  "scientific_verdict": "INCONCLUSIVE",
+  "causal_verdict": "BOUNDED_RESPONSE_OBSERVED",
+  "empirical_comparison": "NOT_PERFORMED",
+  "reasons": [
+    "All 12 prospectively registered economic cells and one technical repeat completed from clean C=eff182e9 with valid v5 strict replay and resource records. The first analysis process failed before a result, was retained, and succeeded on the same raw cell after a fresh output directory was created; no simulator rerun was substituted.",
+    "The registered M1 gain-two minus gain-zero public two-sided-window differences are -6, -8 and +5 seconds over 2700 seconds across the three development seed pairs. The mixed signs do not support a positive availability claim and do not prove equivalence. M2's -9, -8 and +5 seconds are slot sensitivity, not independent additional seeds.",
+    "Common gain-two shadow opportunities occurred in both arms and actual gain-two quote targets shifted with admitted/resting requests. The signal input includes focal makers' own best-level depth; activity and programmed shifts do not establish predictive alpha or an isolated order-level causal effect.",
+    "All 12 strict terminal marks and all 48 maker benchmark gains are unavailable. Fee-net maker superiority, profitability, strategy capacity, long-run survival and empirical realism are not identified.",
+    "Independent technical and economic reviewers accepted only the bounded development result. Resource records attest finite memory, zero observed swap and no OOM; they do not independently attest the hard swap/CPU settings or the first run's labeled Go worker count."
+  ],
+  "identities": {
+    "source": "eff182e98ba1745c82904686a40de50426814219; tree 496c9dac879d783ae3ff911ce3009cbb1c3603e8; Go 1.27.0; repeated-spot-opaque-v5; simulator SHA256 0f39151a188b9805d5ec98525b7172f4dc1e6d0bb5af65df2b15c60fcc1b58e4",
+    "configuration": "Locked ME-016 gain {0,2 bps} x M1/M2 x seeds 18101/18111/18117, 55-minute world and [600,3300) second window; per-cell raw/typed plan digests bound in surface.json",
+    "run": "/home/vlad/e1-me016-candidate-eff182e9-8v0HQc; 12 economic cells, one byte-identical technical repeat, retained first analysis failure and successful same-raw retry; per-cell hashes in surface.json SHA256 5dc22f7016cf37b1f162d3dad6cb5ffb8377a8d06115462c31f096228def5919",
+    "analyzer": "C mespotanalyze SHA256 f97921461b954d00b18bd6bd564d223f240b9d48d21996d108514974eb2d3691; later Go-only surface commit a0f457873389381e33677f7f826fe6abe197373a and binary SHA256 c140ce7bb585b0ffcfc383dfc5468f616b93eda89696621b99921fc62f177051",
+    "protocol": "research/program/ideas/ME-016/protocol.md SHA256 bfd46f5bfd55f64b164516df58471b34e944ffd3fd286edae78ff98136b48808; locked in C before first outcome",
+    "skill_commit": "608e815bbc3e7545b996f648b596bceed6d7b809",
+    "skill_tree": "60b91e73f1000a285e003bed122648636a737b2d"
+  },
+  "authorization": {
+    "prepare": true,
+    "run": false,
+    "basis": "Owner 2026-09-27 bounded E1 authorization and prospectively locked ME-016 protocol permitted exactly 12 development economic cells plus at most one technical repeat after tests, review and first-cell capacity gate. All 13 simulator attempts completed. The ME-016 protocol is exhausted; no new gain, seed, horizon, confirmation or holdout is authorized by unused E1 ceiling."
+  },
+  "review": {
+    "execution": "COMPLETED",
+    "verdict": "ACCEPT",
+    "scope": "Independent Sol-6 medium reviewer A checked retained 12-cell plan/manifest/evidence/sidecar/result/resource hashes, the exact primary numerators and terminal missingness; separate reviewer B accepted only the bounded whole-world development interpretation. Earlier source/design rejections and repairs are preserved. Neither result reviewer ran new worlds or a complete independent raw-event replay.",
+    "reference": "research/program/reviews/me016-result-20260927.md"
+  },
+  "observed": {
+    "assigned_economic_worlds": 12,
+    "valid_economic_worlds": 12,
+    "technical_duplicate_processes": 1,
+    "total_me016_simulator_attempts": 13,
+    "retained_failed_analysis_attempts": 1,
+    "window_denominator_ns": 2700000000000,
+    "primary_m1_gain_two_minus_zero_ns": [-6000000000, -8000000000, 5000000000],
+    "primary_median_delta_ns": -6000000000,
+    "primary_range_delta_ns": [-8000000000, 5000000000],
+    "m2_slot_sensitivity_gain_two_minus_zero_ns": [-9000000000, -8000000000, 5000000000],
+    "m1_gain_two_actual_shifted_target_decisions": [318, 268, 324],
+    "m1_gain_zero_common_shadow_opportunity_decisions": [322, 282, 320],
+    "terminal_marks_available": 0,
+    "maker_benchmark_gains_available": 0,
+    "maximum_economic_run_allocated_bytes": 61689856,
+    "maximum_economic_run_cgroup_memory_bytes": 107474944,
+    "technical_repeat_run_cgroup_memory_bytes": 116207616,
+    "maximum_all_13_run_cgroup_memory_bytes": 116207616,
+    "maximum_economic_analysis_cgroup_memory_bytes": 135872512,
+    "worker_one_repeat_byte_identical": true,
+    "first_run_worker_count_independently_attested": false,
+    "hard_swap_and_cpu_quota_independently_attested_by_resource_json": false,
+    "complete_surface": "research/program/ideas/ME-016/surface.json",
+    "complete_surface_sha256": "5dc22f7016cf37b1f162d3dad6cb5ffb8377a8d06115462c31f096228def5919"
+  },
+  "claims": [
+    {
+      "id": "ME016-M1",
+      "type": "MECHANICAL",
+      "text": "All twelve fixed development worlds passed source-pinned strict v5 replay and retained Go surface checks; one registered fresh-process repeat produced byte-identical canonical evidence, sidecars, manifest and analyzed result.",
+      "evidence_ids": ["ME016-E1", "ME016-E2", "ME016-E4"],
+      "limitations": ["The repeat's command binds GOMAXPROCS=1, but the first run's resource command does not independently attest its worker count. Passing replay is not empirical market validation."]
+    },
+    {
+      "id": "ME016-A1",
+      "type": "ACTIVATION",
+      "text": "The common shadow identified nonzero eligible tick-resolved shifts in both arms; gain-two signal makers produced actual shifted targets and admitted/resting orders under finite ordinary constraints.",
+      "evidence_ids": ["ME016-E1", "ME016-E2"],
+      "limitations": ["Shadow opportunities are arm-specific post-assignment states. The rule uses displayed depth that includes the maker's own orders; activity does not prove imbalance predicts external flow or a positive market effect."]
+    },
+    {
+      "id": "ME016-C1",
+      "type": "CAUSAL",
+      "text": "For M1 in this fixed simulated ecology, assigning gain two bps instead of zero from world start changed registered later public two-sided time by -6, -8 and +5 seconds across three paired development seeds; no consistent positive-availability response was observed.",
+      "evidence_ids": ["ME016-E1", "ME016-E3", "ME016-E4"],
+      "limitations": ["Three development seeds provide a descriptive range, not a confidence interval, equivalence claim or confirmation. M2 slot sensitivity is not another independent seed set; endogenous counterparty paths can diverge."]
+    },
+    {
+      "id": "ME016-D1",
+      "type": "DESCRIPTIVE",
+      "text": "Maker orders supply all measured public best-depth integral, own-only best levels occur in delivered signal snapshots, and all twelve terminal books lack a strict two-sided valuation mark; registered maker gains are unavailable.",
+      "evidence_ids": ["ME016-E1", "ME016-E2", "ME016-E4"],
+      "limitations": ["This does not isolate self-feedback as the cause of the small Q changes. Undefined maker gain is neither zero nor a losing-return estimate; no profitability, capacity or long-run survival claim follows."]
+    }
+  ],
+  "evidence": [
+    {
+      "id": "ME016-E1",
+      "kind": "complete_Go_machine_surface",
+      "location": "research/program/ideas/ME-016/surface.json",
+      "identity": "SHA256 5dc22f7016cf37b1f162d3dad6cb5ffb8377a8d06115462c31f096228def5919; all 12 registered cells with exact window durations and per-cell digests; one byte-identical control; analysis-only surface source a0f45787"
+    },
+    {
+      "id": "ME016-E2",
+      "kind": "external_raw_manifests_strict_results_and_resources",
+      "location": "/home/vlad/e1-me016-candidate-eff182e9-8v0HQc",
+      "identity": "C=eff182e9; 13 retained simulator processes; each plan, manifest, evidence.evs, four market-data sidecars, strict result and resource digests indexed by surface.json; failed first analysis and successful same-raw retry retained; local path is not an off-machine backup"
+    },
+    {
+      "id": "ME016-E3",
+      "kind": "prospective_registered_protocol",
+      "location": "research/program/ideas/ME-016/protocol.md",
+      "identity": "SHA256 bfd46f5bfd55f64b164516df58471b34e944ffd3fd286edae78ff98136b48808; fixed matrix, primary Q denominator, signal opportunity rule and strict terminal missingness before outcomes"
+    },
+    {
+      "id": "ME016-E4",
+      "kind": "scoped_independent_reviews",
+      "location": "research/program/reviews/me016-result-20260927.md",
+      "identity": "Sol-6 medium first-cell, complete technical and separate causal/economic reviews COMPLETED/ACCEPT only at their recorded scopes; earlier design/source REJECT findings and repairs preserved"
+    }
+  ]
+}
