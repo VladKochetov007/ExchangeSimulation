@@ -269,29 +269,34 @@ func (s *checkpointSink) observe(simTime int64, clientID uint64, eventName, venu
 // returns its actual global frame-header sequence. A missing binary successor
 // sink or any write error is fatal to this opt-in source contract.
 func (s *checkpointSink) observeRequiredFundingSource(observation exchange.FundingBookObservation, route string, venueSequence uint64) (uint64, error) {
+	return s.observeRequiredCanonicalEvent(observation.TimestampNano, "funding_book_observation",
+		observation.VenueID, observation, route, venueSequence)
+}
+
+func (s *checkpointSink) observeRequiredCanonicalEvent(simTime int64, eventName, venueID string, payload any, route string, venueSequence uint64) (uint64, error) {
 	if s == nil || s.binary == nil || s.discardBinary || !s.includesEvidenceOnly() || route == "" || venueSequence == 0 {
-		return 0, fmt.Errorf("funding source evidence requires a sequenced canonical binary sink")
+		return 0, fmt.Errorf("%s requires a sequenced canonical binary sink", eventName)
 	}
 	s.mu.Lock()
 	if s.closed || s.err != nil {
-		err := errors.Join(s.err, fmt.Errorf("funding source evidence sink is closed or already failed"))
+		err := errors.Join(s.err, fmt.Errorf("%s sink is closed or already failed", eventName))
 		s.mu.Unlock()
 		return 0, err
 	}
 	s.mu.Unlock()
-	frameSeq, recordErr := s.binary.recordRequired(observation.TimestampNano, 0,
-		"funding_book_observation", observation.VenueID, observation, route, venueSequence)
+	frameSeq, recordErr := s.binary.recordRequired(simTime, 0,
+		eventName, venueID, payload, route, venueSequence)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if recordErr != nil {
-		s.failLocked(fmt.Errorf("record funding source evidence: %w", recordErr))
+		s.failLocked(fmt.Errorf("record %s: %w", eventName, recordErr))
 		return 0, recordErr
 	}
 	if s.closed {
-		s.failLocked(fmt.Errorf("funding source evidence appended after sink close"))
+		s.failLocked(fmt.Errorf("%s appended after sink close", eventName))
 		return 0, s.err
 	}
-	s.observeCompletedBinaryRecordLocked(observation.TimestampNano)
+	s.observeCompletedBinaryRecordLocked(simTime)
 	if s.err != nil {
 		return 0, s.err
 	}
