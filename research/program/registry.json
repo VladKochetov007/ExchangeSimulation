@@ -359,9 +359,9 @@
       "authorization": {
         "prepare": true,
         "run": false,
-        "basis": "Owner 2026-09-27 long-run goal authorizes bounded E0/E1/E2 implementation and conditional development, recorded in research/program/longrun-baselines/authorization-20260927.md. E0 runs remain gated on E0-3/E0-4, fixed protocol, evidence and resource checks."
+        "basis": "Owner 2026-09-27 long-run goal authorizes bounded E0/E1/E2 implementation and conditional development, recorded in research/program/longrun-baselines/authorization-20260927.md. E0 runs remain gated on the maker-local fill timeline, fixed protocol, evidence and resource checks."
       },
-      "next_action": "Finish E0-4 AS estimator and market-series reconstruction after code candidate 985f107, then lock a finite protocol and measure binary-evidence capacity before the first E0 economic world. No independent review verdict has been issued."
+      "next_action": "After mechanically tested code candidate eef0270, independently reconstruct maker-local fill inventory from delayed response processing; then lock the finite protocol and measure binary-evidence capacity before the first E0 economic world. No independent review verdict has been issued."
     },
     {
       "id": "ME-014",
