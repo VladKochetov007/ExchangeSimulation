@@ -1,0 +1,17 @@
+# Malformed position-side admission — bounded semantic correction
+
+Source correction: `640b4c7124aa6b869dde001a02d395ea6232a9bb`, from development `main` `1a0435b7e3bfd3129bfb995db8449fe9962b65be`. Review execution: **COMPLETED**, read-only Sol-6 medium context. Substantive verdict: **ACCEPT for normal `PlaceOrder` admission only**. The reviewer did not run an economic world or inspect reserved holdouts; it ran a focused current-tree test and inspected the staged diff/source paths. This is not an acceptance of arbitrary direct `PositionStore` mutation.
+
+## Reproduction and intended invariant
+
+Before the correction, a synthetic `PlaceOrder` request with `PositionSide(255)` crossed a live ABC perpetual ask and returned `Success:true`. The focused regression failed with that accepted response. `PositionManager` keys a resulting position by the unrecognized side, but funding and risk scans visit only `BOTH`, `LONG`, and `SHORT`. The unknown side was also rendered as `BOTH` by `PositionSide.String()`, obscuring the distinction in some evidence. An admitted order must have a position side that every downstream position/risk/funding path recognizes. Invalid wire values are malformed requests, not a fourth economic position mode.
+
+The fix rejects every side outside those three **before** order ID allocation, reservation, matching and position update, with explicit `INVALID_POSITION_SIDE`. Valid sides retain their prior code path and string forms; an unknown value now renders `UNKNOWN`, not `BOTH`. The regression checks rejection and unchanged order sequence, book and position. The focused exchange/types tests, targeted race check and `go vet ./...` passed. A precommit dirty-tree `make test` passed Go and integrated contract checks but the R2 archive/parity fixture correctly refused a dirty worktree. Clean exact-commit `GOMAXPROCS=4 GOFLAGS=-p=4 make test` passed, including both archive/parity fixtures.
+
+The reviewer found that gateway and gated orders route through `PlaceOrder`; it found no normal bypass. Direct `PositionStore.UpdatePosition` or test-only `InjectPosition` can still create malformed state outside ordinary order admission. The separately planned E2 source snapshot must detect that state; the admission fix alone does not certify arbitrary custom stores or old trajectories.
+
+## Historical activation boundary
+
+The activation condition is an out-of-range side actually submitted, **accepted**, and matched; an invalid side on a rejected/unfilled request cannot create the invisible position. In the currently inspected registered repeatedspot E0/E1 and old multivenue actor construction paths, ordinary `BaseActor` requests omit this field and therefore use valid zero-value `BOTH`. The other production `OrderRequest` constructors located by source search also omit it. This supports **no known activation in those registered construction paths**, not a byte-level audit of every historical source revision. Older string rendering could alias an unknown side to `BOTH`, so aggregate historical text alone cannot universally prove zero malformed requests. No old result or manifest is rewritten or globally invalidated from this finding. If a retained run is later shown to have accepted a malformed side, its trajectory-dependent risk/funding claims require targeted reassessment; offline relabeling would not repair the simulation.
+
+E2 has not run. This correction changes malformed-request semantics prospectively and does not authorize an E2 economic protocol or holdout.
