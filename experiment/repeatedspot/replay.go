@@ -36,7 +36,11 @@ type replayParticipant struct {
 	ClientID uint64           `json:"client_id"`
 	Role     string           `json:"role"`
 	Balances map[string]int64 `json:"balances"`
-	Latency  struct {
+	Fees     struct {
+		Name       string          `json:"name"`
+		Parameters json.RawMessage `json:"parameters"`
+	} `json:"fees"`
+	Latency struct {
 		RequestNanos  int64  `json:"request_latency_ns"`
 		ResponseNanos *int64 `json:"response_latency_ns"`
 	} `json:"latency"`
@@ -82,6 +86,7 @@ type accountState struct {
 	initial         map[string]int64
 	current         map[string]int64
 	feePaidQuote    int64
+	fees            replayPercentageFee
 	fillCount       int
 	startSeen       bool
 	endSeen         bool
@@ -197,6 +202,10 @@ func replayWithWindow(contractBytes []byte, stream io.Reader, identity EvidenceI
 		if err != nil {
 			return nil, fmt.Errorf("repeated spot: invalid maker parameters for client %d: %w", participant.ClientID, err)
 		}
+		fees, err := parseReplayPercentageFee(participant)
+		if err != nil {
+			return nil, fmt.Errorf("repeated spot: invalid fee schedule for client %d: %w", participant.ClientID, err)
+		}
 		workingLimit := int64(0)
 		variance := deliveredVariance{}
 		if maker != nil {
@@ -204,7 +213,7 @@ func replayWithWindow(contractBytes []byte, stream io.Reader, identity EvidenceI
 			variance.value = maker.initialVariance
 		}
 		state.accounts[participant.ClientID] = &accountState{actorID: participant.ActorID, clientID: participant.ClientID,
-			role: participant.Role, initial: initial, current: copyBalances(initial), workingLimit: workingLimit,
+			role: participant.Role, initial: initial, current: copyBalances(initial), fees: fees, workingLimit: workingLimit,
 			maker: maker, variance: variance, requestDelay: participant.Latency.RequestNanos,
 			responseDelay:   *participant.Latency.ResponseNanos,
 			acceptedLocally: make(map[uint64]bool),

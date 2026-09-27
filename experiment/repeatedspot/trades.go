@@ -85,6 +85,42 @@ type tradeAudit struct {
 	hasLastTrade      bool
 }
 
+type replayPercentageFee struct {
+	makerBps int64
+	takerBps int64
+}
+
+func parseReplayPercentageFee(participant replayParticipant) (replayPercentageFee, error) {
+	if participant.Fees.Name != "percentage_v1" {
+		return replayPercentageFee{}, errors.New("unsupported fee model")
+	}
+	var parameters struct {
+		MakerBps int64 `json:"maker_bps"`
+		TakerBps int64 `json:"taker_bps"`
+		InQuote  bool  `json:"in_quote"`
+	}
+	if err := decodePayload(participant.Fees.Parameters, &parameters); err != nil {
+		return replayPercentageFee{}, err
+	}
+	if parameters.MakerBps < 0 || parameters.TakerBps < 0 || !parameters.InQuote {
+		return replayPercentageFee{}, errors.New("E0 replay requires nonnegative quote-currency percentage fees")
+	}
+	return replayPercentageFee{makerBps: parameters.MakerBps, takerBps: parameters.TakerBps}, nil
+}
+
+func (schedule replayPercentageFee) amount(notional int64, role string) (int64, error) {
+	bps := schedule.takerBps
+	if role == "maker" {
+		bps = schedule.makerBps
+	}
+	amount := new(big.Int).Mul(big.NewInt(notional), big.NewInt(bps))
+	amount.Quo(amount, big.NewInt(10_000))
+	if !amount.IsInt64() {
+		return 0, errors.New("contracted fee overflows quote units")
+	}
+	return amount.Int64(), nil
+}
+
 func newTradeAudit(instrument worldspot.InstrumentConfig) *tradeAudit {
 	return &tradeAudit{instrument: instrument, orders: make(map[uint64]acceptedOrder),
 		filledByOrder: make(map[uint64]int64), cancelledOrders: make(map[uint64]bool),
@@ -292,6 +328,14 @@ func (audit *tradeAudit) checkTrade(record *tradeRecord, state *replayState) err
 	if len(record.fills) != 2 || len(record.settlements) != 2 || record.settlements[0].clientID == record.settlements[1].clientID {
 		return errors.New("repeated spot: trade has incomplete or same-account legs")
 	}
+	makerOrder := audit.orders[record.trade.MakerOrderID]
+	takerOrder := audit.orders[record.trade.TakerOrderID]
+	if makerOrder.Type != "LIMIT" || makerOrder.Price != record.trade.Price ||
+		(takerOrder.Type != "LIMIT" && takerOrder.Type != "MARKET") ||
+		(takerOrder.Type == "LIMIT" && ((record.trade.Side == "BUY" && record.trade.Price > takerOrder.Price) ||
+			(record.trade.Side == "SELL" && record.trade.Price < takerOrder.Price))) {
+		return errors.New("repeated spot: trade price violates resting or incoming limit order")
+	}
 	notional := new(big.Int).Mul(big.NewInt(record.trade.Qty), big.NewInt(record.trade.Price))
 	notional.Quo(notional, big.NewInt(audit.instrument.BasePrecision))
 	if !notional.IsInt64() || notional.Sign() <= 0 {
@@ -309,6 +353,18 @@ func (audit *tradeAudit) checkTrade(record *tradeRecord, state *replayState) err
 		if fill.Role == "taker" && (fill.OrderID != record.trade.TakerOrderID || fill.Side != record.trade.Side) ||
 			fill.Role == "maker" && (fill.OrderID != record.trade.MakerOrderID || fill.Side == record.trade.Side) {
 			return errors.New("repeated spot: fill role/side/order identity mismatch")
+		}
+		account := state.accounts[leg.clientID]
+		if account == nil {
+			return errors.New("repeated spot: fill has unknown account")
+		}
+		// Zero-fee fills may omit fee_asset; a positive fee must name USD.
+		if fill.FeeAsset != audit.instrument.QuoteAsset && (fill.FeeAmount != 0 || fill.FeeAsset != "") {
+			return errors.New("repeated spot: fill has wrong fee asset")
+		}
+		expectedFee, err := account.fees.amount(notional.Int64(), fill.Role)
+		if err != nil || fill.FeeAmount != expectedFee {
+			return errors.New("repeated spot: fill fee differs from contracted percentage schedule")
 		}
 		var expectedBase, expectedQuote int64
 		var ok bool
@@ -341,7 +397,6 @@ func (audit *tradeAudit) checkTrade(record *tradeRecord, state *replayState) err
 			return errors.New("repeated spot: fill fee total overflow")
 		}
 		fees = feesNext
-		account := state.accounts[leg.clientID]
 		account.feePaidQuote, ok = checkedAdd(account.feePaidQuote, fill.FeeAmount)
 		if !ok {
 			return errors.New("repeated spot: account fee total overflow")
