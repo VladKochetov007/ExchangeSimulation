@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
   "planning_baseline_commit": "ef61b4cb6e0124aa797f281e379ab143e847646e",
-  "planning_status": "E0_R1_AND_ME015_DEVELOPMENT_REPORTED_GAIN_NOT_IDENTIFIED_E1_E2_PENDING",
+  "planning_status": "E0_R1_ME015_AND_ME016_E1_DEVELOPMENT_REPORTED_TERMINAL_GAIN_NOT_IDENTIFIED_E2_PENDING",
   "current_authorization": "research/program/longrun-baselines/authorization-20260927.md",
   "economic_world_ceiling_by_environment": {"E0": 120, "E1": 120, "E2": 120},
   "calibration_world_ceiling_by_environment": {"E0": 12, "E1": 12, "E2": 12},
-  "economic_worlds_run_for_this_plan": 48,
+  "economic_worlds_run_for_this_plan": 60,
   "seed_ids_reserved": [],
   "source_change_in_this_package": true,
   "implementation_checkpoint": {
@@ -208,6 +208,36 @@
     "post_result_review_verdict": "ACCEPT_SCOPED",
     "confirmation_authorized": false
   },
+  "e1_me016_signal_development_result": {
+    "stage": "REVIEWED_DEVELOPMENT_RESULT_MIXED_SIGN_AVAILABILITY_MAKER_GAIN_NOT_IDENTIFIED",
+    "study_id": "ME-016",
+    "candidate_source_commit": "eff182e98ba1745c82904686a40de50426814219",
+    "candidate_source_tree": "496c9dac879d783ae3ff911ce3009cbb1c3603e8",
+    "external_retained_root": "/home/vlad/e1-me016-candidate-eff182e9-8v0HQc",
+    "report": "research/program/ideas/ME-016/report.md",
+    "result": "research/program/ideas/ME-016/result.json",
+    "surface": "research/program/ideas/ME-016/surface.json",
+    "surface_sha256": "5dc22f7016cf37b1f162d3dad6cb5ffb8377a8d06115462c31f096228def5919",
+    "complete_result_review": "research/program/reviews/me016-result-20260927.md",
+    "prospective_economic_cells": 12,
+    "valid_economic_worlds": 12,
+    "technical_duplicates_run": 1,
+    "e1_owner_ceiling_process_attempts_consumed": 13,
+    "e1_owner_ceiling_process_attempts_remaining": 107,
+    "primary_m1_gain_two_minus_zero_ns_by_seed": [-6000000000, -8000000000, 5000000000],
+    "m2_slot_sensitivity_ns_by_seed": [-9000000000, -8000000000, 5000000000],
+    "primary_contrast_status": "ESTIMATED_DEVELOPMENT_ONLY_NO_CONSISTENT_POSITIVE_RESPONSE",
+    "terminal_marks": "UNAVAILABLE_IN_ALL_12_CELLS",
+    "maker_gain_status": "NOT_IDENTIFIED",
+    "pre_outcome_design_review_execution": "COMPLETED",
+    "pre_outcome_design_review_verdict": "ACCEPT_SCOPED_AFTER_REJECTION_AND_REPAIR",
+    "pre_outcome_source_review_execution": "COMPLETED",
+    "pre_outcome_source_review_verdict": "ACCEPT_SCOPED_AFTER_REJECTION_AND_REPAIR",
+    "post_result_review_execution": "COMPLETED",
+    "post_result_review_verdict": "ACCEPT_SCOPED",
+    "further_me016_run_authorized_after_matrix_completion": false,
+    "confirmation_authorized": false
+  },
   "candidate_environments": [
     {
       "id": "E0",
@@ -219,6 +249,16 @@
       "proposed_technical_controls": 2,
       "run_authorized": false,
       "readiness": "E0_R1_AND_ME015_REVIEWED_DEVELOPMENT_COMPLETE_STRICT_MAKER_GAIN_NOT_IDENTIFIED"
+    },
+    {
+      "id": "E1",
+      "study_id": "ME-016",
+      "description": "One ABC/USD venue, two pure and two AS-family signal makers with recurring finite demand",
+      "design_file": "research/program/ideas/ME-016/protocol.md",
+      "proposed_economic_world_ceiling": 12,
+      "proposed_technical_controls": 1,
+      "run_authorized": false,
+      "readiness": "ME016_REVIEWED_DEVELOPMENT_COMPLETE_NO_CONSISTENT_POSITIVE_AVAILABILITY_ALL_TERMINAL_GAINS_NOT_IDENTIFIED"
     },
     {
       "id": "E2",
@@ -307,5 +347,5 @@
     "free_disk_reserve_gib": 10,
     "require_fresh_capacity_preflight": true
   },
-  "next_authorized_milestone": "Close ME-015 at the reviewed bounded occupancy effect and strict maker-gain non-identification. No third E0 design iteration is automatic. Continue only independently feasible E1/E2 mechanical implementation and acceptance fixtures under the owner goal; integrated E1/E2 payoff worlds require a prospectively priceable repeated foundation and their own gates. No confirmation or historical holdout is authorized from this result."
+  "next_authorized_milestone": "Preserve the reviewed ME-016 mixed-sign E1 public-availability result and strict maker-gain non-identification; its 12-cell matrix and technical repeat are exhausted. No new E0/E1 economic rescue, confirmation or holdout is automatic. The next separately scoped milestone is ME-014/E2 finite funding/lifecycle mechanical readiness, with independent payment and account fixtures before any E2 economic protocol or world."
 }

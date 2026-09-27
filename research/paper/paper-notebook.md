@@ -139,6 +139,13 @@ market-realism or future trading-profit claim.
   causal/statistical reviews accepted the corrected interpretation. Exact
   pre-match depth remains unknown.
 
+## Repeated-maker E0/E1 development boundary — ME-013, ME-015 and ME-016
+
+- [ME-013 r1](../program/ideas/ME-013/report.md) tested repeated finite maker competition but its books became permanently empty before the registered measurement window. The fee-net maker-gain contrast was not identified. That negative result is not repaired offline by later code.
+- [ME-015](../program/ideas/ME-015/report.md) prospectively added a finite, delayed actor-local quote reference and observed a bounded increase in public two-sided-window time for its registered P treatment. Every strict terminal mark remained unavailable, so maker gain, return-risk ranking and absolute price discovery stayed unidentified.
+- [ME-016](../program/ideas/ME-016/report.md) is a distinct source-pinned E1 signal policy, not a rescore of either E0 trajectory. Its registered gain-two versus gain-zero M1 public two-sided-time differences are −6, −8 and +5 seconds over a 2,700-second window, with mirrored M2 slot sensitivity −9, −8 and +5 seconds. Tick-resolved policy shifts, admitted orders, fills and focal-own depth at the best are observed, but the directional positive-availability claim is unsupported in this three-seed development screen. All 12 terminal marks are unavailable, so fee-net maker gains remain unidentified. Use the [machine surface](../program/ideas/ME-016/surface.json), [figure](../program/ideas/ME-016/figures/occupancy.png) and [scoped review](../program/reviews/me016-result-20260927.md); do not pool these worlds with ME-015 as independent replications of one estimand.
+- A paper can use these studies to discuss the chain from finite policy resources and delayed local information to quote action and intermittent public liquidity. It cannot claim that displayed imbalance predicts flow, that a market-making policy is profitable, or that this ecology is empirically validated. The next E2 funding/lifecycle mechanics remain a proposed separately gated extension, not completed results.
+
 ## Draft article architecture, not yet results text
 
 1. Why conditional market ecology requires explicit policy, actor,
@@ -151,6 +158,8 @@ market-realism or future trading-profit claim.
    development only).
 6. ME-005's valid no-opportunity boundary and ME-002-B's reviewed fixed-gate
    mixed-sign development response, without pooling their seeds or ecologies.
-7. Contradictory and null outcomes, fixed-clock limits and what remains
+7. Repeated-maker E0 survival/valuation limits and ME-016's active but mixed-sign
+   displayed-imbalance policy screen, each under its own pinned source.
+8. Contradictory and null outcomes, fixed-clock limits and what remains
    unconfirmed.
-8. A future separately authorized confirmation/empirical-comparison design.
+9. A future separately authorized confirmation/empirical-comparison design.

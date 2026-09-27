@@ -43,6 +43,12 @@ the first [ME-013 E0 r1 protocol](program/ideas/ME-013/protocol.md) completed
 became permanently empty before measurement, leaving the registered maker-gain
 contrast `NOT_IDENTIFIED`; the [post-result review](program/reviews/me013-r1-result-20260927.md)
 accepted this bounded conclusion after an analysis-only window-count repair.
+The separately pinned [ME-015 successor](program/ideas/ME-015/report.md)
+observed a bounded public-availability response but still lacked every strict
+terminal maker mark. The later [ME-016 E1 signal screen](program/ideas/ME-016/report.md)
+completed 12 valid development worlds and one technical repeat: gain-two
+versus gain-zero M1 public two-sided-time differences were −6, −8 and +5
+seconds, with no consistent positive response or identified maker gain.
 ME-014/E2 remains unrun and unconfirmed. Neither branch integration nor valid
 software tests imply market survival or realism.
 
@@ -53,7 +59,7 @@ navigation and provenance records only; it does not enable an experimental
 roster or change the default economics.
 
 For the active E0/E1/E2 development program, use the
-[program index](program/README.md), registry and ME-013 report as the current
+[program index](program/README.md), registry and ME-016 report as the current
 pointer. [`RESUME-HERE.md`](RESUME-HERE.md) and the companion
 [`V2-CURRENT-STATE-AUDIT.md`](V2-CURRENT-STATE-AUDIT.md) retain the separate
 R2/SV1D closeout; their older launch instructions do not govern ME-013.

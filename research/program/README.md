@@ -68,7 +68,7 @@ exhausted; no automatic third E0 redesign, confirmation or holdout follows.
 | 4 | [ME-005](ideas/ME-005/report.md), [ME-007](ideas/ME-007/idea.md) | ME-005 REPORT: four valid development cells, zero registered opportunities and no route; bounded post-result review accepted the narrow claim with limitations, budget exhausted. ME-007 remains proposed. |
 | 5 | ME-004/006/008–010 | deferred allocation, interaction, payoff or derivative questions |
 | 6 | ME-011–ME-012 | restricted games and explicit capital dynamics after reliable payoffs |
-| Development | [ME-013](ideas/ME-013/report.md), [ME-015](ideas/ME-015/report.md), [ME-014](ideas/ME-014/idea.md) | ME-013 r1: early book extinction and gain NOT_IDENTIFIED. ME-015 successor: reviewed bounded occupancy effect under a finite local reference, but all terminal marks still unavailable and gain NOT_IDENTIFIED. Both exact sources and results remain distinct. ME-014 remains preparation; no E2 world has run. |
+| Development | [ME-013](ideas/ME-013/report.md), [ME-015](ideas/ME-015/report.md), [ME-016](ideas/ME-016/report.md), [ME-014](ideas/ME-014/idea.md) | ME-013 r1: early book extinction and gain NOT_IDENTIFIED. ME-015: reviewed bounded occupancy effect under a finite local reference, but no terminal maker gain. ME-016 E1: valid mixed-sign gain-2 versus gain-0 public-availability screen (−6, −8, +5 s in M1), no consistent positive response and all terminal gains unavailable. Distinct pinned sources and populations remain distinct. ME-014/E2 is preparation only. |
 
 This is dependency order, not a run queue. ME-010 is a planning umbrella and needs
 a named child protocol; an umbrella cannot authorize a combined derivative campaign.
@@ -87,7 +87,7 @@ mechanical prerequisites that ME-000 closed before this screen.
 
 ## Current synthesis and resume point
 
-The current E0 resume point is the [ME-015 report](ideas/ME-015/report.md),
+The current E0 result is the [ME-015 report](ideas/ME-015/report.md),
 not its older first-cell launch instructions. ME-013's zero maker placement in
 the measurement window remains an r1 fact. ME-015 prospectively changed the
 actor-local reference rule and observed much more intermittent public depth
@@ -99,11 +99,15 @@ third design iteration. Independently feasible E1/E2 mechanical work may
 continue, but integrated economic payoff claims cannot inherit priceability
 from either E0 version.
 
-The E1 [ME-016 idea and readiness record](ideas/ME-016/idea.md) now identify a
-bounded, opt-in delayed-depth signal maker with a separate v5 evidence epoch and
-independent quote replay. Its mechanical review does not register an economic
-matrix or authorize a run. Signal value, competitive payoff and predictive
-information remain untested; displayed depth includes the maker's own orders.
+The E1 [ME-016 report](ideas/ME-016/report.md) now closes its registered
+12-world development screen. The opt-in delayed-depth signal maker changed
+its quote targets and traded under v5 replay, but the primary M1 public
+two-sided-time differences were −6, −8 and +5 seconds across three seeds.
+M2 mirrored-slot differences are a sensitivity, not extra replications.
+Displayed depth includes the maker's own orders; predictive signal value,
+fee-net maker gain and empirical relevance are not identified. Its exact
+protocol is exhausted. The next unblocked program work is a separately scoped
+ME-014/E2 mechanical funding/lifecycle gate, not an ME-016 outcome rescue.
 
 ME-001's fixed initial endowments and class-replacement intervention changed
 the delivered local ask book, then the immediate buyer's fill and marked

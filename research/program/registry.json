@@ -403,19 +403,19 @@
       "id": "ME-016",
       "title": "Delivered-depth signal in repeated maker competition (E1)",
       "claim_type": "CAUSAL",
-      "stage": "DEVELOPMENT",
+      "stage": "REPORT",
       "idea": "research/program/ideas/ME-016/idea.md",
       "protocol": "research/program/ideas/ME-016/protocol.md",
-      "report": null,
-      "result": null,
+      "report": "research/program/ideas/ME-016/report.md",
+      "result": "research/program/ideas/ME-016/result.json",
       "dependencies": ["ME-015"],
       "policy_ids": ["S07"],
       "authorization": {
         "prepare": true,
-        "run": true,
-        "basis": "Owner 2026-09-27 long-run E1 authorization and this prospectively locked ME-016 development protocol permit exactly 12 assigned gain/slot/seed economic cells plus at most one technical duplicate, conditional on exact-candidate clean tests, pinned Go 1.27 binaries, finite first-cell resource/evidence verification and the stated stop rules. Separate design and source reviews accepted their limited gates after substantive rejections were repaired. No confirmation or holdout is authorized."
+        "run": false,
+        "basis": "Owner 2026-09-27 long-run E1 authorization and the prospectively locked ME-016 protocol permitted exactly 12 assigned gain/slot/seed economic cells plus one technical repeat after the registered gates. All 13 simulator processes completed from C=eff182e9 with reviewed bounded results. This exact protocol is exhausted; unused E1 ceiling does not authorize extra gains, seeds, horizons, confirmation or holdouts."
       },
-      "next_action": "Pin clean candidate C and binaries, pass exact-C tests/vet/race/skill validation, then run the registered gain0/M1/18101 first cell under the finite cgroup. Continue the other assigned cells only if its evidence and resource gates pass, independent of economic sign."
+      "next_action": "Preserve the mixed-sign public-availability result and strict maker-gain non-identification. Continue only separately scoped E2 funding/lifecycle mechanical readiness under ME-014 or another prospectively chosen question; no ME-016 rerun or confirmation follows automatically."
     }
   ],
   "policies": [
