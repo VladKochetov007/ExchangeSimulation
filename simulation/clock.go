@@ -1,6 +1,8 @@
 package simulation
 
 import (
+	"fmt"
+	"math"
 	"sync"
 	"time"
 )
@@ -79,6 +81,42 @@ func (c *SimulatedClock) Advance(delta time.Duration) {
 		c.current = target
 	}
 	c.mu.Unlock()
+}
+
+func (c *SimulatedClock) advanceWithIntermediateDrain(delta time.Duration, drain func(int64) error) error {
+	if delta <= 0 || drain == nil {
+		return fmt.Errorf("simulation: intermediate phase requires a positive step and drain callback")
+	}
+	c.mu.Lock()
+	base := c.goal
+	if base < c.current {
+		base = c.current
+	}
+	if c.scheduler == nil || base > math.MaxInt64-int64(delta) {
+		c.mu.Unlock()
+		return fmt.Errorf("simulation: intermediate phase requires a scheduler and representable target")
+	}
+	if c.goal > c.current {
+		c.mu.Unlock()
+		return fmt.Errorf("simulation: intermediate phase cannot overlap a prior clock advance")
+	}
+	c.goal = base + int64(delta)
+	target := c.goal
+	scheduler := c.scheduler
+	c.mu.Unlock()
+
+	if err := scheduler.processUntil(target, drain); err != nil {
+		c.mu.Lock()
+		c.goal = c.current
+		c.mu.Unlock()
+		return err
+	}
+	c.mu.Lock()
+	if c.current < target {
+		c.current = target
+	}
+	c.mu.Unlock()
+	return nil
 }
 
 func (c *SimulatedClock) SetTime(t int64) {

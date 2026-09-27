@@ -44,6 +44,24 @@ type RunnerConfig struct {
 	// PhaseMaxRounds bounds same-timestamp reaction chains. Zero defaults to
 	// 100,000. Reaching it is a model error, never a silently truncated run.
 	PhaseMaxRounds int
+
+	// DrainIntermediateEvents drains deterministic phases at every scheduler
+	// event time strictly between step boundaries. Under a runner-owned clock
+	// and phase-owned event producers, earlier deliveries then commit before
+	// BeforeTimestampPhase. Concurrent external clock advances or scheduler
+	// insertions break that premise and must be excluded by the assembled world.
+	// This changes timing semantics and requires a scheduler-backed simulated
+	// clock. It does not make direct state-mutating scheduler callbacks safe.
+	DrainIntermediateEvents bool
+
+	// BeforeTimestampPhase runs once after actor Start at the initial clock
+	// value and after each Advance, before venue jobs, ingress, egress or actor
+	// phase callbacks at that step boundary. Scheduler callbacks stamped at
+	// the boundary have already fired but may only queue work. Without
+	// DrainIntermediateEvents, an earlier off-grid delivery may still be queued;
+	// this hook alone does not prove a complete t-minus market-state frontier.
+	// This hook is available only with DeterministicPhases.
+	BeforeTimestampPhase func(atNano int64) error
 }
 
 // Idler is implemented by components that can report having no work queued
@@ -356,6 +374,9 @@ func (r *Runner) drainDeterministicPhases(ctx context.Context) error {
 
 func (r *Runner) runDeterministicPhases(ctx context.Context) error {
 	advanceable := r.clock.(Advanceable)
+	if err := r.runBeforeTimestampPhase(); err != nil {
+		return err
+	}
 	if err := r.drainDeterministicPhases(ctx); err != nil {
 		return err
 	}
@@ -365,7 +386,19 @@ func (r *Runner) runDeterministicPhases(ctx context.Context) error {
 			return nil
 		default:
 		}
-		advanceable.Advance(r.config.Step)
+		if r.config.DrainIntermediateEvents {
+			clock := r.clock.(*SimulatedClock)
+			if err := clock.advanceWithIntermediateDrain(r.config.Step, func(int64) error {
+				return r.drainDeterministicPhases(ctx)
+			}); err != nil {
+				return err
+			}
+		} else {
+			advanceable.Advance(r.config.Step)
+		}
+		if err := r.runBeforeTimestampPhase(); err != nil {
+			return err
+		}
 		if err := r.drainDeterministicPhases(ctx); err != nil {
 			return err
 		}
@@ -376,9 +409,28 @@ func (r *Runner) runDeterministicPhases(ctx context.Context) error {
 	return nil
 }
 
+func (r *Runner) runBeforeTimestampPhase() error {
+	if r.config.BeforeTimestampPhase == nil {
+		return nil
+	}
+	if err := r.deterministicPhaseError(); err != nil {
+		return err
+	}
+	return r.config.BeforeTimestampPhase(r.clock.NowUnixNano())
+}
+
 func (r *Runner) Run(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	if r.config.BeforeTimestampPhase != nil && !r.config.DeterministicPhases {
+		return fmt.Errorf("simulation: before-timestamp phase requires deterministic phases")
+	}
+	if r.config.DrainIntermediateEvents {
+		clock, ok := r.clock.(*SimulatedClock)
+		if !r.config.DeterministicPhases || !ok || clock.scheduler == nil || r.config.Step <= 0 {
+			return fmt.Errorf("simulation: intermediate-event drain requires deterministic phases, a positive step and a scheduled simulated clock")
+		}
+	}
 
 	if r.config.DeterministicPhases {
 		if err := r.prepareDeterministicPhases(); err != nil {

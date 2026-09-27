@@ -2,6 +2,7 @@ package simulation
 
 import (
 	"container/heap"
+	"fmt"
 	"sync"
 )
 
@@ -118,11 +119,42 @@ func (es *EventScheduler) Cancel(id uint64) {
 // ProcessUntil fires all events up to and including the given time
 // Called by SimulatedClock.Advance()
 func (es *EventScheduler) ProcessUntil(untilTime int64) {
+	_ = es.processUntil(untilTime, nil)
+}
+
+// processUntil drains each earlier event-time batch before proceeding to a
+// later timestamp when afterIntermediate is supplied. The ordinary nil path
+// retains the existing scheduler behavior.
+func (es *EventScheduler) processUntil(untilTime int64, afterIntermediate func(int64) error) error {
+	var batchTime int64
+	batchOpen := false
+	intermediateDrains := 0
 	for {
 		es.mu.Lock()
 		if len(es.events) == 0 || es.events[0].Time > untilTime {
 			es.mu.Unlock()
-			return
+			if afterIntermediate != nil && batchOpen && batchTime < untilTime {
+				if err := drainIntermediateBatch(es.clock, afterIntermediate, batchTime, &intermediateDrains); err != nil {
+					return err
+				}
+				batchOpen = false
+				continue
+			}
+			return nil
+		}
+		if afterIntermediate != nil && batchOpen {
+			nextTime := es.events[0].Time
+			if es.clock != nil && nextTime < es.clock.NowUnixNano() {
+				nextTime = es.clock.NowUnixNano()
+			}
+			if nextTime > batchTime && batchTime < untilTime {
+				es.mu.Unlock()
+				if err := drainIntermediateBatch(es.clock, afterIntermediate, batchTime, &intermediateDrains); err != nil {
+					return err
+				}
+				batchOpen = false
+				continue
+			}
 		}
 
 		event := heap.Pop(&es.events).(*ScheduledEvent)
@@ -136,9 +168,16 @@ func (es *EventScheduler) ProcessUntil(untilTime int64) {
 		if es.clock != nil && event.Time > es.clock.NowUnixNano() {
 			es.clock.SetTime(event.Time)
 		}
+		if afterIntermediate != nil {
+			batchTime = es.clock.NowUnixNano()
+			batchOpen = true
+		}
 
 		// Fire callback (unlocked to prevent deadlock if callback schedules events)
 		event.Callback()
+		if afterIntermediate != nil && es.clock.NowUnixNano() != batchTime {
+			return fmt.Errorf("simulation: scheduler callback advanced the clock during intermediate phase")
+		}
 
 		// Reschedule if repeating — unless a Cancel landed while the event was
 		// mid-fire (it was not in the heap, so Cancel could only flag it).
@@ -151,6 +190,23 @@ func (es *EventScheduler) ProcessUntil(untilTime int64) {
 		}
 		es.mu.Unlock()
 	}
+}
+
+func drainIntermediateBatch(clock *SimulatedClock, drain func(int64) error, atNano int64, count *int) error {
+	if clock.NowUnixNano() != atNano {
+		return fmt.Errorf("simulation: clock changed before intermediate phase")
+	}
+	if err := drain(atNano); err != nil {
+		return err
+	}
+	if clock.NowUnixNano() != atNano {
+		return fmt.Errorf("simulation: intermediate phase advanced the clock")
+	}
+	*count = *count + 1
+	if *count > 100_000 {
+		return fmt.Errorf("simulation: intermediate scheduler phases exceeded 100000 rounds")
+	}
+	return nil
 }
 
 // eventHeap implements heap.Interface for priority queue of events
