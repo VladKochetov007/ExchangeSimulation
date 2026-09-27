@@ -103,6 +103,7 @@ const (
 	RejectInsufficientBalance       RejectReason = "INSUFFICIENT_BALANCE"
 	RejectInvalidPrice              RejectReason = "INVALID_PRICE"
 	RejectInvalidQty                RejectReason = "INVALID_QTY"
+	RejectInvalidPositionSide       RejectReason = "INVALID_POSITION_SIDE"
 	RejectUnknownClient             RejectReason = "UNKNOWN_CLIENT"
 	RejectUnknownInstrument         RejectReason = "UNKNOWN_INSTRUMENT"
 	RejectInstrumentExpired         RejectReason = "INSTRUMENT_EXPIRED"
@@ -155,8 +156,10 @@ func (ps PositionSide) String() string {
 		return "LONG"
 	case PositionShort:
 		return "SHORT"
-	default:
+	case PositionBoth:
 		return "BOTH"
+	default:
+		return "UNKNOWN"
 	}
 }
 

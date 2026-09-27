@@ -44,6 +44,7 @@ func TestRejectReasonValues(t *testing.T) {
 		{RejectInsufficientBalance, "INSUFFICIENT_BALANCE"},
 		{RejectInvalidPrice, "INVALID_PRICE"},
 		{RejectInvalidQty, "INVALID_QTY"},
+		{RejectInvalidPositionSide, "INVALID_POSITION_SIDE"},
 		{RejectUnknownClient, "UNKNOWN_CLIENT"},
 		{RejectUnknownInstrument, "UNKNOWN_INSTRUMENT"},
 		{RejectPostOnlyInvalid, "POST_ONLY_INVALID"},
@@ -60,6 +61,12 @@ func TestRejectReasonValues(t *testing.T) {
 		if c.v != c.want {
 			t.Errorf("RejectReason constant %q has wrong value, want %q", c.v, c.want)
 		}
+	}
+}
+
+func TestUnknownPositionSideDoesNotRenderAsBoth(t *testing.T) {
+	if got := PositionSide(255).String(); got != "UNKNOWN" {
+		t.Fatalf("unknown position side rendered as %q", got)
 	}
 }
 

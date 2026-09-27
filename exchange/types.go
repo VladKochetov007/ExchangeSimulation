@@ -107,6 +107,7 @@ const (
 	RejectInsufficientBalance       = etypes.RejectInsufficientBalance
 	RejectInvalidPrice              = etypes.RejectInvalidPrice
 	RejectInvalidQty                = etypes.RejectInvalidQty
+	RejectInvalidPositionSide       = etypes.RejectInvalidPositionSide
 	RejectUnknownClient             = etypes.RejectUnknownClient
 	RejectUnknownInstrument         = etypes.RejectUnknownInstrument
 	RejectInstrumentExpired         = etypes.RejectInstrumentExpired

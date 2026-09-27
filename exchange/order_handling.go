@@ -558,6 +558,11 @@ func (e *DefaultExchange) validatePlaceOrder(clientID uint64, req *OrderRequest)
 	if book == nil {
 		return reject(RejectUnknownInstrument)
 	}
+	switch req.PositionSide {
+	case PositionBoth, PositionLong, PositionShort:
+	default:
+		return reject(RejectInvalidPositionSide)
+	}
 	if exp, ok := book.Instrument.(Expirable); ok && e.Clock.NowUnixNano() >= exp.ExpiryNano() {
 		return reject(RejectInstrumentExpired)
 	}
