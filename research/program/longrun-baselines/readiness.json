@@ -96,16 +96,29 @@
     "go_vet_all": "PASS",
     "known_gap": "Locked E0 numeric protocol, pinned runner/analyzer/build identities, measured binary-evidence capacity and bounded review/fallback record remain missing"
   },
+  "e0_study_adapter_checkpoint": {
+    "code_commit": "62f9e6954e8ddcd070c74e5fbcdd6e0554e0cca1",
+    "protocol": "research/program/ideas/ME-013/protocol.md",
+    "scope": "Finite 24-cell P/A/M1/M2 by quote-size by development-seed adapter, clean-source/binary/effective-world plan binding, exclusive external run and analysis artifacts",
+    "status": "SOURCE_AND_PROTOCOL_PREPARE_NOT_YET_RUN_READY",
+    "economic_worlds_run": 0,
+    "focused_tests": "PASS",
+    "go_vet_all": "PASS",
+    "targeted_race": "PASS",
+    "clean_make_test": "PENDING_PROTOCOL_CANDIDATE_COMMIT",
+    "review_execution": "NOT_ISSUED",
+    "known_gap": "Clean committed protocol gate, external pinned binaries/plan-generation check, actual measured binary-evidence capacity and review/fallback record"
+  },
   "candidate_environments": [
     {
       "id": "E0",
       "study_id": "ME-013",
       "description": "One ABC/USD venue, repeated finite-resource pure and AS-style makers with recurring demand",
       "design_file": "research/program/longrun-baselines/config-drafts/e0-repeated-spot.md",
-      "proposed_economic_world_ceiling": 15,
+      "proposed_economic_world_ceiling": 24,
       "proposed_technical_controls": 2,
       "run_authorized": false,
-      "readiness": "E0_FIXTURE_TESTED_BLOCK_PROTOCOL_RUNNER_CAPACITY_REVIEW"
+      "readiness": "E0_PROTOCOL_DRAFT_BLOCK_CLEAN_PIN_CAPACITY_REVIEW"
     },
     {
       "id": "E2",
@@ -194,5 +207,5 @@
     "free_disk_reserve_gib": 10,
     "require_fresh_capacity_preflight": true
   },
-  "next_authorized_milestone": "Lock one finite E0 numerical protocol and missing-mark rule, pin runner/analyzer binaries, and measure real binary-evidence capacity before an economic world. Preserve UNREVIEWED DEVELOPMENT and the confirmation review gate."
+  "next_authorized_milestone": "Commit and test the finite E0 r1 protocol candidate, build and verify clean pinned runner/analyzer binaries and external plan files, then measure capacity on the first registered development cell under finite resources. Preserve UNREVIEWED DEVELOPMENT and the confirmation review gate."
 }

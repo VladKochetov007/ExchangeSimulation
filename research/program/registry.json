@@ -351,7 +351,7 @@
       "claim_type": "CAUSAL",
       "stage": "PREPARE",
       "idea": "research/program/ideas/ME-013/idea.md",
-      "protocol": null,
+      "protocol": "research/program/ideas/ME-013/protocol.md",
       "report": null,
       "result": null,
       "dependencies": ["ME-000"],
@@ -359,9 +359,9 @@
       "authorization": {
         "prepare": true,
         "run": false,
-        "basis": "Owner 2026-09-27 long-run goal authorizes bounded E0/E1/E2 implementation and conditional development, recorded in research/program/longrun-baselines/authorization-20260927.md. E0 runs remain gated on the maker-local fill timeline, fixed protocol, evidence and resource checks."
+        "basis": "Owner 2026-09-27 long-run goal authorizes bounded E0/E1/E2 implementation and conditional development, recorded in research/program/longrun-baselines/authorization-20260927.md. The E0 r1 prospective protocol exists, but clean candidate/build, capacity, and review/fallback gates have not yet passed."
       },
-      "next_action": "After mechanically tested code candidate eef0270, independently reconstruct maker-local fill inventory from delayed response processing; then lock the finite protocol and measure binary-evidence capacity before the first E0 economic world. No independent review verdict has been issued."
+      "next_action": "Pin a clean E0 r1 candidate and runner/analyzer binaries, test plan generation without running a world, then measure binary-evidence capacity on the first registered development cell only after the remaining gates. No independent review verdict has been issued."
     },
     {
       "id": "ME-014",
