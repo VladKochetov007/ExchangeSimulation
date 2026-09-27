@@ -206,10 +206,51 @@ func TestFundingRateQuantizationUsesSignedHalfEven(t *testing.T) {
 		{-1, 2, 0}, {-3, 2, -2}, {-5, 2, -2}, {-7, 2, -4},
 	} {
 		rate := new(big.Rat).SetFrac64(test.numerator, test.denominator)
-		got, err := roundFundingRateHalfEven(rate, 1)
+		got, err := roundRationalHalfEven(rate, 1)
 		if err != nil || got != test.want {
 			t.Fatalf("%d/%d -> %d, %v; want %d", test.numerator, test.denominator, got, err, test.want)
 		}
+	}
+}
+
+func TestWindowedFundingSettlementTermsUseSameCompleteWindow(t *testing.T) {
+	contract := WindowedFundingRateContract{SampleCount: 2, SampleSpacingNano: int64(time.Second),
+		BaseRateBps: 1, PremiumWeightNumerator: 1, PremiumWeightDenominator: 1,
+		MaxAbsRateBps: 75, NormalizationSeconds: 28_800, RateUnitsPerBp: 1_000_000}
+	settlement := int64(5 * time.Minute)
+	samples := fundingTestSamples(settlement, 2, 50_000, 50_000)
+	samples[1].MarkPrice = 50_001
+	terms, err := contract.SettlementTermsAt(settlement, 300, samples)
+	if err != nil || terms.NotionalMarkPrice != 50_000 || terms.Rate.SignedUnits() != 11_458 {
+		t.Fatalf("even half-atom tie terms = %+v, %v", terms, err)
+	}
+	samples[0].MarkPrice = 50_001
+	samples[1].MarkPrice = 50_002
+	terms, err = contract.SettlementTermsAt(settlement, 300, samples)
+	if err != nil || terms.NotionalMarkPrice != 50_002 || terms.Rate.SignedUnits() != 13_542 {
+		t.Fatalf("odd half-atom tie terms = %+v, %v", terms, err)
+	}
+	samples[1].TimestampNano = settlement
+	if _, err := contract.SettlementTermsAt(settlement, 300, samples); err == nil {
+		t.Fatal("accepted present-time sample for settlement mark")
+	}
+}
+
+func TestWindowedFundingSettlementTermsRejectIncompleteAndOverflowingRates(t *testing.T) {
+	contract := WindowedFundingRateContract{SampleCount: 2, SampleSpacingNano: int64(time.Second),
+		PremiumWeightDenominator: 1, MaxAbsRateBps: math.MaxInt64,
+		NormalizationSeconds: 1, RateUnitsPerBp: 2}
+	settlement := int64(5 * time.Minute)
+	samples := fundingTestSamples(settlement, 2, math.MaxInt64, math.MaxInt64)
+	if terms, err := contract.SettlementTermsAt(settlement, 1, samples); err != nil || terms.NotionalMarkPrice != math.MaxInt64 || terms.Rate.SignedUnits() != 0 {
+		t.Fatalf("large exact mean = %+v, %v", terms, err)
+	}
+	if _, err := contract.SettlementTermsAt(settlement, 1, samples[:1]); err == nil {
+		t.Fatal("accepted missing sample for settlement mark")
+	}
+	contract.BaseRateBps = math.MaxInt64
+	if _, err := contract.SettlementTermsAt(settlement, 2, samples); err == nil {
+		t.Fatal("accepted overflowing rate with otherwise valid mark")
 	}
 }
 

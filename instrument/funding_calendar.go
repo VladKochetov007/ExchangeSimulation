@@ -55,6 +55,14 @@ type FundingWindowSample struct {
 	MarkPrice     int64
 }
 
+// FundingSettlementTerms bind the rate and notional mark calculated from one
+// immutable input window. The caller must attest the window's venue-local book
+// source before using these terms to post cash.
+type FundingSettlementTerms struct {
+	Rate              QuantizedFundingRate
+	NotionalMarkPrice int64
+}
+
 // QuantizedFundingRate keeps its unit scale attached to its signed value.
 // The legacy FundingRate.Rate field means whole basis points; callers must
 // not copy SignedUnits there without an explicit, exact conversion.
@@ -125,15 +133,36 @@ func (contract WindowedFundingRateContract) RateAt(settlementNano, intervalSecon
 	} else if perSettlement.Cmp(negativeCap) < 0 {
 		perSettlement = negativeCap
 	}
-	quantized, err := roundFundingRateHalfEven(perSettlement, contract.RateUnitsPerBp)
+	quantized, err := roundRationalHalfEven(perSettlement, contract.RateUnitsPerBp)
 	if err != nil {
 		return QuantizedFundingRate{}, err
 	}
 	return NewQuantizedFundingRate(quantized, contract.RateUnitsPerBp)
 }
 
-func roundFundingRateHalfEven(rate *big.Rat, unitsPerBp int64) (int64, error) {
-	scaled := new(big.Rat).Mul(rate, new(big.Rat).SetInt64(unitsPerBp))
+// SettlementTermsAt derives the scheduled rate and the half-even-quantized
+// arithmetic mean of the same complete past perp-mark window. It cannot attest
+// book provenance or current risk-mark availability on its own.
+func (contract WindowedFundingRateContract) SettlementTermsAt(settlementNano, intervalSeconds int64, samples []FundingWindowSample) (FundingSettlementTerms, error) {
+	window := append([]FundingWindowSample(nil), samples...)
+	rate, err := contract.RateAt(settlementNano, intervalSeconds, window)
+	if err != nil {
+		return FundingSettlementTerms{}, err
+	}
+	markSum := new(big.Int)
+	for _, sample := range window {
+		markSum.Add(markSum, big.NewInt(sample.MarkPrice))
+	}
+	markMean := new(big.Rat).SetFrac(markSum, big.NewInt(int64(len(window))))
+	markPrice, err := roundRationalHalfEven(markMean, 1)
+	if err != nil || markPrice <= 0 {
+		return FundingSettlementTerms{}, fmt.Errorf("windowed funding: invalid settlement notional mark")
+	}
+	return FundingSettlementTerms{Rate: rate, NotionalMarkPrice: markPrice}, nil
+}
+
+func roundRationalHalfEven(value *big.Rat, unitsPerWhole int64) (int64, error) {
+	scaled := new(big.Rat).Mul(value, new(big.Rat).SetInt64(unitsPerWhole))
 	numerator := new(big.Int).Abs(scaled.Num())
 	quotient, remainder := new(big.Int).QuoRem(numerator, scaled.Denom(), new(big.Int))
 	twiceRemainder := new(big.Int).Mul(remainder, big.NewInt(2))
