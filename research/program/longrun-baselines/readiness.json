@@ -100,14 +100,32 @@
     "code_commit": "62f9e6954e8ddcd070c74e5fbcdd6e0554e0cca1",
     "protocol": "research/program/ideas/ME-013/protocol.md",
     "scope": "Finite 24-cell P/A/M1/M2 by quote-size by development-seed adapter, clean-source/binary/effective-world plan binding, exclusive external run and analysis artifacts",
-    "status": "SOURCE_AND_PROTOCOL_PREPARE_NOT_YET_RUN_READY",
+    "status": "SUPERSEDED_BY_REVIEWED_E0_R1_LAUNCH_CANDIDATE",
     "economic_worlds_run": 0,
     "focused_tests": "PASS",
     "go_vet_all": "PASS",
     "targeted_race": "PASS",
-    "clean_make_test": "PENDING_PROTOCOL_CANDIDATE_COMMIT",
-    "review_execution": "NOT_ISSUED",
-    "known_gap": "Clean committed protocol gate, external pinned binaries/plan-generation check, actual measured binary-evidence capacity and review/fallback record"
+    "clean_make_test": "PASS_AT_075dda1_GO_1_27_0",
+    "review_execution": "COMPLETED_SCOPED_ACCEPT_AT_075dda1",
+    "known_gap": "Actual full-cell binary-evidence capacity remains unmeasured; first registered cell is the counted preflight"
+  },
+  "e0_r1_launch_gate": {
+    "candidate_commit": "075dda144b0bbab57219dd3048c2496b9e1a479c",
+    "candidate_tree": "1899361dd7446bf4193114430fa73c21c876b74c",
+    "record": "research/program/longrun-baselines/e0-r1-launch-gate-20260927.md",
+    "protocol": "research/program/ideas/ME-013/protocol.md",
+    "first_cell": "P-q10000000-s18001",
+    "first_cell_role": "REGISTERED_ECONOMIC_CELL_AND_COUNTED_RESOURCE_PREFLIGHT",
+    "economic_worlds_run_when_recorded": 0,
+    "mechanics_review_execution": "COMPLETED",
+    "mechanics_review_verdict": "ACCEPT_SCOPED_AFTER_PRIOR_REJECT",
+    "economic_design_review_execution": "COMPLETED",
+    "economic_design_review_verdict": "ACCEPT_WITH_SCOPED_CARRY_FORWARD",
+    "clean_make_test": "PASS",
+    "go_vet_all": "PASS",
+    "targeted_race": "PASS",
+    "actual_e0_capacity": "PENDING_FIRST_REGISTERED_CELL",
+    "confirmation_authorized": false
   },
   "candidate_environments": [
     {
@@ -118,7 +136,7 @@
       "proposed_economic_world_ceiling": 24,
       "proposed_technical_controls": 2,
       "run_authorized": false,
-      "readiness": "E0_PROTOCOL_DRAFT_BLOCK_CLEAN_PIN_CAPACITY_REVIEW"
+      "readiness": "E0_FIRST_REGISTERED_CELL_PREFLIGHT_READY_REMAINING_BATCH_CAPACITY_PENDING"
     },
     {
       "id": "E2",
@@ -207,5 +225,5 @@
     "free_disk_reserve_gib": 10,
     "require_fresh_capacity_preflight": true
   },
-  "next_authorized_milestone": "Commit and test the finite E0 r1 protocol candidate, build and verify clean pinned runner/analyzer binaries and external plan files, then measure capacity on the first registered development cell under finite resources. Preserve UNREVIEWED DEVELOPMENT and the confirmation review gate."
+  "next_authorized_milestone": "Run and independently analyze only the first registered E0 r1 development cell as counted resource preflight from pinned 075dda1; decide the remaining fixed batch from its real footprint and valid evidence. Confirmation remains separately gated."
 }
