@@ -385,7 +385,7 @@
       "id": "ME-015",
       "title": "Finite actor-local reference for repeated spot makers (E0 successor)",
       "claim_type": "CAUSAL",
-      "stage": "PLAN",
+      "stage": "PREPARE",
       "idea": "research/program/ideas/ME-015/idea.md",
       "protocol": "research/program/ideas/ME-015/protocol.md",
       "report": null,
@@ -394,10 +394,10 @@
       "policy_ids": ["S06", "S07", "S28", "S32"],
       "authorization": {
         "prepare": true,
-        "run": false,
-        "basis": "Owner 2026-09-27 long-run E0/E1/E2 development authorization permits a bounded prospective E0 successor within the remaining environment budget. The ME-015 protocol is still a draft; source/evidence, independent review, immutable-plan and resource gates have not passed. No ME-015 world or confirmation is authorized by this registry entry alone."
+        "run": true,
+        "basis": "Owner 2026-09-27 long-run E0/E1/E2 development authorization, subject to the prospectively locked ME-015 development protocol: at most 24 assigned worlds plus two counted technical duplicates. Only ON/P/18101 may launch after clean pinned build, exact plan and finite-cgroup/disk guards; the rest depend on valid measured first-cell capacity and evidence, not a favorable economic outcome. No confirmation, E1/E2 or holdout authorization follows."
       },
-      "next_action": "Review the finite delivered-local-reference design, then implement focused actor/evidence tests and pin a clean candidate. Do not run until the final prospective protocol and gates are complete."
+      "next_action": "Record exact candidate and scoped review identities; build clean Go 1.27.0 binaries and verify the first locked plan/resource namespace before the counted ON/P/18101 preflight."
     }
   ],
   "policies": [
