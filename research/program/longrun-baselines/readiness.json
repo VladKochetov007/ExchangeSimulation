@@ -268,7 +268,7 @@
       "proposed_economic_world_ceiling": 6,
       "proposed_technical_controls": 2,
       "run_authorized": false,
-      "readiness": "PURE_CALENDAR_RATE_CBA54855_CASH_PREVIEW_F0DF3D3E_AND_SETTLEMENT_TERMS_11338826_REVIEWED; PRODUCTION_SOURCE_ATOMIC_PAYMENT_POLICY_EVIDENCE_AND_PRICEABLE_REPEATED_FOUNDATION_NOT_READY",
+      "readiness": "PURE_CALENDAR_RATE_CBA54855_CASH_PREVIEW_F0DF3D3E_SETTLEMENT_TERMS_11338826_AND_BATCH_PREFLIGHT_0332835A_REVIEWED; PRODUCTION_SOURCE_ATOMIC_COMMIT_POLICY_EVIDENCE_AND_PRICEABLE_REPEATED_FOUNDATION_NOT_READY",
       "mechanical_checkpoint": "research/program/ideas/ME-014/readiness-20260927.md",
       "source_commit": "cba548552295d748d1c8c922fb7daca4b41a9c58",
       "independent_review": "research/program/reviews/me014-funding-primitive-20260927.md",
@@ -277,7 +277,9 @@
       "prospective_settlement_contract": "research/program/ideas/ME-014/settlement-contract-20260927.md",
       "prospective_settlement_design_review": "research/program/reviews/me014-settlement-design-20260927.md",
       "pure_settlement_terms_source_commit": "113388260cd1533759fdc900dda083d71dea1155",
-      "pure_settlement_terms_review": "research/program/reviews/me014-settlement-terms-20260927.md"
+      "pure_settlement_terms_review": "research/program/reviews/me014-settlement-terms-20260927.md",
+      "pure_batch_preview_source_commit": "0332835a78809ded0176c91db1e8bb25c92f1b7f",
+      "pure_batch_preview_review": "research/program/reviews/me014-funding-batch-preview-20260927.md"
     }
   ],
   "bounded_implementation_tasks": [
