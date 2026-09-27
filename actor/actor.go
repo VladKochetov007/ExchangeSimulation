@@ -596,6 +596,7 @@ func (a *BaseActor) decodeMarketData(md *exchange.MarketDataMsg) *Event {
 				Symbol:    md.Symbol,
 				Trade:     md.Data.(*exchange.Trade),
 				Timestamp: md.Timestamp,
+				SeqNum:    md.SeqNum,
 			},
 		}
 	case exchange.MDDelta:

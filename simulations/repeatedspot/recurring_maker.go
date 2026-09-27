@@ -28,6 +28,41 @@ type MakerQuote struct {
 	AskPrice int64
 }
 
+type MakerDecision struct {
+	ActorID               uint64  `json:"actor_id"`
+	ScheduledAt           int64   `json:"scheduled_at"`
+	DecisionAt            int64   `json:"decision_at"`
+	BookSeen              bool    `json:"book_seen"`
+	LatestBookSourceAt    int64   `json:"latest_book_source_at"`
+	LatestBookSequence    uint64  `json:"latest_book_sequence"`
+	LatestBookProcessedAt int64   `json:"latest_book_processed_at"`
+	BestBid               int64   `json:"best_bid"`
+	BestAsk               int64   `json:"best_ask"`
+	FilledInventory       int64   `json:"filled_inventory"`
+	WorkingLower          int64   `json:"working_lower"`
+	WorkingUpper          int64   `json:"working_upper"`
+	LogVariancePerSecond  float64 `json:"log_variance_per_second"`
+	DeliveredTradeSamples uint64  `json:"delivered_trade_samples"`
+	TargetBid             int64   `json:"target_bid"`
+	TargetAsk             int64   `json:"target_ask"`
+	Action                string  `json:"action"`
+}
+
+type MakerObservation struct {
+	ActorID        uint64 `json:"actor_id"`
+	Kind           string `json:"kind"`
+	ProcessedAt    int64  `json:"processed_at"`
+	SourceAt       int64  `json:"source_at"`
+	SourceSequence uint64 `json:"source_sequence"`
+	Symbol         string `json:"symbol"`
+	BestBid        int64  `json:"best_bid,omitempty"`
+	BestAsk        int64  `json:"best_ask,omitempty"`
+	TradeID        uint64 `json:"trade_id,omitempty"`
+	TradePrice     int64  `json:"trade_price,omitempty"`
+	TradeQty       int64  `json:"trade_qty,omitempty"`
+	TradeSide      string `json:"trade_side,omitempty"`
+}
+
 type MakerQuoteRule func(MakerQuoteInput) (MakerQuote, bool)
 
 type RecurringMakerConfig struct {
@@ -49,26 +84,30 @@ type RecurringMakerConfig struct {
 // A cancellation request never creates capacity by itself.
 type RecurringMaker struct {
 	*actor.BaseActor
-	config               RecurringMakerConfig
-	quoteRule            MakerQuoteRule
-	inventory            *workingInventory
-	bestBid              int64
-	bestAsk              int64
-	latestBookAt         int64
-	bookSeen             bool
-	activeBid            uint64
-	activeAsk            uint64
-	quotedBid            int64
-	quotedAsk            int64
-	cancelRequested      map[uint64]struct{}
-	unresolvedEnd        map[uint64]struct{}
-	subscribed           bool
-	started              atomic.Bool
-	fault                error
-	logVariancePerSecond float64
-	lastTradePrice       int64
-	lastTradeSourceTime  int64
-	tradeSamples         uint64
+	config                RecurringMakerConfig
+	quoteRule             MakerQuoteRule
+	inventory             *workingInventory
+	bestBid               int64
+	bestAsk               int64
+	latestBookAt          int64
+	latestBookSequence    uint64
+	latestBookProcessedAt int64
+	bookSeen              bool
+	activeBid             uint64
+	activeAsk             uint64
+	quotedBid             int64
+	quotedAsk             int64
+	cancelRequested       map[uint64]struct{}
+	unresolvedEnd         map[uint64]struct{}
+	subscribed            bool
+	started               atomic.Bool
+	fault                 error
+	logVariancePerSecond  float64
+	lastTradePrice        int64
+	lastTradeSourceTime   int64
+	tradeSamples          uint64
+	decisionObserver      func(MakerDecision)
+	observationObserver   func(MakerObservation)
 }
 
 func NewRecurringMaker(id uint64, gateway actor.Gateway, config RecurringMakerConfig, quoteRule MakerQuoteRule) (*RecurringMaker, error) {
@@ -101,6 +140,16 @@ func (maker *RecurringMaker) Fault() error {
 		return fmt.Errorf("repeatedspot: maker %d has an unreconciled rejected cancellation", maker.ID())
 	}
 	return nil
+}
+
+// SetDecisionObserver records every scheduled decision, including no-action
+// choices. The callback is observational and must not change actor state.
+func (maker *RecurringMaker) SetDecisionObserver(observer func(MakerDecision)) {
+	maker.decisionObserver = observer
+}
+
+func (maker *RecurringMaker) SetObservationObserver(observer func(MakerObservation)) {
+	maker.observationObserver = observer
 }
 
 func (maker *RecurringMaker) Start(ctx context.Context) error {
@@ -147,15 +196,21 @@ func (maker *RecurringMaker) onSnapshot(event actor.BookSnapshotEvent) {
 	}
 	maker.bookSeen = true
 	maker.latestBookAt = event.Timestamp
+	maker.latestBookSequence = event.SeqNum
+	maker.latestBookProcessedAt = maker.localNow(event.Timestamp)
 	maker.bestBid, maker.bestAsk = 0, 0
-	if event.Snapshot == nil {
-		return
+	if event.Snapshot != nil {
+		if len(event.Snapshot.Bids) != 0 {
+			maker.bestBid = event.Snapshot.Bids[0].Price
+		}
+		if len(event.Snapshot.Asks) != 0 {
+			maker.bestAsk = event.Snapshot.Asks[0].Price
+		}
 	}
-	if len(event.Snapshot.Bids) != 0 {
-		maker.bestBid = event.Snapshot.Bids[0].Price
-	}
-	if len(event.Snapshot.Asks) != 0 {
-		maker.bestAsk = event.Snapshot.Asks[0].Price
+	if maker.observationObserver != nil {
+		maker.observationObserver(MakerObservation{ActorID: maker.ID(), Kind: "snapshot",
+			ProcessedAt: maker.latestBookProcessedAt, SourceAt: event.Timestamp, SourceSequence: event.SeqNum,
+			Symbol: event.Symbol, BestBid: maker.bestBid, BestAsk: maker.bestAsk})
 	}
 }
 
@@ -170,6 +225,12 @@ func (maker *RecurringMaker) onTrade(event actor.TradeEvent) {
 	if maker.lastTradePrice != 0 && event.Timestamp < maker.lastTradeSourceTime {
 		maker.fault = fmt.Errorf("repeatedspot: delivered trade source time regressed")
 		return
+	}
+	if maker.observationObserver != nil {
+		maker.observationObserver(MakerObservation{ActorID: maker.ID(), Kind: "trade",
+			ProcessedAt: maker.localNow(event.Timestamp), SourceAt: event.Timestamp, SourceSequence: event.SeqNum,
+			Symbol: event.Symbol, TradeID: event.Trade.TradeID, TradePrice: event.Trade.Price,
+			TradeQty: event.Trade.Qty, TradeSide: event.Trade.Side.String()})
 	}
 	if maker.lastTradePrice != 0 && event.Timestamp-maker.lastTradeSourceTime < int64(maker.config.VolatilitySampleInterval) {
 		return
@@ -276,29 +337,71 @@ func (maker *RecurringMaker) clearActive(orderID uint64) {
 	}
 }
 
-func (maker *RecurringMaker) onTick(_ time.Time) {
+func (maker *RecurringMaker) onTick(scheduled time.Time) {
+	action := "fault"
+	var quote MakerQuote
+	defer func() { maker.observeDecision(scheduled, quote, action) }()
 	if maker.fault != nil {
 		return
 	}
 	if !maker.subscribed {
 		maker.Subscribe(maker.config.Symbol, exchange.MDSnapshot, exchange.MDTrade)
 		maker.subscribed = true
+		action = "subscribe"
 		return
 	}
 	if maker.hasPendingPlacement() || len(maker.cancelRequested) != 0 {
+		action = "await_response"
 		return
 	}
-	quote, usable := maker.targetQuote()
+	var usable bool
+	quote, usable = maker.targetQuote()
 	if maker.activeBid != 0 || maker.activeAsk != 0 {
 		if usable && maker.matchesCurrentQuote(quote) {
+			action = "keep_quotes"
 			return
 		}
 		maker.cancelActive()
+		action = "cancel_quotes"
 		return
 	}
 	if usable {
 		maker.submitPair(quote)
+		action = "evaluate_placements"
+		if maker.fault != nil {
+			action = "fault"
+		}
+	} else {
+		action = "no_usable_quote"
 	}
+}
+
+func (maker *RecurringMaker) observeDecision(scheduled time.Time, quote MakerQuote, action string) {
+	if maker.decisionObserver == nil {
+		return
+	}
+	decisionAt := maker.localNow(scheduled.UnixNano())
+	lower, upper, err := maker.inventory.envelope()
+	if err != nil {
+		maker.fault = err
+		return
+	}
+	maker.decisionObserver(MakerDecision{
+		ActorID: maker.ID(), ScheduledAt: scheduled.UnixNano(), DecisionAt: decisionAt,
+		BookSeen: maker.bookSeen, LatestBookSourceAt: maker.latestBookAt,
+		LatestBookSequence: maker.latestBookSequence, LatestBookProcessedAt: maker.latestBookProcessedAt,
+		BestBid: maker.bestBid, BestAsk: maker.bestAsk,
+		FilledInventory: maker.inventory.filled, WorkingLower: lower, WorkingUpper: upper,
+		LogVariancePerSecond: maker.logVariancePerSecond, DeliveredTradeSamples: maker.tradeSamples,
+		TargetBid: quote.BidPrice, TargetAsk: quote.AskPrice, Action: action,
+	})
+}
+
+func (maker *RecurringMaker) localNow(fallback int64) int64 {
+	if clocked, ok := maker.Gateway().(interface{ NowUnixNano() int64 }); ok {
+		return clocked.NowUnixNano()
+	}
+	return fallback
 }
 
 func (maker *RecurringMaker) hasPendingPlacement() bool {

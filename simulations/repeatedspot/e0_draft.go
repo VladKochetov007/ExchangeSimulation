@@ -78,6 +78,6 @@ func DraftE0Config(makers [4]PolicyDefinition, takerSeeds [4]int64, roundTripSee
 			BasePrecision: e0BasePrecision, QuotePrecision: e0QuotePrecision,
 			TickSize: e0TickSize, MinOrderSize: e0BasePrecision / 1_000},
 		Step: time.Second, Iterations: 55 * 60, SnapshotInterval: time.Second,
-		ForbidBorrowing: true, Participants: participants,
+		ForbidBorrowing: true, RecordSnapshotProjectionEvidence: true, Participants: participants,
 	}, nil
 }

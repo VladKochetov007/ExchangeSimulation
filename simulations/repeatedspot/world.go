@@ -102,14 +102,15 @@ type Participant struct {
 }
 
 type Config struct {
-	VenueID          string
-	Instrument       InstrumentConfig
-	StartUnixNano    int64
-	Step             time.Duration
-	Iterations       int
-	SnapshotInterval time.Duration
-	ForbidBorrowing  bool
-	Participants     []Participant
+	VenueID                          string
+	Instrument                       InstrumentConfig
+	StartUnixNano                    int64
+	Step                             time.Duration
+	Iterations                       int
+	SnapshotInterval                 time.Duration
+	ForbidBorrowing                  bool
+	RecordSnapshotProjectionEvidence bool
+	Participants                     []Participant
 }
 
 type participantContract struct {
@@ -128,20 +129,21 @@ type namedDefinition struct {
 }
 
 type worldContract struct {
-	SchemaVersion       int                   `json:"schema_version"`
-	VenueID             string                `json:"venue_id"`
-	Instrument          InstrumentConfig      `json:"instrument"`
-	MatchingRule        string                `json:"matching_rule"`
-	ClockMode           string                `json:"clock_mode"`
-	DeterministicPhases bool                  `json:"deterministic_phases"`
-	PhaseMaxRounds      int                   `json:"phase_max_rounds"`
-	AutomationEnabled   bool                  `json:"automation_enabled"`
-	StartUnixNano       int64                 `json:"start_unix_nano"`
-	Step                time.Duration         `json:"step_ns"`
-	Iterations          int                   `json:"iterations"`
-	SnapshotInterval    time.Duration         `json:"snapshot_interval_ns"`
-	ForbidBorrowing     bool                  `json:"forbid_borrowing"`
-	Participants        []participantContract `json:"participants"`
+	SchemaVersion                    int                   `json:"schema_version"`
+	VenueID                          string                `json:"venue_id"`
+	Instrument                       InstrumentConfig      `json:"instrument"`
+	MatchingRule                     string                `json:"matching_rule"`
+	ClockMode                        string                `json:"clock_mode"`
+	DeterministicPhases              bool                  `json:"deterministic_phases"`
+	PhaseMaxRounds                   int                   `json:"phase_max_rounds"`
+	AutomationEnabled                bool                  `json:"automation_enabled"`
+	StartUnixNano                    int64                 `json:"start_unix_nano"`
+	Step                             time.Duration         `json:"step_ns"`
+	Iterations                       int                   `json:"iterations"`
+	SnapshotInterval                 time.Duration         `json:"snapshot_interval_ns"`
+	ForbidBorrowing                  bool                  `json:"forbid_borrowing"`
+	RecordSnapshotProjectionEvidence bool                  `json:"record_snapshot_projection_evidence"`
+	Participants                     []participantContract `json:"participants"`
 }
 
 const phaseMaxRounds = 100_000
@@ -167,6 +169,9 @@ func (world *World) ContractJSON() []byte {
 }
 
 func (world *World) ContractSHA256() string { return world.contractHash }
+
+// SimulatedNowUnixNano is an observation-only clock read for evidence sinks.
+func (world *World) SimulatedNowUnixNano() int64 { return world.clock.NowUnixNano() }
 
 // Venue and Actors allow externally composed evidence observers to be
 // installed before Run. Mutating economic state through these handles is
@@ -216,12 +221,13 @@ func Build(cfg Config) (*World, error) {
 	if err := validateConfig(cfg); err != nil {
 		return nil, err
 	}
-	contract := worldContract{SchemaVersion: 1, VenueID: cfg.VenueID, Instrument: cfg.Instrument,
+	contract := worldContract{SchemaVersion: 2, VenueID: cfg.VenueID, Instrument: cfg.Instrument,
 		MatchingRule: "price_time_fifo", ClockMode: "simulated_event_scheduler",
 		DeterministicPhases: true, PhaseMaxRounds: phaseMaxRounds, AutomationEnabled: false,
 		StartUnixNano: cfg.StartUnixNano, Step: cfg.Step, Iterations: cfg.Iterations,
 		SnapshotInterval: cfg.SnapshotInterval, ForbidBorrowing: cfg.ForbidBorrowing,
-		Participants: make([]participantContract, 0, len(cfg.Participants))}
+		RecordSnapshotProjectionEvidence: cfg.RecordSnapshotProjectionEvidence,
+		Participants:                     make([]participantContract, 0, len(cfg.Participants))}
 	for _, participant := range cfg.Participants {
 		balances := make(map[string]int64, len(participant.Balances))
 		for asset, balance := range participant.Balances {
@@ -247,6 +253,7 @@ func Build(cfg Config) (*World, error) {
 		ID: cfg.VenueID, Clock: clock, TickerFactory: timers,
 		SnapshotInterval: cfg.SnapshotInterval, EstimatedClients: len(cfg.Participants),
 		DeterministicPhases: true, ForbidBorrowing: cfg.ForbidBorrowing,
+		RecordSnapshotProjectionEvidence: cfg.RecordSnapshotProjectionEvidence,
 	})
 	instrument := cfg.Instrument
 	ex.AddInstrument(exchange.NewSpotInstrument(instrument.Symbol, instrument.BaseAsset, instrument.QuoteAsset,

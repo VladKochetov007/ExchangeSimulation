@@ -79,6 +79,7 @@ type TradeEvent struct {
 	Symbol    string
 	Trade     *exchange.Trade
 	Timestamp int64
+	SeqNum    uint64
 }
 
 // IndexEvent is the venue's published reference price for a symbol.
