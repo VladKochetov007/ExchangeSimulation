@@ -70,60 +70,10 @@ func (failure *FundingPayerCashShortfall) Error() string {
 // The later exchange adapter must compare the whole snapshot at commit and
 // record both account and finite-reserve movements atomically.
 func PreviewFundingBatch(input FundingBatchInput) (FundingBatchPreview, error) {
-	if input.VenueID == "" || input.Symbol == "" || input.QuoteAsset == "" || input.BasePrecision <= 0 ||
-		input.Terms.NotionalMarkPrice <= 0 ||
-		len(input.Accounts) != len(input.RegisteredClientIDs) ||
-		input.InitialRoundingReserve < int64(len(input.RegisteredClientIDs)) ||
-		input.CurrentRoundingReserve < 0 {
-		return FundingBatchPreview{}, fmt.Errorf("funding batch: invalid identity, price, registry or finite reserve")
-	}
-	expectedAccrual, err := NewScaledFundingAccrual(input.BasePrecision, input.Terms.Rate.UnitsPerBp())
+	accounts, states, expectedAccrual, err := validateFundingBatchPrior(input)
 	if err != nil {
-		return FundingBatchPreview{}, fmt.Errorf("funding batch: %w", err)
+		return FundingBatchPreview{}, err
 	}
-	accounts := slices.Clone(input.Accounts)
-	registeredClientIDs := slices.Clone(input.RegisteredClientIDs)
-	slices.Sort(registeredClientIDs)
-	slices.SortFunc(accounts, func(left, right FundingBatchAccount) int {
-		if left.ClientID < right.ClientID {
-			return -1
-		}
-		if left.ClientID > right.ClientID {
-			return 1
-		}
-		return 0
-	})
-
-	states := make([]ScaledFundingAccrual, len(accounts))
-	netPosition := new(big.Int)
-	priorRemainders := new(big.Int)
-	for index, account := range accounts {
-		if index > 0 && registeredClientIDs[index] == registeredClientIDs[index-1] {
-			return FundingBatchPreview{}, fmt.Errorf("funding batch: duplicate registered client %d", registeredClientIDs[index])
-		}
-		if account.ClientID != registeredClientIDs[index] {
-			return FundingBatchPreview{}, fmt.Errorf("funding batch: account client %d is not the registered client %d", account.ClientID, registeredClientIDs[index])
-		}
-		if account.PerpCash < 0 {
-			return FundingBatchPreview{}, fmt.Errorf("funding batch: client %d begins with negative perp cash", account.ClientID)
-		}
-		state, restoreErr := RestoreScaledFundingAccrual(input.BasePrecision, input.Terms.Rate.UnitsPerBp(), account.Accrual)
-		if restoreErr != nil {
-			return FundingBatchPreview{}, fmt.Errorf("funding batch: client %d: %w", account.ClientID, restoreErr)
-		}
-		states[index] = state
-		netPosition.Add(netPosition, big.NewInt(account.NetPosition))
-		priorRemainders.Add(priorRemainders, &state.remainder)
-	}
-	if netPosition.Sign() != 0 {
-		return FundingBatchPreview{}, fmt.Errorf("funding batch: unmatched signed perp positions %s", netPosition)
-	}
-	priorReserveChange := new(big.Int).Sub(big.NewInt(input.CurrentRoundingReserve), big.NewInt(input.InitialRoundingReserve))
-	priorReserveChange.Mul(priorReserveChange, new(big.Int).Set(&expectedAccrual.denominator))
-	if priorReserveChange.Cmp(priorRemainders) != 0 {
-		return FundingBatchPreview{}, fmt.Errorf("funding batch: reserve and prior fractional claims disagree")
-	}
-
 	result := FundingBatchPreview{
 		VenueID: input.VenueID, Symbol: input.Symbol, QuoteAsset: input.QuoteAsset,
 		AccountCash:           make([]FundingAccountCashPreview, 0, len(accounts)),
@@ -168,4 +118,63 @@ func PreviewFundingBatch(input FundingBatchInput) (FundingBatchPreview, error) {
 	result.RoundingReserveDelta = reserveDelta.Int64()
 	result.RoundingReserveAfter = reserveAfter.Int64()
 	return result, nil
+}
+
+// The source join and the pure payment preview must agree on the same prior
+// finite-money identity before any prospective cash result is considered.
+func validateFundingBatchPrior(input FundingBatchInput) ([]FundingBatchAccount, []ScaledFundingAccrual, ScaledFundingAccrual, error) {
+	if input.VenueID == "" || input.Symbol == "" || input.QuoteAsset == "" || input.BasePrecision <= 0 ||
+		input.Terms.NotionalMarkPrice <= 0 ||
+		len(input.Accounts) != len(input.RegisteredClientIDs) ||
+		input.InitialRoundingReserve < int64(len(input.RegisteredClientIDs)) ||
+		input.CurrentRoundingReserve < 0 {
+		return nil, nil, ScaledFundingAccrual{}, fmt.Errorf("funding batch: invalid identity, price, registry or finite reserve")
+	}
+	expectedAccrual, err := NewScaledFundingAccrual(input.BasePrecision, input.Terms.Rate.UnitsPerBp())
+	if err != nil {
+		return nil, nil, ScaledFundingAccrual{}, fmt.Errorf("funding batch: %w", err)
+	}
+	accounts := slices.Clone(input.Accounts)
+	registeredClientIDs := slices.Clone(input.RegisteredClientIDs)
+	slices.Sort(registeredClientIDs)
+	slices.SortFunc(accounts, func(left, right FundingBatchAccount) int {
+		if left.ClientID < right.ClientID {
+			return -1
+		}
+		if left.ClientID > right.ClientID {
+			return 1
+		}
+		return 0
+	})
+
+	states := make([]ScaledFundingAccrual, len(accounts))
+	netPosition := new(big.Int)
+	priorRemainders := new(big.Int)
+	for index, account := range accounts {
+		if index > 0 && registeredClientIDs[index] == registeredClientIDs[index-1] {
+			return nil, nil, ScaledFundingAccrual{}, fmt.Errorf("funding batch: duplicate registered client %d", registeredClientIDs[index])
+		}
+		if account.ClientID != registeredClientIDs[index] {
+			return nil, nil, ScaledFundingAccrual{}, fmt.Errorf("funding batch: account client %d is not the registered client %d", account.ClientID, registeredClientIDs[index])
+		}
+		if account.PerpCash < 0 {
+			return nil, nil, ScaledFundingAccrual{}, fmt.Errorf("funding batch: client %d begins with negative perp cash", account.ClientID)
+		}
+		state, restoreErr := RestoreScaledFundingAccrual(input.BasePrecision, input.Terms.Rate.UnitsPerBp(), account.Accrual)
+		if restoreErr != nil {
+			return nil, nil, ScaledFundingAccrual{}, fmt.Errorf("funding batch: client %d: %w", account.ClientID, restoreErr)
+		}
+		states[index] = state
+		netPosition.Add(netPosition, big.NewInt(account.NetPosition))
+		priorRemainders.Add(priorRemainders, &state.remainder)
+	}
+	if netPosition.Sign() != 0 {
+		return nil, nil, ScaledFundingAccrual{}, fmt.Errorf("funding batch: unmatched signed perp positions %s", netPosition)
+	}
+	priorReserveChange := new(big.Int).Sub(big.NewInt(input.CurrentRoundingReserve), big.NewInt(input.InitialRoundingReserve))
+	priorReserveChange.Mul(priorReserveChange, new(big.Int).Set(&expectedAccrual.denominator))
+	if priorReserveChange.Cmp(priorRemainders) != 0 {
+		return nil, nil, ScaledFundingAccrual{}, fmt.Errorf("funding batch: reserve and prior fractional claims disagree")
+	}
+	return accounts, states, expectedAccrual, nil
 }

@@ -1,6 +1,7 @@
 package exchange
 
 import (
+	"errors"
 	"reflect"
 	"slices"
 	"testing"
@@ -88,6 +89,16 @@ func TestCaptureOwnedFundingBatchInputFailsClosedOnMissingOrMismatchedOwnership(
 		{"missing-owned-fraction", func(ex *DefaultExchange, _ *fundingSourceClock, _ *FundingAccountSnapshotRequest, _ *instrument.FundingSettlementTerms) {
 			delete(ex.fundingStates["ABC-PERP"].remainders, 4)
 		}},
+		{"malformed-owned-fraction", func(ex *DefaultExchange, _ *fundingSourceClock, _ *FundingAccountSnapshotRequest, _ *instrument.FundingSettlementTerms) {
+			fraction := ex.fundingStates["ABC-PERP"].remainders[1]
+			fraction.Denominator = "1"
+			ex.fundingStates["ABC-PERP"].remainders[1] = fraction
+		}},
+		{"reserve-fraction-inconsistency", func(ex *DefaultExchange, _ *fundingSourceClock, _ *FundingAccountSnapshotRequest, _ *instrument.FundingSettlementTerms) {
+			reserve := ex.ExchangeBalance.FundingRoundingReserves["ABC-PERP"]
+			reserve.Balance = 5
+			ex.ExchangeBalance.FundingRoundingReserves["ABC-PERP"] = reserve
+		}},
 		{"changed-rate-scale", func(_ *DefaultExchange, _ *fundingSourceClock, _ *FundingAccountSnapshotRequest, terms *instrument.FundingSettlementTerms) {
 			terms.Rate, _ = instrument.NewQuantizedFundingRate(1, 100)
 		}},
@@ -128,5 +139,28 @@ func TestCaptureOwnedFundingBatchInputRequiresSuccessfulEndowment(t *testing.T) 
 	clock.now = 20
 	if input, err := ex.CaptureOwnedFundingBatchInput(fundingAccountSourceRequest(), fundingOwnedBatchTerms(t)); err == nil || !reflect.DeepEqual(input, FundingBatchInput{}) {
 		t.Fatalf("unendowed venue yielded preview input: %+v, %v", input, err)
+	}
+}
+
+func TestCaptureOwnedFundingBatchInputDoesNotMisclassifyPayerShortfall(t *testing.T) {
+	ex, clock := endowedFundingBatchFixture(t)
+	ex.Positions.UpdatePosition(1, "ABC-PERP", 1, 100, Buy, PositionBoth)
+	ex.Positions.UpdatePosition(4, "ABC-PERP", 1, 100, Sell, PositionBoth)
+	ex.Clients[1].PerpBalances["USD"] = 0
+	clock.now = 20
+	rate, err := instrument.NewQuantizedFundingRate(100_000_000, 1_000_000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	input, err := ex.CaptureOwnedFundingBatchInput(fundingAccountSourceRequest(),
+		instrument.FundingSettlementTerms{Rate: rate, NotionalMarkPrice: 100})
+	if err != nil {
+		t.Fatalf("valid prior state was mislabeled structural corruption: %v", err)
+	}
+	preview, err := PreviewFundingBatch(input)
+	var shortfall *FundingPayerCashShortfall
+	if !errors.As(err, &shortfall) || !reflect.DeepEqual(shortfall.ClientIDs, []uint64{1}) ||
+		!reflect.DeepEqual(preview, FundingBatchPreview{}) {
+		t.Fatalf("unfunded payer did not remain a distinct economic decision: %+v, %v", preview, err)
 	}
 }

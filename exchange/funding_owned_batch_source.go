@@ -68,5 +68,8 @@ func (e *DefaultExchange) captureOwnedFundingBatchInputLocked(request FundingAcc
 			PerpCash: account.PerpCash, Accrual: fraction,
 		})
 	}
+	if _, _, _, err := validateFundingBatchPrior(result); err != nil {
+		return FundingBatchInput{}, fmt.Errorf("owned funding batch: invalid persistent prior state: %w", err)
+	}
 	return result, nil
 }
