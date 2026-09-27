@@ -402,20 +402,20 @@
     {
       "id": "ME-016",
       "title": "Delivered-depth signal in repeated maker competition (E1)",
-      "claim_type": "MECHANICAL",
-      "stage": "PREPARE",
+      "claim_type": "CAUSAL",
+      "stage": "DEVELOPMENT",
       "idea": "research/program/ideas/ME-016/idea.md",
-      "protocol": null,
+      "protocol": "research/program/ideas/ME-016/protocol.md",
       "report": null,
       "result": null,
       "dependencies": ["ME-015"],
       "policy_ids": ["S07"],
       "authorization": {
         "prepare": true,
-        "run": false,
-        "basis": "Owner 2026-09-27 long-run E1 authorization permits bounded policy/evidence implementation and focused fixtures. This idea card is not a locked ME-016 economic protocol and authorizes no E1 world, seed, confirmation or holdout."
+        "run": true,
+        "basis": "Owner 2026-09-27 long-run E1 authorization and this prospectively locked ME-016 development protocol permit exactly 12 assigned gain/slot/seed economic cells plus at most one technical duplicate, conditional on exact-candidate clean tests, pinned Go 1.27 binaries, finite first-cell resource/evidence verification and the stated stop rules. Separate design and source reviews accepted their limited gates after substantive rejections were repaired. No confirmation or holdout is authorized."
       },
-      "next_action": "The opt-in signal maker and strict v5 replay are mechanically reviewed. Pass the clean full gate, then prospectively design and independently review a small E1 mixed-roster economic protocol with explicit opportunity, activation, missing-mark and causal endpoints. No ME-016 world is registered yet."
+      "next_action": "Pin clean candidate C and binaries, pass exact-C tests/vet/race/skill validation, then run the registered gain0/M1/18101 first cell under the finite cgroup. Continue the other assigned cells only if its evidence and resource gates pass, independent of economic sign."
     }
   ],
   "policies": [
