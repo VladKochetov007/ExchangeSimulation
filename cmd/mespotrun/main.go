@@ -26,7 +26,7 @@ func run(arguments []string) error {
 	switch arguments[0] {
 	case "cells":
 		flags := flag.NewFlagSet("cells", flag.ContinueOnError)
-		study := flags.String("study", "ME-013", "registered development study: ME-013 or ME-015")
+		study := flags.String("study", "ME-013", "registered development study: ME-013, ME-015 or ME-016")
 		if err := flags.Parse(arguments[1:]); err != nil {
 			return err
 		}
@@ -38,11 +38,14 @@ func run(arguments []string) error {
 			return json.NewEncoder(os.Stdout).Encode(repeatedspot.E0DevelopmentCells())
 		case "ME-015":
 			return json.NewEncoder(os.Stdout).Encode(repeatedspot.E0LocalReferenceDevelopmentCells())
+		case "ME-016":
+			return json.NewEncoder(os.Stdout).Encode(repeatedspot.ME016DevelopmentCells())
 		default:
 			return fmt.Errorf("unknown registered study %q", *study)
 		}
 	case "plan":
 		flags := flag.NewFlagSet("plan", flag.ContinueOnError)
+		study := flags.String("study", "ME-013", "registered development study")
 		repository := flags.String("repo", "", "clean pinned E0 source checkout")
 		analyzer := flags.String("analyzer", "", "pinned mespotanalyze binary")
 		output := flags.String("out", "", "new exclusive plan JSON path")
@@ -50,17 +53,33 @@ func run(arguments []string) error {
 		quantity := flags.Int64("quote-qty", 0, "maker base atoms per side")
 		seed := flags.Int64("seed", 0, "registered E0 development seed")
 		referenceMode := flags.String("reference-mode", "", "empty for ME-013; OFF or ON for ME-015")
+		signalGain := flags.Int64("signal-gain-bps", -1, "ME-016 signal gain, 0 or 2 bps")
 		if err := flags.Parse(arguments[1:]); err != nil {
 			return err
 		}
 		if flags.NArg() != 0 || *repository == "" || *analyzer == "" || *output == "" {
 			return errors.New("plan requires -repo, -analyzer, -out, -composition, -quote-qty and -seed")
 		}
-		return repeatedspot.WriteE0Plan(*repository, *analyzer, *output,
-			repeatedspot.E0Cell{Composition: *composition, QuoteQty: *quantity,
-				Seed: *seed, ReferenceMode: *referenceMode})
+		switch *study {
+		case "ME-016":
+			if *quantity != 0 || *referenceMode != "" || *signalGain < 0 {
+				return errors.New("ME-016 plan requires -signal-gain-bps and forbids E0 quote/reference options")
+			}
+			return repeatedspot.WriteME016Plan(*repository, *analyzer, *output,
+				repeatedspot.ME016Cell{Composition: *composition, SignalGainBps: *signalGain, Seed: *seed})
+		case "ME-013", "ME-015":
+			if *signalGain != -1 {
+				return errors.New("E0 plan forbids ME-016 signal gain")
+			}
+			return repeatedspot.WriteE0Plan(*repository, *analyzer, *output,
+				repeatedspot.E0Cell{Composition: *composition, QuoteQty: *quantity,
+					Seed: *seed, ReferenceMode: *referenceMode})
+		default:
+			return fmt.Errorf("unknown registered study %q", *study)
+		}
 	case "run":
 		flags := flag.NewFlagSet("run", flag.ContinueOnError)
+		study := flags.String("study", "ME-013", "registered development study")
 		repository := flags.String("repo", "", "clean pinned E0 source checkout")
 		analyzer := flags.String("analyzer", "", "pinned mespotanalyze binary")
 		plan := flags.String("plan", "", "locked plan JSON path")
@@ -75,6 +94,17 @@ func run(arguments []string) error {
 		contextWithDeadline, cancel := context.WithTimeout(context.Background(), *timeout)
 		defer cancel()
 		started := time.Now()
+		if *study == "ME-016" {
+			manifest, err := repeatedspot.RunME016Plan(contextWithDeadline, *repository, *analyzer, *plan, *output)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(os.Stderr, "mespotrun: completed ME-016 cell %s in %s\n", manifest.Cell.ID(), time.Since(started))
+			return json.NewEncoder(os.Stdout).Encode(manifest)
+		}
+		if *study != "ME-013" && *study != "ME-015" {
+			return fmt.Errorf("unknown registered study %q", *study)
+		}
 		manifest, err := repeatedspot.RunE0Plan(contextWithDeadline, *repository, *analyzer, *plan, *output)
 		if err != nil {
 			return err

@@ -106,6 +106,11 @@ func (series *restingDepthSeries) finish(at int64) (RestingDepthSummary, error) 
 }
 
 func (state *replayState) restingOrderEvent(event Event) error {
+	if state.signalAudit != nil {
+		if err := state.signalAudit.accrueResting(event.Timestamp, state.resting); err != nil {
+			return err
+		}
+	}
 	switch event.Name {
 	case "OrderAccepted":
 		var order acceptedOrder

@@ -138,6 +138,26 @@ func TestSignalEvidenceHasOwnSchemaAndIndependentReplay(t *testing.T) {
 	}
 }
 
+func TestSignalReplayRejectsRehashedStreamWithoutWorldCompletion(t *testing.T) {
+	world := signalMakerFixture(t)
+	contract, events, directory := capturedFixtureWorld(t, world)
+	withoutCompletion := make([]Event, 0, len(events)-1)
+	removed := false
+	for _, event := range events {
+		if event.Source == "control" && event.Name == "world_end" {
+			removed = true
+			continue
+		}
+		withoutCompletion = append(withoutCompletion, event)
+	}
+	if !removed {
+		t.Fatal("signal fixture has no completion boundary")
+	}
+	if _, err := replayMutatedSignal(t, contract, withoutCompletion, directory); err == nil {
+		t.Fatal("rehashed but semantically incomplete v5 world passed strict replay")
+	}
+}
+
 func TestSignalReplayRejectsRehashedDepthAndQuoteMutations(t *testing.T) {
 	contract, original, directory := capturedFixtureWorld(t, signalMakerFixture(t))
 	for name, mutate := range map[string]func(*Event){

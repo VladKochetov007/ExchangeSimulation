@@ -79,6 +79,7 @@ type EconomicReplay struct {
 	MeasurementWindow  MeasurementWindow                `json:"measurement_window"`
 	PublicWindowDepth  RestingDepthSummary              `json:"public_window_resting_depth"`
 	MakerWindowDepth   RestingDepthSummary              `json:"maker_window_resting_depth"`
+	SignalAudit        *ME016SignalAudit                `json:"signal_audit,omitempty"`
 }
 
 type accountState struct {
@@ -136,12 +137,14 @@ type replayState struct {
 	makerResting        *restingDepthSeries
 	publicWindowDepth   RestingDepthSummary
 	makerWindowDepth    RestingDepthSummary
+	signalAudit         *ME016SignalAudit
 }
 
 type publicSnapshot struct {
 	timestamp int64
 	bids      []types.PriceLevel
 	asks      []types.PriceLevel
+	ownBest   map[uint64]signalOwnedBest
 }
 
 type makerObservationRecord struct {
@@ -204,6 +207,9 @@ func replayWithWindow(contractBytes []byte, stream io.Reader, identity EvidenceI
 		makerResting:    newRestingDepthSeries(contract.StartUnixNano, window),
 		publicSnapshots: make(map[uint64]publicSnapshot), latestMakerSnapshot: make(map[uint64]worldspot.MakerObservation),
 		lastTwoSidedMaker: make(map[uint64]worldspot.MakerObservation)}
+	if requiredSchema == SignalEvidenceSchemaID {
+		state.signalAudit = newME016SignalAudit(window, contract.StartUnixNano)
+	}
 	for _, participant := range contract.Participants {
 		if participant.ClientID == 0 || participant.ActorID == 0 || participant.Role == "" ||
 			participant.Latency.RequestNanos < 0 || participant.Latency.ResponseNanos == nil ||
@@ -243,6 +249,15 @@ func replayWithWindow(contractBytes []byte, stream io.Reader, identity EvidenceI
 			state.accounts[participant.ClientID].localRisk = newInventoryRiskSeries(contract.StartUnixNano, window, workingLimit)
 			state.accounts[participant.ClientID].envelope = newMakerEnvelopeReplay(contract.StartUnixNano, window, workingLimit)
 		}
+		if state.signalAudit != nil {
+			category := "other"
+			if maker != nil {
+				category = "maker"
+			} else if participant.Role == "seed_once" {
+				category = "seed"
+			}
+			state.signalAudit.clientCategory[participant.ClientID] = category
+		}
 	}
 	if err := WalkEvidence(stream, identity, state.visit); err != nil {
 		return nil, err
@@ -272,6 +287,11 @@ func replayWithWindow(contractBytes []byte, stream io.Reader, identity EvidenceI
 	}
 	if err := state.finishRestingDepth(terminalAt); err != nil {
 		return nil, err
+	}
+	if state.signalAudit != nil {
+		if err := state.signalAudit.finish(terminalAt, state.market, state.resting, state.publicWindowDepth); err != nil {
+			return nil, err
+		}
 	}
 	for _, account := range state.accounts {
 		if account.envelope == nil {
@@ -306,6 +326,11 @@ func replayWithWindow(contractBytes []byte, stream io.Reader, identity EvidenceI
 			account.outbound.UnresolvedAtEnd++
 		}
 	}
+	if state.signalAudit != nil {
+		if err := state.signalAudit.finishRequests(state.sentRequests); err != nil {
+			return nil, err
+		}
+	}
 	market := state.market.summary()
 	tradeVolume, tradeNotional := state.trades.totals()
 	market.TradeVolumeBaseUnits = tradeVolume
@@ -315,6 +340,7 @@ func replayWithWindow(contractBytes []byte, stream io.Reader, identity EvidenceI
 		TerminalMarkStatus: state.markStatus, TerminalMidQuote: state.terminalMid, InformationAudit: info,
 		Market: market, MeasurementWindow: window,
 		PublicWindowDepth: state.publicWindowDepth, MakerWindowDepth: state.makerWindowDepth}
+	report.SignalAudit = state.signalAudit
 	ids := make([]uint64, 0, len(state.accounts))
 	for clientID := range state.accounts {
 		ids = append(ids, clientID)
@@ -407,7 +433,13 @@ func (state *replayState) visit(event Event) error {
 				return err
 			}
 		}
-		return state.restingOrderEvent(event)
+		if err := state.restingOrderEvent(event); err != nil {
+			return err
+		}
+		if state.signalAudit != nil {
+			return state.signalAudit.exchangeEvent(event, state)
+		}
+		return nil
 	default:
 		return fmt.Errorf("repeated spot: unsupported exchange event %q", event.Name)
 	}
@@ -603,6 +635,11 @@ func (state *replayState) makerDecision(event Event) error {
 	if err := account.variance.verifyDecision(decision); err != nil {
 		return err
 	}
+	if state.signalAudit != nil && account.maker.trackTopDepth {
+		if err := state.signalAudit.makerDecision(state, account, decision); err != nil {
+			return err
+		}
+	}
 	if decision.FilledInventory != account.localResponses.NetProcessedFillBase {
 		return errors.New("repeated spot: maker decision used inventory absent from processed fill responses")
 	}
@@ -654,28 +691,28 @@ func (state *replayState) verifiedMakerReference(account *accountState, decision
 		}
 		return decision.BestBid + (decision.BestAsk-decision.BestBid)/2, nil
 	}
-	mode := "unavailable"
-	var mid, sourceAt int64
-	var sequence uint64
-	latest, seen := state.latestMakerSnapshot[account.clientID]
-	if seen && latest.BestBid > 0 && latest.BestAsk > latest.BestBid {
-		mode = "live_two_sided"
-		mid = latest.BestBid + (latest.BestAsk-latest.BestBid)/2
-		sourceAt, sequence = latest.SourceAt, latest.SourceSequence
-	} else if seen && (latest.BestBid <= 0 || latest.BestAsk <= 0) && account.maker.localReferenceAge > 0 {
-		prior, available := state.lastTwoSidedMaker[account.clientID]
-		if available && decision.DecisionAt >= prior.SourceAt &&
-			decision.DecisionAt-prior.SourceAt < account.maker.localReferenceAge {
-			mode = "cached_two_sided"
-			mid = prior.BestBid + (prior.BestAsk-prior.BestBid)/2
-			sourceAt, sequence = prior.SourceAt, prior.SourceSequence
-		}
-	}
+	mode, mid, sourceAt, sequence := state.makerReferenceAt(account, decision.DecisionAt)
 	if decision.ReferenceMode != mode || decision.ReferenceMid != mid ||
 		decision.ReferenceSourceAt != sourceAt || decision.ReferenceSequence != sequence {
 		return 0, errors.New("repeated spot: selected maker reference disagrees with delivered local book")
 	}
 	return mid, nil
+}
+
+func (state *replayState) makerReferenceAt(account *accountState, decisionAt int64) (string, int64, int64, uint64) {
+	latest, seen := state.latestMakerSnapshot[account.clientID]
+	if seen && latest.BestBid > 0 && latest.BestAsk > latest.BestBid {
+		return "live_two_sided", latest.BestBid + (latest.BestAsk-latest.BestBid)/2,
+			latest.SourceAt, latest.SourceSequence
+	}
+	if seen && (latest.BestBid <= 0 || latest.BestAsk <= 0) && account.maker.localReferenceAge > 0 {
+		prior, available := state.lastTwoSidedMaker[account.clientID]
+		if available && decisionAt >= prior.SourceAt && decisionAt-prior.SourceAt < account.maker.localReferenceAge {
+			return "cached_two_sided", prior.BestBid + (prior.BestAsk-prior.BestBid)/2,
+				prior.SourceAt, prior.SourceSequence
+		}
+	}
+	return "unavailable", 0, 0, 0
 }
 
 func (state *replayState) makerObservation(event Event) error {
@@ -703,6 +740,11 @@ func (state *replayState) makerObservation(event Event) error {
 				*observation.TopBidVisibleQty != firstLevelVisibleQty(source.bids) ||
 				*observation.TopAskVisibleQty != firstLevelVisibleQty(source.asks) {
 				return errors.New("repeated spot: signal maker displayed depth differs from published book")
+			}
+			if state.signalAudit != nil {
+				if err := state.signalAudit.makerSnapshot(event, observation, source); err != nil {
+					return err
+				}
 			}
 		} else if observation.TopBidVisibleQty != nil || observation.TopAskVisibleQty != nil {
 			return errors.New("repeated spot: legacy maker observed unregistered displayed depth")
@@ -757,11 +799,24 @@ func (state *replayState) publicSnapshot(event Event) error {
 	if err := state.resting.verifySnapshot(snapshot.PublicBids, snapshot.PublicAsks); err != nil {
 		return err
 	}
-	state.publicSnapshots[snapshot.SourceSequence] = publicSnapshot{event.Timestamp, snapshot.PublicBids, snapshot.PublicAsks}
+	var owned map[uint64]signalOwnedBest
+	if state.signalAudit != nil {
+		var err error
+		owned, err = state.resting.ownedBest(snapshot.PublicBids, snapshot.PublicAsks)
+		if err != nil {
+			return err
+		}
+	}
+	state.publicSnapshots[snapshot.SourceSequence] = publicSnapshot{event.Timestamp, snapshot.PublicBids, snapshot.PublicAsks, owned}
 	return nil
 }
 
 func (state *replayState) publicDelta(event Event) error {
+	if state.signalAudit != nil {
+		if err := state.signalAudit.accrueBook(event.Timestamp, state.market); err != nil {
+			return err
+		}
+	}
 	var delta struct {
 		Side       string `json:"side"`
 		Price      int64  `json:"price"`
