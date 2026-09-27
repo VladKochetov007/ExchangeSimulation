@@ -367,7 +367,7 @@
       "id": "ME-014",
       "title": "Two-venue repeated spot-perpetual funding baseline (E2)",
       "claim_type": "CAUSAL",
-      "stage": "PLAN",
+      "stage": "PREPARE",
       "idea": "research/program/ideas/ME-014/idea.md",
       "protocol": null,
       "report": null,
@@ -379,7 +379,7 @@
         "run": false,
         "basis": "Owner 2026-09-27 long-run goal authorizes bounded E0/E1/E2 implementation and conditional development, recorded in research/program/longrun-baselines/authorization-20260927.md. E2 runs remain gated on E0 and versioned funding/lifecycle/evidence readiness plus a fixed protocol."
       },
-      "next_action": "After E0 readiness, implement versioned funding/lifecycle and independent multi-payment fixtures; lock and validate an E2 protocol before any ME-014 world."
+      "next_action": "Pure absolute calendar and scaled window-rate arithmetic are reviewed but not production-wired. Next implement exact atomic payment/remainder and venue-local two-sided sample/clock fixtures, then integrated actor/evidence multi-payment tests. E0/E1 terminal priceability and a fixed reviewed E2 protocol remain economic-run gates; no ME-014 world is authorized yet."
     },
     {
       "id": "ME-015",
