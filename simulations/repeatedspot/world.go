@@ -188,6 +188,14 @@ func (world *World) Run(ctx context.Context) error {
 		if world.runErr == nil && world.clock.NowUnixNano() < world.expectedEnd {
 			world.runErr = fmt.Errorf("repeatedspot: incomplete world: stopped at %d before %d", world.clock.NowUnixNano(), world.expectedEnd)
 		}
+		if world.runErr == nil {
+			for _, participant := range world.actors {
+				if checked, ok := participant.(interface{ Fault() error }); ok && checked.Fault() != nil {
+					world.runErr = fmt.Errorf("repeatedspot: actor %d failed: %w", participant.ID(), checked.Fault())
+					break
+				}
+			}
+		}
 		world.closed.Store(true)
 	})
 	if !called {
