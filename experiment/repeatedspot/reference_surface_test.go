@@ -36,8 +36,9 @@ func syntheticE0ReferenceInputs() []E0CellArtifacts {
 			EconomicReconstruction: replay},
 			Diagnostic: E0LiquidityDiagnostic{Evidence: evidence, MeasurementStartNanos: window.StartAt,
 				MeasurementEndNanos: window.EndAt, WorldEndNanos: window.EndAt,
-				ShadowReferenceMaxAgeNanos: int64(E0LocalReferenceMaxAge),
-				BookDurations:              BookStateDurations{HorizonNanos: window.EndAt, EmptyNanos: window.EndAt},
+				ShadowReferenceMaxAgeNanos:      int64(E0LocalReferenceMaxAge),
+				MeasurementSpreadPriceUnitNanos: "0",
+				BookDurations:                   BookStateDurations{HorizonNanos: window.EndAt, EmptyNanos: window.EndAt},
 				MeasurementBookDurations: BookStateDurations{HorizonNanos: window.EndAt - window.StartAt,
 					EmptyNanos: window.EndAt - window.StartAt}, Makers: makers},
 			ResultSHA256: strings.Repeat("d", 64), DiagnosticSHA256: strings.Repeat("e", 64)})
@@ -53,7 +54,8 @@ func TestSummarizeE0LocalReferenceKeepsZeroAndMissingMarks(t *testing.T) {
 	}
 	if surface.ValidEconomicCells != 24 || surface.PrimaryContrastStatus != "ESTIMATED_DEVELOPMENT_ONLY" ||
 		surface.PrimaryMedianDeltaNanos != 0 || len(surface.PrimaryPairs) != 3 ||
-		surface.TreatmentPAGainStatus != "NOT_IDENTIFIED" || surface.Cells[0].MakerGainSumQuoteAtoms != nil ||
+		surface.TreatmentPAGainStatus != "NOT_IDENTIFIED" || surface.ControlPAGainStatus != "NOT_IDENTIFIED" ||
+		surface.Cells[0].MakerGainSumQuoteAtoms != nil || surface.Cells[0].WindowMidDriftPriceUnits != nil ||
 		surface.Cells[0].MeasurementBookDurations.TwoSidedNanos != 0 {
 		t.Fatalf("zero-opportunity world was lost or misclassified: %+v", surface)
 	}
@@ -71,6 +73,10 @@ func TestSummarizeE0LocalReferenceRequiresWindowedIndependentNumerator(t *testin
 	window := E0MeasurementWindow()
 	inputs[0].Diagnostic.MeasurementBookDurations.TwoSidedNanos = 100
 	inputs[0].Diagnostic.MeasurementBookDurations.EmptyNanos = window.EndAt - window.StartAt - 100
+	inputs[0].Diagnostic.MeasurementSpreadPriceUnitNanos = "200"
+	firstMid, lastMid := int64(100), int64(101)
+	inputs[0].Diagnostic.FirstWindowTwoSidedMidPrice = &firstMid
+	inputs[0].Diagnostic.LastWindowTwoSidedMidPrice = &lastMid
 	inputs[0].Result.EconomicReconstruction.PublicWindowDepth.TwoSidedNanos = 100
 	inputs[0].Result.EconomicReconstruction.PublicWindowDepth.BidPresentNanos = 100
 	inputs[0].Result.EconomicReconstruction.PublicWindowDepth.AskPresentNanos = 100
@@ -79,7 +85,8 @@ func TestSummarizeE0LocalReferenceRequiresWindowedIndependentNumerator(t *testin
 	inputs[0].Result.EconomicReconstruction.Market.TwoSidedNanos = 100
 	inputs[0].Result.EconomicReconstruction.Market.EmptyNanos = window.EndAt - 100
 	surface, err := SummarizeE0LocalReference(inputs)
-	if err != nil || surface.PrimaryPairs[0].OnMinusOffNanos != 100 || surface.PrimaryMaximumDeltaNanos != 100 {
+	if err != nil || surface.PrimaryPairs[0].OnMinusOffNanos != 100 || surface.PrimaryMaximumDeltaNanos != 100 ||
+		surface.Cells[0].WindowMidDriftPriceUnits == nil || *surface.Cells[0].WindowMidDriftPriceUnits != 1 {
 		t.Fatalf("valid exact-window contrast failed: %+v, %v", surface.PrimaryPairs, err)
 	}
 	inputs[0].Diagnostic.MeasurementBookDurations.TwoSidedNanos++

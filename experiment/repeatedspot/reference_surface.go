@@ -11,29 +11,33 @@ import (
 )
 
 type E0ReferenceCellSummary struct {
-	Cell                       E0Cell              `json:"cell"`
-	ResultSHA256               string              `json:"result_sha256"`
-	DiagnosticSHA256           string              `json:"diagnostic_sha256"`
-	ManifestSHA256             string              `json:"manifest_sha256"`
-	EvidenceFileSHA256         string              `json:"evidence_file_sha256"`
-	ExecutionHash              string              `json:"execution_hash"`
-	TerminalMarkStatus         string              `json:"terminal_mark_status"`
-	MakerGainSumQuoteAtoms     *string             `json:"maker_gain_sum_quote_atoms"`
-	MeasurementBookDurations   BookStateDurations  `json:"measurement_book_durations"`
-	PublicRestingDepth         RestingDepthSummary `json:"public_resting_depth"`
-	MakerOnlyRestingDepth      RestingDepthSummary `json:"maker_only_resting_depth"`
-	TradeCount                 int                 `json:"trade_count"`
-	ShadowEligibleDecisions    int64               `json:"shadow_eligible_decisions"`
-	ShadowWaitingDecisions     int64               `json:"shadow_waiting_decisions"`
-	ShadowPlacementEvaluations int64               `json:"shadow_placement_evaluations"`
-	CachedReferenceDecisions   int64               `json:"cached_reference_decisions"`
-	CachedReferenceAgeSumNanos int64               `json:"cached_reference_age_sum_ns"`
-	CachedReferenceAgeMaxNanos int64               `json:"cached_reference_age_max_ns"`
-	RunResourceSHA256          string              `json:"run_resource_sha256,omitempty"`
-	AnalysisResourceSHA256     string              `json:"analysis_resource_sha256,omitempty"`
-	PeakRunAllocatedBytes      uint64              `json:"peak_run_allocated_bytes,omitempty"`
-	PeakRunCgroupMemoryBytes   uint64              `json:"peak_run_cgroup_memory_bytes,omitempty"`
-	PeakAnalysisCgroupBytes    uint64              `json:"peak_analysis_cgroup_memory_bytes,omitempty"`
+	Cell                        E0Cell              `json:"cell"`
+	ResultSHA256                string              `json:"result_sha256"`
+	DiagnosticSHA256            string              `json:"diagnostic_sha256"`
+	ManifestSHA256              string              `json:"manifest_sha256"`
+	EvidenceFileSHA256          string              `json:"evidence_file_sha256"`
+	ExecutionHash               string              `json:"execution_hash"`
+	TerminalMarkStatus          string              `json:"terminal_mark_status"`
+	MakerGainSumQuoteAtoms      *string             `json:"maker_gain_sum_quote_atoms"`
+	MeasurementBookDurations    BookStateDurations  `json:"measurement_book_durations"`
+	PublicRestingDepth          RestingDepthSummary `json:"public_resting_depth"`
+	MakerOnlyRestingDepth       RestingDepthSummary `json:"maker_only_resting_depth"`
+	WindowSpreadPriceUnitNanos  string              `json:"window_spread_price_unit_ns"`
+	FirstWindowTwoSidedMidPrice *int64              `json:"first_window_two_sided_mid_price_units"`
+	LastWindowTwoSidedMidPrice  *int64              `json:"last_window_two_sided_mid_price_units"`
+	WindowMidDriftPriceUnits    *int64              `json:"window_two_sided_mid_drift_price_units"`
+	TradeCount                  int                 `json:"trade_count"`
+	ShadowEligibleDecisions     int64               `json:"shadow_eligible_decisions"`
+	ShadowWaitingDecisions      int64               `json:"shadow_waiting_decisions"`
+	ShadowPlacementEvaluations  int64               `json:"shadow_placement_evaluations"`
+	CachedReferenceDecisions    int64               `json:"cached_reference_decisions"`
+	CachedReferenceAgeSumNanos  int64               `json:"cached_reference_age_sum_ns"`
+	CachedReferenceAgeMaxNanos  int64               `json:"cached_reference_age_max_ns"`
+	RunResourceSHA256           string              `json:"run_resource_sha256,omitempty"`
+	AnalysisResourceSHA256      string              `json:"analysis_resource_sha256,omitempty"`
+	PeakRunAllocatedBytes       uint64              `json:"peak_run_allocated_bytes,omitempty"`
+	PeakRunCgroupMemoryBytes    uint64              `json:"peak_run_cgroup_memory_bytes,omitempty"`
+	PeakAnalysisCgroupBytes     uint64              `json:"peak_analysis_cgroup_memory_bytes,omitempty"`
 }
 
 type E0ReferenceSeedPair struct {
@@ -61,6 +65,8 @@ type E0ReferenceSurface struct {
 	PrimaryMaximumDeltaNanos int64                       `json:"primary_maximum_delta_ns"`
 	TreatmentPAGainStatus    string                      `json:"treatment_p_vs_a_gain_status"`
 	TreatmentPAGainPairs     []E0PrimaryPair             `json:"treatment_p_vs_a_gain_pairs"`
+	ControlPAGainStatus      string                      `json:"control_p_vs_a_gain_status"`
+	ControlPAGainPairs       []E0PrimaryPair             `json:"control_p_vs_a_gain_pairs"`
 	Cells                    []E0ReferenceCellSummary    `json:"cells"`
 }
 
@@ -81,7 +87,7 @@ func SummarizeE0LocalReference(inputs []E0CellArtifacts) (E0ReferenceSurface, er
 	window := E0MeasurementWindow()
 	surface := E0ReferenceSurface{SchemaVersion: 1, StudyID: "ME-015", StudyStage: "DEVELOPMENT",
 		ExpectedEconomicCells: len(registered), PrimaryContrastStatus: "ESTIMATED_DEVELOPMENT_ONLY",
-		TreatmentPAGainStatus: "NOT_IDENTIFIED"}
+		TreatmentPAGainStatus: "NOT_IDENTIFIED", ControlPAGainStatus: "NOT_IDENTIFIED"}
 	gains := make(map[E0Cell]*big.Int, len(registered))
 	for _, cell := range registered {
 		input, present := byCell[cell]
@@ -103,6 +109,7 @@ func SummarizeE0LocalReference(inputs []E0CellArtifacts) (E0ReferenceSurface, er
 			diagnostic.TradeCount != int64(replay.TradeCount) ||
 			!sameBookDurations(diagnostic.BookDurations, replay.Market) ||
 			!sameWindowedPublicDepth(diagnostic.MeasurementBookDurations, replay.PublicWindowDepth) ||
+			!validWindowPriceSummary(diagnostic) ||
 			replay.MakerWindowDepth.WindowNanos != window.EndAt-window.StartAt ||
 			replay.MakerWindowDepth.BidPresentNanos < 0 || replay.MakerWindowDepth.AskPresentNanos < 0 ||
 			replay.MakerWindowDepth.TwoSidedNanos < 0 ||
@@ -116,7 +123,14 @@ func SummarizeE0LocalReference(inputs []E0CellArtifacts) (E0ReferenceSurface, er
 			EvidenceFileSHA256: result.EvidenceFileSHA256, ExecutionHash: replay.Evidence.ExecutionHash,
 			TerminalMarkStatus: replay.TerminalMarkStatus, MeasurementBookDurations: diagnostic.MeasurementBookDurations,
 			PublicRestingDepth: replay.PublicWindowDepth, MakerOnlyRestingDepth: replay.MakerWindowDepth,
-			TradeCount: replay.TradeCount}
+			WindowSpreadPriceUnitNanos:  diagnostic.MeasurementSpreadPriceUnitNanos,
+			FirstWindowTwoSidedMidPrice: diagnostic.FirstWindowTwoSidedMidPrice,
+			LastWindowTwoSidedMidPrice:  diagnostic.LastWindowTwoSidedMidPrice,
+			TradeCount:                  replay.TradeCount}
+		if diagnostic.FirstWindowTwoSidedMidPrice != nil {
+			drift := *diagnostic.LastWindowTwoSidedMidPrice - *diagnostic.FirstWindowTwoSidedMidPrice
+			summary.WindowMidDriftPriceUnits = &drift
+		}
 		makerIDs := make(map[uint64]struct{}, 4)
 		gainSum := new(big.Int)
 		anyGain, everyGain := false, true
@@ -188,10 +202,27 @@ func SummarizeE0LocalReference(inputs []E0CellArtifacts) (E0ReferenceSurface, er
 		surface.PrimaryPairs[2].OnMinusOffNanos}
 	slices.Sort(deltas)
 	surface.PrimaryMinimumDeltaNanos, surface.PrimaryMedianDeltaNanos, surface.PrimaryMaximumDeltaNanos = deltas[0], deltas[1], deltas[2]
-	availableGainPairs := 0
+	treatmentPairs, availableTreatmentPairs := referenceMakerGainPairs("ON", byCell, gains)
+	surface.TreatmentPAGainPairs = treatmentPairs
+	if availableTreatmentPairs == len(e0LocalReferenceSeeds) {
+		surface.TreatmentPAGainStatus = "ESTIMATED_DEVELOPMENT_ONLY"
+	}
+	controlPairs, availableControlPairs := referenceMakerGainPairs("OFF", byCell, gains)
+	surface.ControlPAGainPairs = controlPairs
+	if availableControlPairs == len(e0LocalReferenceSeeds) {
+		surface.ControlPAGainStatus = "ESTIMATED_DEVELOPMENT_ONLY"
+	}
+	surface.ValidEconomicCells = len(surface.Cells)
+	return surface, nil
+}
+
+func referenceMakerGainPairs(mode string, byCell map[E0Cell]E0CellArtifacts,
+	gains map[E0Cell]*big.Int) ([]E0PrimaryPair, int) {
+	pairs := make([]E0PrimaryPair, 0, len(e0LocalReferenceSeeds))
+	available := 0
 	for _, seed := range e0LocalReferenceSeeds {
-		pureCell := E0Cell{Composition: "P", QuoteQty: e0QuoteSmall, Seed: seed, ReferenceMode: "ON"}
-		asCell := E0Cell{Composition: "A", QuoteQty: e0QuoteSmall, Seed: seed, ReferenceMode: "ON"}
+		pureCell := E0Cell{Composition: "P", QuoteQty: e0QuoteSmall, Seed: seed, ReferenceMode: mode}
+		asCell := E0Cell{Composition: "A", QuoteQty: e0QuoteSmall, Seed: seed, ReferenceMode: mode}
 		pure, as := byCell[pureCell].Result.EconomicReconstruction, byCell[asCell].Result.EconomicReconstruction
 		pair := E0PrimaryPair{Seed: seed, PureTerminalMarkStatus: pure.TerminalMarkStatus,
 			ASTerminalMarkStatus: as.TerminalMarkStatus, DeltaDenominatorMakerCount: 4}
@@ -199,16 +230,26 @@ func SummarizeE0LocalReference(inputs []E0CellArtifacts) (E0ReferenceSurface, er
 			if asGain, present := gains[asCell]; present {
 				value := new(big.Int).Sub(asGain, pureGain).String()
 				pair.DeltaNumeratorQuoteAtoms = &value
-				availableGainPairs++
+				available++
 			}
 		}
-		surface.TreatmentPAGainPairs = append(surface.TreatmentPAGainPairs, pair)
+		pairs = append(pairs, pair)
 	}
-	if availableGainPairs == len(e0LocalReferenceSeeds) {
-		surface.TreatmentPAGainStatus = "ESTIMATED_DEVELOPMENT_ONLY"
+	return pairs, available
+}
+
+func validWindowPriceSummary(diagnostic E0LiquidityDiagnostic) bool {
+	spread, parsed := new(big.Int).SetString(diagnostic.MeasurementSpreadPriceUnitNanos, 10)
+	if !parsed || spread.Sign() < 0 {
+		return false
 	}
-	surface.ValidEconomicCells = len(surface.Cells)
-	return surface, nil
+	if diagnostic.MeasurementBookDurations.TwoSidedNanos == 0 {
+		return spread.Sign() == 0 && diagnostic.FirstWindowTwoSidedMidPrice == nil &&
+			diagnostic.LastWindowTwoSidedMidPrice == nil
+	}
+	return spread.Sign() > 0 && diagnostic.FirstWindowTwoSidedMidPrice != nil &&
+		diagnostic.LastWindowTwoSidedMidPrice != nil && *diagnostic.FirstWindowTwoSidedMidPrice > 0 &&
+		*diagnostic.LastWindowTwoSidedMidPrice > 0
 }
 
 func sameWindowedPublicDepth(book BookStateDurations, depth RestingDepthSummary) bool {

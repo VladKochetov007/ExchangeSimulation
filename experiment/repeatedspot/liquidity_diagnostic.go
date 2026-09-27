@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"math/big"
 	"sort"
 
 	worldspot "exchange_sim/simulations/repeatedspot"
@@ -43,19 +44,22 @@ type BookStateDurations struct {
 }
 
 type E0LiquidityDiagnostic struct {
-	Evidence                   EvidenceIdentity        `json:"evidence"`
-	MeasurementStartNanos      int64                   `json:"measurement_start_ns"`
-	MeasurementEndNanos        int64                   `json:"measurement_end_ns"`
-	WorldEndNanos              int64                   `json:"world_end_ns"`
-	FirstPermanentEmptyNanos   *int64                  `json:"first_permanent_empty_ns,omitempty"`
-	LastTwoSidedEndNanos       *int64                  `json:"last_two_sided_end_ns,omitempty"`
-	FirstTradeNanos            *int64                  `json:"first_trade_ns,omitempty"`
-	LastTradeNanos             *int64                  `json:"last_trade_ns,omitempty"`
-	TradeCount                 int64                   `json:"trade_count"`
-	BookDurations              BookStateDurations      `json:"book_durations"`
-	MeasurementBookDurations   BookStateDurations      `json:"measurement_book_durations"`
-	ShadowReferenceMaxAgeNanos int64                   `json:"shadow_reference_max_age_ns,omitempty"`
-	Makers                     []MakerLiquidityActions `json:"makers"`
+	Evidence                        EvidenceIdentity        `json:"evidence"`
+	MeasurementStartNanos           int64                   `json:"measurement_start_ns"`
+	MeasurementEndNanos             int64                   `json:"measurement_end_ns"`
+	WorldEndNanos                   int64                   `json:"world_end_ns"`
+	FirstPermanentEmptyNanos        *int64                  `json:"first_permanent_empty_ns,omitempty"`
+	LastTwoSidedEndNanos            *int64                  `json:"last_two_sided_end_ns,omitempty"`
+	FirstTradeNanos                 *int64                  `json:"first_trade_ns,omitempty"`
+	LastTradeNanos                  *int64                  `json:"last_trade_ns,omitempty"`
+	TradeCount                      int64                   `json:"trade_count"`
+	BookDurations                   BookStateDurations      `json:"book_durations"`
+	MeasurementBookDurations        BookStateDurations      `json:"measurement_book_durations"`
+	MeasurementSpreadPriceUnitNanos string                  `json:"measurement_spread_price_unit_ns"`
+	FirstWindowTwoSidedMidPrice     *int64                  `json:"first_window_two_sided_mid_price_units,omitempty"`
+	LastWindowTwoSidedMidPrice      *int64                  `json:"last_window_two_sided_mid_price_units,omitempty"`
+	ShadowReferenceMaxAgeNanos      int64                   `json:"shadow_reference_max_age_ns,omitempty"`
+	Makers                          []MakerLiquidityActions `json:"makers"`
 }
 
 // DiagnoseE0LiquidityEvidence reconstructs exchange book-state durations and
@@ -78,6 +82,7 @@ func DiagnoseE0LiquidityEvidenceWithReference(input io.Reader, identity Evidence
 	var series *publicBookSeries
 	worldEnded := false
 	var lastWindowAt int64
+	var measurementSpread big.Int
 	accrueWindow := func(at int64) error {
 		if at < lastWindowAt {
 			return errors.New("repeated spot: diagnostic event time regressed")
@@ -89,9 +94,20 @@ func DiagnoseE0LiquidityEvidenceWithReference(input io.Reader, identity Evidence
 			return nil
 		}
 		duration := until - from
+		bid, _ := bestVisible(series.bids, true)
+		ask, _ := bestVisible(series.asks, false)
 		switch publicBookState(series) {
 		case "two_sided":
+			if bid >= ask {
+				return errors.New("repeated spot: crossed public book in measurement window")
+			}
 			result.MeasurementBookDurations.TwoSidedNanos += duration
+			measurementSpread.Add(&measurementSpread, new(big.Int).Mul(big.NewInt(ask-bid), big.NewInt(duration)))
+			mid := bid + (ask-bid)/2
+			if result.FirstWindowTwoSidedMidPrice == nil {
+				result.FirstWindowTwoSidedMidPrice = int64Pointer(mid)
+			}
+			result.LastWindowTwoSidedMidPrice = int64Pointer(mid)
 		case "bid_only":
 			result.MeasurementBookDurations.BidOnlyNanos += duration
 		case "ask_only":
@@ -264,6 +280,7 @@ func DiagnoseE0LiquidityEvidenceWithReference(input io.Reader, identity Evidence
 		TwoSidedNanos: market.TwoSidedNanos, BidOnlyNanos: market.BidOnlyNanos,
 		AskOnlyNanos: market.AskOnlyNanos, EmptyNanos: market.EmptyNanos}
 	measured := result.MeasurementBookDurations
+	result.MeasurementSpreadPriceUnitNanos = measurementSpread.String()
 	if measured.TwoSidedNanos+measured.BidOnlyNanos+measured.AskOnlyNanos+measured.EmptyNanos != measured.HorizonNanos {
 		return E0LiquidityDiagnostic{}, errors.New("repeated spot: incomplete measurement book-state duration")
 	}

@@ -60,6 +60,22 @@ func TestDiagnoseE0LiquidityEvidenceTracksFinalEmptyStreakAndMakerGate(t *testin
 	if len(diagnostic.Makers) != 1 {
 		t.Fatalf("maker count: %+v", diagnostic.Makers)
 	}
+	if diagnostic.MeasurementSpreadPriceUnitNanos != "0" ||
+		diagnostic.FirstWindowTwoSidedMidPrice != nil || diagnostic.LastWindowTwoSidedMidPrice != nil {
+		t.Fatalf("one-sided measurement window acquired an invented spread or midpoint: %+v", diagnostic)
+	}
+	withTwoSidedWindow, err := DiagnoseE0LiquidityEvidence(bytes.NewReader(stream.Bytes()), identity,
+		MeasurementWindow{StartAt: 2, EndAt: 10}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if withTwoSidedWindow.MeasurementSpreadPriceUnitNanos != "6" ||
+		withTwoSidedWindow.FirstWindowTwoSidedMidPrice == nil ||
+		*withTwoSidedWindow.FirstWindowTwoSidedMidPrice != 101 ||
+		withTwoSidedWindow.LastWindowTwoSidedMidPrice == nil ||
+		*withTwoSidedWindow.LastWindowTwoSidedMidPrice != 101 {
+		t.Fatalf("windowed spread/midpoint reconstruction failed: %+v", withTwoSidedWindow)
+	}
 	maker := diagnostic.Makers[0]
 	if maker.BeforeMeasurement["evaluate_placements"] != 1 ||
 		maker.DuringMeasurement["cancel_quotes"] != 1 || maker.DuringMeasurement["no_usable_quote"] != 1 ||
@@ -105,7 +121,8 @@ func TestDiagnoseShadowReferenceEligibilityInBothPolicyArms(t *testing.T) {
 		ActorID: 2, Kind: "snapshot", ProcessedAt: 4, SourceAt: 3,
 		SourceSequence: 12, Symbol: "ABC/USD", BestBid: 99})
 	for _, decision := range []worldspot.MakerDecision{
-		{ActorID: 2, DecisionAt: 5, BestBid: 99, Action: "evaluate_placements", ReferenceMode: "cached_two_sided"},
+		{ActorID: 2, DecisionAt: 5, BestBid: 99, Action: "evaluate_placements", ReferenceMode: "cached_two_sided",
+			ReferenceMid: 100, ReferenceSourceAt: 1, ReferenceSequence: 11},
 		{ActorID: 2, DecisionAt: 6, BestBid: 99, Action: "await_response"},
 		{ActorID: 2, DecisionAt: 16, BestBid: 99, Action: "no_usable_quote"},
 	} {
@@ -123,7 +140,8 @@ func TestDiagnoseShadowReferenceEligibilityInBothPolicyArms(t *testing.T) {
 	}
 	if len(result.Makers) != 1 || result.Makers[0].ShadowEligibleDecisions != 2 ||
 		result.Makers[0].ShadowWaitingDecisions != 1 || result.Makers[0].ShadowEvaluations != 1 ||
-		result.Makers[0].CachedReferenceDecisions != 1 || result.MeasurementBookDurations.BidOnlyNanos != 16 {
+		result.Makers[0].CachedReferenceDecisions != 1 || result.Makers[0].CachedReferenceAgeSum != 4 ||
+		result.Makers[0].CachedReferenceAgeMax != 4 || result.MeasurementBookDurations.BidOnlyNanos != 16 {
 		t.Fatalf("shadow denominator confused activity with eligibility or counted expiry: %+v", result)
 	}
 }
