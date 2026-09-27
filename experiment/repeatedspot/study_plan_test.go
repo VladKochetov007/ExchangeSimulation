@@ -1,7 +1,10 @@
 package repeatedspot
 
 import (
+	"bytes"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -12,6 +15,45 @@ func syntheticE0Identity() executionpilot.Identity {
 	return executionpilot.Identity{SourceCommit: strings.Repeat("a", 40), SourceTree: strings.Repeat("b", 40),
 		SimulatorSHA256: strings.Repeat("c", 64), AnalyzerSHA256: strings.Repeat("d", 64),
 		Toolchain: "go1.27.0", EvidenceSchemaID: EvidenceSchemaID}
+}
+
+func TestE0PublishedPlanRoundTripsIntoRunVerifier(t *testing.T) {
+	cell := E0Cell{Composition: "P", QuoteQty: e0QuoteSmall, Seed: e0DevelopmentSeeds[0]}
+	identity := syntheticE0Identity()
+	plan, err := LockE0Plan(cell, identity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "plan.json")
+	if err := writeE0ExclusiveJSON(path, plan); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, rawDigest, err := DecodeE0Plan(raw)
+	if err != nil || rawDigest == "" || decoded.TypedPlanSHA256 != plan.TypedPlanSHA256 {
+		t.Fatalf("published plan lost its identities: %v", err)
+	}
+	world, err := VerifyE0Plan(decoded, identity)
+	if err != nil {
+		t.Fatalf("writer-produced plan could not pass the runner's verifier: %v", err)
+	}
+	if !bytes.Equal(decoded.EffectiveWorld, world.ContractJSON()) {
+		t.Fatal("decoded plan retained noncanonical contract bytes for replay")
+	}
+	manifest := E0RunManifest{SchemaVersion: 1, Cell: cell, PlanRawSHA256: rawDigest,
+		TypedPlanSHA256: decoded.TypedPlanSHA256, Identity: identity,
+		ContractSHA256: world.ContractSHA256(), Evidence: EvidenceIdentity{SchemaID: EvidenceSchemaID},
+		SidecarSHA256: make(map[string]string)}
+	for _, name := range e0Sidecars {
+		manifest.SidecarSHA256[name] = strings.Repeat("a", 64)
+	}
+	if err := verifyE0Manifest(decoded, rawDigest, identity, manifest); err != nil {
+		t.Fatalf("writer-produced plan could not verify the runner's canonical manifest: %v", err)
+	}
+	world.Close()
 }
 
 func TestE0PlanBindsCellWorldWindowAndToolchain(t *testing.T) {
