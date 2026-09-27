@@ -79,6 +79,13 @@ func DecodeE0Plan(raw []byte) (E0LockedPlan, string, error) {
 	if len(plan.EffectiveWorld) == 0 || plan.TypedPlanSHA256 == "" {
 		return E0LockedPlan{}, "", errors.New("repeated spot: incomplete E0 plan")
 	}
+	// The plan writer may indent RawMessage; downstream contract hashes and
+	// replay must use the world's canonical bytes, not presentation whitespace.
+	var canonicalWorld bytes.Buffer
+	if err := json.Compact(&canonicalWorld, plan.EffectiveWorld); err != nil {
+		return E0LockedPlan{}, "", fmt.Errorf("repeated spot: invalid effective world JSON: %w", err)
+	}
+	plan.EffectiveWorld = canonicalWorld.Bytes()
 	hash := sha256.Sum256(raw)
 	return plan, hex.EncodeToString(hash[:]), nil
 }
