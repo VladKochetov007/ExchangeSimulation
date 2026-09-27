@@ -1,0 +1,38 @@
+# E0 independent evidence checkpoint — development mechanics only
+
+Code candidate: `985f10790695cafb62077bc638db9b1fd0ad27fd`. Its exact source/config tree remains a development candidate, not a preregistered economic run.
+
+The new `experiment/repeatedspot` package records a single ordered E0 stream using the existing canonical `evstream` container (`repeated-spot-opaque-v1`, epoch `0x45300001`). It does **not** change matching, fees, a participant's information set, or the historical binary/JSON evidence identities. The one-book assembly contract advances to schema 2 because its optional public-snapshot projection flag is now explicit. The E0 draft enables that measurement flag; earlier historical research was not rerun or relabeled.
+
+The working hypothesis for this checkpoint was mechanical: a repeated spot world can be scored from recorded exchange and participant boundaries rather than from mutable simulator summaries. The cheapest falsifiers were one synthetic three-client execution and streams whose hash/trailer were recomputed after semantic corruption. This is verification tier A for the encoded ledger and receipt contract, not external-validity evidence for market ecology.
+
+## Source-to-evidence path
+
+`NewCapture` requires a fresh deterministic delayed-gateway world, a binary output writer, and the existing market-data receipt recorder. It refuses to overwrite an existing venue logger and requires public-snapshot projection. Before `World.Run`, it records the immutable world-contract SHA-256 and one balance snapshot per endowed client. During the run it records exchange order/book/trade/fill/balance/fee events, maker decisions including no-action ticks, and maker-processed snapshot/trade observations. After the runner stops it records the run boundary, final balances, and one public terminal book. The existing receipt recorder independently captures courier schedules, inbox deliveries, and outgoing placement decisions. A failed run or receipt finalization produces a failure event; a complete trailer alone is never treated as an economic verdict.
+
+`Replay` checks the contract digest, strict nested JSON, the stream epoch/hash/count/trailer, control ordering and exact scheduled end, every opening/closing balance snapshot, and each spot settlement against the original endowment. A trade must have exactly two prior spot-settlement legs and two following fills anchored to accepted orders. Quantity, side, price, client/order/trade identity, base/quote cash arithmetic, charged-asset fees, fee-revenue events, venue fee ledger, and per-asset conservation must agree. It computes the notional independently with a big-integer intermediate rather than calling the venue's `MulDiv`. Borrowing and non-spot accounting are outside this E0 contract and fail closed instead of being ignored.
+
+For each maker, processed observations must match the earlier venue-published public snapshot or trade, then an actual delayed-feed receipt with the same message fingerprint and sequence at or before processing. Decisions must agree with the latest *processed* local snapshot, be no earlier than their scheduled tick, and respect the declared pending-inclusive working limit. The pre-existing independent receipt auditor verifies the whole schedule→receipt→placement frontier sidecars; the E0 reader performs a second bounded pass to join no-action/processed observations that the outgoing-placement audit does not cover. This tests the information boundary, not the economic quality of the maker's quote policy.
+
+The first trade's `trade_id` and the first published snapshot's `source_sequence` can legitimately be zero. The synthetic fixture exposed both; the analyzer treats zero as an identity, not a missing-value sentinel. A missing field is still rejected where the schema requires it.
+
+The provisional terminal mark is the midpoint of the **public, positive-price, strictly two-sided** terminal book. In quote fixed-point units, the reported passive-endowment-relative trading gain is
+
+`G = (C_T − C_0) + trunc[(B_T − B_0) P_T / base_precision]`.
+
+The cash change already contains charged fees. This is not an executable liquidation value, a return on allocated capital, or a claim that aggregate marked wealth is conserved. If the public terminal book is one-sided or empty, the mark and every mark-dependent gain are `UNAVAILABLE_ONE_SIDED_OR_EMPTY`, not zero; the world remains a recorded outcome. A future locked E0 protocol must decide whether this strict midpoint is the primary valuation convention and specify any executable exit-cost sensitivity *before* economic results.
+
+## Verification and limits
+
+Focused synthetic tests exercise a real exchange fill with a nonzero quote-asset fee and venue posting, receipt audit, snapshot/trade fingerprint join, independent replay, one-sided terminal valuation, same-process economic-state neutrality, and byte-identical fresh-process evidence controls. Mutations with newly computed stream hashes reject missing/reordered settlement, wrong fee, duplicate fill, altered terminal account, fabricated maker source/view, altered public depth with unchanged best price, and false completion. Raw byte corruption, truncation, wrong hash/count, duplicate JSON keys, and an unencodable event also fail closed. These are fixtures, **not** E0 economic worlds or additional research seeds.
+
+The exact code candidate passed a clean `GOMAXPROCS=4 GOFLAGS=-p=2 make test` from a detached checkout at `985f107` using Go 1.27.0, `go vet ./...`, and targeted `go test -race ./experiment/repeatedspot ./simulations/repeatedspot ./actor -count=1`. The corresponding pre-commit `make test` had all Go and integrated contract tests pass but the repository parity target correctly rejected the dirty worktree; only the clean checkout is counted as the full gate. Reproduce the focused replay and mutation checks with `go test ./experiment/repeatedspot -count=1`. The synthetic test-generated sidecars are not retained research evidence.
+
+Still missing before an E0 economic cell:
+
+1. A locked executable E0 protocol and source/config/toolchain/binary/evidence manifest. The draft 55-minute roster is not a registered cell; no seed identifiers have been assigned here.
+2. Independent replay of the maker's AS quote/variance arithmetic across delivered history, and a production-path opportunity/action/depth/time-series estimator sufficient for the primary inventory/wealth contrast. Current focused quote tests are not a full economic estimator.
+3. A measured capacity preflight for the actual binary-evidence E0 path, with peak staging and host headroom. No 55-minute output size is inferred from the 12-second fixture.
+4. A bounded independent mechanics/economic review of the exact candidate and prospective causal design. The earlier Sol-6 medium launches returned `agent thread limit reached`; execution was `UNAVAILABLE`, verdict `NOT_ISSUED`. No reviewer has issued a verdict on this evidence commit. Under the owner's recorded fallback, a later *exploratory development* cell may proceed without a review only after the other gates pass and with **UNREVIEWED DEVELOPMENT** clearly attached; confirmation remains blocked until substantive review.
+
+No E0, E1, E2, confirmation, or historical holdout world was launched by this checkpoint. Do not promote a passing software replay into a profitability, stationary-market, or empirical-realism claim. The next discriminating step is a bounded estimator/contract fixture, then a pinned preflight and development protocol; it is not another parameter search for a favorable result.

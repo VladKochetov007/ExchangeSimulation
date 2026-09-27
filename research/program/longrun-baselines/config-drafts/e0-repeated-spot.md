@@ -2,6 +2,8 @@
 
 This is a prospective *human-readable contract*, not a JSON/YAML accepted by a runner. Do not place it in `configs/`, infer seeds, or launch worlds from it. Source inspected at `ef61b4cb6e0124aa797f281e379ab143e847646e`; no current builder represents this roster exactly. [Readiness](../readiness.json) and [plan](../plan.md) control what must be built/tested first.
 
+Development implementation note: the later `DraftE0Config` adapter now represents the roster mechanically and enables public-snapshot projection solely for the [E0 evidence replay](../e0-evidence-checkpoint-20260927.md). This does not turn the values below into a locked executable protocol, or make the full economic estimator/run capacity ready.
+
 | Item | Proposed value and interpretation |
 |---|---|
 | Venue / contract | One ABC/USD FIFO price-time spot book, USD numeraire; 1 USD price tick; 0.001 ABC minimum order; positive-price domain for maker mid and return estimators. No perp, futures, options, index-anchored quote, funding or borrow. |
