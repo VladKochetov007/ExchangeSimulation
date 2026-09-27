@@ -336,4 +336,16 @@ func (audit *tradeAudit) checkTrade(record *tradeRecord, state *replayState) err
 	return nil
 }
 
+func (audit *tradeAudit) totals() (string, string) {
+	volume := big.NewInt(0)
+	notional := big.NewInt(0)
+	for _, record := range audit.trades {
+		volume.Add(volume, big.NewInt(record.trade.Qty))
+		tradeNotional := new(big.Int).Mul(big.NewInt(record.trade.Qty), big.NewInt(record.trade.Price))
+		tradeNotional.Quo(tradeNotional, big.NewInt(audit.instrument.BasePrecision))
+		notional.Add(notional, tradeNotional)
+	}
+	return volume.String(), notional.String()
+}
+
 func validSide(side string) bool { return side == "BUY" || side == "SELL" }

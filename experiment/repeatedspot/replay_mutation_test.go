@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"exchange_sim/simulation"
 	worldspot "exchange_sim/simulations/repeatedspot"
@@ -115,6 +116,15 @@ func TestIndependentReplayRejectsRehashedSemanticCorruption(t *testing.T) {
 		"missing settlement": func(t *testing.T, events []Event) []Event {
 			index := firstEvent(t, events, "balance_change")
 			return append(events[:index], events[index+1:]...)
+		},
+		"missing final public book delta": func(t *testing.T, events []Event) []Event {
+			for index := len(events) - 1; index >= 0; index-- {
+				if events[index].Name == "BookDelta" {
+					return append(events[:index], events[index+1:]...)
+				}
+			}
+			t.Fatal("fixture lacks a public book delta")
+			return nil
 		},
 		"reordered settlement": func(t *testing.T, events []Event) []Event {
 			trade := firstEvent(t, events, "Trade")
@@ -330,9 +340,8 @@ func TestIndependentReplayReconstructsProductionStoikovQuote(t *testing.T) {
 }
 
 func TestIndependentReplayKeepsOneSidedTerminalMarkUnavailable(t *testing.T) {
-	contract, events, directory := capturedFixture(t)
-	index := firstEvent(t, events, "terminal_book")
-	replacePayloadField(t, &events[index], "asks", []any{})
+	contract, events, directory := capturedFixtureWorld(t,
+		fixtureWorldWithBook(t, true, false, 1, 20*time.Second))
 	report, err := replayMutated(t, contract, events, directory)
 	if err != nil {
 		t.Fatal(err)

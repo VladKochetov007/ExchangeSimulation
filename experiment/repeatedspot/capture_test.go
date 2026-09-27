@@ -38,13 +38,17 @@ func fixtureWorldWithAggression(t *testing.T, enabled bool) *worldspot.World {
 }
 
 func fixtureWorldWithMaker(t *testing.T, enabled, stoikov bool) *worldspot.World {
+	return fixtureWorldWithBook(t, enabled, stoikov, 2, 2*time.Second)
+}
+
+func fixtureWorldWithBook(t *testing.T, enabled, stoikov bool, seedAskQty int64, quoteInterval time.Duration) *worldspot.World {
 	t.Helper()
-	seed, err := worldspot.NewSeedOncePolicy(worldspot.SeedOnceConfig{Symbol: "ABC/USD", BidPrice: 99, AskPrice: 101, BidQty: 2, AskQty: 2})
+	seed, err := worldspot.NewSeedOncePolicy(worldspot.SeedOnceConfig{Symbol: "ABC/USD", BidPrice: 99, AskPrice: 101, BidQty: 2, AskQty: seedAskQty})
 	if err != nil {
 		t.Fatal(err)
 	}
 	makerConfig := worldspot.RecurringMakerConfig{Symbol: "ABC/USD", QuoteQty: 1, MinQuoteQty: 1,
-		WorkingLimit: 5, TickSize: 1, QuoteInterval: 2 * time.Second,
+		WorkingLimit: 5, TickSize: 1, QuoteInterval: quoteInterval,
 		InitialLogVariancePerSecond: 1e-8, VolatilityHalfLife: 4 * time.Second,
 		VolatilitySampleInterval: time.Second, MaxLogVarianceMultiple: 4}
 	var maker worldspot.PolicyDefinition
@@ -135,6 +139,12 @@ func TestCaptureProductionPathAndInformationSidecars(t *testing.T) {
 	}
 	if replay.TradeCount != 1 || len(replay.Accounts) != 3 || replay.TerminalMarkStatus == "" || replay.VenueFeeRevenue["USD"] != 1 {
 		t.Fatalf("incomplete independent economic replay: %+v", replay)
+	}
+	market := replay.Market
+	if market.HorizonNanos != 12*int64(time.Second) || market.PublicSnapshotMessages == 0 ||
+		market.TradeVolumeBaseUnits != "1" || market.TradeNotionalQuoteUnits != "101" ||
+		market.TwoSidedNanos+market.BidOnlyNanos+market.AskOnlyNanos+market.EmptyNanos != market.HorizonNanos {
+		t.Fatalf("incomplete or nonpartitioned time-weighted market evidence: %+v", market)
 	}
 }
 

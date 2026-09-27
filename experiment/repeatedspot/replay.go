@@ -62,6 +62,7 @@ type EconomicReplay struct {
 	TerminalMarkStatus string                           `json:"terminal_mark_status"`
 	TerminalMidQuote   *int64                           `json:"terminal_mid_quote,omitempty"`
 	InformationAudit   *analysis.MarketDataReceiptAudit `json:"information_audit"`
+	Market             MarketSummary                    `json:"market"`
 }
 
 type accountState struct {
@@ -91,6 +92,7 @@ type replayState struct {
 	terminalBook        bool
 	terminalMid         *int64
 	markStatus          string
+	market              *publicBookSeries
 	trades              *tradeAudit
 	publicSnapshots     map[uint64]publicSnapshot
 	makerObservations   []makerObservationRecord
@@ -117,7 +119,9 @@ func Replay(contractBytes []byte, stream io.Reader, identity EvidenceIdentity, r
 		return nil, err
 	}
 	if contract.SchemaVersion != 2 || contract.VenueID == "" || contract.Instrument.Symbol == "" || !contract.RecordSnapshotProjectionEvidence ||
-		contract.Instrument.BasePrecision <= 0 || contract.Instrument.BaseAsset == "" || contract.Instrument.QuoteAsset == "" ||
+		contract.Instrument.BasePrecision <= 0 || contract.Instrument.QuotePrecision <= 0 ||
+		contract.Instrument.TickSize <= 0 || contract.Instrument.MinOrderSize <= 0 ||
+		contract.Instrument.BaseAsset == "" || contract.Instrument.QuoteAsset == "" ||
 		contract.StartUnixNano < 0 || contract.Step <= 0 || contract.Iterations <= 0 || !contract.ForbidBorrowing ||
 		len(contract.Participants) == 0 || int64(contract.Iterations) > (math.MaxInt64-contract.StartUnixNano)/contract.Step {
 		return nil, errors.New("repeated spot: unsupported or invalid E0 contract")
@@ -125,6 +129,7 @@ func Replay(contractBytes []byte, stream io.Reader, identity EvidenceIdentity, r
 	hash := sha256.Sum256(contractBytes)
 	state := &replayState{contract: contract, contractHash: hex.EncodeToString(hash[:]), phase: "before_begin",
 		accounts: make(map[uint64]*accountState), venue: make(map[string]int64), trades: newTradeAudit(contract.Instrument),
+		market:          newPublicBookSeries(contract.StartUnixNano, contract.Instrument.TickSize),
 		publicSnapshots: make(map[uint64]publicSnapshot), latestMakerSnapshot: make(map[uint64]worldspot.MakerObservation)}
 	for _, participant := range contract.Participants {
 		if participant.ClientID == 0 || participant.ActorID == 0 || participant.Role == "" || state.accounts[participant.ClientID] != nil {
@@ -178,9 +183,14 @@ func Replay(contractBytes []byte, stream io.Reader, identity EvidenceIdentity, r
 	if err := state.verifyMakerReceipts(receiptDir); err != nil {
 		return nil, err
 	}
+	market := state.market.summary()
+	tradeVolume, tradeNotional := state.trades.totals()
+	market.TradeVolumeBaseUnits = tradeVolume
+	market.TradeNotionalQuoteUnits = tradeNotional
 	report := &EconomicReplay{ContractSHA256: state.contractHash, Evidence: identity,
 		VenueFeeRevenue: copyBalances(state.venue), TradeCount: len(state.trades.trades),
-		TerminalMarkStatus: state.markStatus, TerminalMidQuote: state.terminalMid, InformationAudit: info}
+		TerminalMarkStatus: state.markStatus, TerminalMidQuote: state.terminalMid, InformationAudit: info,
+		Market: market}
 	ids := make([]uint64, 0, len(state.accounts))
 	for clientID := range state.accounts {
 		ids = append(ids, clientID)
@@ -241,6 +251,10 @@ func (state *replayState) visit(event Event) error {
 			if err := state.publicSnapshot(event); err != nil {
 				return err
 			}
+		} else if event.Name == "BookDelta" {
+			if err := state.publicDelta(event); err != nil {
+				return err
+			}
 		}
 		return state.trades.visit(event)
 	default:
@@ -280,7 +294,8 @@ func (state *replayState) control(event Event) error {
 		}
 		state.phase = "closing_snapshots"
 	case "terminal_book":
-		if state.phase != "closing_snapshots" || state.terminalBook {
+		if state.phase != "closing_snapshots" || state.terminalBook ||
+			event.Timestamp != state.contract.StartUnixNano+int64(state.contract.Iterations)*state.contract.Step {
 			return errors.New("repeated spot: duplicate or misplaced terminal book")
 		}
 		for _, account := range state.accounts {
@@ -288,7 +303,7 @@ func (state *replayState) control(event Event) error {
 				return errors.New("repeated spot: terminal account snapshot missing before book")
 			}
 		}
-		if err := state.readTerminalBook(event.Payload); err != nil {
+		if err := state.readTerminalBook(event.Timestamp, event.Payload); err != nil {
 			return err
 		}
 		state.terminalBook = true
@@ -500,8 +515,26 @@ func (state *replayState) publicSnapshot(event Event) error {
 	if duplicate {
 		return errors.New("repeated spot: missing or duplicate public snapshot projection")
 	}
+	if err := state.market.verifySnapshot(event.Timestamp, snapshot.PublicBids, snapshot.PublicAsks); err != nil {
+		return err
+	}
 	state.publicSnapshots[snapshot.SourceSequence] = publicSnapshot{event.Timestamp, snapshot.PublicBids, snapshot.PublicAsks}
 	return nil
+}
+
+func (state *replayState) publicDelta(event Event) error {
+	var delta struct {
+		Side       string `json:"side"`
+		Price      int64  `json:"price"`
+		VisibleQty int64  `json:"visible_qty"`
+		HiddenQty  int64  `json:"hidden_qty"`
+		TotalQty   int64  `json:"total_qty"`
+	}
+	if err := decodePayload(event.Payload, &delta); err != nil {
+		return err
+	}
+	return state.market.delta(event.Timestamp, delta.Side, delta.Price,
+		delta.VisibleQty, delta.HiddenQty, delta.TotalQty)
 }
 
 func firstLevelPrice(levels []types.PriceLevel) int64 {
@@ -520,7 +553,7 @@ func validMakerAction(action string) bool {
 	}
 }
 
-func (state *replayState) readTerminalBook(payload json.RawMessage) error {
+func (state *replayState) readTerminalBook(at int64, payload json.RawMessage) error {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(payload, &fields); err != nil {
 		return err
@@ -540,6 +573,9 @@ func (state *replayState) readTerminalBook(payload json.RawMessage) error {
 	}
 	if book.Symbol != state.contract.Instrument.Symbol {
 		return errors.New("repeated spot: terminal book symbol mismatch")
+	}
+	if err := state.market.verifyTerminal(at, book.Bids, book.Asks); err != nil {
+		return err
 	}
 	for index, level := range book.Bids {
 		if level.Price <= 0 || level.VisibleQty <= 0 || level.HiddenQty < 0 || index > 0 && level.Price >= book.Bids[index-1].Price {
