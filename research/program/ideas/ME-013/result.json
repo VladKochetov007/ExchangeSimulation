@@ -1,0 +1,119 @@
+{
+  "schema_version": 1,
+  "study_id": "ME-013",
+  "stage": "REPORT",
+  "process_status": "COMPLETED",
+  "evidence_validity": "VALID",
+  "opportunity_presence": "UNKNOWN",
+  "policy_activity": "ACTIVE",
+  "registered_activation": "NOT_APPLICABLE",
+  "scientific_verdict": "IDENTIFICATION_LIMITATION",
+  "causal_verdict": "NOT_IDENTIFIED",
+  "empirical_comparison": "NOT_PERFORMED",
+  "reasons": [
+    "All 24 preregistered development cells and two technical controls completed from clean source C3 and passed strict pinned replay. One earlier C2 attempt failed before World.Run and is retained separately, not counted as an economic world.",
+    "In all 24 cells, the public book became permanently empty by simulated second 16–36, before the registered 10-minute observation start; all terminal books lack a strict two-sided midpoint.",
+    "The registered primary P-minus-A fee-net passive-endowment gain is undefined in all three seed pairs at the 0.1-ABC quote size. Missing gains are not zero gains, losses, or evidence of policy equivalence.",
+    "Every maker made early placement decisions and the venue traded, but no maker placement evaluation or resting bid/ask side-time occurred in the 45-minute observation window. Corrected retained-event diagnostics count 540 no-usable-quote decisions per maker inside the exclusive window and one further end-tick decision outside it.",
+    "A post-result reviewer rejected the version-2 diagnostic's inclusive-end count. Version 3 repaired and rescored only the diagnostic from the same immutable streams; the same reviewer accepted the correction, and an independent economic reviewer accepted the bounded non-identification interpretation. No confirmation or holdout was performed."
+  ],
+  "identities": {
+    "source": "17b9e8a05415dcee05130b09a4a478d458c314c9; tree 1eabae0484e5afd97c687a07470980e74d1e0a03; Go 1.27.0",
+    "configuration": "ME-013 r1 fixed 24-cell P/A/M1/M2 × 0.1/0.2 ABC × 18001/18011/18017; each locked plan's raw and typed digests are bound by the per-cell manifest SHA256 indexed in surface.json",
+    "run": "/home/vlad/e0-development-17b9e8a-zNbB8W; 24 strict replay results and two technical controls indexed by surface.json SHA256 e6ba67807f6f4a0bb2555fced1fd78b96df6dde2ebc773c75cd525daefa52d93",
+    "analyzer": "C3 mespotanalyze SHA256 2dcf1506875f62941647748761835162cee76def66da3a844b89e612ca6a3ae6; corrected offline diagnostic/aggregate source e2491ebfbdb2129d42f48ca5eaa005f6ee59b876 and mespotdiagnose SHA256 70aa941f02b74a4e876ccc1b49d57993a157d147d142179db5dec87fe81c5094",
+    "protocol": "research/program/ideas/ME-013/protocol.md SHA256 23ff88ac2d87c7394524ee39f46fe86e0a9ced09399beeb51f36f2f649153f7c; prospective C3 protocol and later operational C2/C3 amendment preserved",
+    "skill_commit": "5d036c3ef8f470dcb84e1d392c0ebac69f95af14",
+    "skill_tree": "60b91e73f1000a285e003bed122648636a737b2d"
+  },
+  "authorization": {
+    "prepare": true,
+    "run": false,
+    "basis": "Owner 2026-09-27 long-run E0/E1/E2 authorization and the prospectively fixed ME-013 r1 protocol authorized the 24 development cells and two technical controls after gates. They are complete; the r1 matrix is exhausted. The broader E0 ceiling is not authorization to rerun or alter this r1 result. Confirmation and historical holdouts were not authorized."
+  },
+  "review": {
+    "execution": "COMPLETED",
+    "verdict": "ACCEPT",
+    "scope": "Sol-6 medium independent mechanics reviewer rejected the first post-result diagnostic count, then accepted exact e2491ebf after complete retained-evidence v3 rescore and boundary regression. A separate Sol-6 medium economic reviewer accepted only the bounded E0-r1 survival/non-identification interpretation and its carry-forward after correction. Neither ran worlds or certified empirical realism.",
+    "reference": "research/program/reviews/me013-r1-result-20260927.md"
+  },
+  "observed": {
+    "economic_cells_valid": 24,
+    "technical_duplicates": 2,
+    "invalid_pre_start_attempts": 1,
+    "primary_available_pairs": 0,
+    "registered_primary_status": "NOT_IDENTIFIED",
+    "horizon_simulated_seconds": 3300,
+    "observation_window_simulated_seconds": [600, 3300],
+    "final_permanent_empty_onset_simulated_seconds": [16, 36],
+    "terminal_marks_available": 0,
+    "maker_placement_evaluations_in_window_all_cells": 0,
+    "maker_resting_side_actor_nanos_in_window_all_cells": 0,
+    "no_usable_quote_decisions_per_cell_in_window": 2160,
+    "rejected_version_2_surface_sha256": "5286241dda92fb9ec326bd14dcfca9090738db28ac89b734ea36b11cf24828cd",
+    "corrected_surface": "research/program/ideas/ME-013/surface.json",
+    "corrected_surface_sha256": "e6ba67807f6f4a0bb2555fced1fd78b96df6dde2ebc773c75cd525daefa52d93"
+  },
+  "claims": [
+    {
+      "id": "ME013-M1",
+      "type": "MECHANICAL",
+      "text": "All 24 assigned economic processes produced valid strict replay results; the two worker-count controls reproduced the first cell's manifest and analyzed result byte-for-byte.",
+      "evidence_ids": ["ME013-E1", "ME013-E2"],
+      "limitations": ["Technical duplicates are not independent economic worlds; process and replay success do not imply market realism."]
+    },
+    {
+      "id": "ME013-D1",
+      "type": "DESCRIPTIVE",
+      "text": "In every registered r1 world the public ABC/USD book became permanently empty by simulated second 36, before the fixed 600-second observation start, and ended without a two-sided mark.",
+      "evidence_ids": ["ME013-E1", "ME013-E3"],
+      "limitations": ["This describes three development seeds, two sizes and the specified P/A/mixed rosters; it does not establish universal finite-maker failure or a unique cause of initial depletion."]
+    },
+    {
+      "id": "ME013-A1",
+      "type": "ACTIVATION",
+      "text": "The venue traded early and makers continued scheduled decisions, but makers had zero placement evaluations and zero resting side-time in the observation window; the corrected diagnostic records 2,160 in-window no-usable-quote decisions per world.",
+      "evidence_ids": ["ME013-E1", "ME013-E3", "ME013-E4"],
+      "limitations": ["No binary mechanism-activation threshold was preregistered; this is an observed activity decomposition, not a registered pass/fail predicate."]
+    },
+    {
+      "id": "ME013-C1",
+      "type": "CAUSAL",
+      "text": "The registered three-seed P-versus-A fee-net passive-endowment-gain contrast at 0.1 ABC is not identified because all three paired terminal midpoints are unavailable.",
+      "evidence_ids": ["ME013-E1", "ME013-E5"],
+      "limitations": ["Undefined marked gains must not be replaced by zero, cash-only changes, last trades, or survivor-only pairs; no policy ranking or strategy capacity follows."]
+    }
+  ],
+  "evidence": [
+    {
+      "id": "ME013-E1",
+      "kind": "complete_machine_surface",
+      "location": "research/program/ideas/ME-013/surface.json",
+      "identity": "SHA256 e6ba67807f6f4a0bb2555fced1fd78b96df6dde2ebc773c75cd525daefa52d93; 24 canonical cell/result/diagnostic/resource identities and two bit-identical controls"
+    },
+    {
+      "id": "ME013-E2",
+      "kind": "external_raw_manifest_replay_and_resources",
+      "location": "/home/vlad/e0-development-17b9e8a-zNbB8W",
+      "identity": "C3 source 17b9e8a; per-cell manifest, raw evidence, sidecar, strict result and resource SHA256 values indexed by surface.json; external location is not an off-machine backup"
+    },
+    {
+      "id": "ME013-E3",
+      "kind": "corrected_retained_event_diagnostics",
+      "location": "/home/vlad/e0-development-17b9e8a-zNbB8W/analysis",
+      "identity": "24 exclusive-window *-liquidity-diagnostic-v3.json files from clean e2491ebf mespotdiagnose SHA256 70aa941f02b74a4e876ccc1b49d57993a157d147d142179db5dec87fe81c5094; v2 retained but rejected"
+    },
+    {
+      "id": "ME013-E4",
+      "kind": "bounded_independent_review",
+      "location": "research/program/reviews/me013-r1-result-20260927.md",
+      "identity": "Independent A REJECT v2 then ACCEPT e2491ebf v3; independent B ACCEPT bounded economic interpretation and corrected carry-forward; exact limitations in review record"
+    },
+    {
+      "id": "ME013-E5",
+      "kind": "prospective_registered_protocol",
+      "location": "research/program/ideas/ME-013/protocol.md",
+      "identity": "SHA256 23ff88ac2d87c7394524ee39f46fe86e0a9ced09399beeb51f36f2f649153f7c; strict terminal-mark and missing-pair rule set before any outcome"
+    }
+  ]
+}
