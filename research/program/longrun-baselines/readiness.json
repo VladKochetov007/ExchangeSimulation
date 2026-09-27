@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
   "planning_baseline_commit": "ef61b4cb6e0124aa797f281e379ab143e847646e",
-  "planning_status": "OWNER_AUTHORIZED_PREPARATION_NOT_RUN_READY",
+  "planning_status": "E0_R1_DEVELOPMENT_CLOSED_NON_IDENTIFIED_E1_E2_PENDING",
   "current_authorization": "research/program/longrun-baselines/authorization-20260927.md",
   "economic_world_ceiling_by_environment": {"E0": 120, "E1": 120, "E2": 120},
   "calibration_world_ceiling_by_environment": {"E0": 12, "E1": 12, "E2": 12},
-  "economic_worlds_run_for_this_plan": 0,
+  "economic_worlds_run_for_this_plan": 24,
   "seed_ids_reserved": [],
   "source_change_in_this_package": true,
   "implementation_checkpoint": {
@@ -148,6 +148,28 @@
     "actual_e0_capacity": "PENDING_VALID_FIRST_CELL",
     "confirmation_authorized": false
   },
+  "e0_r1_development_result": {
+    "execution_source_commit": "17b9e8a05415dcee05130b09a4a478d458c314c9",
+    "report": "research/program/ideas/ME-013/report.md",
+    "result": "research/program/ideas/ME-013/result.json",
+    "surface": "research/program/ideas/ME-013/surface.json",
+    "review": "research/program/reviews/me013-r1-result-20260927.md",
+    "economic_cells_completed_and_valid": 24,
+    "technical_duplicates_completed": 2,
+    "invalid_pre_start_attempts_retained": 1,
+    "total_process_attempts": 27,
+    "e0_owner_ceiling_process_attempts_conservatively_consumed": 27,
+    "e0_owner_ceiling_process_attempts_remaining": 93,
+    "primary_gain_contrast": "NOT_IDENTIFIED_ZERO_AVAILABLE_PAIRS",
+    "terminal_marks": "UNAVAILABLE_IN_ALL_24_CELLS",
+    "final_empty_book_onset_simulated_seconds": "16_TO_36_IN_ALL_CELLS",
+    "corrected_in_window_no_usable_quote_decisions_per_cell": 2160,
+    "prior_analysis_version": "REJECTED_EXCLUSIVE_END_OFF_BY_ONE_RETAINED",
+    "post_result_review_execution": "COMPLETED",
+    "post_result_review_verdict": "ACCEPT_SCOPED_AFTER_ANALYSIS_REPAIR",
+    "confirmation_authorized": false,
+    "e1_e2_economic_worlds_run": 0
+  },
   "candidate_environments": [
     {
       "id": "E0",
@@ -157,7 +179,7 @@
       "proposed_economic_world_ceiling": 24,
       "proposed_technical_controls": 2,
       "run_authorized": false,
-      "readiness": "E0_C3_FIRST_REGISTERED_CELL_RETRY_READY_REMAINING_BATCH_CAPACITY_PENDING"
+      "readiness": "E0_R1_DEVELOPMENT_COMPLETE_PRIMARY_NOT_IDENTIFIED_SUCCESSOR_NOT_REGISTERED"
     },
     {
       "id": "E2",
@@ -167,7 +189,7 @@
       "proposed_economic_world_ceiling": 6,
       "proposed_technical_controls": 2,
       "run_authorized": false,
-      "readiness": "BLOCKED_ON_E0_AND_VERSIONED_FUNDING_LIFECYCLE_IMPLEMENTATION"
+      "readiness": "E2_ECONOMIC_WORLDS_BLOCKED_ON_USABLE_E0_FOUNDATION_AND_VERSIONED_FUNDING_LIFECYCLE_IMPLEMENTATION"
     }
   ],
   "bounded_implementation_tasks": [

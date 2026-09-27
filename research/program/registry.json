@@ -349,19 +349,19 @@
       "id": "ME-013",
       "title": "Repeated spot-maker competition baseline (E0)",
       "claim_type": "CAUSAL",
-      "stage": "PREPARE",
+      "stage": "REPORT",
       "idea": "research/program/ideas/ME-013/idea.md",
       "protocol": "research/program/ideas/ME-013/protocol.md",
-      "report": null,
-      "result": null,
+      "report": "research/program/ideas/ME-013/report.md",
+      "result": "research/program/ideas/ME-013/result.json",
       "dependencies": ["ME-000"],
       "policy_ids": ["S06", "S07", "S28", "S32"],
       "authorization": {
         "prepare": true,
-        "run": true,
-        "basis": "Owner 2026-09-27 long-run goal and ME-013 r1 authorize only the first assigned P/0.1/18001 cell as counted resource preflight. C2=075dda1 failed before World.Run and any market event; the preserved invalid attempt and reviewed C3=17b9e8a replacement are recorded in research/program/longrun-baselines/e0-r1-plan-roundtrip-amendment-20260927.md. Remaining registered cells require valid first-cell evidence and measured capacity; confirmation is not authorized."
+        "run": false,
+        "basis": "Owner 2026-09-27 long-run goal and preregistered ME-013 r1: 24 economic cells and two technical controls completed from reviewed C3=17b9e8a, with one earlier C2 pre-start invalid attempt retained. The exact r1 matrix is exhausted; its primary gain contrast is NOT_IDENTIFIED because all 24 terminal marks are unavailable. Post-result A/B reviews accepted this bounded development result after rejecting and correcting an analysis-only end-window count. The owner's broader E0 ceiling does not authorize additional r1 arms or confirmation; a successor requires its own prospective contract."
       },
-      "next_action": "Retry and strictly analyze the unchanged first registered P/0.1/18001 cell from pinned C3=17b9e8a in a fresh finite-cgroup namespace. Preserve the C2 failed attempt; stop again if the new resource or evidence contract fails."
+      "next_action": "Preserve r1 as a valid non-identification/survival boundary. Prospectively design a separately named finite actor-local-reference recovery successor before any further E0 economic world; E1/E2 economic inference cannot inherit r1 viability. No confirmation or holdout is authorized."
     },
     {
       "id": "ME-014",

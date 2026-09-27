@@ -31,6 +31,18 @@ not new market worlds. The later separately pinned
 original simulator. Repository publication never relabels those
 historical worlds as runs of a later merged source tree.
 
+The newer [ME-013 E0 r1 repeated-maker development result](ideas/ME-013/report.md)
+completed **24/24** registered economic cells plus two technical controls from
+source `17b9e8a`; one earlier C2 pre-start attempt remains invalid and retained.
+All 24 books became permanently empty by simulated second 36, before the
+registered 10-minute measurement start. Every terminal midpoint is unavailable,
+so the primary P–A maker-gain contrast is `NOT_IDENTIFIED`, not zero. The
+[machine surface](ideas/ME-013/surface.json), [claim/evidence result](ideas/ME-013/result.json)
+and [review record](reviews/me013-r1-result-20260927.md)
+include the corrected exclusive-window diagnostic and preserved rejected
+version. A separately preregistered successor is needed before the intended
+repeated economic comparison; this result does not authorize confirmation.
+
 ## Starting queue
 
 | Priority | IDs | Next boundary |
@@ -42,15 +54,16 @@ historical worlds as runs of a later merged source tree.
 | 4 | [ME-005](ideas/ME-005/report.md), [ME-007](ideas/ME-007/idea.md) | ME-005 REPORT: four valid development cells, zero registered opportunities and no route; bounded post-result review accepted the narrow claim with limitations, budget exhausted. ME-007 remains proposed. |
 | 5 | ME-004/006/008–010 | deferred allocation, interaction, payoff or derivative questions |
 | 6 | ME-011–ME-012 | restricted games and explicit capital dynamics after reliable payoffs |
-| Preparation | [ME-013](ideas/ME-013/idea.md), [ME-014](ideas/ME-014/idea.md) | Owner-authorized bounded E0/E1/E2 work. The [24-cell E0 r1 protocol](ideas/ME-013/protocol.md) remains fixed. The original [first-cell launch gate](longrun-baselines/e0-r1-launch-gate-20260927.md) produced one invalid pre-start attempt; the [C3 technical amendment](longrun-baselines/e0-r1-plan-roundtrip-amendment-20260927.md) pins its reviewed replacement. Only that same first cell may retry as counted resource preflight; the remainder depends on actual measured footprint and valid evidence. No E0 economic outcome or confirmation existed at the amendment. [ME-014](ideas/ME-014/idea.md) remains preparation. |
+| Development | [ME-013](ideas/ME-013/report.md), [ME-014](ideas/ME-014/idea.md) | ME-013 r1 REPORT: 24 valid E0 cells, all terminal marks unavailable; primary gain contrast NOT_IDENTIFIED. Its exact protocol, source, C2 invalid attempt, C3 correction and reviewed post-result analytical repair are preserved. E0 r1 budget is exhausted; a distinct recovery successor must be prospective. ME-014 remains preparation; no E2 world has run. |
 
 This is dependency order, not a run queue. ME-010 is a planning umbrella and needs
 a named child protocol; an umbrella cannot authorize a combined derivative campaign.
-The [repeated-ecology planning package](longrun-baselines/plan.md) is a prospective
-one-book maker-competition baseline followed by a two-venue spot/perp funding
-baseline. Its [readiness record](longrun-baselines/readiness.json) identifies
-bounded adapters and new compressed-funding semantics; its draft numbers are
-not registered config values or a run-ready protocol. These entries do not
+The [repeated-ecology planning package](longrun-baselines/plan.md) describes
+one-book maker competition followed by a two-venue spot/perp funding baseline.
+E0's first protocol has now produced the bounded negative result above; its
+[readiness record](longrun-baselines/readiness.json) keeps the earlier mechanical
+checkpoints historical and E2's compressed-funding tasks prospective. Draft E2
+numbers are not registered config values or a run-ready protocol. These entries do not
 change the closed ME-001/002/003/002-B/005 reports or R2/SV1D boundary.
 The completed ME-001 protocol used one ABC/USD venue, immediate execution,
 three quantities, three compositions and three development seeds. Its object
@@ -59,6 +72,17 @@ was execution quantity/cost, not capital profitability. The source-grounded
 mechanical prerequisites that ME-000 closed before this screen.
 
 ## Current synthesis and resume point
+
+The current E0 resume point is the [ME-013 r1 report](ideas/ME-013/report.md),
+not the older first-cell launch instructions. Repeated decision clocks were
+observable, but maker placement and resting depth were zero throughout the
+measurement window. All 24 cells lost their public book before that window;
+the first cell's retained trace shows a one-sided local reference at the next
+maker decision. The observed r1 ecology therefore cannot identify the
+registered return-risk comparison. A bounded local-reference recovery design
+would be a new economic successor, not a score repair or a hidden liquidity
+backstop. E1 and E2 implementation can reuse tested mechanics, but no integrated
+economic claim transfers from this r1 ecology.
 
 ME-001's fixed initial endowments and class-replacement intervention changed
 the delivered local ask book, then the immediate buyer's fill and marked

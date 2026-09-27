@@ -34,10 +34,17 @@ exhausted. Merging documentation into `main` does not relabel those
 historical worlds as `main` executions. The
 R2/SV1D closure below remains a separate completed historical boundary.
 
-The prospective [repeated-strategy E0/E2 plan](program/longrun-baselines/plan.md)
-and its [readiness record](program/longrun-baselines/readiness.json) specify a
-future one-book maker competition and multi-period two-venue funding ecology.
-The original drafts were planning-only. The [2026-09-27 owner amendment](program/longrun-baselines/authorization-20260927.md) now authorizes bounded E0/E1/E2 implementation and development after prospective readiness/protocol/resource gates. A tested mechanical PR1 source change exists, but no ME-013/014 economic world, locked protocol, seed reservation, confirmed claim or current run-ready candidate follows from it.
+The [repeated-strategy E0/E2 plan](program/longrun-baselines/plan.md)
+and its [readiness record](program/longrun-baselines/readiness.json) define the
+longer-horizon development program. Under the [2026-09-27 owner amendment](program/longrun-baselines/authorization-20260927.md),
+the first [ME-013 E0 r1 protocol](program/ideas/ME-013/protocol.md) completed
+24 valid economic cells and two technical controls. Its
+[source-pinned report](program/ideas/ME-013/report.md) finds that every book
+became permanently empty before measurement, leaving the registered maker-gain
+contrast `NOT_IDENTIFIED`; the [post-result review](program/reviews/me013-r1-result-20260927.md)
+accepted this bounded conclusion after an analysis-only window-count repair.
+ME-014/E2 remains unrun and unconfirmed. Neither branch integration nor valid
+software tests imply market survival or realism.
 
 The historical consolidation code baseline was the former scientific tip
 `f507c7ee2b11fd05e1adb9f17fa0a66faf889ea1`, descended from the published
@@ -45,10 +52,11 @@ The historical consolidation code baseline was the former scientific tip
 navigation and provenance records only; it does not enable an experimental
 roster or change the default economics.
 
-The single current operational pointer is
-[`RESUME-HERE.md`](RESUME-HERE.md), whose current entry closes the R2/SV1D
-development line. The companion audit is
-[`V2-CURRENT-STATE-AUDIT.md`](V2-CURRENT-STATE-AUDIT.md).
+For the active E0/E1/E2 development program, use the
+[program index](program/README.md), registry and ME-013 report as the current
+pointer. [`RESUME-HERE.md`](RESUME-HERE.md) and the companion
+[`V2-CURRENT-STATE-AUDIT.md`](V2-CURRENT-STATE-AUDIT.md) retain the separate
+R2/SV1D closeout; their older launch instructions do not govern ME-013.
 
 ## Closed research lines
 

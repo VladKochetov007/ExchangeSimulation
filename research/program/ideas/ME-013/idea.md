@@ -1,6 +1,11 @@
 # ME-013 — Repeated spot-maker competition (E0)
 
-Stage: **PREPARE**. Claim sought later: simulation-internal **CAUSAL** development contrast between finite, equal-resource pure and AS-style maker rosters under recurring demand. This card is a pointer, not a run protocol or run-ready candidate.
+Stage: **REPORT** for r1. The [source-pinned development report](report.md),
+[standard claim/evidence result](result.json), [24-cell machine surface](surface.json)
+and [independent review record](../../reviews/me013-r1-result-20260927.md)
+close r1 at a valid **primary `NOT_IDENTIFIED`** boundary: all 24 terminal
+midpoints are unavailable after early book extinction. This card remains a
+pointer, not a new run protocol or confirmation authorization.
 
 Question: how do symmetric versus inventory-aware quote policies change maker inventory risk, fee-net benchmark-relative wealth and liquidity when they compete repeatedly in the same ABC/USD book? Competing explanations include unequal cap/lifecycle behavior, seed depth, RNG coupling, price drift and missing terminal marks.
 
@@ -8,4 +13,16 @@ The [long-run plan](../../longrun-baselines/plan.md), [policy contracts](../../l
 
 Historical context: [ME-001](../ME-001/report.md) was immediate execution, [ME-002-B](../ME-002-B/report.md) was a one-child first-action gate screen, and [ME-005](../ME-005/report.md) had no qualifying executable arbitrage route. None measures repeated-maker PnL or inventory competition. [R2/SV1D](../../../v2-r2-sv1d-iteration-closeout.md) stays closed; its supplier result is not this policy comparison.
 
-Current next action: attempt and independently analyze **only the first registered** P/0.1/18001 development cell from clean C3=`17b9e8a` as the counted resource preflight; launch further cells only if its technical envelope and evidence pass. The [maker-local response](../../longrun-baselines/e0-local-response-checkpoint-20260927.md), [inventory/resting-depth](../../longrun-baselines/e0-risk-series-checkpoint-20260927.md), and [pending-inclusive envelope](../../longrun-baselines/e0-envelope-checkpoint-20260927.md) checkpoints are mechanical only; the last measures working-limit cap clipping and placement denial, not every reason to withhold liquidity. Earlier individual increments remain historically **UNREVIEWED DEVELOPMENT**; the C3 successor has bounded mechanics/design review, not confirmation or broad market validation. The [2026-09-27 owner authorization](../../longrun-baselines/authorization-20260927.md) bounds every development execution.
+The former first-cell action is complete: C3=`17b9e8a` passed its counted
+capacity/evidence preflight, and all 24 registered cells plus two controls
+completed. The [maker-local response](../../longrun-baselines/e0-local-response-checkpoint-20260927.md),
+[inventory/resting-depth](../../longrun-baselines/e0-risk-series-checkpoint-20260927.md),
+and [pending-inclusive envelope](../../longrun-baselines/e0-envelope-checkpoint-20260927.md)
+checkpoints remain mechanical history; the last measures working-limit cap
+clipping and placement denial, not every reason to withhold liquidity. Earlier
+individual increments remain historically **UNREVIEWED DEVELOPMENT**; C3 has
+bounded pre-outcome mechanics/design review and r1 has bounded post-result
+review, not confirmation or broad market validation. The next economic design,
+if pursued under the [owner authorization](../../longrun-baselines/authorization-20260927.md),
+must be a separately preregistered local-reference recovery successor; do not
+rerun or relabel r1.
