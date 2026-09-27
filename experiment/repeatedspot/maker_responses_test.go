@@ -11,7 +11,7 @@ import (
 
 func TestBufferedFillReceiptMayPrecedeProcessedAcceptance(t *testing.T) {
 	account := &accountState{actorID: 7, clientID: 2, maker: &makerParameters{}, workingLimit: 5,
-		acceptedLocally: make(map[uint64]bool)}
+		acceptedLocally: make(map[uint64]bool), localRisk: newInventoryRiskSeries(0, MeasurementWindow{StartAt: 0, EndAt: 10}, 5)}
 	accepted := worldspot.MakerProcessedResponse{ActorID: 7, Kind: "accepted", RequestID: 8, OrderID: 10}
 	fill := worldspot.MakerProcessedResponse{ActorID: 7, Kind: "fill", OrderID: 10, TradeID: 0,
 		Symbol: "ABC/USD", Qty: 1, Price: 101, Side: "BUY", ExchangeAt: 1}

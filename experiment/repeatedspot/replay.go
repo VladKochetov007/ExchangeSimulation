@@ -57,6 +57,8 @@ type AccountResult struct {
 	BenchmarkGain  *int64                `json:"benchmark_gain_quote,omitempty"`
 	Outbound       OutboundSummary       `json:"outbound"`
 	LocalResponses *MakerResponseSummary `json:"maker_local_responses,omitempty"`
+	InventoryRisk  AccountInventoryRisk  `json:"inventory_risk"`
+	RestingDepth   RestingDepthSummary   `json:"resting_depth"`
 }
 
 type EconomicReplay struct {
@@ -69,6 +71,7 @@ type EconomicReplay struct {
 	TerminalMidQuote   *int64                           `json:"terminal_mid_quote,omitempty"`
 	InformationAudit   *analysis.MarketDataReceiptAudit `json:"information_audit"`
 	Market             MarketSummary                    `json:"market"`
+	MeasurementWindow  MeasurementWindow                `json:"measurement_window"`
 }
 
 type accountState struct {
@@ -91,6 +94,11 @@ type accountState struct {
 	outbound        OutboundSummary
 	localResponses  MakerResponseSummary
 	acceptedLocally map[uint64]bool
+	exchangeRisk    *inventoryRiskSeries
+	localRisk       *inventoryRiskSeries
+	inventoryRisk   AccountInventoryRisk
+	restingDepth    *restingDepthSeries
+	restingSummary  RestingDepthSummary
 }
 
 type replayState struct {
@@ -111,6 +119,8 @@ type replayState struct {
 	latestMakerSnapshot map[uint64]worldspot.MakerObservation
 	sentRequests        map[requestKey]*sentOrder
 	makerReceipts       map[makerReceiptKey]*makerReceipt
+	measurementWindow   MeasurementWindow
+	resting             *restingBook
 }
 
 type publicSnapshot struct {
@@ -125,6 +135,16 @@ type makerObservationRecord struct {
 }
 
 func Replay(contractBytes []byte, stream io.Reader, identity EvidenceIdentity, receiptDir string) (*EconomicReplay, error) {
+	return replayWithWindow(contractBytes, stream, identity, receiptDir, nil)
+}
+
+// ReplayWindow verifies the full stream while measuring inventory exposure
+// only inside the caller's prospectively declared observation window.
+func ReplayWindow(contractBytes []byte, stream io.Reader, identity EvidenceIdentity, receiptDir string, window MeasurementWindow) (*EconomicReplay, error) {
+	return replayWithWindow(contractBytes, stream, identity, receiptDir, &window)
+}
+
+func replayWithWindow(contractBytes []byte, stream io.Reader, identity EvidenceIdentity, receiptDir string, requested *MeasurementWindow) (*EconomicReplay, error) {
 	if err := executionpilot.ValidateStrictJSON(contractBytes); err != nil {
 		return nil, fmt.Errorf("repeated spot: invalid contract JSON: %w", err)
 	}
@@ -140,12 +160,21 @@ func Replay(contractBytes []byte, stream io.Reader, identity EvidenceIdentity, r
 		len(contract.Participants) == 0 || int64(contract.Iterations) > (math.MaxInt64-contract.StartUnixNano)/contract.Step {
 		return nil, errors.New("repeated spot: unsupported or invalid E0 contract")
 	}
+	terminalAt := contract.StartUnixNano + int64(contract.Iterations)*contract.Step
+	window := MeasurementWindow{StartAt: contract.StartUnixNano, EndAt: terminalAt}
+	if requested != nil {
+		window = *requested
+	}
+	if window.StartAt < contract.StartUnixNano || window.EndAt > terminalAt || window.EndAt <= window.StartAt {
+		return nil, errors.New("repeated spot: invalid measurement window")
+	}
 	hash := sha256.Sum256(contractBytes)
 	state := &replayState{contract: contract, contractHash: hex.EncodeToString(hash[:]), phase: "before_begin",
 		accounts: make(map[uint64]*accountState), venue: make(map[string]int64), trades: newTradeAudit(contract.Instrument),
-		market:          newPublicBookSeries(contract.StartUnixNano, contract.Instrument.TickSize),
-		sentRequests:    make(map[requestKey]*sentOrder),
-		makerReceipts:   make(map[makerReceiptKey]*makerReceipt),
+		market:        newPublicBookSeries(contract.StartUnixNano, contract.Instrument.TickSize),
+		sentRequests:  make(map[requestKey]*sentOrder),
+		makerReceipts: make(map[makerReceiptKey]*makerReceipt), measurementWindow: window,
+		resting:         &restingBook{orders: make(map[uint64]*restingOrder)},
 		publicSnapshots: make(map[uint64]publicSnapshot), latestMakerSnapshot: make(map[uint64]worldspot.MakerObservation)}
 	for _, participant := range contract.Participants {
 		if participant.ClientID == 0 || participant.ActorID == 0 || participant.Role == "" ||
@@ -175,7 +204,12 @@ func Replay(contractBytes []byte, stream io.Reader, identity EvidenceIdentity, r
 			role: participant.Role, initial: initial, current: copyBalances(initial), workingLimit: workingLimit,
 			maker: maker, variance: variance, requestDelay: participant.Latency.RequestNanos,
 			responseDelay:   *participant.Latency.ResponseNanos,
-			acceptedLocally: make(map[uint64]bool)}
+			acceptedLocally: make(map[uint64]bool),
+			exchangeRisk:    newInventoryRiskSeries(contract.StartUnixNano, window, workingLimit),
+			restingDepth:    newRestingDepthSeries(contract.StartUnixNano, window)}
+		if maker != nil {
+			state.accounts[participant.ClientID].localRisk = newInventoryRiskSeries(contract.StartUnixNano, window, workingLimit)
+		}
 	}
 	if err := WalkEvidence(stream, identity, state.visit); err != nil {
 		return nil, err
@@ -198,6 +232,12 @@ func Replay(contractBytes []byte, stream io.Reader, identity EvidenceIdentity, r
 		return nil, err
 	}
 	if err := state.finishMakerResponses(); err != nil {
+		return nil, err
+	}
+	if err := state.finishInventoryRisk(terminalAt); err != nil {
+		return nil, err
+	}
+	if err := state.finishRestingDepth(terminalAt); err != nil {
 		return nil, err
 	}
 	if err := state.checkConservation(); err != nil {
@@ -227,7 +267,7 @@ func Replay(contractBytes []byte, stream io.Reader, identity EvidenceIdentity, r
 	report := &EconomicReplay{ContractSHA256: state.contractHash, Evidence: identity,
 		VenueFeeRevenue: copyBalances(state.venue), TradeCount: len(state.trades.trades),
 		TerminalMarkStatus: state.markStatus, TerminalMidQuote: state.terminalMid, InformationAudit: info,
-		Market: market}
+		Market: market, MeasurementWindow: window}
 	ids := make([]uint64, 0, len(state.accounts))
 	for clientID := range state.accounts {
 		ids = append(ids, clientID)
@@ -242,6 +282,8 @@ func Replay(contractBytes []byte, stream io.Reader, identity EvidenceIdentity, r
 		if account.maker != nil {
 			result.LocalResponses = &account.localResponses
 		}
+		result.InventoryRisk = account.inventoryRisk
+		result.RestingDepth = account.restingSummary
 		if state.terminalMid != nil {
 			gain, err := benchmarkGain(account, contract.Instrument, *state.terminalMid)
 			if err != nil {
@@ -309,7 +351,15 @@ func (state *replayState) visit(event Event) error {
 		if err := state.checkOrderOutcome(event); err != nil {
 			return err
 		}
-		return state.trades.visit(event)
+		if err := state.trades.visit(event); err != nil {
+			return err
+		}
+		if event.Name == "OrderFill" {
+			if err := state.exchangeInventoryFill(event); err != nil {
+				return err
+			}
+		}
+		return state.restingOrderEvent(event)
 	default:
 		return fmt.Errorf("repeated spot: unsupported exchange event %q", event.Name)
 	}
@@ -580,6 +630,9 @@ func (state *replayState) publicSnapshot(event Event) error {
 	if err := state.market.verifySnapshot(event.Timestamp, snapshot.PublicBids, snapshot.PublicAsks); err != nil {
 		return err
 	}
+	if err := state.resting.verifySnapshot(snapshot.PublicBids, snapshot.PublicAsks); err != nil {
+		return err
+	}
 	state.publicSnapshots[snapshot.SourceSequence] = publicSnapshot{event.Timestamp, snapshot.PublicBids, snapshot.PublicAsks}
 	return nil
 }
@@ -637,6 +690,9 @@ func (state *replayState) readTerminalBook(at int64, payload json.RawMessage) er
 		return errors.New("repeated spot: terminal book symbol mismatch")
 	}
 	if err := state.market.verifyTerminal(at, book.Bids, book.Asks); err != nil {
+		return err
+	}
+	if err := state.resting.verifySnapshot(book.Bids, book.Asks); err != nil {
 		return err
 	}
 	for index, level := range book.Bids {

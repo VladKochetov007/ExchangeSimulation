@@ -165,6 +165,10 @@ func TestCaptureProductionPathAndInformationSidecars(t *testing.T) {
 		market.TwoSidedNanos+market.BidOnlyNanos+market.AskOnlyNanos+market.EmptyNanos != market.HorizonNanos {
 		t.Fatalf("incomplete or nonpartitioned time-weighted market evidence: %+v", market)
 	}
+	if replay.Accounts[0].RestingDepth.BidPresentNanos == 0 ||
+		replay.Accounts[0].RestingDepth.AskPresentNanos == 0 {
+		t.Fatalf("finite seed-once book contribution was not reconstructed: %+v", replay.Accounts[0].RestingDepth)
+	}
 }
 
 func TestMakerFillUsesDeliveredResponseNotExchangeInstant(t *testing.T) {
@@ -190,7 +194,8 @@ func TestMakerFillUsesDeliveredResponseNotExchangeInstant(t *testing.T) {
 	maker := replay.Accounts[1]
 	if maker.ClientID != 2 || maker.LocalResponses.FillReceived == 0 ||
 		maker.LocalResponses.FillReceived != maker.LocalResponses.FillProcessed ||
-		maker.LocalResponses.NetProcessedFillBase == 0 {
+		maker.LocalResponses.NetProcessedFillBase == 0 ||
+		maker.RestingDepth.AskDepthBaseUnitNanos == "0" {
 		t.Fatalf("maker fill was not independently delivered and processed: %+v", maker)
 	}
 	noQuoteCancellation := false
