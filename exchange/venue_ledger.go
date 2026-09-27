@@ -12,7 +12,8 @@ const (
 	// VenueInsuranceFund absorbs the deficit of a bankrupt account and is paid
 	// by liquidation clearance fees. It goes negative when a deficit exceeds
 	// what it holds, which is the one place a venue can create money.
-	VenueInsuranceFund VenueBucket = "insurance_fund"
+	VenueInsuranceFund          VenueBucket = "insurance_fund"
+	VenueFundingRoundingReserve VenueBucket = "funding_rounding_reserve"
 )
 
 // VenueBalanceEvent records a movement of the exchange's own money.
@@ -62,13 +63,28 @@ func (e *DefaultExchange) moveVenueBalanceWithTradeID(bucket VenueBucket, asset 
 	if delta == 0 || asset == "" {
 		return
 	}
-	balances := e.ExchangeBalance.FeeRevenue
-	if bucket == VenueInsuranceFund {
-		balances = e.ExchangeBalance.InsuranceFund
+	var old, updated int64
+	switch bucket {
+	case VenueFeeRevenue:
+		old = e.ExchangeBalance.FeeRevenue[asset]
+		updated = etypes.AddAmount(old, delta)
+		e.ExchangeBalance.FeeRevenue[asset] = updated
+	case VenueInsuranceFund:
+		old = e.ExchangeBalance.InsuranceFund[asset]
+		updated = etypes.AddAmount(old, delta)
+		e.ExchangeBalance.InsuranceFund[asset] = updated
+	case VenueFundingRoundingReserve:
+		reserve, present := e.ExchangeBalance.FundingRoundingReserves[symbol]
+		if !present || reserve.Asset != asset {
+			panic("funding rounding reserve movement has no matching symbol/asset owner")
+		}
+		old = reserve.Balance
+		updated = etypes.AddAmount(old, delta)
+		reserve.Balance = updated
+		e.ExchangeBalance.FundingRoundingReserves[symbol] = reserve
+	default:
+		panic("unknown venue balance bucket")
 	}
-	old := balances[asset]
-	updated := etypes.AddAmount(old, delta)
-	balances[asset] = updated
 	e.venueBalanceSequence++
 	sequence := e.venueBalanceSequence
 	e.conservation.recordVenue(asset, delta)

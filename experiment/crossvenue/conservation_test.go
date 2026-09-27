@@ -25,6 +25,7 @@ func TestME005ConservationRejectsBrokenLedgerAndResiduals(t *testing.T) {
 		{"broken-chain", func(result *analysis.Conservation) { result.Deltas.ChainBroken = 1 }},
 		{"missing-fee", func(result *analysis.Conservation) { result.Deltas.TradingFeeMismatches = 1 }},
 		{"bad-venue-sequence", func(result *analysis.Conservation) { result.Deltas.VenueSequenceMismatches = 1 }},
+		{"unbound-funding-endowment", func(result *analysis.Conservation) { result.Deltas.FundingReserveEndowmentMismatches = 1 }},
 		{"asset-residual", func(result *analysis.Conservation) { result.Identities[0].Residual = 1 }},
 		{"venue-residual", func(result *analysis.Conservation) { result.VenueIdentities[0].Residual = -1 }},
 		{"funding-residual", func(result *analysis.Conservation) {

@@ -133,14 +133,23 @@ type Report struct {
 // its insurance fund absorbed. A conservation identity that ignores it reports
 // every fee as value destroyed.
 type VenueLedger struct {
-	VenueID       string           `json:"venue_id"`
-	FeeRevenue    map[string]int64 `json:"fee_revenue"`
-	InsuranceFund map[string]int64 `json:"insurance_fund"`
+	VenueID                 string                           `json:"venue_id"`
+	FeeRevenue              map[string]int64                 `json:"fee_revenue"`
+	InsuranceFund           map[string]int64                 `json:"insurance_fund"`
+	FundingRoundingReserves map[string]FundingReserveBalance `json:"funding_rounding_reserves,omitempty"`
 	// FinalSequence is the terminal value of the venue's monotonic balance
 	// journal sequence. A movement stream can be balanced while a complete pair
 	// of opposite movements has been omitted, so the terminal counter is an
 	// independent completeness anchor.
 	FinalSequence *uint64 `json:"final_sequence"`
+}
+
+type FundingReserveBalance struct {
+	Asset             string `json:"asset"`
+	SourceID          string `json:"source_id"`
+	Initial           int64  `json:"initial"`
+	Balance           int64  `json:"balance"`
+	EndowmentEventSeq uint64 `json:"endowment_event_seq"`
 }
 
 // Run is one simulation output directory.

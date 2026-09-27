@@ -80,25 +80,26 @@ type DeltaConsistency struct {
 	// including financing, funding remainders, and position-rounding carry,
 	// with the terminal venue report. FeesLogged remains the trade-fee event
 	// stream and is intentionally narrower.
-	FeeRevenueMismatches         int `json:"fee_revenue_mismatches"`
-	TradingFeeMismatches         int `json:"trading_fee_mismatches"`
-	TradingFeeEvents             int `json:"trading_fee_events"`
-	MarginInterestMismatches     int `json:"margin_interest_mismatches"`
-	MarginInterestEvents         int `json:"margin_interest_events"`
-	MarginInterestFailures       int `json:"margin_interest_failures"`
-	FundingRemainderMismatches   int `json:"funding_remainder_mismatches"`
-	FundingRemainderRecords      int `json:"funding_remainder_records"`
-	FundingWalletMismatches      int `json:"funding_wallet_mismatches"`
-	UnsupportedRevenueRecords    int `json:"unsupported_revenue_records"`
-	MalformedInterestRecords     int `json:"malformed_interest_records"`
-	DuplicateFeeIdentities       int `json:"duplicate_fee_identities"`
-	DuplicateFeeMovements        int `json:"duplicate_fee_movements"`
-	MalformedVenueLedgers        int `json:"malformed_venue_ledgers"`
-	VenueTerminalSequenceMissing int `json:"venue_terminal_sequence_missing"`
-	VenueOrderMismatches         int `json:"venue_order_mismatches"`
-	VenueSequenceMismatches      int `json:"venue_sequence_mismatches"`
-	VenueChainMismatches         int `json:"venue_chain_mismatches"`
-	ArithmeticFailures           int `json:"arithmetic_failures"`
+	FeeRevenueMismatches              int `json:"fee_revenue_mismatches"`
+	TradingFeeMismatches              int `json:"trading_fee_mismatches"`
+	TradingFeeEvents                  int `json:"trading_fee_events"`
+	MarginInterestMismatches          int `json:"margin_interest_mismatches"`
+	MarginInterestEvents              int `json:"margin_interest_events"`
+	MarginInterestFailures            int `json:"margin_interest_failures"`
+	FundingRemainderMismatches        int `json:"funding_remainder_mismatches"`
+	FundingRemainderRecords           int `json:"funding_remainder_records"`
+	FundingWalletMismatches           int `json:"funding_wallet_mismatches"`
+	UnsupportedRevenueRecords         int `json:"unsupported_revenue_records"`
+	MalformedInterestRecords          int `json:"malformed_interest_records"`
+	DuplicateFeeIdentities            int `json:"duplicate_fee_identities"`
+	DuplicateFeeMovements             int `json:"duplicate_fee_movements"`
+	MalformedVenueLedgers             int `json:"malformed_venue_ledgers"`
+	FundingReserveEndowmentMismatches int `json:"funding_reserve_endowment_mismatches,omitempty"`
+	VenueTerminalSequenceMissing      int `json:"venue_terminal_sequence_missing"`
+	VenueOrderMismatches              int `json:"venue_order_mismatches"`
+	VenueSequenceMismatches           int `json:"venue_sequence_mismatches"`
+	VenueChainMismatches              int `json:"venue_chain_mismatches"`
+	ArithmeticFailures                int `json:"arithmetic_failures"`
 }
 
 // PositionRoundingAudit independently validates the terminal carry ledger.
@@ -198,7 +199,8 @@ type VenueConservationIdentity struct {
 //
 // where ExternalIn is deposits and borrowing, InternalNet is every other
 // logged balance movement summed over participants, ExchangeTake is what the
-// venue itself holds in fees and insurance, and OpenPositionValue is the
+// venue holds in fees and insurance plus the reserve change since its explicit
+// external endowment, and OpenPositionValue is the
 // unrealised profit of positions still open at the end — the cash that has not
 // been paid yet because nobody has closed.
 //
@@ -381,6 +383,7 @@ type venueBucketKey struct {
 	venue  string
 	bucket string
 	asset  string
+	symbol string
 }
 
 type venueTransition struct {
@@ -431,6 +434,19 @@ func (r *Run) MeasureConservation(opts ConservationOptions) (*Conservation, erro
 	venueRecordedByVenue := make(map[venueAssetKey]int64)
 	feeRevenueRecordedByVenue := make(map[venueAssetKey]int64)
 	venueTransitions := make(map[venueBucketKey][]venueTransition)
+	type reserveKey struct{ venue, symbol, asset string }
+	type reserveEndowmentRecord struct {
+		amount, timestamp int64
+		sourceID          string
+		frame             uint64
+	}
+	type reserveMovementRecord struct {
+		amount, timestamp int64
+		frame             uint64
+	}
+	reserveEndowments := make(map[reserveKey]reserveEndowmentRecord)
+	reserveMovements := make(map[reserveKey]reserveMovementRecord)
+	reserveFrames := make(map[uint64]struct{})
 	venueSequences := make(map[string][]uint64)
 	lastVenueSequenceByFile := make(map[string]uint64)
 	observedVenues := make(map[string]struct{})
@@ -440,7 +456,7 @@ func (r *Run) MeasureConservation(opts ConservationOptions) (*Conservation, erro
 	roundingBalances := make(map[positionRoundingKey]int64)
 	roundingVenueFlows := make(map[venueRoundingKey]int64)
 	var rounding PositionRoundingAudit
-	scan := ScanOptions{Events: []string{"balance_change", "fee_revenue", "margin_interest", "margin_interest_failed", "venue_balance_change", "position_rounding"}, Files: opts.Files, FilesSelected: opts.FilesSelected}
+	scan := ScanOptions{Events: []string{"balance_change", "fee_revenue", "margin_interest", "margin_interest_failed", "venue_balance_change", "position_rounding", "funding_reserve_endowment"}, Files: opts.Files, FilesSelected: opts.FilesSelected}
 	type feePayload struct {
 		Timestamp int64  `json:"timestamp"`
 		Symbol    string `json:"symbol"`
@@ -472,6 +488,17 @@ func (r *Run) MeasureConservation(opts ConservationOptions) (*Conservation, erro
 		Symbol     string `json:"symbol"`
 		Reason     string `json:"reason"`
 	}
+	type reserveEndowmentPayload struct {
+		VenueID             string   `json:"venue_id"`
+		PerpSymbol          string   `json:"perp_symbol"`
+		QuoteAsset          string   `json:"quote_asset"`
+		TimestampNano       int64    `json:"timestamp_nano"`
+		AccountCap          int      `json:"account_cap"`
+		RegisteredClientIDs []uint64 `json:"registered_client_ids"`
+		InitialQuoteAtoms   int64    `json:"initial_quote_atoms"`
+		RateUnitsPerBp      int64    `json:"rate_units_per_bp"`
+		SourceID            string   `json:"source_id"`
+	}
 	if err := r.Scan(scan, func(event Event) {
 		if event.VenueID == "" {
 			mu.Lock()
@@ -482,6 +509,40 @@ func (r *Run) MeasureConservation(opts ConservationOptions) (*Conservation, erro
 		mu.Lock()
 		observedVenues[event.VenueID] = struct{}{}
 		mu.Unlock()
+		if event.Name == "funding_reserve_endowment" {
+			var record reserveEndowmentPayload
+			err := decodeRequiredJSON(event.Raw(), &record, "venue_id", "perp_symbol", "quote_asset", "timestamp_nano", "account_cap", "registered_client_ids", "initial_quote_atoms", "rate_units_per_bp", "source_id")
+			valid := err == nil && event.GlobalSequence != 0 && event.ClientID == 0 &&
+				record.VenueID == event.VenueID && record.PerpSymbol != "" && record.QuoteAsset != "" &&
+				record.TimestampNano == event.SimTS && record.TimestampNano >= 0 &&
+				record.AccountCap > 0 && len(record.RegisteredClientIDs) == record.AccountCap &&
+				record.InitialQuoteAtoms == int64(record.AccountCap) && record.RateUnitsPerBp > 0 &&
+				record.SourceID == "E2_ROUNDING_RESERVE_ENDOWMENT"
+			for index := 1; valid && index < len(record.RegisteredClientIDs); index++ {
+				valid = record.RegisteredClientIDs[index] > record.RegisteredClientIDs[index-1]
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			if !valid {
+				deltas.FundingReserveEndowmentMismatches++
+				return
+			}
+			key := reserveKey{venue: event.VenueID, symbol: record.PerpSymbol, asset: record.QuoteAsset}
+			if _, duplicate := reserveFrames[event.GlobalSequence]; duplicate {
+				deltas.FundingReserveEndowmentMismatches++
+				return
+			}
+			reserveFrames[event.GlobalSequence] = struct{}{}
+			if _, present := reserveEndowments[key]; present {
+				deltas.FundingReserveEndowmentMismatches++
+				return
+			}
+			reserveEndowments[key] = reserveEndowmentRecord{
+				amount: record.InitialQuoteAtoms, timestamp: record.TimestampNano,
+				sourceID: record.SourceID, frame: event.GlobalSequence,
+			}
+			return
+		}
 		if event.Name == "position_rounding" {
 			var record positionRoundingEventRecord
 			if err := decodeRequiredJSON(event.Raw(), &record, "timestamp", "client_id", "symbol", "asset", "cash_adjustment", "remainder_numerator", "precision"); err != nil || record.Timestamp == 0 || record.Timestamp != event.SimTS || record.Symbol == "" || record.Asset == "" || record.Precision <= 0 {
@@ -549,13 +610,23 @@ func (r *Run) MeasureConservation(opts ConservationOptions) (*Conservation, erro
 				mu.Unlock()
 				return
 			}
-			if movement.Bucket != "fee_revenue" && movement.Bucket != "insurance_fund" {
+			if movement.Bucket != "fee_revenue" && movement.Bucket != "insurance_fund" && movement.Bucket != "funding_rounding_reserve" {
 				mu.Lock()
 				deltas.MalformedVenueRecords++
 				mu.Unlock()
 				return
 			}
-			if movement.Timestamp == 0 || movement.Timestamp != event.SimTS {
+			if movement.Bucket == "funding_rounding_reserve" &&
+				(movement.Symbol == "" || movement.TradeID != 0 ||
+					(movement.Reason != "external_endowment" && movement.Reason != "scheduled_funding_rounding") ||
+					movement.Reason == "external_endowment" && (movement.OldBalance != 0 || movement.Delta <= 0)) {
+				mu.Lock()
+				deltas.MalformedVenueRecords++
+				mu.Unlock()
+				return
+			}
+			if movement.Timestamp != event.SimTS || movement.Timestamp == 0 &&
+				(movement.Bucket != "funding_rounding_reserve" || movement.Reason != "external_endowment") {
 				mu.Lock()
 				deltas.MalformedVenueRecords++
 				mu.Unlock()
@@ -593,6 +664,23 @@ func (r *Run) MeasureConservation(opts ConservationOptions) (*Conservation, erro
 				movementTimestamp = event.SimTS
 			}
 			mu.Lock()
+			if movement.Bucket == "funding_rounding_reserve" {
+				if event.GlobalSequence == 0 {
+					deltas.FundingReserveEndowmentMismatches++
+				} else if _, duplicate := reserveFrames[event.GlobalSequence]; duplicate {
+					deltas.FundingReserveEndowmentMismatches++
+				} else {
+					reserveFrames[event.GlobalSequence] = struct{}{}
+				}
+			}
+			if movement.Bucket == "funding_rounding_reserve" && movement.Reason == "external_endowment" {
+				key := reserveKey{venue: event.VenueID, symbol: movement.Symbol, asset: movement.Asset}
+				if _, alreadyEndowed := reserveMovements[key]; alreadyEndowed {
+					deltas.MalformedVenueRecords++
+				} else {
+					reserveMovements[key] = reserveMovementRecord{amount: movement.Delta, timestamp: movement.Timestamp, frame: event.GlobalSequence}
+				}
+			}
 			if previous, present := lastVenueSequenceByFile[event.File]; present && movement.Sequence <= previous {
 				deltas.VenueOrderMismatches++
 			}
@@ -601,6 +689,9 @@ func (r *Run) MeasureConservation(opts ConservationOptions) (*Conservation, erro
 			addConservationValue(venueRecorded, movement.Asset, movement.Delta, &deltas.ArithmeticFailures)
 			addConservationValue(venueRecordedByVenue, venueAssetKey{venue: event.VenueID, asset: movement.Asset}, movement.Delta, &deltas.ArithmeticFailures)
 			venueKey := venueBucketKey{venue: event.VenueID, bucket: movement.Bucket, asset: movement.Asset}
+			if movement.Bucket == "funding_rounding_reserve" {
+				venueKey.symbol = movement.Symbol
+			}
 			venueTransitions[venueKey] = append(venueTransitions[venueKey], venueTransition{sequence: movement.Sequence, timestamp: movementTimestamp, oldBalance: movement.OldBalance, newBalance: movement.NewBalance})
 			if movement.Bucket == "fee_revenue" {
 				if !isAuditedFeeRevenueReason(movement.Reason) {
@@ -885,6 +976,38 @@ func (r *Run) MeasureConservation(opts ConservationOptions) (*Conservation, erro
 		for asset, amount := range ledger.InsuranceFund {
 			addConservationValue(reportedVenueByVenue, venueAssetKey{venue: ledger.VenueID, asset: asset}, amount, &deltas.ArithmeticFailures)
 			addConservationValue(reportedBucketBalances, venueBucketKey{venue: ledger.VenueID, bucket: "insurance_fund", asset: asset}, amount, &deltas.ArithmeticFailures)
+		}
+		for symbol, reserve := range ledger.FundingRoundingReserves {
+			if symbol == "" || reserve.Asset == "" || reserve.SourceID == "" || reserve.Initial <= 0 || reserve.Balance < 0 || reserve.EndowmentEventSeq == 0 {
+				deltas.MalformedVenueLedgers++
+				continue
+			}
+			addConservationValue(reportedVenueByVenue, venueAssetKey{venue: ledger.VenueID, asset: reserve.Asset}, reserve.Balance, &deltas.ArithmeticFailures)
+			addConservationValue(reportedBucketBalances, venueBucketKey{venue: ledger.VenueID, bucket: "funding_rounding_reserve", asset: reserve.Asset, symbol: symbol}, reserve.Balance, &deltas.ArithmeticFailures)
+			key := reserveKey{venue: ledger.VenueID, symbol: symbol, asset: reserve.Asset}
+			endowment, hasEndowment := reserveEndowments[key]
+			movement, hasMovement := reserveMovements[key]
+			if !hasEndowment || !hasMovement || endowment.amount != reserve.Initial ||
+				endowment.sourceID != reserve.SourceID || endowment.frame != reserve.EndowmentEventSeq ||
+				movement.amount != endowment.amount || movement.timestamp != endowment.timestamp ||
+				movement.frame <= endowment.frame {
+				deltas.FundingReserveEndowmentMismatches++
+			}
+		}
+	}
+	for key := range reserveEndowments {
+		ledger, present := findVenueLedger(r.Report.VenueLedgers, key.venue)
+		if !present {
+			deltas.FundingReserveEndowmentMismatches++
+			continue
+		}
+		if _, present := ledger.FundingRoundingReserves[key.symbol]; !present {
+			deltas.FundingReserveEndowmentMismatches++
+		}
+	}
+	for key := range reserveMovements {
+		if _, present := reserveEndowments[key]; !present {
+			deltas.FundingReserveEndowmentMismatches++
 		}
 	}
 	for venue := range observedVenues {
@@ -1174,7 +1297,8 @@ const borrowedWallet = "borrowed"
 // holdings out of nothing, because they come from outside the market.
 var externalReasons = map[string]bool{"initial_deposit": true, "borrow": true}
 
-// venueTake is what the exchange itself holds, read from its report.
+// venueTake is what the exchange acquired from the internal economy, read from
+// its report. The externally endowed reserve principal is excluded.
 //
 // The movement stream is the independent source and is compared against this
 // rather than replacing it: a run whose venue movements were never recorded
@@ -1189,6 +1313,17 @@ func (r *Run) venueTake() (map[string]int64, int) {
 		}
 		for asset, amount := range ledger.InsuranceFund {
 			addConservationValue(take, asset, amount, &arithmeticFailures)
+		}
+		for _, reserve := range ledger.FundingRoundingReserves {
+			// The initial K atoms are external venue capital, not income from
+			// participants. Only the change since that endowment closes the
+			// internal cash-flow identity.
+			change, ok := fundingReserveNetChange(reserve)
+			if !ok {
+				arithmeticFailures++
+				continue
+			}
+			addConservationValue(take, reserve.Asset, change, &arithmeticFailures)
 		}
 	}
 	return take, arithmeticFailures
@@ -1314,6 +1449,14 @@ func (r *Run) venueIdentities(venueFlows map[string]map[flowKey]*AssetFlow) ([]V
 		for asset, amount := range ledger.InsuranceFund {
 			addConservationValue(take[ledger.VenueID], asset, amount, &arithmeticFailures)
 		}
+		for _, reserve := range ledger.FundingRoundingReserves {
+			change, ok := fundingReserveNetChange(reserve)
+			if !ok {
+				arithmeticFailures++
+				continue
+			}
+			addConservationValue(take[ledger.VenueID], reserve.Asset, change, &arithmeticFailures)
+		}
 	}
 	openLinear := make(map[string]int64)
 	for _, row := range r.Report.TerminalAccounts {
@@ -1379,6 +1522,10 @@ func (r *Run) venueIdentities(venueFlows map[string]map[flowKey]*AssetFlow) ([]V
 		}
 	}
 	return out, arithmeticFailures
+}
+
+func fundingReserveNetChange(reserve FundingReserveBalance) (int64, bool) {
+	return subAuditInt64(reserve.Balance, reserve.Initial)
 }
 
 // contractClass groups a symbol by how its cash conserves.

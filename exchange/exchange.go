@@ -19,8 +19,9 @@ import (
 
 // ExchangeBalance tracks the exchange's own accumulated revenue and safety fund.
 type ExchangeBalance struct {
-	FeeRevenue    map[string]int64 `json:"fee_revenue"`
-	InsuranceFund map[string]int64 `json:"insurance_fund"`
+	FeeRevenue              map[string]int64                 `json:"fee_revenue"`
+	InsuranceFund           map[string]int64                 `json:"insurance_fund"`
+	FundingRoundingReserves map[string]FundingReserveBalance `json:"funding_rounding_reserves,omitempty"`
 }
 
 // ErrSettlementPendingExposure is returned when an account still has a
@@ -140,9 +141,11 @@ type DefaultExchange struct {
 	Instruments map[string]Instrument
 	// instrumentListedAt retains the original public listing time. Reference-
 	// data replays must not rewrite contract tenor as subscription time.
-	instrumentListedAt map[string]int64
-	Positions          PositionStore
-	ExchangeBalance    *ExchangeBalance
+	instrumentListedAt       map[string]int64
+	Positions                PositionStore
+	ExchangeBalance          *ExchangeBalance
+	fundingStates            map[string]*fundingOwnedState
+	fundingEndowmentFailures map[string]error
 	// conservation accumulates every recorded movement so that a balance
 	// changed without one can be detected, which no audit of the log itself
 	// could do: the log would be self-consistent and merely incomplete.
@@ -318,9 +321,12 @@ func NewExchangeWithConfig(config ExchangeConfig) *DefaultExchange {
 		instrumentListedAt: make(map[string]int64, 16),
 		Positions:          NewPositionManager(config.Clock),
 		ExchangeBalance: &ExchangeBalance{
-			FeeRevenue:    make(map[string]int64),
-			InsuranceFund: make(map[string]int64),
+			FeeRevenue:              make(map[string]int64),
+			InsuranceFund:           make(map[string]int64),
+			FundingRoundingReserves: make(map[string]FundingReserveBalance),
 		},
+		fundingStates:                    make(map[string]*fundingOwnedState),
+		fundingEndowmentFailures:         make(map[string]error),
 		conservation:                     newConservationTracker(),
 		NextOrderID:                      1,
 		Matcher:                          matcher,
@@ -783,7 +789,10 @@ func (e *DefaultExchange) CancelAllClientOrders(clientID uint64) int {
 func (e *DefaultExchange) ConnectNewClient(clientID uint64, initialBalances map[string]int64, feePlan FeeModel) Gateway {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	if e.closed {
+	// E2's finite reserve is sized for one frozen roster and identity lifetime.
+	// No later account or replacement session can enter the venue after it is
+	// endowed; the historical path is unchanged when no reserve is configured.
+	if e.closed || len(e.fundingStates) != 0 {
 		gateway := NewClientGateway(clientID)
 		gateway.Close()
 		return gateway

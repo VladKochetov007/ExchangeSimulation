@@ -128,6 +128,9 @@ func (e *DefaultExchange) VerifyConservation() []ConservationViolation {
 	for asset, amount := range e.ExchangeBalance.InsuranceFund {
 		accumulate(asset, amount)
 	}
+	for _, reserve := range e.ExchangeBalance.FundingRoundingReserves {
+		accumulate(reserve.Asset, reserve.Balance)
+	}
 	for asset := range e.conservation.unrepresentable {
 		unrepresentable[asset] = true
 	}

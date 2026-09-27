@@ -1,10 +1,32 @@
 package analysis
 
 import (
+	"encoding/json"
 	"fmt"
 	"math"
 	"testing"
 )
+
+func reserveFrameLine(ts int64, frame uint64, event string, payload map[string]any) string {
+	raw, err := json.Marshal(map[string]any{
+		"sim_ts": ts, "client_id": uint64(0), "event": event,
+		"data": map[string]any{"venue_id": "north", "global_sequence": frame, "payload": payload},
+	})
+	if err != nil {
+		panic(err)
+	}
+	return string(raw)
+}
+
+func reserveEndowmentPayload(symbol string) map[string]any {
+	return map[string]any{
+		"venue_id": "north", "perp_symbol": symbol, "quote_asset": "USD",
+		"timestamp_nano": int64(1), "account_cap": 4,
+		"registered_client_ids": []uint64{1, 2, 3, 4},
+		"initial_quote_atoms":   int64(4), "rate_units_per_bp": int64(1_000_000),
+		"source_id": "E2_ROUNDING_RESERVE_ENDOWMENT",
+	}
+}
 
 func changeLine(ts int64, venue string, clientID uint64, symbol, reason string, deltas [][3]any) string {
 	changes := ""
@@ -128,6 +150,172 @@ func TestConservationReconcilesVenueStreamsAndChecksVenueArithmetic(t *testing.T
 	}
 	if result.Deltas.MalformedVenueRecords != 1 || result.Deltas.VenueBalanceMismatches != 1 {
 		t.Fatalf("venue old/new/delta inconsistency was accepted: %+v", result.Deltas)
+	}
+}
+
+func TestConservationRecognizesFiniteFundingReserveWithoutRelabelingFees(t *testing.T) {
+	finalSequence := uint64(1)
+	report := Report{VenueLedgers: []VenueLedger{{
+		VenueID: "north", FeeRevenue: map[string]int64{}, InsuranceFund: map[string]int64{},
+		FundingRoundingReserves: map[string]FundingReserveBalance{
+			"ABC-PERP": {Asset: "USD", SourceID: "E2_ROUNDING_RESERVE_ENDOWMENT", Initial: 4, Balance: 4, EndowmentEventSeq: 1},
+		}, FinalSequence: &finalSequence,
+	}}}
+	endowmentRecord := reserveFrameLine(1, 1, "funding_reserve_endowment", reserveEndowmentPayload("ABC-PERP"))
+	endowment := reserveFrameLine(1, 2, "venue_balance_change", map[string]any{
+		"timestamp": 1, "sequence": uint64(1), "bucket": "funding_rounding_reserve", "asset": "USD",
+		"symbol": "ABC-PERP", "trade_id": uint64(0), "reason": "external_endowment",
+		"old_balance": 0, "new_balance": 4, "delta": 4,
+	})
+	measure := func(report Report, rows []string) *Conservation {
+		t.Helper()
+		run, err := Open(writeRun(t, report, map[string][]string{"north/derivatives.jsonl": rows}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		result, err := run.MeasureConservation(ConservationOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return result
+	}
+	valid := measure(report, []string{endowmentRecord, endowment})
+	if valid.Deltas.MalformedVenueRecords != 0 || valid.Deltas.MalformedVenueLedgers != 0 ||
+		valid.Deltas.VenueBalanceMismatches != 0 || valid.Deltas.VenueChainMismatches != 0 ||
+		valid.Deltas.FeeRevenueMismatches != 0 || valid.Deltas.FundingReserveEndowmentMismatches != 0 {
+		t.Fatalf("externally endowed reserve was treated as fees or missing venue money: %+v", valid.Deltas)
+	}
+	atZeroPayload := reserveEndowmentPayload("ABC-PERP")
+	atZeroPayload["timestamp_nano"] = int64(0)
+	atZeroSource := reserveFrameLine(0, 1, "funding_reserve_endowment", atZeroPayload)
+	atZeroMovement := reserveFrameLine(0, 2, "venue_balance_change", map[string]any{
+		"timestamp": int64(0), "sequence": uint64(1), "bucket": "funding_rounding_reserve",
+		"asset": "USD", "symbol": "ABC-PERP", "trade_id": uint64(0),
+		"reason": "external_endowment", "old_balance": int64(0),
+		"new_balance": int64(4), "delta": int64(4),
+	})
+	if result := measure(report, []string{atZeroSource, atZeroMovement}); result.Deltas.MalformedVenueRecords != 0 ||
+		result.Deltas.FundingReserveEndowmentMismatches != 0 || result.Deltas.VenueBalanceMismatches != 0 {
+		t.Fatalf("valid construction at simulation time zero was rejected: %+v", result.Deltas)
+	}
+	if take, failures := (&Run{Report: report}).venueTake(); failures != 0 || take["USD"] != 0 {
+		t.Fatalf("external K atoms were misclassified as participant-derived venue take: %v %d", take, failures)
+	}
+	paidReport := report
+	paidReport.VenueLedgers = []VenueLedger{report.VenueLedgers[0]}
+	paidReport.VenueLedgers[0].FundingRoundingReserves = map[string]FundingReserveBalance{
+		"ABC-PERP": {Asset: "USD", SourceID: "E2_ROUNDING_RESERVE_ENDOWMENT", Initial: 4, Balance: 3, EndowmentEventSeq: 1},
+	}
+	if take, failures := (&Run{Report: paidReport}).venueTake(); failures != 0 || take["USD"] != -1 {
+		t.Fatalf("reserve cash paid to accounts did not offset their cash gain: %v %d", take, failures)
+	}
+	badReport := report
+	badReport.VenueLedgers = []VenueLedger{report.VenueLedgers[0]}
+	badReport.VenueLedgers[0].FundingRoundingReserves = map[string]FundingReserveBalance{
+		"ABC-PERP": {Asset: "USD", SourceID: "E2_ROUNDING_RESERVE_ENDOWMENT", Initial: 4, Balance: 5, EndowmentEventSeq: 1},
+	}
+	if result := measure(badReport, []string{endowmentRecord, endowment}); result.Deltas.VenueBalanceMismatches == 0 ||
+		result.Deltas.VenueChainMismatches == 0 {
+		t.Fatalf("terminal reserve corruption was accepted: %+v", result.Deltas)
+	}
+	wrongInitial := report
+	wrongInitial.VenueLedgers = []VenueLedger{report.VenueLedgers[0]}
+	wrongInitial.VenueLedgers[0].FundingRoundingReserves = map[string]FundingReserveBalance{
+		"ABC-PERP": {Asset: "USD", SourceID: "E2_ROUNDING_RESERVE_ENDOWMENT", Initial: 3, Balance: 4, EndowmentEventSeq: 1},
+	}
+	if result := measure(wrongInitial, []string{endowmentRecord, endowment}); result.Deltas.FundingReserveEndowmentMismatches == 0 {
+		t.Fatalf("reported external endowment did not match actual movement: %+v", result.Deltas)
+	}
+	wrongSource := report
+	wrongSource.VenueLedgers = []VenueLedger{report.VenueLedgers[0]}
+	wrongSource.VenueLedgers[0].FundingRoundingReserves = map[string]FundingReserveBalance{
+		"ABC-PERP": {Asset: "USD", SourceID: "OTHER", Initial: 4, Balance: 4, EndowmentEventSeq: 1},
+	}
+	if result := measure(wrongSource, []string{endowmentRecord, endowment}); result.Deltas.FundingReserveEndowmentMismatches == 0 {
+		t.Fatalf("reported source was not bound to canonical endowment: %+v", result.Deltas)
+	}
+	wrongFrame := report
+	wrongFrame.VenueLedgers = []VenueLedger{report.VenueLedgers[0]}
+	wrongFrame.VenueLedgers[0].FundingRoundingReserves = map[string]FundingReserveBalance{
+		"ABC-PERP": {Asset: "USD", SourceID: "E2_ROUNDING_RESERVE_ENDOWMENT", Initial: 4, Balance: 4, EndowmentEventSeq: 9},
+	}
+	if result := measure(wrongFrame, []string{endowmentRecord, endowment}); result.Deltas.FundingReserveEndowmentMismatches == 0 {
+		t.Fatalf("reported frame was not bound to canonical endowment: %+v", result.Deltas)
+	}
+	unknownReason := reserveFrameLine(1, 2, "venue_balance_change", map[string]any{
+		"timestamp": 1, "sequence": uint64(1), "bucket": "funding_rounding_reserve", "asset": "USD",
+		"symbol": "ABC-PERP", "reason": "secret_topup", "old_balance": 0, "new_balance": 4, "delta": 4,
+	})
+	if result := measure(report, []string{endowmentRecord, unknownReason}); result.Deltas.MalformedVenueRecords == 0 {
+		t.Fatalf("undeclared reserve source was accepted: %+v", result.Deltas)
+	}
+	twoSymbols := report
+	secondFinalSequence := uint64(2)
+	twoSymbols.VenueLedgers = []VenueLedger{report.VenueLedgers[0]}
+	twoSymbols.VenueLedgers[0].FinalSequence = &secondFinalSequence
+	twoSymbols.VenueLedgers[0].FundingRoundingReserves = map[string]FundingReserveBalance{
+		"ABC-PERP": {Asset: "USD", SourceID: "E2_ROUNDING_RESERVE_ENDOWMENT", Initial: 4, Balance: 4, EndowmentEventSeq: 1},
+		"CDF-PERP": {Asset: "USD", SourceID: "E2_ROUNDING_RESERVE_ENDOWMENT", Initial: 4, Balance: 4, EndowmentEventSeq: 3},
+	}
+	secondPayload := reserveEndowmentPayload("CDF-PERP")
+	secondPayload["timestamp_nano"] = int64(2)
+	secondEndowmentRecord := reserveFrameLine(2, 3, "funding_reserve_endowment", secondPayload)
+	secondEndowment := reserveFrameLine(2, 4, "venue_balance_change", map[string]any{
+		"timestamp": 2, "sequence": uint64(2), "bucket": "funding_rounding_reserve", "asset": "USD",
+		"symbol": "CDF-PERP", "trade_id": uint64(0), "reason": "external_endowment",
+		"old_balance": 0, "new_balance": 4, "delta": 4,
+	})
+	if result := measure(twoSymbols, []string{endowmentRecord, endowment, secondEndowmentRecord, secondEndowment}); result.Deltas.VenueChainMismatches != 0 ||
+		result.Deltas.VenueBalanceMismatches != 0 || result.Deltas.FundingReserveEndowmentMismatches != 0 {
+		t.Fatalf("two distinct USD reserves were collapsed into one balance chain: %+v", result.Deltas)
+	}
+	duplicateFrames := twoSymbols
+	duplicateFrames.VenueLedgers = []VenueLedger{twoSymbols.VenueLedgers[0]}
+	duplicateFrames.VenueLedgers[0].FundingRoundingReserves = map[string]FundingReserveBalance{
+		"ABC-PERP": {Asset: "USD", SourceID: "E2_ROUNDING_RESERVE_ENDOWMENT", Initial: 4, Balance: 4, EndowmentEventSeq: 1},
+		"CDF-PERP": {Asset: "USD", SourceID: "E2_ROUNDING_RESERVE_ENDOWMENT", Initial: 4, Balance: 4, EndowmentEventSeq: 1},
+	}
+	if result := measure(duplicateFrames, []string{
+		endowmentRecord, endowment,
+		reserveFrameLine(2, 1, "funding_reserve_endowment", secondPayload),
+		reserveFrameLine(2, 2, "venue_balance_change", map[string]any{
+			"timestamp": 2, "sequence": uint64(2), "bucket": "funding_rounding_reserve", "asset": "USD",
+			"symbol": "CDF-PERP", "trade_id": uint64(0), "reason": "external_endowment",
+			"old_balance": 0, "new_balance": 4, "delta": 4,
+		}),
+	}); result.Deltas.FundingReserveEndowmentMismatches == 0 {
+		t.Fatalf("global frame identities reused across two reserves: %+v", result.Deltas)
+	}
+	for _, mutation := range []struct {
+		name   string
+		rows   []string
+		report Report
+	}{
+		{"missing-endowment", []string{endowment}, report},
+		{"missing-movement", []string{endowmentRecord}, report},
+		{"reversed-frames", []string{reserveFrameLine(1, 3, "funding_reserve_endowment", reserveEndowmentPayload("ABC-PERP")), endowment}, report},
+		{"duplicate-source", []string{endowmentRecord, endowmentRecord, endowment}, report},
+		{"wrong-source", []string{reserveFrameLine(1, 1, "funding_reserve_endowment", func() map[string]any {
+			payload := reserveEndowmentPayload("ABC-PERP")
+			payload["source_id"] = "OTHER"
+			return payload
+		}()), endowment}, report},
+		{"wrong-roster", []string{reserveFrameLine(1, 1, "funding_reserve_endowment", func() map[string]any {
+			payload := reserveEndowmentPayload("ABC-PERP")
+			payload["registered_client_ids"] = []uint64{1, 2, 2, 4}
+			return payload
+		}()), endowment}, report},
+		{"underfunded-cap", []string{reserveFrameLine(1, 1, "funding_reserve_endowment", func() map[string]any {
+			payload := reserveEndowmentPayload("ABC-PERP")
+			payload["initial_quote_atoms"] = int64(3)
+			return payload
+		}()), endowment}, report},
+	} {
+		t.Run(mutation.name, func(t *testing.T) {
+			if result := measure(mutation.report, mutation.rows); result.Deltas.FundingReserveEndowmentMismatches == 0 {
+				t.Fatalf("corrupt source/movement identity was accepted: %+v", result.Deltas)
+			}
+		})
 	}
 }
 

@@ -4618,10 +4618,11 @@ func exchangeGreekRisk(venue *Venue, account etypes.MarkedAccountSnapshot, phase
 // charged to the insurance fund, which writes off their debt and therefore
 // raises the population's summed result above the fees it paid.
 type VenueLedger struct {
-	VenueID       string           `json:"venue_id"`
-	FeeRevenue    map[string]int64 `json:"fee_revenue"`
-	InsuranceFund map[string]int64 `json:"insurance_fund"`
-	FinalSequence *uint64          `json:"final_sequence"`
+	VenueID                 string                                    `json:"venue_id"`
+	FeeRevenue              map[string]int64                          `json:"fee_revenue"`
+	InsuranceFund           map[string]int64                          `json:"insurance_fund"`
+	FundingRoundingReserves map[string]exchange.FundingReserveBalance `json:"funding_rounding_reserves,omitempty"`
+	FinalSequence           *uint64                                   `json:"final_sequence"`
 }
 
 // CaptureVenueLedgers snapshots every venue's own balances.
@@ -4633,9 +4634,10 @@ func (s *Sim) CaptureVenueLedgers() []VenueLedger {
 			continue
 		}
 		ledger := VenueLedger{
-			VenueID:       venue.ID,
-			FeeRevenue:    make(map[string]int64, len(balance.FeeRevenue)),
-			InsuranceFund: make(map[string]int64, len(balance.InsuranceFund)),
+			VenueID:                 venue.ID,
+			FeeRevenue:              make(map[string]int64, len(balance.FeeRevenue)),
+			InsuranceFund:           make(map[string]int64, len(balance.InsuranceFund)),
+			FundingRoundingReserves: make(map[string]exchange.FundingReserveBalance, len(balance.FundingRoundingReserves)),
 		}
 		finalSequence := venue.Exchange.VenueBalanceSequenceForReport()
 		ledger.FinalSequence = &finalSequence
@@ -4644,6 +4646,9 @@ func (s *Sim) CaptureVenueLedgers() []VenueLedger {
 		}
 		for asset, amount := range balance.InsuranceFund {
 			ledger.InsuranceFund[asset] = amount
+		}
+		for symbol, reserve := range balance.FundingRoundingReserves {
+			ledger.FundingRoundingReserves[symbol] = reserve
 		}
 		ledgers = append(ledgers, ledger)
 	}

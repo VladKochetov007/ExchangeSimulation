@@ -17,6 +17,7 @@ func validateConservation(result *analysis.Conservation) error {
 		deltas.MarginInterestMismatches != 0 || deltas.MarginInterestFailures != 0 || deltas.FundingRemainderMismatches != 0 ||
 		deltas.FundingWalletMismatches != 0 || deltas.UnsupportedRevenueRecords != 0 || deltas.MalformedInterestRecords != 0 ||
 		deltas.DuplicateFeeIdentities != 0 || deltas.DuplicateFeeMovements != 0 || deltas.MalformedVenueLedgers != 0 ||
+		deltas.FundingReserveEndowmentMismatches != 0 ||
 		deltas.VenueTerminalSequenceMissing != 0 || deltas.VenueOrderMismatches != 0 ||
 		deltas.VenueSequenceMismatches != 0 || deltas.VenueChainMismatches != 0 || deltas.ArithmeticFailures != 0 {
 		return fmt.Errorf("ME-005 conservation: movement or venue ledger mismatch: %+v", deltas)
