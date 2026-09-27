@@ -2,6 +2,8 @@
 
 Planning source: `main` at `ef61b4cb6e0124aa797f281e379ab143e847646e` (2026-09-26); locally observed compiler `go1.27.0 linux/amd64`, while `go.mod` declares Go 1.25. No executable candidate or binary is pinned by this planning record. This is a design and readiness record, not a locked protocol, simulator result, scientific freeze, or permission to allocate seeds. See the [policy contracts](policy-contracts.md), [mathematical notes](mathematical-notes.md), [E0 draft](config-drafts/e0-repeated-spot.md), [E2 draft](config-drafts/e2-two-venue-funding.md), and [readiness record](readiness.json).
 
+Implementation update: [E0 PR1 mechanical checkpoint](pr1-implementation-20260927.md) adds the one-book adapter and finite seed-once actor on a separate feature branch. It does not remove the E0-3/E0-4 economic/evidence blockers or authorize the draft campaign.
+
 ## Question and boundary
 
 The first economic question is whether inventory-aware quoting changes the distribution of carried inventory, fee-net benchmark-relative wealth, and liquidity when four finite makers compete for recurring finite-resource demand in one spot book. A mixed population tests competition within the same order book; pure-only worlds are not enough. The second question is whether an explicit finite-life spot/perpetual carry desk is economically viable and changes basis under two different funding clocks, without assuming profitable arbitrage or a shared wallet.

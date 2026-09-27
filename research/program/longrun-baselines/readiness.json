@@ -4,7 +4,15 @@
   "planning_status": "DRAFT_NOT_AUTHORIZED_TO_RUN",
   "economic_worlds_run_for_this_plan": 0,
   "seed_ids_reserved": [],
-  "source_change_in_this_package": false,
+  "source_change_in_this_package": true,
+  "implementation_checkpoint": {
+    "branch": "feature/e0-repeated-spot-pr1-20260926",
+    "report": "research/program/longrun-baselines/pr1-implementation-20260927.md",
+    "scope": "E0-1 and E0-2 mechanical implementation and fixtures only",
+    "economic_claim": "NOT_ESTABLISHED",
+    "code_review_execution": "NOT_ISSUED",
+    "run_authorized": false
+  },
   "candidate_environments": [
     {
       "id": "E0",
@@ -14,7 +22,7 @@
       "proposed_economic_world_ceiling": 15,
       "proposed_technical_controls": 2,
       "run_authorized": false,
-      "readiness": "BLOCKED_ON_BOUNDED_IMPLEMENTATION_AND_REVIEW"
+      "readiness": "E0-1_E0-2_FIXTURE_TESTED_E0-3_E0-4_BLOCK_ECONOMIC_RUN"
     },
     {
       "id": "E2",
@@ -101,5 +109,5 @@
     "free_disk_reserve_gib": 10,
     "require_fresh_capacity_preflight": true
   },
-  "next_authorizable_milestone": "PR1 one-book E0 scenario adapter and integrated contract tests only; implementation and economic worlds require a separate owner instruction."
+  "next_authorizable_milestone": "PR2 shared pending-inclusive maker cap and quote lifecycle, then delivered-past estimator/evidence gate; economic worlds remain unauthorized."
 }
