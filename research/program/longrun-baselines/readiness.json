@@ -8,9 +8,14 @@
   "implementation_checkpoint": {
     "branch": "feature/e0-repeated-spot-pr1-20260926",
     "report": "research/program/longrun-baselines/pr1-implementation-20260927.md",
+    "external_review_request": "research/program/longrun-baselines/pr1-review-request-20260927.md",
     "scope": "E0-1 and E0-2 mechanical implementation and fixtures only",
     "economic_claim": "NOT_ESTABLISHED",
-    "code_review_execution": "NOT_ISSUED",
+    "code_review_execution": "UNAVAILABLE",
+    "code_review_verdict": "NOT_ISSUED",
+    "code_review_reason": "One fresh Sol-6 medium read-only request for exact PR1 commit returned agent thread limit reached; no reviewer inspected code.",
+    "tested_candidate_commit": "21b2b4552fc66b47a35219781ff1a1115f105f95",
+    "clean_make_test": "PASS",
     "run_authorized": false
   },
   "candidate_environments": [
