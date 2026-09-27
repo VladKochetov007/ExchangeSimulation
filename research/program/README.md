@@ -99,6 +99,12 @@ third design iteration. Independently feasible E1/E2 mechanical work may
 continue, but integrated economic payoff claims cannot inherit priceability
 from either E0 version.
 
+The E1 [ME-016 idea and readiness record](ideas/ME-016/idea.md) now identify a
+bounded, opt-in delayed-depth signal maker with a separate v5 evidence epoch and
+independent quote replay. Its mechanical review does not register an economic
+matrix or authorize a run. Signal value, competitive payoff and predictive
+information remain untested; displayed depth includes the maker's own orders.
+
 ME-001's fixed initial endowments and class-replacement intervention changed
 the delivered local ask book, then the immediate buyer's fill and marked
 target cost. Both replacement arms separated five-level ask depth in the

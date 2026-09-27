@@ -398,6 +398,24 @@
         "basis": "Owner 2026-09-27 long-run E0/E1/E2 authorization and prospectively locked ME-015 development protocol authorized this exact 24-cell matrix plus two counted technical duplicates. All 26 ME-015 process executions completed from clean C=4cc34e40 and received scoped independent result review. This protocol is exhausted; no ME-015 rerun, third E0 economic design iteration, confirmation or holdout follows automatically."
       },
       "next_action": "Preserve the bounded public two-sided-time response and strict gain non-identification. Continue only independently feasible E1/E2 mechanical readiness; any new E0 economic design or confirmation needs its own prospective contract and gate."
+    },
+    {
+      "id": "ME-016",
+      "title": "Delivered-depth signal in repeated maker competition (E1)",
+      "claim_type": "MECHANICAL",
+      "stage": "PREPARE",
+      "idea": "research/program/ideas/ME-016/idea.md",
+      "protocol": null,
+      "report": null,
+      "result": null,
+      "dependencies": ["ME-015"],
+      "policy_ids": ["S07"],
+      "authorization": {
+        "prepare": true,
+        "run": false,
+        "basis": "Owner 2026-09-27 long-run E1 authorization permits bounded policy/evidence implementation and focused fixtures. This idea card is not a locked ME-016 economic protocol and authorizes no E1 world, seed, confirmation or holdout."
+      },
+      "next_action": "The opt-in signal maker and strict v5 replay are mechanically reviewed. Pass the clean full gate, then prospectively design and independently review a small E1 mixed-roster economic protocol with explicit opportunity, activation, missing-mark and causal endpoints. No ME-016 world is registered yet."
     }
   ],
   "policies": [
