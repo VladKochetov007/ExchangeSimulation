@@ -8,4 +8,4 @@ The [long-run plan](../../longrun-baselines/plan.md), [policy contracts](../../l
 
 ME-014 depends on the composable repeated E0 environment, not on finding a profitable ME-005 route. Historical [P4 funding-carry](../../../v2-5-p4-funding-carry-results.md) falsified its registered market-basis endpoint; that verdict is not rewritten by a prospective new population. The [R2/SV1D closure](../../../v2-r2-sv1d-iteration-closeout.md) remains separate.
 
-Next action after E0 readiness: owner-authorized E2 funding/lifecycle implementation and independently reconstructible multi-payment fixtures. No ME-014 world or holdout is authorized now.
+Next action after E0 readiness: implement E2 funding/lifecycle and independently reconstructible multi-payment fixtures under the [2026-09-27 bounded owner authorization](../../longrun-baselines/authorization-20260927.md). No ME-014 world is run-ready before a fixed protocol, evidence and resource gates; historical holdouts remain prohibited.

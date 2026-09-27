@@ -349,7 +349,7 @@
       "id": "ME-013",
       "title": "Repeated spot-maker competition baseline (E0)",
       "claim_type": "CAUSAL",
-      "stage": "PLAN",
+      "stage": "PREPARE",
       "idea": "research/program/ideas/ME-013/idea.md",
       "protocol": null,
       "report": null,
@@ -357,11 +357,11 @@
       "dependencies": ["ME-000"],
       "policy_ids": ["S06", "S07", "S28", "S32"],
       "authorization": {
-        "prepare": false,
+        "prepare": true,
         "run": false,
-        "basis": "Owner 2026-09-26 authorized planning documentation only. E0 implementation, protocol lock and worlds require separate decisions."
+        "basis": "Owner 2026-09-27 long-run goal authorizes bounded E0/E1/E2 implementation and conditional development, recorded in research/program/longrun-baselines/authorization-20260927.md. E0 runs remain gated on E0-3/E0-4, fixed protocol, evidence and resource checks."
       },
-      "next_action": "Seek bounded authorization for PR1 one-book composable repeated roster and seed-once contract tests; no economic run."
+      "next_action": "Integrate tested PR1 as UNREVIEWED DEVELOPMENT; implement E0-3/E0-4, lock and validate a finite protocol before the first E0 economic world."
     },
     {
       "id": "ME-014",
@@ -375,11 +375,11 @@
       "dependencies": ["ME-013"],
       "policy_ids": ["S06", "S07", "S18", "S28", "S32"],
       "authorization": {
-        "prepare": false,
+        "prepare": true,
         "run": false,
-        "basis": "Owner 2026-09-26 authorized a long-horizon planning package only; compressed funding semantics, implementation and worlds are not authorized."
+        "basis": "Owner 2026-09-27 long-run goal authorizes bounded E0/E1/E2 implementation and conditional development, recorded in research/program/longrun-baselines/authorization-20260927.md. E2 runs remain gated on E0 and versioned funding/lifecycle/evidence readiness plus a fixed protocol."
       },
-      "next_action": "After E0 readiness, seek a separate versioned funding/lifecycle implementation decision and independent fixtures; no ME-014 world."
+      "next_action": "After E0 readiness, implement versioned funding/lifecycle and independent multi-payment fixtures; lock and validate an E2 protocol before any ME-014 world."
     }
   ],
   "policies": [

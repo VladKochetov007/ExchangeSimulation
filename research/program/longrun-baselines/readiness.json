@@ -1,7 +1,10 @@
 {
   "schema_version": 1,
   "planning_baseline_commit": "ef61b4cb6e0124aa797f281e379ab143e847646e",
-  "planning_status": "DRAFT_NOT_AUTHORIZED_TO_RUN",
+  "planning_status": "OWNER_AUTHORIZED_PREPARATION_NOT_RUN_READY",
+  "current_authorization": "research/program/longrun-baselines/authorization-20260927.md",
+  "economic_world_ceiling_by_environment": {"E0": 120, "E1": 120, "E2": 120},
+  "calibration_world_ceiling_by_environment": {"E0": 12, "E1": 12, "E2": 12},
   "economic_worlds_run_for_this_plan": 0,
   "seed_ids_reserved": [],
   "source_change_in_this_package": true,
@@ -114,5 +117,5 @@
     "free_disk_reserve_gib": 10,
     "require_fresh_capacity_preflight": true
   },
-  "next_authorizable_milestone": "PR2 shared pending-inclusive maker cap and quote lifecycle, then delivered-past estimator/evidence gate; economic worlds remain unauthorized."
+  "next_authorized_milestone": "Integrate tested PR1 as UNREVIEWED DEVELOPMENT; then E0-3 shared pending-inclusive maker cap and quote lifecycle, followed by E0-4 delivered-past estimator/evidence. Economic runs remain gated on fixed protocol, tests, evidence and capacity."
 }

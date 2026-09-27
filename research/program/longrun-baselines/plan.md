@@ -1,4 +1,6 @@
-# Repeated-strategy market ecology: development plan (NOT AUTHORIZED TO RUN)
+# Repeated-strategy market ecology: original development design draft
+
+Authorization update: this heading describes the **original draft**. The owner subsequently authorized bounded E0/E1/E2 implementation and development on 2026-09-27, subject to the gates in the [current authorization record](authorization-20260927.md). Neither this draft nor its proposed numbers became a locked protocol by that decision. Historical planning-only statements below describe their original date, not the current owner permission.
 
 Planning source: `main` at `ef61b4cb6e0124aa797f281e379ab143e847646e` (2026-09-26); locally observed compiler `go1.27.0 linux/amd64`, while `go.mod` declares Go 1.25. No executable candidate or binary is pinned by this planning record. This is a design and readiness record, not a locked protocol, simulator result, scientific freeze, or permission to allocate seeds. See the [policy contracts](policy-contracts.md), [mathematical notes](mathematical-notes.md), [E0 draft](config-drafts/e0-repeated-spot.md), [E2 draft](config-drafts/e2-two-venue-funding.md), and [readiness record](readiness.json).
 
@@ -82,7 +84,7 @@ Registered contrasts need matched rosters and explicit RNG stream alignment; equ
 
 Old 30-minute integrated profiling reported about 30 seconds wall, 0.8 GiB RSS and 0.64 GiB raw evidence; the [ME-005 five-minute report](../ideas/ME-005/report.md) recorded about 189 MB of retained output across its cells. These are **not** measured E0/E2 scaling coefficients. A planning envelope is at most 4 CPU workers/8 GiB RAM, sequential cells, ≤1.5 GiB E0 and ≤4 GiB E2 retained output per future cell, ≤20/45 minutes wall per cell, and ≥10 GiB free-disk reserve after accounting for extraction staging. At 15+6 proposed economic worlds, a pessimistic output ceiling is 46.5 GiB before controls/staging; current free space does not itself certify that campaign. A future measured capacity preflight must replace these estimates. No cleanup, evidence deletion or guard reduction is implied.
 
-## Prioritized implementation and validation sequence (future authority required)
+## Prioritized implementation and validation sequence (original planning sequence)
 
 1. **PR1, first milestone:** an externally composed one-book E0 scenario adapter; finite seed-once actor; equal-resource pure/AS/taker/round-trip roster; immutable effective-config export; integrated fixture proving repeated decisions, ordinary fills/cancels, no derivative books, finite seed and no hidden replenishment. This is one reusable environment, not an all-strategy world.
 2. **PR2:** shared worst-case working-position guard including live and in-flight orders; delivered-past AS estimator with declared sparse-data prior; matched cancel/post-only lifecycle; account/PnL/endowment and observation evidence plus corruption tests. Validate exact policy behavior, race/determinism and evidence neutrality. Any source change is reviewed before economic worlds.

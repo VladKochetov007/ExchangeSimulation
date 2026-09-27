@@ -42,7 +42,7 @@ historical worlds as runs of a later merged source tree.
 | 4 | [ME-005](ideas/ME-005/report.md), [ME-007](ideas/ME-007/idea.md) | ME-005 REPORT: four valid development cells, zero registered opportunities and no route; bounded post-result review accepted the narrow claim with limitations, budget exhausted. ME-007 remains proposed. |
 | 5 | ME-004/006/008–010 | deferred allocation, interaction, payoff or derivative questions |
 | 6 | ME-011–ME-012 | restricted games and explicit capital dynamics after reliable payoffs |
-| Planning | [ME-013](ideas/ME-013/idea.md), [ME-014](ideas/ME-014/idea.md) | NEW long-horizon repeated-strategy E0/E2 drafts; implementation and economic worlds **not authorized** |
+| Preparation | [ME-013](ideas/ME-013/idea.md), [ME-014](ideas/ME-014/idea.md) | Owner-authorized bounded E0/E1/E2 implementation/development; PR1 mechanical checkpoint exists, but economic worlds are not yet run-ready. See the [current authorization and gates](longrun-baselines/authorization-20260927.md). |
 
 This is dependency order, not a run queue. ME-010 is a planning umbrella and needs
 a named child protocol; an umbrella cannot authorize a combined derivative campaign.
@@ -50,7 +50,7 @@ The [repeated-ecology planning package](longrun-baselines/plan.md) is a prospect
 one-book maker-competition baseline followed by a two-venue spot/perp funding
 baseline. Its [readiness record](longrun-baselines/readiness.json) identifies
 bounded adapters and new compressed-funding semantics; its draft numbers are
-not registered config values or permission to run. These PLAN entries do not
+not registered config values or a run-ready protocol. These entries do not
 change the closed ME-001/002/003/002-B/005 reports or R2/SV1D boundary.
 The completed ME-001 protocol used one ABC/USD venue, immediate execution,
 three quantities, three compositions and three development seeds. Its object

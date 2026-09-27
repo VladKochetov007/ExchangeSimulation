@@ -1,6 +1,6 @@
 # ME-013 — Repeated spot-maker competition (E0)
 
-Stage: **PLAN**. Claim sought later: simulation-internal **CAUSAL** development contrast between finite, equal-resource pure and AS-style maker rosters under recurring demand. This card is a pointer, not a run protocol or authorization.
+Stage: **PREPARE**. Claim sought later: simulation-internal **CAUSAL** development contrast between finite, equal-resource pure and AS-style maker rosters under recurring demand. This card is a pointer, not a run protocol or run-ready candidate.
 
 Question: how do symmetric versus inventory-aware quote policies change maker inventory risk, fee-net benchmark-relative wealth and liquidity when they compete repeatedly in the same ABC/USD book? Competing explanations include unequal cap/lifecycle behavior, seed depth, RNG coupling, price drift and missing terminal marks.
 
@@ -8,4 +8,4 @@ The [long-run plan](../../longrun-baselines/plan.md), [policy contracts](../../l
 
 Historical context: [ME-001](../ME-001/report.md) was immediate execution, [ME-002-B](../ME-002-B/report.md) was a one-child first-action gate screen, and [ME-005](../ME-005/report.md) had no qualifying executable arbitrage route. None measures repeated-maker PnL or inventory competition. [R2/SV1D](../../../v2-r2-sv1d-iteration-closeout.md) stays closed; its supplier result is not this policy comparison.
 
-Current next action: owner decision on **PR1 only** (one-book composable roster, finite opening seed and integrated fixtures). Economic source, protocol review and a separate run authorization are needed before any development world.
+Current next action: integrate the tested PR1 mechanical checkpoint as **UNREVIEWED DEVELOPMENT**, then implement E0-3/E0-4 and lock a finite protocol before economic worlds. The [2026-09-27 owner authorization](../../longrun-baselines/authorization-20260927.md) permits bounded E0 development after those gates; PR1 alone is not run-ready.
