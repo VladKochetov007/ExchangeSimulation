@@ -74,6 +74,9 @@ type tradeAudit struct {
 	orders            map[uint64]acceptedOrder
 	filledByOrder     map[uint64]int64
 	cancelledOrders   map[uint64]bool
+	forcedCancels     map[uint64]bool
+	cancelRemainders  map[uint64]int64
+	cancelAt          map[uint64]int64
 	trades            map[uint64]*tradeRecord
 	pendingSettlement []settlementRecord
 	pendingVenueFees  map[uint64]int64
@@ -85,7 +88,9 @@ type tradeAudit struct {
 func newTradeAudit(instrument worldspot.InstrumentConfig) *tradeAudit {
 	return &tradeAudit{instrument: instrument, orders: make(map[uint64]acceptedOrder),
 		filledByOrder: make(map[uint64]int64), cancelledOrders: make(map[uint64]bool),
-		trades: make(map[uint64]*tradeRecord), pendingVenueFees: make(map[uint64]int64),
+		forcedCancels: make(map[uint64]bool), cancelRemainders: make(map[uint64]int64),
+		cancelAt: make(map[uint64]int64),
+		trades:   make(map[uint64]*tradeRecord), pendingVenueFees: make(map[uint64]int64),
 		pendingFeeEvents: make(map[uint64]int64)}
 }
 
@@ -142,6 +147,7 @@ func (audit *tradeAudit) visit(event Event) error {
 		var cancellation struct {
 			OrderID      uint64 `json:"order_id"`
 			RemainingQty *int64 `json:"remaining_qty"`
+			Reason       string `json:"reason"`
 		}
 		if err := json.Unmarshal(event.Payload, &cancellation); err != nil {
 			return err
@@ -153,6 +159,9 @@ func (audit *tradeAudit) visit(event Event) error {
 			return errors.New("repeated spot: cancellation disagrees with order remainder")
 		}
 		audit.cancelledOrders[order.OrderID] = true
+		audit.cancelRemainders[order.OrderID] = *cancellation.RemainingQty
+		audit.forcedCancels[order.OrderID] = cancellation.Reason != ""
+		audit.cancelAt[order.OrderID] = event.Timestamp
 	case "OrderCancelRejected":
 		var rejection struct {
 			OrderID uint64 `json:"order_id"`

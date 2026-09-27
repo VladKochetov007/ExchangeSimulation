@@ -3,6 +3,7 @@ package repeatedspot
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -18,6 +19,7 @@ type testAggressor struct {
 	sent    bool
 	enabled bool
 	market  bool
+	qty     int64
 }
 
 func (aggressor *testAggressor) HandleEvent(context.Context, *actor.Event) {}
@@ -28,9 +30,9 @@ func (aggressor *testAggressor) onTick(time.Time) {
 	}
 	aggressor.sent = true
 	if aggressor.market {
-		aggressor.SubmitOrder("ABC/USD", exchange.Buy, exchange.Market, 0, 1)
+		aggressor.SubmitOrder("ABC/USD", exchange.Buy, exchange.Market, 0, aggressor.qty)
 	} else {
-		aggressor.SubmitOrder("ABC/USD", exchange.Buy, exchange.LimitOrder, 101, 1)
+		aggressor.SubmitOrder("ABC/USD", exchange.Buy, exchange.LimitOrder, 101, aggressor.qty)
 	}
 }
 
@@ -47,6 +49,10 @@ func fixtureWorldWithMaker(t *testing.T, enabled, stoikov bool) *worldspot.World
 }
 
 func fixtureWorldWithBook(t *testing.T, enabled, stoikov bool, seedAskQty int64, quoteInterval time.Duration, marketOrder bool) *worldspot.World {
+	return fixtureWorldWithAggressorSchedule(t, enabled, stoikov, seedAskQty, quoteInterval, marketOrder, 1, 3*time.Second)
+}
+
+func fixtureWorldWithAggressorSchedule(t *testing.T, enabled, stoikov bool, seedAskQty int64, quoteInterval time.Duration, marketOrder bool, qty int64, aggressorInterval time.Duration) *worldspot.World {
 	t.Helper()
 	seed, err := worldspot.NewSeedOncePolicy(worldspot.SeedOnceConfig{Symbol: "ABC/USD", BidPrice: 99, AskPrice: 101, BidQty: 2, AskQty: seedAskQty})
 	if err != nil {
@@ -72,16 +78,18 @@ func fixtureWorldWithBook(t *testing.T, enabled, stoikov bool, seedAskQty int64,
 		t.Fatal(err)
 	}
 	params := struct {
-		Enabled bool `json:"enabled"`
-		Market  bool `json:"market"`
-	}{enabled, marketOrder}
+		Enabled bool  `json:"enabled"`
+		Market  bool  `json:"market"`
+		Qty     int64 `json:"qty"`
+	}{enabled, marketOrder, qty}
 	aggressor, err := worldspot.DefinePolicy("fixture_aggressor", params, func(id uint64, gateway actor.Gateway, _ exchange.TickerFactory, decoded struct {
-		Enabled bool `json:"enabled"`
-		Market  bool `json:"market"`
+		Enabled bool  `json:"enabled"`
+		Market  bool  `json:"market"`
+		Qty     int64 `json:"qty"`
 	}) (actor.Actor, error) {
-		result := &testAggressor{BaseActor: actor.NewBaseActor(id, gateway), enabled: decoded.Enabled, market: decoded.Market}
+		result := &testAggressor{BaseActor: actor.NewBaseActor(id, gateway), enabled: decoded.Enabled, market: decoded.Market, qty: decoded.Qty}
 		result.SetHandler(result)
-		result.AddTicker(3*time.Second, result.onTick)
+		result.AddTicker(aggressorInterval, result.onTick)
 		return result, nil
 	})
 	if err != nil {
@@ -131,7 +139,7 @@ func TestCaptureProductionPathAndInformationSidecars(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"control/world_begin", "control/world_run_start", "control/world_end", "exchange/balance_snapshot", "exchange/balance_change", "exchange/venue_balance_change", "exchange/fee_revenue", "exchange/Trade", "exchange/OrderFill", "actor/order_send", "actor/maker_decision"} {
+	for _, name := range []string{"control/world_begin", "control/world_run_start", "control/world_end", "exchange/balance_snapshot", "exchange/balance_change", "exchange/venue_balance_change", "exchange/fee_revenue", "exchange/Trade", "exchange/OrderFill", "actor/order_send", "actor/maker_decision", "gateway/maker_response_receipt", "actor/maker_processed_response"} {
 		if counts[name] == 0 {
 			t.Fatalf("production capture missing %s: %+v", name, counts)
 		}
@@ -156,6 +164,52 @@ func TestCaptureProductionPathAndInformationSidecars(t *testing.T) {
 		market.TradeVolumeBaseUnits != "1" || market.TradeNotionalQuoteUnits != "101" ||
 		market.TwoSidedNanos+market.BidOnlyNanos+market.AskOnlyNanos+market.EmptyNanos != market.HorizonNanos {
 		t.Fatalf("incomplete or nonpartitioned time-weighted market evidence: %+v", market)
+	}
+}
+
+func TestMakerFillUsesDeliveredResponseNotExchangeInstant(t *testing.T) {
+	world := fixtureWorldWithAggressorSchedule(t, true, false, 1, 2*time.Second, true, 2, 5*time.Second)
+	directory := t.TempDir()
+	receipts, err := simulation.NewMarketDataReceiptRecorder(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var raw bytes.Buffer
+	capture, err := NewCapture(world, &raw, receipts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity, err := capture.Run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	replay, err := Replay(world.ContractJSON(), bytes.NewReader(raw.Bytes()), identity, directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	maker := replay.Accounts[1]
+	if maker.ClientID != 2 || maker.LocalResponses.FillReceived == 0 ||
+		maker.LocalResponses.FillReceived != maker.LocalResponses.FillProcessed ||
+		maker.LocalResponses.NetProcessedFillBase == 0 {
+		t.Fatalf("maker fill was not independently delivered and processed: %+v", maker)
+	}
+	noQuoteCancellation := false
+	if err := WalkEvidence(bytes.NewReader(raw.Bytes()), identity, func(event Event) error {
+		if event.Name != "maker_decision" || event.ClientID != 2 {
+			return nil
+		}
+		var decision worldspot.MakerDecision
+		if err := json.Unmarshal(event.Payload, &decision); err != nil {
+			return err
+		}
+		noQuoteCancellation = noQuoteCancellation || decision.Action == "cancel_quotes" &&
+			decision.TargetBid == 0 && decision.TargetAsk == 0
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !noQuoteCancellation {
+		t.Fatal("fixture did not exercise cancellation after a one-sided book")
 	}
 }
 

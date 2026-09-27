@@ -25,9 +25,14 @@ type requestKey struct {
 }
 
 type sentOrder struct {
-	request  sentRequest
-	at       int64
-	resolved bool
+	request          sentRequest
+	at               int64
+	resolved         bool
+	outcome          string
+	outcomeAt        int64
+	outcomeOrderID   uint64
+	outcomeRemaining int64
+	outcomeReason    string
 }
 
 type sentRequest struct {
@@ -129,9 +134,11 @@ func (state *replayState) checkOrderOutcome(event Event) error {
 			return errors.New("repeated spot: accepted order differs from actor submission")
 		}
 		state.accounts[event.ClientID].outbound.PlaceAccepted++
+		sent.outcome, sent.outcomeAt, sent.outcomeOrderID = event.Name, event.Timestamp, accepted.OrderID
 	case "OrderRejected":
 		var rejected struct {
 			RequestID   uint64 `json:"request_id"`
+			Error       string `json:"error"`
 			Symbol      string `json:"symbol"`
 			Qty         int64  `json:"qty"`
 			Side        string `json:"side"`
@@ -156,11 +163,13 @@ func (state *replayState) checkOrderOutcome(event Event) error {
 			return errors.New("repeated spot: rejected order differs from actor submission")
 		}
 		state.accounts[event.ClientID].outbound.PlaceRejected++
+		sent.outcome, sent.outcomeAt, sent.outcomeReason = event.Name, event.Timestamp, rejected.Error
 	case "OrderCancelled":
 		var cancelled struct {
-			RequestID *uint64 `json:"request_id"`
-			OrderID   uint64  `json:"order_id"`
-			Reason    string  `json:"reason"`
+			RequestID    *uint64 `json:"request_id"`
+			OrderID      uint64  `json:"order_id"`
+			RemainingQty int64   `json:"remaining_qty"`
+			Reason       string  `json:"reason"`
 		}
 		if err := json.Unmarshal(event.Payload, &cancelled); err != nil {
 			return err
@@ -194,10 +203,12 @@ func (state *replayState) checkOrderOutcome(event Event) error {
 			return errors.New("repeated spot: cancellation targets a different order")
 		}
 		state.accounts[event.ClientID].outbound.CancelAccepted++
+		sent.outcome, sent.outcomeAt, sent.outcomeOrderID, sent.outcomeRemaining = event.Name, event.Timestamp, cancelled.OrderID, cancelled.RemainingQty
 	case "OrderCancelRejected":
 		var rejected struct {
 			RequestID uint64 `json:"request_id"`
 			OrderID   uint64 `json:"order_id"`
+			Error     string `json:"error"`
 		}
 		if err := json.Unmarshal(event.Payload, &rejected); err != nil {
 			return err
@@ -210,6 +221,7 @@ func (state *replayState) checkOrderOutcome(event Event) error {
 			return errors.New("repeated spot: cancel rejection targets a different order")
 		}
 		state.accounts[event.ClientID].outbound.CancelRejected++
+		sent.outcome, sent.outcomeAt, sent.outcomeOrderID, sent.outcomeReason = event.Name, event.Timestamp, rejected.OrderID, rejected.Error
 	}
 	return nil
 }

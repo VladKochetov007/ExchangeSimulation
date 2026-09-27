@@ -37,7 +37,8 @@ type replayParticipant struct {
 	Role     string           `json:"role"`
 	Balances map[string]int64 `json:"balances"`
 	Latency  struct {
-		RequestNanos int64 `json:"request_latency_ns"`
+		RequestNanos  int64  `json:"request_latency_ns"`
+		ResponseNanos *int64 `json:"response_latency_ns"`
 	} `json:"latency"`
 	Policy struct {
 		Name       string          `json:"name"`
@@ -46,15 +47,16 @@ type replayParticipant struct {
 }
 
 type AccountResult struct {
-	ActorID       uint64           `json:"actor_id"`
-	ClientID      uint64           `json:"client_id"`
-	Role          string           `json:"role"`
-	Initial       map[string]int64 `json:"initial"`
-	Terminal      map[string]int64 `json:"terminal"`
-	FeePaidQuote  int64            `json:"fee_paid_quote"`
-	FillCount     int              `json:"fill_count"`
-	BenchmarkGain *int64           `json:"benchmark_gain_quote,omitempty"`
-	Outbound      OutboundSummary  `json:"outbound"`
+	ActorID        uint64                `json:"actor_id"`
+	ClientID       uint64                `json:"client_id"`
+	Role           string                `json:"role"`
+	Initial        map[string]int64      `json:"initial"`
+	Terminal       map[string]int64      `json:"terminal"`
+	FeePaidQuote   int64                 `json:"fee_paid_quote"`
+	FillCount      int                   `json:"fill_count"`
+	BenchmarkGain  *int64                `json:"benchmark_gain_quote,omitempty"`
+	Outbound       OutboundSummary       `json:"outbound"`
+	LocalResponses *MakerResponseSummary `json:"maker_local_responses,omitempty"`
 }
 
 type EconomicReplay struct {
@@ -70,22 +72,25 @@ type EconomicReplay struct {
 }
 
 type accountState struct {
-	actorID      uint64
-	clientID     uint64
-	role         string
-	initial      map[string]int64
-	current      map[string]int64
-	feePaidQuote int64
-	fillCount    int
-	startSeen    bool
-	endSeen      bool
-	workingLimit int64
-	requestDelay int64
-	maker        *makerParameters
-	variance     deliveredVariance
-	decisions    int64
-	pendingSends []*sentOrder
-	outbound     OutboundSummary
+	actorID         uint64
+	clientID        uint64
+	role            string
+	initial         map[string]int64
+	current         map[string]int64
+	feePaidQuote    int64
+	fillCount       int
+	startSeen       bool
+	endSeen         bool
+	workingLimit    int64
+	requestDelay    int64
+	responseDelay   int64
+	maker           *makerParameters
+	variance        deliveredVariance
+	decisions       int64
+	pendingSends    []*sentOrder
+	outbound        OutboundSummary
+	localResponses  MakerResponseSummary
+	acceptedLocally map[uint64]bool
 }
 
 type replayState struct {
@@ -105,6 +110,7 @@ type replayState struct {
 	makerObservations   []makerObservationRecord
 	latestMakerSnapshot map[uint64]worldspot.MakerObservation
 	sentRequests        map[requestKey]*sentOrder
+	makerReceipts       map[makerReceiptKey]*makerReceipt
 }
 
 type publicSnapshot struct {
@@ -139,10 +145,13 @@ func Replay(contractBytes []byte, stream io.Reader, identity EvidenceIdentity, r
 		accounts: make(map[uint64]*accountState), venue: make(map[string]int64), trades: newTradeAudit(contract.Instrument),
 		market:          newPublicBookSeries(contract.StartUnixNano, contract.Instrument.TickSize),
 		sentRequests:    make(map[requestKey]*sentOrder),
+		makerReceipts:   make(map[makerReceiptKey]*makerReceipt),
 		publicSnapshots: make(map[uint64]publicSnapshot), latestMakerSnapshot: make(map[uint64]worldspot.MakerObservation)}
 	for _, participant := range contract.Participants {
 		if participant.ClientID == 0 || participant.ActorID == 0 || participant.Role == "" ||
-			participant.Latency.RequestNanos < 0 || state.accounts[participant.ClientID] != nil {
+			participant.Latency.RequestNanos < 0 || participant.Latency.ResponseNanos == nil ||
+			*participant.Latency.ResponseNanos < 0 ||
+			state.accounts[participant.ClientID] != nil {
 			return nil, errors.New("repeated spot: duplicate or incomplete participant identity")
 		}
 		initial := make(map[string]int64, len(participant.Balances))
@@ -164,7 +173,9 @@ func Replay(contractBytes []byte, stream io.Reader, identity EvidenceIdentity, r
 		}
 		state.accounts[participant.ClientID] = &accountState{actorID: participant.ActorID, clientID: participant.ClientID,
 			role: participant.Role, initial: initial, current: copyBalances(initial), workingLimit: workingLimit,
-			maker: maker, variance: variance, requestDelay: participant.Latency.RequestNanos}
+			maker: maker, variance: variance, requestDelay: participant.Latency.RequestNanos,
+			responseDelay:   *participant.Latency.ResponseNanos,
+			acceptedLocally: make(map[uint64]bool)}
 	}
 	if err := WalkEvidence(stream, identity, state.visit); err != nil {
 		return nil, err
@@ -184,6 +195,9 @@ func Replay(contractBytes []byte, stream io.Reader, identity EvidenceIdentity, r
 		}
 	}
 	if err := state.trades.finish(state); err != nil {
+		return nil, err
+	}
+	if err := state.finishMakerResponses(); err != nil {
 		return nil, err
 	}
 	if err := state.checkConservation(); err != nil {
@@ -223,7 +237,11 @@ func Replay(contractBytes []byte, stream io.Reader, identity EvidenceIdentity, r
 		account := state.accounts[clientID]
 		result := AccountResult{ActorID: account.actorID, ClientID: clientID, Role: account.role,
 			Initial: copyBalances(account.initial), Terminal: copyBalances(account.current),
-			FeePaidQuote: account.feePaidQuote, FillCount: account.fillCount, Outbound: account.outbound}
+			FeePaidQuote: account.feePaidQuote, FillCount: account.fillCount, Outbound: account.outbound,
+		}
+		if account.maker != nil {
+			result.LocalResponses = &account.localResponses
+		}
 		if state.terminalMid != nil {
 			gain, err := benchmarkGain(account, contract.Instrument, *state.terminalMid)
 			if err != nil {
@@ -258,6 +276,12 @@ func (state *replayState) visit(event Event) error {
 	}
 	if event.Source == "actor" && event.Name == "maker_observation" {
 		return state.makerObservation(event)
+	}
+	if event.Source == "gateway" && event.Name == "maker_response_receipt" {
+		return state.makerResponseReceipt(event)
+	}
+	if event.Source == "actor" && event.Name == "maker_processed_response" {
+		return state.makerProcessedResponse(event)
 	}
 	if event.Source == "actor" && event.Name == "order_send" {
 		return state.orderSend(event)
@@ -472,12 +496,18 @@ func (state *replayState) makerDecision(event Event) error {
 	if err := account.variance.verifyDecision(decision); err != nil {
 		return err
 	}
+	if decision.FilledInventory != account.localResponses.NetProcessedFillBase {
+		return errors.New("repeated spot: maker decision used inventory absent from processed fill responses")
+	}
 	switch decision.Action {
 	case "keep_quotes", "cancel_quotes", "evaluate_placements", "no_usable_quote":
 		bid, ask, usable := expectedMakerQuote(account.maker, decision)
-		if usable != (decision.Action != "no_usable_quote") ||
+		if (decision.Action == "no_usable_quote" && usable) ||
+			(decision.Action == "keep_quotes" || decision.Action == "evaluate_placements") && !usable ||
 			decision.TargetBid != bid || decision.TargetAsk != ask {
-			return errors.New("repeated spot: maker target quote differs from independent policy calculation")
+			return fmt.Errorf("repeated spot: maker target quote differs from independent policy calculation: client=%d at=%d action=%s book=%d/%d filled=%d target=%d/%d expected=%d/%d usable=%t",
+				event.ClientID, event.Timestamp, decision.Action, decision.BestBid, decision.BestAsk,
+				decision.FilledInventory, decision.TargetBid, decision.TargetAsk, bid, ask, usable)
 		}
 	case "subscribe", "await_response":
 		if decision.TargetBid != 0 || decision.TargetAsk != 0 {

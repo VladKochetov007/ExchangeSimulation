@@ -139,6 +139,10 @@ func TestRecurringMakerPartialFillShrinksSameSideQuoteAtCap(t *testing.T) {
 
 func TestRecurringMakerProcessesFirstTradeIDZero(t *testing.T) {
 	maker, gateway := makerFixture(t)
+	var processed []MakerProcessedResponse
+	maker.SetProcessedResponseObserver(func(response MakerProcessedResponse) {
+		processed = append(processed, response)
+	})
 	maker.onTick(time.Time{})
 	observeMakerBook(maker, 99, 101)
 	maker.onTick(time.Time{})
@@ -151,6 +155,11 @@ func TestRecurringMakerProcessesFirstTradeIDZero(t *testing.T) {
 	}
 	if maker.inventory.filled != 1 {
 		t.Fatalf("maker did not reconcile first fill: %d", maker.inventory.filled)
+	}
+	if len(processed) != 2 || processed[0].Kind != "accepted" ||
+		processed[1].Kind != "fill" || processed[1].TradeID != 0 ||
+		processed[1].FilledInventory != 1 {
+		t.Fatalf("first-trade observation has wrong identity or inventory: %+v", processed)
 	}
 }
 

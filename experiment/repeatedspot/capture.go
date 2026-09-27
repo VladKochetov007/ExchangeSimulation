@@ -93,11 +93,19 @@ func NewCapture(world *worldspot.World, stream io.Writer, receipts *simulation.M
 		gateway.SetMarketDataReceiptRecorder(receipts, contract.VenueID,
 			fmt.Sprintf("%s/client/%d", contract.VenueID, participant.ClientID), participant.Role)
 		if maker, ok := actors[index].(*worldspot.RecurringMaker); ok {
+			if err := gateway.SetDeterministicResponseReceiptObserver(func(response exchange.Response, receivedAt int64) {
+				capture.recorder.Record(receivedAt, clientID, "gateway", "maker_response_receipt", contract.Instrument.Symbol, response)
+			}); err != nil {
+				return nil, err
+			}
 			maker.SetDecisionObserver(func(decision worldspot.MakerDecision) {
 				capture.recorder.Record(decision.DecisionAt, clientID, "actor", "maker_decision", contract.Instrument.Symbol, decision)
 			})
 			maker.SetObservationObserver(func(observation worldspot.MakerObservation) {
 				capture.recorder.Record(observation.ProcessedAt, clientID, "actor", "maker_observation", contract.Instrument.Symbol, observation)
+			})
+			maker.SetProcessedResponseObserver(func(response worldspot.MakerProcessedResponse) {
+				capture.recorder.Record(response.ProcessedAt, clientID, "actor", "maker_processed_response", contract.Instrument.Symbol, response)
 			})
 		}
 	}

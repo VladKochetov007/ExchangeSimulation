@@ -63,6 +63,28 @@ type MakerObservation struct {
 	TradeSide      string `json:"trade_side,omitempty"`
 }
 
+// MakerProcessedResponse is the order event the maker actually handled, not
+// the exchange execution time or the gateway's earlier delivery time.
+type MakerProcessedResponse struct {
+	ActorID         uint64 `json:"actor_id"`
+	Kind            string `json:"kind"`
+	ProcessedAt     int64  `json:"processed_at"`
+	RequestID       uint64 `json:"request_id"`
+	OrderID         uint64 `json:"order_id"`
+	TradeID         uint64 `json:"trade_id"`
+	Symbol          string `json:"symbol"`
+	Qty             int64  `json:"qty"`
+	Price           int64  `json:"price"`
+	Side            string `json:"side"`
+	IsFull          bool   `json:"is_full"`
+	FeeAmount       int64  `json:"fee_amount"`
+	FeeAsset        string `json:"fee_asset"`
+	ExchangeAt      int64  `json:"exchange_at"`
+	RemainingQty    int64  `json:"remaining_qty"`
+	Reason          string `json:"reason"`
+	FilledInventory int64  `json:"filled_inventory"`
+}
+
 type MakerQuoteRule func(MakerQuoteInput) (MakerQuote, bool)
 
 type RecurringMakerConfig struct {
@@ -108,6 +130,7 @@ type RecurringMaker struct {
 	tradeSamples          uint64
 	decisionObserver      func(MakerDecision)
 	observationObserver   func(MakerObservation)
+	responseObserver      func(MakerProcessedResponse)
 }
 
 func NewRecurringMaker(id uint64, gateway actor.Gateway, config RecurringMakerConfig, quoteRule MakerQuoteRule) (*RecurringMaker, error) {
@@ -152,6 +175,10 @@ func (maker *RecurringMaker) SetObservationObserver(observer func(MakerObservati
 	maker.observationObserver = observer
 }
 
+func (maker *RecurringMaker) SetProcessedResponseObserver(observer func(MakerProcessedResponse)) {
+	maker.responseObserver = observer
+}
+
 func (maker *RecurringMaker) Start(ctx context.Context) error {
 	if !maker.started.CompareAndSwap(false, true) {
 		return fmt.Errorf("repeatedspot: recurring maker already started")
@@ -184,6 +211,43 @@ func (maker *RecurringMaker) HandleEvent(_ context.Context, event *actor.Event) 
 	case actor.EventOrderCancelRejected:
 		maker.onCancelRejected(event.Data.(actor.OrderCancelRejectedEvent))
 	}
+	maker.observeProcessedResponse(event)
+}
+
+func (maker *RecurringMaker) observeProcessedResponse(event *actor.Event) {
+	if maker.responseObserver == nil {
+		return
+	}
+	observation := MakerProcessedResponse{ActorID: maker.ID(), ProcessedAt: maker.localNow(0),
+		FilledInventory: maker.inventory.filled}
+	switch event.Type {
+	case actor.EventOrderAccepted:
+		accepted := event.Data.(actor.OrderAcceptedEvent)
+		observation.Kind, observation.RequestID, observation.OrderID = "accepted", accepted.RequestID, accepted.OrderID
+	case actor.EventOrderRejected:
+		rejected := event.Data.(actor.OrderRejectedEvent)
+		observation.Kind, observation.RequestID, observation.Reason = "order_rejected", rejected.RequestID, rejected.Reason
+	case actor.EventOrderPartialFill, actor.EventOrderFilled:
+		fill := event.Data.(actor.OrderFillEvent)
+		observation.Kind, observation.OrderID, observation.TradeID = "fill", fill.OrderID, fill.TradeID
+		observation.Symbol, observation.Qty, observation.Price = fill.Symbol, fill.Qty, fill.Price
+		observation.Side, observation.IsFull = fill.Side.String(), fill.IsFull
+		observation.FeeAmount, observation.FeeAsset, observation.ExchangeAt = fill.FeeAmount, fill.FeeAsset, fill.Timestamp
+	case actor.EventOrderCancelled:
+		cancelled := event.Data.(actor.OrderCancelledEvent)
+		observation.Kind, observation.RequestID, observation.OrderID = "cancelled", cancelled.RequestID, cancelled.OrderID
+		if cancelled.RequestID == 0 {
+			observation.Kind = "forced_cancel"
+		}
+		observation.RemainingQty = cancelled.RemainingQty
+	case actor.EventOrderCancelRejected:
+		rejected := event.Data.(actor.OrderCancelRejectedEvent)
+		observation.Kind, observation.RequestID, observation.OrderID = "cancel_rejected", rejected.RequestID, rejected.OrderID
+		observation.Reason = rejected.Reason
+	default:
+		return
+	}
+	maker.responseObserver(observation)
 }
 
 func (maker *RecurringMaker) onSnapshot(event actor.BookSnapshotEvent) {
