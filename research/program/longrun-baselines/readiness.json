@@ -21,6 +21,17 @@
     "clean_make_test": "PASS",
     "run_authorized": false
   },
+  "maker_v2_checkpoint": {
+    "candidate_commit": "492fad0009d4011dd182217ffd270af455ecf071",
+    "report": "research/program/longrun-baselines/e0-maker-v2-checkpoint-20260927.md",
+    "external_review_request": "research/program/longrun-baselines/e0-maker-v2-review-request-20260927.md",
+    "scope": "E0-3 shared bounded maker lifecycle and actor-side delivered-trade estimator; independent E0-4 evidence remains missing",
+    "status": "MECHANICALLY_TESTED_UNREVIEWED_DEVELOPMENT",
+    "review_execution": "UNAVAILABLE",
+    "review_verdict": "NOT_ISSUED",
+    "economic_worlds_run": 0,
+    "clean_make_test": "PASS"
+  },
   "candidate_environments": [
     {
       "id": "E0",
@@ -63,14 +74,16 @@
       "scope": "Equal-resource shared quote lifecycle and hard worst-case position cap for pure and AS makers",
       "classification": "SEMANTIC_ADAPTER",
       "source": ["simulations/multivenue/naive.go", "simulations/multivenue/stoikov.go"],
-      "acceptance": "Simultaneous live, pending and cancel-in-flight orders cannot breach the declared cap; identical target quotes do not create asymmetric churn; post-only and fee paths are matched."
+      "acceptance": "Simultaneous live, pending and cancel-in-flight orders cannot breach the declared cap; identical target quotes do not create asymmetric churn; post-only and fee paths are matched.",
+      "current_status": "V2_MECHANICALLY_TESTED_REVIEW_NOT_ISSUED"
     },
     {
       "id": "E0-4",
       "scope": "Delivered-past AS variance/fill exposure prior, account/PnL/observation reconstruction",
       "classification": "ESTIMATOR_AND_MEASUREMENT",
       "source": ["simulations/multivenue/stoikov.go", "evstream"],
-      "acceptance": "No decision reads future or venue-global state; formula agrees with normalized-inventory fixture; missing, duplicate, reordered, fee-wrong and incomplete evidence fail closed."
+      "acceptance": "No decision reads future or venue-global state; formula agrees with normalized-inventory fixture; missing, duplicate, reordered, fee-wrong and incomplete evidence fail closed.",
+      "current_status": "ACTOR_DELIVERED_HISTORY_PARTIAL_INDEPENDENT_ECONOMIC_EVIDENCE_MISSING"
     },
     {
       "id": "E2-1",
@@ -117,5 +130,5 @@
     "free_disk_reserve_gib": 10,
     "require_fresh_capacity_preflight": true
   },
-  "next_authorized_milestone": "Integrate tested PR1 as UNREVIEWED DEVELOPMENT; then E0-3 shared pending-inclusive maker cap and quote lifecycle, followed by E0-4 delivered-past estimator/evidence. Economic runs remain gated on fixed protocol, tests, evidence and capacity."
+  "next_authorized_milestone": "Integrate the mechanically tested E0 maker-v2 increment as UNREVIEWED DEVELOPMENT; then finish E0-4 independent decision/account/fee/endowment evidence, corruption and neutrality fixtures. Lock a finite E0 protocol and measure capacity before any economic world."
 }

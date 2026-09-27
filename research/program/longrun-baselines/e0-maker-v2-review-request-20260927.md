@@ -1,0 +1,9 @@
+# Bounded independent review package: E0 maker v2
+
+Execution status: `UNAVAILABLE`; scientific verdict: `NOT_ISSUED`. One fresh Sol-6 medium read-only reviewer launch for candidate `492fad0009d4011dd182217ffd270af455ecf071` failed with `agent thread limit reached`. No model inspected this package. Do not infer acceptance or repeat the same unavailable call indefinitely.
+
+Review exact source change with `git diff d97f39c43e41c3ad523a60de4b28d532571acbf8..492fad0009d4011dd182217ffd270af455ecf071 -- simulations/repeatedspot`. Relevant implementation: `working_inventory.go`, `recurring_maker.go`, `maker_policies_v2.go`, `world.go`; focused tests are beside them. Governing design: [E0 draft](config-drafts/e0-repeated-spot.md), [policy contracts](policy-contracts.md), [owner authorization](authorization-20260927.md), and [checkpoint](e0-maker-v2-checkpoint-20260927.md). Historical PR1 v1 adapters remain in `policies.go`.
+
+Requested review is limited to: (1) worst-case pending/live/cancel-in-flight inventory bounds; (2) accept/fill/cancel/rejection ordering, duplicate and overrun handling; (3) shared post-only/fee/clock lifecycle across pure/AS v2; (4) delivered-past trade variance, AS units and tick rounding; (5) propagation of actor risk faults to world completion; (6) whether any unintended old-v1 or default-economics change occurred. Report concrete file/line findings and a scoped substantive verdict. This package does **not** request an E0 economic-protocol, empirical-realism, or confirmation review.
+
+Reproduce mechanical checks from the clean commit: `go test ./simulations/repeatedspot -count=20`, `go test -race ./simulations/repeatedspot -count=1`, `go vet ./simulations/repeatedspot`, and `GOMAXPROCS=4 GOFLAGS=-p=2 make test`. At `492fad0` they passed. The next gate is an independent E0-4 evidence reconstruction and fixed development protocol, not an old-holdout run.
