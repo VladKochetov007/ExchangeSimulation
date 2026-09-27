@@ -21,6 +21,9 @@ type MakerQuoteInput struct {
 	WorkingLimit          int64
 	LogVariancePerSecond  float64
 	DeliveredTradeSamples uint64
+	TopBidVisibleQty      int64
+	TopAskVisibleQty      int64
+	BookSourceAge         time.Duration
 }
 
 type MakerQuote struct {
@@ -38,6 +41,8 @@ type MakerDecision struct {
 	LatestBookProcessedAt int64   `json:"latest_book_processed_at"`
 	BestBid               int64   `json:"best_bid"`
 	BestAsk               int64   `json:"best_ask"`
+	TopBidVisibleQty      *int64  `json:"top_bid_visible_qty,omitempty"`
+	TopAskVisibleQty      *int64  `json:"top_ask_visible_qty,omitempty"`
 	ReferenceMode         string  `json:"reference_mode,omitempty"`
 	ReferenceMid          int64   `json:"reference_mid,omitempty"`
 	ReferenceSourceAt     int64   `json:"reference_source_at,omitempty"`
@@ -53,18 +58,20 @@ type MakerDecision struct {
 }
 
 type MakerObservation struct {
-	ActorID        uint64 `json:"actor_id"`
-	Kind           string `json:"kind"`
-	ProcessedAt    int64  `json:"processed_at"`
-	SourceAt       int64  `json:"source_at"`
-	SourceSequence uint64 `json:"source_sequence"`
-	Symbol         string `json:"symbol"`
-	BestBid        int64  `json:"best_bid,omitempty"`
-	BestAsk        int64  `json:"best_ask,omitempty"`
-	TradeID        uint64 `json:"trade_id,omitempty"`
-	TradePrice     int64  `json:"trade_price,omitempty"`
-	TradeQty       int64  `json:"trade_qty,omitempty"`
-	TradeSide      string `json:"trade_side,omitempty"`
+	ActorID          uint64 `json:"actor_id"`
+	Kind             string `json:"kind"`
+	ProcessedAt      int64  `json:"processed_at"`
+	SourceAt         int64  `json:"source_at"`
+	SourceSequence   uint64 `json:"source_sequence"`
+	Symbol           string `json:"symbol"`
+	BestBid          int64  `json:"best_bid,omitempty"`
+	BestAsk          int64  `json:"best_ask,omitempty"`
+	TopBidVisibleQty *int64 `json:"top_bid_visible_qty,omitempty"`
+	TopAskVisibleQty *int64 `json:"top_ask_visible_qty,omitempty"`
+	TradeID          uint64 `json:"trade_id,omitempty"`
+	TradePrice       int64  `json:"trade_price,omitempty"`
+	TradeQty         int64  `json:"trade_qty,omitempty"`
+	TradeSide        string `json:"trade_side,omitempty"`
 }
 
 // MakerProcessedResponse is the order event the maker actually handled, not
@@ -91,6 +98,12 @@ type MakerProcessedResponse struct {
 
 type MakerQuoteRule func(MakerQuoteInput) (MakerQuote, bool)
 
+type MakerInformationOptions struct {
+	LocalReferenceMaxAge  time.Duration
+	EmitReferenceEvidence bool
+	EmitTopDepthEvidence  bool
+}
+
 type RecurringMakerConfig struct {
 	Symbol                      string        `json:"symbol"`
 	QuoteQty                    int64         `json:"quote_qty"`
@@ -115,12 +128,15 @@ type RecurringMaker struct {
 	inventory             *workingInventory
 	bestBid               int64
 	bestAsk               int64
+	topBidVisibleQty      int64
+	topAskVisibleQty      int64
 	latestBookAt          int64
 	latestBookSequence    uint64
 	latestBookProcessedAt int64
 	bookSeen              bool
 	referenceMaxAge       time.Duration
 	recordReference       bool
+	recordTopDepth        bool
 	lastTwoSidedMid       int64
 	lastTwoSidedAt        int64
 	lastTwoSidedSequence  uint64
@@ -143,21 +159,24 @@ type RecurringMaker struct {
 }
 
 func NewRecurringMaker(id uint64, gateway actor.Gateway, config RecurringMakerConfig, quoteRule MakerQuoteRule) (*RecurringMaker, error) {
-	return newRecurringMaker(id, gateway, config, quoteRule, 0, false)
+	return NewRecurringMakerWithInformation(id, gateway, config, quoteRule, MakerInformationOptions{})
 }
 
 func NewRecurringMakerWithLocalReference(id uint64, gateway actor.Gateway, config RecurringMakerConfig, quoteRule MakerQuoteRule, maxAge time.Duration) (*RecurringMaker, error) {
-	return newRecurringMaker(id, gateway, config, quoteRule, maxAge, true)
+	return NewRecurringMakerWithInformation(id, gateway, config, quoteRule, MakerInformationOptions{
+		LocalReferenceMaxAge: maxAge, EmitReferenceEvidence: true})
 }
 
-func newRecurringMaker(id uint64, gateway actor.Gateway, config RecurringMakerConfig, quoteRule MakerQuoteRule, maxAge time.Duration, recordReference bool) (*RecurringMaker, error) {
+func NewRecurringMakerWithInformation(id uint64, gateway actor.Gateway, config RecurringMakerConfig, quoteRule MakerQuoteRule, information MakerInformationOptions) (*RecurringMaker, error) {
 	if gateway == nil || config.Symbol == "" || config.QuoteQty <= 0 || config.MinQuoteQty <= 0 ||
 		config.MinQuoteQty > config.QuoteQty || config.WorkingLimit <= 0 || config.TickSize <= 0 ||
 		config.QuoteInterval <= 0 || config.RequoteBps < 0 || quoteRule == nil ||
 		math.IsNaN(config.InitialLogVariancePerSecond) || math.IsInf(config.InitialLogVariancePerSecond, 0) ||
 		config.InitialLogVariancePerSecond < 0 || config.VolatilityHalfLife < 0 || config.VolatilitySampleInterval < 0 ||
 		math.IsNaN(config.MaxLogVarianceMultiple) || math.IsInf(config.MaxLogVarianceMultiple, 0) || config.MaxLogVarianceMultiple < 0 ||
-		math.IsInf(config.InitialLogVariancePerSecond*config.MaxLogVarianceMultiple, 0) || maxAge < 0 {
+		math.IsInf(config.InitialLogVariancePerSecond*config.MaxLogVarianceMultiple, 0) ||
+		information.LocalReferenceMaxAge < 0 ||
+		information.LocalReferenceMaxAge > 0 && !information.EmitReferenceEvidence {
 		return nil, fmt.Errorf("repeatedspot: invalid recurring maker contract")
 	}
 	inventory, err := newWorkingInventory(0, config.WorkingLimit)
@@ -167,7 +186,9 @@ func newRecurringMaker(id uint64, gateway actor.Gateway, config RecurringMakerCo
 	maker := &RecurringMaker{BaseActor: actor.NewBaseActor(id, gateway), config: config,
 		quoteRule: quoteRule, inventory: inventory, cancelRequested: make(map[uint64]struct{}),
 		unresolvedEnd: make(map[uint64]struct{}), logVariancePerSecond: config.InitialLogVariancePerSecond,
-		referenceMaxAge: maxAge, recordReference: recordReference}
+		referenceMaxAge: information.LocalReferenceMaxAge,
+		recordReference: information.EmitReferenceEvidence,
+		recordTopDepth:  information.EmitTopDepthEvidence}
 	maker.SetHandler(maker)
 	maker.AddTicker(config.QuoteInterval, maker.onTick)
 	return maker, nil
@@ -282,13 +303,20 @@ func (maker *RecurringMaker) onSnapshot(event actor.BookSnapshotEvent) {
 	maker.latestBookSequence = event.SeqNum
 	maker.latestBookProcessedAt = processedAt
 	maker.bestBid, maker.bestAsk = 0, 0
+	maker.topBidVisibleQty, maker.topAskVisibleQty = 0, 0
 	if event.Snapshot != nil {
 		if len(event.Snapshot.Bids) != 0 {
 			maker.bestBid = event.Snapshot.Bids[0].Price
+			maker.topBidVisibleQty = event.Snapshot.Bids[0].VisibleQty
 		}
 		if len(event.Snapshot.Asks) != 0 {
 			maker.bestAsk = event.Snapshot.Asks[0].Price
+			maker.topAskVisibleQty = event.Snapshot.Asks[0].VisibleQty
 		}
+	}
+	if maker.topBidVisibleQty < 0 || maker.topAskVisibleQty < 0 {
+		maker.fault = fmt.Errorf("repeatedspot: delivered displayed depth is negative")
+		return
 	}
 	if maker.bestBid > 0 && maker.bestAsk > maker.bestBid {
 		maker.lastTwoSidedMid = maker.bestBid + (maker.bestAsk-maker.bestBid)/2
@@ -296,9 +324,15 @@ func (maker *RecurringMaker) onSnapshot(event actor.BookSnapshotEvent) {
 		maker.lastTwoSidedSequence = event.SeqNum
 	}
 	if maker.observationObserver != nil {
-		maker.observationObserver(MakerObservation{ActorID: maker.ID(), Kind: "snapshot",
+		observation := MakerObservation{ActorID: maker.ID(), Kind: "snapshot",
 			ProcessedAt: maker.latestBookProcessedAt, SourceAt: event.Timestamp, SourceSequence: event.SeqNum,
-			Symbol: event.Symbol, BestBid: maker.bestBid, BestAsk: maker.bestAsk})
+			Symbol: event.Symbol, BestBid: maker.bestBid, BestAsk: maker.bestAsk}
+		if maker.recordTopDepth {
+			bidQty, askQty := maker.topBidVisibleQty, maker.topAskVisibleQty
+			observation.TopBidVisibleQty = &bidQty
+			observation.TopAskVisibleQty = &askQty
+		}
+		maker.observationObserver(observation)
 	}
 }
 
@@ -484,6 +518,11 @@ func (maker *RecurringMaker) observeDecision(scheduled time.Time, quote MakerQuo
 		LogVariancePerSecond: maker.logVariancePerSecond, DeliveredTradeSamples: maker.tradeSamples,
 		TargetBid: quote.BidPrice, TargetAsk: quote.AskPrice, Action: action,
 	}
+	if maker.recordTopDepth {
+		bidQty, askQty := maker.topBidVisibleQty, maker.topAskVisibleQty
+		decision.TopBidVisibleQty = &bidQty
+		decision.TopAskVisibleQty = &askQty
+	}
 	if maker.recordReference {
 		decision.ReferenceMode = reference.mode
 		decision.ReferenceMid = reference.mid
@@ -531,13 +570,24 @@ func (maker *RecurringMaker) quoteReference(decisionAt int64) makerReference {
 }
 
 func (maker *RecurringMaker) targetQuote(decisionAt int64) (MakerQuote, makerReference, bool) {
+	if maker.recordTopDepth && maker.bookSeen && decisionAt < maker.latestBookAt {
+		return MakerQuote{}, makerReference{mode: "unavailable"}, false
+	}
 	reference := maker.quoteReference(decisionAt)
 	if reference.mid <= 0 {
 		return MakerQuote{}, reference, false
 	}
+	bookSourceAge := time.Duration(0)
+	topBidQty, topAskQty := int64(0), int64(0)
+	if maker.recordTopDepth && maker.bookSeen && decisionAt >= maker.latestBookAt &&
+		maker.bestBid > 0 && maker.bestAsk > maker.bestBid {
+		bookSourceAge = time.Duration(decisionAt - maker.latestBookAt)
+		topBidQty, topAskQty = maker.topBidVisibleQty, maker.topAskVisibleQty
+	}
 	quote, ok := maker.quoteRule(MakerQuoteInput{MidPrice: reference.mid, FilledInventory: maker.inventory.filled,
 		WorkingLimit: maker.config.WorkingLimit, LogVariancePerSecond: maker.logVariancePerSecond,
-		DeliveredTradeSamples: maker.tradeSamples})
+		DeliveredTradeSamples: maker.tradeSamples, TopBidVisibleQty: topBidQty,
+		TopAskVisibleQty: topAskQty, BookSourceAge: bookSourceAge})
 	if !ok || quote.BidPrice < 0 || quote.AskPrice < 0 ||
 		(quote.BidPrice == 0 && quote.AskPrice == 0) ||
 		(quote.BidPrice > 0 && quote.AskPrice > 0 && quote.AskPrice <= quote.BidPrice) ||
