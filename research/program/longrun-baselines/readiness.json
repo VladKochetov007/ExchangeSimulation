@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "planning_baseline_commit": "ef61b4cb6e0124aa797f281e379ab143e847646e",
-  "planning_status": "E0_R1_DEVELOPMENT_CLOSED_NON_IDENTIFIED_E1_E2_PENDING",
+  "planning_status": "E0_R1_CLOSED_ME015_REFERENCE_SUCCESSOR_IN_READINESS_E1_E2_PENDING",
   "current_authorization": "research/program/longrun-baselines/authorization-20260927.md",
   "economic_world_ceiling_by_environment": {"E0": 120, "E1": 120, "E2": 120},
   "calibration_world_ceiling_by_environment": {"E0": 12, "E1": 12, "E2": 12},
@@ -170,6 +170,21 @@
     "confirmation_authorized": false,
     "e1_e2_economic_worlds_run": 0
   },
+  "e0_me015_local_reference_successor": {
+    "stage": "READINESS_NOT_RUN_READY",
+    "study_id": "ME-015",
+    "idea": "research/program/ideas/ME-015/idea.md",
+    "draft_protocol": "research/program/ideas/ME-015/protocol.md",
+    "prospective_economic_cells": 24,
+    "prospective_technical_controls": 2,
+    "economic_worlds_run": 0,
+    "run_authorized_by_locked_protocol": false,
+    "pre_outcome_source_review_execution": "NOT_COMPLETED",
+    "pre_outcome_source_review_verdict": "NOT_ISSUED",
+    "pre_outcome_design_review_execution": "COMPLETED",
+    "pre_outcome_design_review_verdict": "ACCEPT_WITH_CLARIFICATIONS_APPLIED_PENDING_RECORD",
+    "historical_r1_source_and_result_unchanged": true
+  },
   "candidate_environments": [
     {
       "id": "E0",
@@ -179,7 +194,7 @@
       "proposed_economic_world_ceiling": 24,
       "proposed_technical_controls": 2,
       "run_authorized": false,
-      "readiness": "E0_R1_DEVELOPMENT_COMPLETE_PRIMARY_NOT_IDENTIFIED_SUCCESSOR_NOT_REGISTERED"
+      "readiness": "E0_R1_DEVELOPMENT_COMPLETE_PRIMARY_NOT_IDENTIFIED_ME015_SUCCESSOR_DRAFT_NOT_RUN_READY"
     },
     {
       "id": "E2",
@@ -268,5 +283,5 @@
     "free_disk_reserve_gib": 10,
     "require_fresh_capacity_preflight": true
   },
-  "next_authorized_milestone": "Retain the failed C2 pre-start attempt; run and independently analyze only the same first registered E0 r1 cell from pinned C3=17b9e8a in a fresh namespace as counted resource preflight. Decide the remaining fixed batch from valid measured capacity. Confirmation remains separately gated."
+  "next_authorized_milestone": "Complete clean source/evidence gates and independent pre-outcome review for the separate ME-015 local-reference successor; then lock its prospective protocol and source before any assigned development cell. No r1 rerun, E1/E2 world or confirmation is authorized by this draft."
 }
