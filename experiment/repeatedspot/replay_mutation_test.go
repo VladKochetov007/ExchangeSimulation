@@ -7,11 +7,16 @@ import (
 	"testing"
 
 	"exchange_sim/simulation"
+	worldspot "exchange_sim/simulations/repeatedspot"
 )
 
 func capturedFixture(t *testing.T) ([]byte, []Event, string) {
 	t.Helper()
-	world := fixtureWorld(t)
+	return capturedFixtureWorld(t, fixtureWorld(t))
+}
+
+func capturedFixtureWorld(t *testing.T, world *worldspot.World) ([]byte, []Event, string) {
+	t.Helper()
 	directory := t.TempDir()
 	receipts, err := simulation.NewMarketDataReceiptRecorder(directory)
 	if err != nil {
@@ -86,6 +91,26 @@ func TestIndependentReplayRejectsRehashedSemanticCorruption(t *testing.T) {
 			index := firstEvent(t, events, "OrderFill")
 			replacePayloadField(t, &events[index], "fee_amount", 2)
 			return events
+		},
+		"forged cumulative maker fill": func(t *testing.T, events []Event) []Event {
+			for index := range events {
+				if events[index].Name != "OrderFill" {
+					continue
+				}
+				var fill struct {
+					Role string `json:"role"`
+				}
+				if err := json.Unmarshal(events[index].Payload, &fill); err != nil {
+					t.Fatal(err)
+				}
+				if fill.Role == "maker" {
+					replacePayloadField(t, &events[index], "filled_qty", 2)
+					replacePayloadField(t, &events[index], "remaining_qty", 0)
+					return events
+				}
+			}
+			t.Fatal("fixture lacks a maker fill")
+			return nil
 		},
 		"missing settlement": func(t *testing.T, events []Event) []Event {
 			index := firstEvent(t, events, "balance_change")
@@ -166,6 +191,34 @@ func TestIndependentReplayRejectsRehashedSemanticCorruption(t *testing.T) {
 			t.Fatal("fixture lacks maker decision with a book")
 			return nil
 		},
+		"forged delivered variance": func(t *testing.T, events []Event) []Event {
+			index := firstEvent(t, events, "maker_decision")
+			replacePayloadField(t, &events[index], "log_variance_per_second", 0.5)
+			return events
+		},
+		"omitted scheduled maker decision": func(t *testing.T, events []Event) []Event {
+			index := firstEvent(t, events, "maker_decision")
+			return append(events[:index], events[index+1:]...)
+		},
+		"forged target quote": func(t *testing.T, events []Event) []Event {
+			for index := range events {
+				if events[index].Name != "maker_decision" {
+					continue
+				}
+				var decision struct {
+					TargetBid int64 `json:"target_bid"`
+				}
+				if err := json.Unmarshal(events[index].Payload, &decision); err != nil {
+					t.Fatal(err)
+				}
+				if decision.TargetBid > 0 {
+					replacePayloadField(t, &events[index], "target_bid", decision.TargetBid+1)
+					return events
+				}
+			}
+			t.Fatal("fixture lacks a computed maker quote")
+			return nil
+		},
 		"forged public depth with same best price": func(t *testing.T, events []Event) []Event {
 			var observedSequence uint64
 			found := false
@@ -230,6 +283,50 @@ func TestIndependentReplayRejectsRehashedSemanticCorruption(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestIndependentReplayReconstructsProductionStoikovQuote(t *testing.T) {
+	contract, events, directory := capturedFixtureWorld(t, fixtureWorldWithMaker(t, true, true))
+	var computed int
+	for _, event := range events {
+		if event.Name != "maker_decision" {
+			continue
+		}
+		var decision struct {
+			TargetBid int64 `json:"target_bid"`
+		}
+		if err := json.Unmarshal(event.Payload, &decision); err != nil {
+			t.Fatal(err)
+		}
+		if decision.TargetBid > 0 {
+			computed++
+		}
+	}
+	if computed == 0 {
+		t.Fatal("Stoikov fixture did not compute a quote")
+	}
+	if _, err := replayMutated(t, contract, events, directory); err != nil {
+		t.Fatal(err)
+	}
+	for index := range events {
+		if events[index].Name != "maker_decision" {
+			continue
+		}
+		var decision struct {
+			TargetAsk int64 `json:"target_ask"`
+		}
+		if err := json.Unmarshal(events[index].Payload, &decision); err != nil {
+			t.Fatal(err)
+		}
+		if decision.TargetAsk > 0 {
+			replacePayloadField(t, &events[index], "target_ask", decision.TargetAsk+1)
+			if _, err := replayMutated(t, contract, events, directory); err == nil {
+				t.Fatal("rehashed Stoikov target mutation was accepted")
+			}
+			return
+		}
+	}
+	t.Fatal("Stoikov fixture lacks a positive ask target")
 }
 
 func TestIndependentReplayKeepsOneSidedTerminalMarkUnavailable(t *testing.T) {

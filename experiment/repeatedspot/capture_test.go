@@ -34,16 +34,31 @@ func fixtureWorld(t *testing.T) *worldspot.World {
 }
 
 func fixtureWorldWithAggression(t *testing.T, enabled bool) *worldspot.World {
+	return fixtureWorldWithMaker(t, enabled, false)
+}
+
+func fixtureWorldWithMaker(t *testing.T, enabled, stoikov bool) *worldspot.World {
 	t.Helper()
 	seed, err := worldspot.NewSeedOncePolicy(worldspot.SeedOnceConfig{Symbol: "ABC/USD", BidPrice: 99, AskPrice: 101, BidQty: 2, AskQty: 2})
 	if err != nil {
 		t.Fatal(err)
 	}
-	maker, err := worldspot.NewBoundedFixedMakerPolicy(worldspot.BoundedFixedMakerConfig{
-		Maker: worldspot.RecurringMakerConfig{Symbol: "ABC/USD", QuoteQty: 1, MinQuoteQty: 1,
-			WorkingLimit: 5, TickSize: 1, QuoteInterval: 2 * time.Second,
-			InitialLogVariancePerSecond: 1e-8}, SpreadBps: 100,
-	})
+	makerConfig := worldspot.RecurringMakerConfig{Symbol: "ABC/USD", QuoteQty: 1, MinQuoteQty: 1,
+		WorkingLimit: 5, TickSize: 1, QuoteInterval: 2 * time.Second,
+		InitialLogVariancePerSecond: 1e-8, VolatilityHalfLife: 4 * time.Second,
+		VolatilitySampleInterval: time.Second, MaxLogVarianceMultiple: 4}
+	var maker worldspot.PolicyDefinition
+	if stoikov {
+		maker, err = worldspot.NewBoundedStoikovMakerPolicy(worldspot.BoundedStoikovMakerConfig{
+			Maker: makerConfig, QuotePrecision: 1, RelativeRiskAversion: 50,
+			RelativeFillDecay: 20_000, InventoryHorizon: 10 * time.Second,
+			MinHalfSpreadTicks: 1,
+		})
+	} else {
+		maker, err = worldspot.NewBoundedFixedMakerPolicy(worldspot.BoundedFixedMakerConfig{
+			Maker: makerConfig, SpreadBps: 100,
+		})
+	}
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,7 +67,12 @@ func fixtureWorldWithAggression(t *testing.T, enabled bool) *worldspot.World {
 	}{enabled}
 	aggressor, err := worldspot.DefinePolicy("fixture_aggressor", params, func(id uint64, gateway actor.Gateway, _ exchange.TickerFactory, decoded struct {
 		Enabled bool `json:"enabled"`
-	}) (actor.Actor, error) { result := &testAggressor{BaseActor: actor.NewBaseActor(id, gateway), enabled: decoded.Enabled}; result.SetHandler(result); result.AddTicker(3*time.Second, result.onTick); return result, nil })
+	}) (actor.Actor, error) {
+		result := &testAggressor{BaseActor: actor.NewBaseActor(id, gateway), enabled: decoded.Enabled}
+		result.SetHandler(result)
+		result.AddTicker(3*time.Second, result.onTick)
+		return result, nil
+	})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -63,6 +63,8 @@ type tradeRecord struct {
 type tradeAudit struct {
 	instrument        worldspot.InstrumentConfig
 	orders            map[uint64]acceptedOrder
+	filledByOrder     map[uint64]int64
+	cancelledOrders   map[uint64]bool
 	trades            map[uint64]*tradeRecord
 	pendingSettlement []settlementRecord
 	pendingVenueFees  map[uint64]int64
@@ -73,6 +75,7 @@ type tradeAudit struct {
 
 func newTradeAudit(instrument worldspot.InstrumentConfig) *tradeAudit {
 	return &tradeAudit{instrument: instrument, orders: make(map[uint64]acceptedOrder),
+		filledByOrder: make(map[uint64]int64), cancelledOrders: make(map[uint64]bool),
 		trades: make(map[uint64]*tradeRecord), pendingVenueFees: make(map[uint64]int64),
 		pendingFeeEvents: make(map[uint64]int64)}
 }
@@ -126,12 +129,28 @@ func (audit *tradeAudit) visit(event Event) error {
 		if err := json.Unmarshal(event.Payload, &rejected); err != nil || rejected.RequestID == 0 || rejected.Symbol != audit.instrument.Symbol || rejected.Qty <= 0 {
 			return errors.New("repeated spot: malformed order rejection")
 		}
-	case "OrderCancelled", "OrderCancelRejected":
+	case "OrderCancelled":
 		var cancellation struct {
+			OrderID      uint64 `json:"order_id"`
+			RemainingQty *int64 `json:"remaining_qty"`
+		}
+		if err := json.Unmarshal(event.Payload, &cancellation); err != nil {
+			return err
+		}
+		order := audit.orders[cancellation.OrderID]
+		if order.OrderID == 0 || order.ClientID != event.ClientID || cancellation.RemainingQty == nil ||
+			*cancellation.RemainingQty < 0 || *cancellation.RemainingQty != order.Qty-audit.filledByOrder[order.OrderID] ||
+			audit.cancelledOrders[order.OrderID] {
+			return errors.New("repeated spot: cancellation disagrees with order remainder")
+		}
+		audit.cancelledOrders[order.OrderID] = true
+	case "OrderCancelRejected":
+		var rejection struct {
 			OrderID uint64 `json:"order_id"`
 		}
-		if err := json.Unmarshal(event.Payload, &cancellation); err != nil || cancellation.OrderID == 0 || audit.orders[cancellation.OrderID].OrderID == 0 {
-			return errors.New("repeated spot: cancellation references unknown order")
+		if err := json.Unmarshal(event.Payload, &rejection); err != nil ||
+			audit.orders[rejection.OrderID].ClientID != event.ClientID || rejection.OrderID == 0 {
+			return errors.New("repeated spot: cancel rejection references unknown client order")
 		}
 	case "BookSnapshot":
 		var snapshot struct {
@@ -186,11 +205,14 @@ func (audit *tradeAudit) visit(event Event) error {
 			return errors.New("repeated spot: invalid, duplicate or unanchored order fill")
 		}
 		order := audit.orders[fill.OrderID]
+		nextFilled, ok := checkedAdd(audit.filledByOrder[fill.OrderID], fill.Qty)
 		if order.OrderID == 0 || order.ClientID != event.ClientID || order.Side != fill.Side ||
-			fill.FilledQty > order.Qty || fill.RemainingQty != order.Qty-fill.FilledQty ||
+			audit.cancelledOrders[fill.OrderID] || !ok || nextFilled > order.Qty ||
+			fill.FilledQty != nextFilled || fill.RemainingQty != order.Qty-nextFilled ||
 			fill.FeeAmount > 0 && fill.FeeAsset != audit.instrument.QuoteAsset {
-			return errors.New("repeated spot: fill disagrees with accepted order or fee asset")
+			return errors.New("repeated spot: fill disagrees with cumulative accepted order or fee asset")
 		}
+		audit.filledByOrder[fill.OrderID] = nextFilled
 		record.fills = append(record.fills, struct {
 			clientID uint64
 			fill     recordedFill

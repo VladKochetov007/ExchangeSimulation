@@ -75,6 +75,9 @@ type accountState struct {
 	startSeen    bool
 	endSeen      bool
 	workingLimit int64
+	maker        *makerParameters
+	variance     deliveredVariance
+	decisions    int64
 }
 
 type replayState struct {
@@ -134,20 +137,19 @@ func Replay(contractBytes []byte, stream io.Reader, identity EvidenceIdentity, r
 			}
 			initial[asset] = balance
 		}
+		maker, err := parseMakerParameters(participant)
+		if err != nil {
+			return nil, fmt.Errorf("repeated spot: invalid maker parameters for client %d: %w", participant.ClientID, err)
+		}
 		workingLimit := int64(0)
-		if participant.Policy.Name == "bounded_fixed_maker_v2" || participant.Policy.Name == "bounded_stoikov_maker_v2" {
-			var parameters struct {
-				Maker struct {
-					WorkingLimit int64 `json:"working_limit"`
-				} `json:"maker"`
-			}
-			if err := json.Unmarshal(participant.Policy.Parameters, &parameters); err != nil || parameters.Maker.WorkingLimit <= 0 {
-				return nil, fmt.Errorf("repeated spot: invalid maker risk limit for client %d", participant.ClientID)
-			}
-			workingLimit = parameters.Maker.WorkingLimit
+		variance := deliveredVariance{}
+		if maker != nil {
+			workingLimit = maker.workingLimit
+			variance.value = maker.initialVariance
 		}
 		state.accounts[participant.ClientID] = &accountState{actorID: participant.ActorID, clientID: participant.ClientID,
-			role: participant.Role, initial: initial, current: copyBalances(initial), workingLimit: workingLimit}
+			role: participant.Role, initial: initial, current: copyBalances(initial), workingLimit: workingLimit,
+			maker: maker, variance: variance}
 	}
 	if err := WalkEvidence(stream, identity, state.visit); err != nil {
 		return nil, err
@@ -158,6 +160,9 @@ func Replay(contractBytes []byte, stream io.Reader, identity EvidenceIdentity, r
 	for _, account := range state.accounts {
 		if !account.startSeen || !account.endSeen {
 			return nil, fmt.Errorf("repeated spot: missing boundary account snapshot for client %d", account.clientID)
+		}
+		if account.maker != nil && account.decisions != int64(contract.Iterations)*contract.Step/account.maker.quoteIntervalNanos {
+			return nil, fmt.Errorf("repeated spot: incomplete maker decision schedule for client %d", account.clientID)
 		}
 	}
 	if err := state.trades.finish(state); err != nil {
@@ -406,12 +411,36 @@ func (state *replayState) makerDecision(event Event) error {
 		!validMakerAction(decision.Action) {
 		return errors.New("repeated spot: malformed or future-dated maker decision")
 	}
+	horizon := int64(state.contract.Iterations) * state.contract.Step
+	if account.decisions >= horizon/account.maker.quoteIntervalNanos {
+		return errors.New("repeated spot: extra maker decision outside registered schedule")
+	}
+	expectedScheduled := state.contract.StartUnixNano + (account.decisions+1)*account.maker.quoteIntervalNanos
+	if decision.ScheduledAt != expectedScheduled {
+		return errors.New("repeated spot: missing, duplicate or mistimed maker decision")
+	}
 	latest, seen := state.latestMakerSnapshot[event.ClientID]
 	if decision.BookSeen != seen || seen && (decision.LatestBookSourceAt != latest.SourceAt ||
 		decision.LatestBookSequence != latest.SourceSequence || decision.LatestBookProcessedAt != latest.ProcessedAt ||
 		decision.BestBid != latest.BestBid || decision.BestAsk != latest.BestAsk) {
 		return errors.New("repeated spot: maker decision disagrees with its processed local snapshot")
 	}
+	if err := account.variance.verifyDecision(decision); err != nil {
+		return err
+	}
+	switch decision.Action {
+	case "keep_quotes", "cancel_quotes", "evaluate_placements", "no_usable_quote":
+		bid, ask, usable := expectedMakerQuote(account.maker, decision)
+		if usable != (decision.Action != "no_usable_quote") ||
+			decision.TargetBid != bid || decision.TargetAsk != ask {
+			return errors.New("repeated spot: maker target quote differs from independent policy calculation")
+		}
+	case "subscribe", "await_response":
+		if decision.TargetBid != 0 || decision.TargetAsk != 0 {
+			return errors.New("repeated spot: maker reported a target while no quote was calculated")
+		}
+	}
+	account.decisions++
 	return nil
 }
 
@@ -440,6 +469,9 @@ func (state *replayState) makerObservation(event Event) error {
 			trade.trade.Price != observation.TradePrice || trade.trade.Qty != observation.TradeQty ||
 			trade.trade.Side != observation.TradeSide {
 			return errors.New("repeated spot: maker trade observation disagrees with exchange trade")
+		}
+		if err := account.variance.observe(account.maker, observation); err != nil {
+			return err
 		}
 	}
 	state.makerObservations = append(state.makerObservations, makerObservationRecord{event.ClientID, observation})
