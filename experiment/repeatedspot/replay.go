@@ -167,6 +167,16 @@ func replayWithWindow(contractBytes []byte, stream io.Reader, identity EvidenceI
 	if err := json.Unmarshal(contractBytes, &contract); err != nil {
 		return nil, err
 	}
+	requiredSchema := EvidenceSchemaID
+	for _, participant := range contract.Participants {
+		if participant.Policy.Name == "bounded_imbalance_stoikov_maker_v1" {
+			requiredSchema = SignalEvidenceSchemaID
+			break
+		}
+	}
+	if identity.SchemaID != requiredSchema {
+		return nil, errors.New("repeated spot: evidence schema does not match the registered policy roster")
+	}
 	if contract.SchemaVersion != 2 || contract.VenueID == "" || contract.Instrument.Symbol == "" || !contract.RecordSnapshotProjectionEvidence ||
 		contract.Instrument.BasePrecision <= 0 || contract.Instrument.QuotePrecision <= 0 ||
 		contract.Instrument.TickSize <= 0 || contract.Instrument.MinOrderSize <= 0 ||
@@ -581,6 +591,15 @@ func (state *replayState) makerDecision(event Event) error {
 		decision.BestBid != latest.BestBid || decision.BestAsk != latest.BestAsk) {
 		return errors.New("repeated spot: maker decision disagrees with its processed local snapshot")
 	}
+	if account.maker.trackTopDepth {
+		if decision.TopBidVisibleQty == nil || decision.TopAskVisibleQty == nil ||
+			*decision.TopBidVisibleQty != visibleQuantity(latest.TopBidVisibleQty) ||
+			*decision.TopAskVisibleQty != visibleQuantity(latest.TopAskVisibleQty) {
+			return errors.New("repeated spot: signal maker decision depth differs from delivered local snapshot")
+		}
+	} else if decision.TopBidVisibleQty != nil || decision.TopAskVisibleQty != nil {
+		return errors.New("repeated spot: legacy maker reported unregistered depth evidence")
+	}
 	if err := account.variance.verifyDecision(decision); err != nil {
 		return err
 	}
@@ -679,11 +698,23 @@ func (state *replayState) makerObservation(event Event) error {
 			priorSeen && observation.SourceAt < prior.SourceAt {
 			return errors.New("repeated spot: maker snapshot disagrees with published public book")
 		}
+		if account.maker.trackTopDepth {
+			if observation.TopBidVisibleQty == nil || observation.TopAskVisibleQty == nil ||
+				*observation.TopBidVisibleQty != firstLevelVisibleQty(source.bids) ||
+				*observation.TopAskVisibleQty != firstLevelVisibleQty(source.asks) {
+				return errors.New("repeated spot: signal maker displayed depth differs from published book")
+			}
+		} else if observation.TopBidVisibleQty != nil || observation.TopAskVisibleQty != nil {
+			return errors.New("repeated spot: legacy maker observed unregistered displayed depth")
+		}
 		state.latestMakerSnapshot[event.ClientID] = observation
 		if observation.BestBid > 0 && observation.BestAsk > observation.BestBid {
 			state.lastTwoSidedMaker[event.ClientID] = observation
 		}
 	} else {
+		if observation.TopBidVisibleQty != nil || observation.TopAskVisibleQty != nil {
+			return errors.New("repeated spot: maker trade observation carried book depth")
+		}
 		trade := state.trades.trades[observation.TradeID]
 		if trade == nil || trade.timestamp != observation.SourceAt ||
 			trade.trade.Price != observation.TradePrice || trade.trade.Qty != observation.TradeQty ||
@@ -750,6 +781,20 @@ func firstLevelPrice(levels []types.PriceLevel) int64 {
 		return 0
 	}
 	return levels[0].Price
+}
+
+func firstLevelVisibleQty(levels []types.PriceLevel) int64 {
+	if len(levels) == 0 {
+		return 0
+	}
+	return levels[0].VisibleQty
+}
+
+func visibleQuantity(value *int64) int64 {
+	if value == nil {
+		return 0
+	}
+	return *value
 }
 
 func validMakerAction(action string) bool {

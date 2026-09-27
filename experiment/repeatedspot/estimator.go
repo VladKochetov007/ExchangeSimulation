@@ -29,6 +29,9 @@ type makerParameters struct {
 	minHalfSpreadTicks  int64
 	localReferenceAge   int64
 	trackReference      bool
+	trackTopDepth       bool
+	signalGainBps       int64
+	maxSignalAge        int64
 }
 
 type deliveredVariance struct {
@@ -40,7 +43,7 @@ type deliveredVariance struct {
 
 func parseMakerParameters(participant replayParticipant) (*makerParameters, error) {
 	switch participant.Policy.Name {
-	case "bounded_fixed_maker_v2", "bounded_stoikov_maker_v2", "bounded_fixed_maker_v3", "bounded_stoikov_maker_v3":
+	case "bounded_fixed_maker_v2", "bounded_stoikov_maker_v2", "bounded_fixed_maker_v3", "bounded_stoikov_maker_v3", "bounded_imbalance_stoikov_maker_v1":
 	default:
 		return nil, nil
 	}
@@ -63,11 +66,15 @@ func parseMakerParameters(participant replayParticipant) (*makerParameters, erro
 		InventoryHorizon   int64   `json:"inventory_horizon_ns"`
 		MinHalfSpreadTicks int64   `json:"min_half_spread_ticks"`
 		LocalReferenceAge  int64   `json:"local_reference_max_age_ns"`
+		SignalGainBps      int64   `json:"signal_gain_bps"`
+		MaxSignalAge       int64   `json:"max_signal_age_ns"`
 	}
 	if err := json.Unmarshal(participant.Policy.Parameters, &raw); err != nil {
 		return nil, err
 	}
-	trackReference := participant.Policy.Name == "bounded_fixed_maker_v3" || participant.Policy.Name == "bounded_stoikov_maker_v3"
+	trackTopDepth := participant.Policy.Name == "bounded_imbalance_stoikov_maker_v1"
+	trackReference := participant.Policy.Name == "bounded_fixed_maker_v3" ||
+		participant.Policy.Name == "bounded_stoikov_maker_v3" || trackTopDepth
 	if trackReference {
 		var fields map[string]json.RawMessage
 		if err := json.Unmarshal(participant.Policy.Parameters, &fields); err != nil {
@@ -75,6 +82,13 @@ func parseMakerParameters(participant replayParticipant) (*makerParameters, erro
 		}
 		if _, present := fields["local_reference_max_age_ns"]; !present {
 			return nil, errors.New("repeated spot: versioned maker omitted local reference lifetime")
+		}
+		if trackTopDepth {
+			for _, required := range []string{"signal_gain_bps", "max_signal_age_ns"} {
+				if _, present := fields[required]; !present {
+					return nil, fmt.Errorf("repeated spot: signal maker omitted %s", required)
+				}
+			}
 		}
 	}
 	parameters := &makerParameters{kind: participant.Policy.Name,
@@ -87,21 +101,24 @@ func parseMakerParameters(participant replayParticipant) (*makerParameters, erro
 		quotePrecision: raw.QuotePrecision, riskAversion: raw.RelativeRisk,
 		fillDecay: raw.RelativeFillDecay, horizonNanos: raw.InventoryHorizon,
 		minHalfSpreadTicks: raw.MinHalfSpreadTicks, localReferenceAge: raw.LocalReferenceAge,
-		trackReference: trackReference}
+		trackReference: trackReference, trackTopDepth: trackTopDepth,
+		signalGainBps: raw.SignalGainBps, maxSignalAge: raw.MaxSignalAge}
 	if parameters.workingLimit <= 0 || parameters.quoteQty <= 0 || parameters.minQuoteQty <= 0 ||
 		parameters.minQuoteQty > parameters.quoteQty || parameters.quoteIntervalNanos <= 0 || parameters.tickSize <= 0 ||
 		!finiteNumber(parameters.initialVariance) || parameters.initialVariance < 0 ||
 		parameters.halfLifeNanos < 0 || parameters.sampleIntervalNanos < 0 ||
 		!finiteNumber(parameters.maxVarianceMultiple) || parameters.maxVarianceMultiple < 0 ||
 		!finiteNumber(parameters.initialVariance*parameters.maxVarianceMultiple) || parameters.localReferenceAge < 0 ||
-		!parameters.trackReference && parameters.localReferenceAge != 0 {
+		!parameters.trackReference && parameters.localReferenceAge != 0 ||
+		parameters.trackTopDepth && (parameters.signalGainBps < 0 || parameters.maxSignalAge <= 0) ||
+		!parameters.trackTopDepth && (parameters.signalGainBps != 0 || parameters.maxSignalAge != 0) {
 		return nil, errors.New("repeated spot: malformed maker estimator parameters")
 	}
 	if (parameters.kind == "bounded_fixed_maker_v2" || parameters.kind == "bounded_fixed_maker_v3") &&
 		(parameters.spreadBps < 0 || parameters.spreadBps >= 10_000) {
 		return nil, errors.New("repeated spot: malformed fixed-maker spread")
 	}
-	if (parameters.kind == "bounded_stoikov_maker_v2" || parameters.kind == "bounded_stoikov_maker_v3") &&
+	if (parameters.kind == "bounded_stoikov_maker_v2" || parameters.kind == "bounded_stoikov_maker_v3" || parameters.trackTopDepth) &&
 		(parameters.quotePrecision <= 0 || parameters.riskAversion <= 0 || parameters.fillDecay <= 0 ||
 			parameters.horizonNanos <= 0 || parameters.minHalfSpreadTicks <= 0 ||
 			!finiteNumber(parameters.riskAversion) || !finiteNumber(parameters.fillDecay)) {
@@ -185,7 +202,57 @@ func expectedMakerQuote(parameters *makerParameters, decision worldspot.MakerDec
 	}
 	bid := roundedQuoteTicks(reservation-halfSpread, parameters.quotePrecision, parameters.tickSize, false)
 	ask := roundedQuoteTicks(reservation+halfSpread, parameters.quotePrecision, parameters.tickSize, true)
-	return bid, ask, bid > 0 && ask > bid
+	if !parameters.trackTopDepth {
+		return bid, ask, bid > 0 && ask > bid
+	}
+	if bid <= 0 || ask <= bid {
+		return 0, 0, false
+	}
+	if parameters.trackTopDepth {
+		return expectedImbalanceQuote(parameters, decision, mid, bid, ask)
+	}
+	return bid, ask, true
+}
+
+// This replay deliberately uses arbitrary-precision arithmetic rather than the
+// production policy's 128-bit helper, then enforces the same int64 boundaries.
+func expectedImbalanceQuote(parameters *makerParameters, decision worldspot.MakerDecision, mid, bid, ask int64) (int64, int64, bool) {
+	if decision.TopBidVisibleQty == nil || decision.TopAskVisibleQty == nil ||
+		*decision.TopBidVisibleQty < 0 || *decision.TopAskVisibleQty < 0 ||
+		decision.DecisionAt < decision.LatestBookSourceAt {
+		return 0, 0, false
+	}
+	if parameters.signalGainBps == 0 || *decision.TopBidVisibleQty == 0 || *decision.TopAskVisibleQty == 0 ||
+		decision.DecisionAt-decision.LatestBookSourceAt >= parameters.maxSignalAge {
+		return bid, ask, true
+	}
+	total := new(big.Int).Add(big.NewInt(*decision.TopBidVisibleQty), big.NewInt(*decision.TopAskVisibleQty))
+	if !total.IsInt64() || total.Sign() <= 0 {
+		return 0, 0, false
+	}
+	difference := new(big.Int).Sub(big.NewInt(*decision.TopBidVisibleQty), big.NewInt(*decision.TopAskVisibleQty))
+	if !difference.IsInt64() {
+		return 0, 0, false
+	}
+	imbalance := new(big.Int).Quo(difference.Mul(difference, big.NewInt(1_000_000)), total)
+	if !imbalance.IsInt64() {
+		return 0, 0, false
+	}
+	gain := new(big.Int).Mul(imbalance, big.NewInt(parameters.signalGainBps))
+	if !gain.IsInt64() {
+		return 0, 0, false
+	}
+	shift := new(big.Int).Quo(gain.Mul(gain, big.NewInt(mid)), big.NewInt(10_000_000_000))
+	if !shift.IsInt64() {
+		return 0, 0, false
+	}
+	shiftTicks := shift.Int64() / parameters.tickSize * parameters.tickSize
+	bid, bidOK := checkedAdd(bid, shiftTicks)
+	ask, askOK := checkedAdd(ask, shiftTicks)
+	if !bidOK || !askOK || bid <= 0 || ask <= bid {
+		return 0, 0, false
+	}
+	return bid, ask, true
 }
 
 func roundedQuoteTicks(price float64, precision, tickSize int64, up bool) int64 {

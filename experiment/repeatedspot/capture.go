@@ -23,6 +23,9 @@ type captureContract struct {
 		ActorID  uint64 `json:"actor_id"`
 		ClientID uint64 `json:"client_id"`
 		Role     string `json:"role"`
+		Policy   struct {
+			Name string `json:"name"`
+		} `json:"policy"`
 	} `json:"participants"`
 }
 
@@ -79,7 +82,18 @@ func NewCapture(world *worldspot.World, stream io.Writer, receipts *simulation.M
 		cancelObservers[index] = cancelObserver
 	}
 
-	capture := &Capture{world: world, recorder: NewRecorder(stream), receipts: receipts, symbol: contract.Instrument.Symbol}
+	schemaID := EvidenceSchemaID
+	for _, participant := range contract.Participants {
+		if participant.Policy.Name == "bounded_imbalance_stoikov_maker_v1" {
+			schemaID = SignalEvidenceSchemaID
+			break
+		}
+	}
+	recorder, err := NewRecorderForSchema(stream, schemaID)
+	if err != nil {
+		return nil, err
+	}
+	capture := &Capture{world: world, recorder: recorder, receipts: receipts, symbol: contract.Instrument.Symbol}
 	world.Venue().SetLogger(contract.Instrument.Symbol, ExchangeLogger{Recorder: capture.recorder, Route: contract.Instrument.Symbol})
 	world.Venue().SetLogger("_global", ExchangeLogger{Recorder: capture.recorder, Route: "_global"})
 	for index, participant := range contract.Participants {

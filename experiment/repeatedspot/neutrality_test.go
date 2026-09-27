@@ -39,6 +39,14 @@ func TestFreshProcessLocalReferenceIdentity(t *testing.T) {
 	compareFreshProcessIdentity(t, "REPEATED_SPOT_CHILD_REFERENCE_IDENTITY", "TestFreshProcessLocalReferenceIdentity")
 }
 
+func TestFreshProcessSignalMakerIdentity(t *testing.T) {
+	if destination := os.Getenv("REPEATED_SPOT_CHILD_SIGNAL_IDENTITY"); destination != "" {
+		writeFixtureIdentity(t, destination, signalMakerFixture(t))
+		return
+	}
+	compareFreshProcessIdentity(t, "REPEATED_SPOT_CHILD_SIGNAL_IDENTITY", "TestFreshProcessSignalMakerIdentity")
+}
+
 func localReferenceFixture(t *testing.T) *worldspot.World {
 	t.Helper()
 	return fixtureWorldWithReferencePolicy(t, true, false, 1, 2*time.Second,

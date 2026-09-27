@@ -16,8 +16,10 @@ import (
 )
 
 const (
-	EvidenceSchemaID    = "repeated-spot-opaque-v4"
-	evidenceSchemaEpoch = 0x45300003
+	EvidenceSchemaID          = "repeated-spot-opaque-v4"
+	SignalEvidenceSchemaID    = "repeated-spot-opaque-v5"
+	evidenceSchemaEpoch       = 0x45300003
+	signalEvidenceSchemaEpoch = 0x45300004
 )
 
 type EvidenceIdentity struct {
@@ -48,12 +50,33 @@ type envelope struct {
 type Recorder struct {
 	mu       sync.Mutex
 	writer   *evstream.Writer
+	schemaID string
 	firstErr error
 	finished bool
 }
 
 func NewRecorder(output io.Writer) *Recorder {
-	return &Recorder{writer: evstream.NewWriter(output, evstream.WriterOptions{SchemaEpoch: evidenceSchemaEpoch})}
+	return &Recorder{writer: evstream.NewWriter(output, evstream.WriterOptions{SchemaEpoch: evidenceSchemaEpoch}),
+		schemaID: EvidenceSchemaID}
+}
+
+func NewRecorderForSchema(output io.Writer, schemaID string) (*Recorder, error) {
+	epoch, ok := repeatedSpotSchemaEpoch(schemaID)
+	if !ok || output == nil {
+		return nil, errors.New("repeated spot: unsupported evidence schema or nil output")
+	}
+	return &Recorder{writer: evstream.NewWriter(output, evstream.WriterOptions{SchemaEpoch: epoch}), schemaID: schemaID}, nil
+}
+
+func repeatedSpotSchemaEpoch(schemaID string) (uint32, bool) {
+	switch schemaID {
+	case EvidenceSchemaID:
+		return evidenceSchemaEpoch, true
+	case SignalEvidenceSchemaID:
+		return signalEvidenceSchemaEpoch, true
+	default:
+		return 0, false
+	}
 }
 
 func (recorder *Recorder) Record(timestamp int64, clientID uint64, source, name, route string, payload any) {
@@ -95,7 +118,7 @@ func (recorder *Recorder) Finish() (EvidenceIdentity, error) {
 		return EvidenceIdentity{}, closeErr
 	}
 	hash := recorder.writer.ExecutionHash()
-	return EvidenceIdentity{SchemaID: EvidenceSchemaID, ExecutionHash: hex.EncodeToString(hash[:]),
+	return EvidenceIdentity{SchemaID: recorder.schemaID, ExecutionHash: hex.EncodeToString(hash[:]),
 		FrameCount: recorder.writer.Count()}, nil
 }
 
@@ -109,7 +132,8 @@ func (logger ExchangeLogger) LogEvent(timestamp int64, clientID uint64, name str
 }
 
 func WalkEvidence(input io.Reader, expected EvidenceIdentity, visit func(Event) error) error {
-	if expected.SchemaID != EvidenceSchemaID || len(expected.ExecutionHash) != 2*sha256.Size || expected.FrameCount == 0 || visit == nil {
+	epoch, supported := repeatedSpotSchemaEpoch(expected.SchemaID)
+	if !supported || len(expected.ExecutionHash) != 2*sha256.Size || expected.FrameCount == 0 || visit == nil {
 		return errors.New("repeated spot: invalid evidence identity or visitor")
 	}
 	if _, err := hex.DecodeString(expected.ExecutionHash); err != nil {
@@ -119,7 +143,7 @@ func WalkEvidence(input io.Reader, expected EvidenceIdentity, visit func(Event) 
 	if err != nil {
 		return err
 	}
-	if reader.SchemaEpoch() != evidenceSchemaEpoch {
+	if reader.SchemaEpoch() != epoch {
 		return errors.New("repeated spot: evidence schema epoch mismatch")
 	}
 	if err := reader.Range(func(frame evstream.Frame) error {

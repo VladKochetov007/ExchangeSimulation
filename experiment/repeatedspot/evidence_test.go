@@ -63,6 +63,32 @@ func TestEvidenceRoundTripAndCorruption(t *testing.T) {
 	}
 }
 
+func TestSignalEvidenceEpochCannotBeRelabeledAsLegacy(t *testing.T) {
+	var raw bytes.Buffer
+	recorder, err := NewRecorderForSchema(&raw, SignalEvidenceSchemaID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recorder.Record(1, 2, "actor", "maker_decision", "ABC/USD", map[string]int64{"bid": 99})
+	identity, err := recorder.Finish()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if identity.SchemaID != SignalEvidenceSchemaID {
+		t.Fatalf("signal recorder reported wrong schema: %+v", identity)
+	}
+	if err := WalkEvidence(bytes.NewReader(raw.Bytes()), identity, func(Event) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	identity.SchemaID = EvidenceSchemaID
+	if err := WalkEvidence(bytes.NewReader(raw.Bytes()), identity, func(Event) error { return nil }); err == nil {
+		t.Fatal("v5 bytes passed after relabeling with historical v4 schema")
+	}
+	if _, err := NewRecorderForSchema(&raw, "repeated-spot-opaque-v6"); err == nil {
+		t.Fatal("unsupported evidence schema was accepted")
+	}
+}
+
 func TestEvidenceRejectsDuplicateJSONWithMatchingCanonicalHash(t *testing.T) {
 	var raw bytes.Buffer
 	writer := evstream.NewWriter(&raw, evstream.WriterOptions{SchemaEpoch: evidenceSchemaEpoch})
