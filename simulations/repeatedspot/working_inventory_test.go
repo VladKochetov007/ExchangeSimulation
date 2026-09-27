@@ -130,6 +130,28 @@ func TestWorkingInventoryRejectionAndFullFill(t *testing.T) {
 	}
 }
 
+func TestWorkingInventoryAcceptsFirstExchangeTradeIDZero(t *testing.T) {
+	inventory, err := newWorkingInventory(0, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := inventory.reserve(1, exchange.Buy, 2); err != nil {
+		t.Fatal(err)
+	}
+	if err := inventory.accepted(1, 101); err != nil {
+		t.Fatal(err)
+	}
+	if err := inventory.filledOrder(101, 0, exchange.Buy, 1, false); err != nil {
+		t.Fatalf("valid first trade ID zero was rejected: %v", err)
+	}
+	if inventory.filled != 1 {
+		t.Fatalf("first fill did not reach local inventory: %d", inventory.filled)
+	}
+	if err := inventory.filledOrder(101, 0, exchange.Buy, 1, true); err == nil {
+		t.Fatal("duplicate trade ID zero was accepted")
+	}
+}
+
 func TestWorkingInventoryOverflowAndInvalidSideFailClosed(t *testing.T) {
 	if _, err := newWorkingInventory(11, 10); err == nil {
 		t.Fatal("initial position outside limit accepted")

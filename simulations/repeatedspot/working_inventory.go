@@ -120,7 +120,7 @@ func (inventory *workingInventory) rejected(requestID uint64) error {
 
 func (inventory *workingInventory) filledOrder(orderID, tradeID uint64, side exchange.Side, quantity int64, full bool) error {
 	order := inventory.orders[orderID]
-	if order == nil || order.side != side || tradeID == 0 || quantity <= 0 || quantity > order.remaining {
+	if order == nil || order.side != side || quantity <= 0 || quantity > order.remaining {
 		return fmt.Errorf("repeatedspot: unanchored or overrun working fill %d/%d", orderID, tradeID)
 	}
 	if _, exists := inventory.tradeIDs[tradeID]; exists {

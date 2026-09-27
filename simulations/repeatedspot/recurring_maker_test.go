@@ -137,6 +137,23 @@ func TestRecurringMakerPartialFillShrinksSameSideQuoteAtCap(t *testing.T) {
 	}
 }
 
+func TestRecurringMakerProcessesFirstTradeIDZero(t *testing.T) {
+	maker, gateway := makerFixture(t)
+	maker.onTick(time.Time{})
+	observeMakerBook(maker, 99, 101)
+	maker.onTick(time.Time{})
+	acceptMakerQuote(maker, gateway.requests[1].OrderReq.RequestID, 101)
+	maker.HandleEvent(context.Background(), &actor.Event{Type: actor.EventOrderPartialFill,
+		Data: actor.OrderFillEvent{OrderID: 101, Symbol: "ABC/USD", Side: exchange.Buy,
+			Qty: 1, IsFull: false, TradeID: 0}})
+	if err := maker.Fault(); err != nil {
+		t.Fatalf("maker rejected legitimate first exchange trade: %v", err)
+	}
+	if maker.inventory.filled != 1 {
+		t.Fatalf("maker did not reconcile first fill: %d", maker.inventory.filled)
+	}
+}
+
 func TestRecurringMakerInvalidCancelRemainderHaltsPolicy(t *testing.T) {
 	maker, gateway := makerFixture(t)
 	maker.onTick(time.Time{})
