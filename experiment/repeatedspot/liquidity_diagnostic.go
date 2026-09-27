@@ -21,6 +21,7 @@ type MakerLiquidityActions struct {
 	ActorID                 uint64                  `json:"actor_id"`
 	BeforeMeasurement       map[string]int64        `json:"before_measurement"`
 	DuringMeasurement       map[string]int64        `json:"during_measurement"`
+	AfterMeasurement        map[string]int64        `json:"after_measurement"`
 	FirstNoUsableQuote      *LiquidityDecisionPoint `json:"first_no_usable_quote,omitempty"`
 	FirstUnusableCancel     *LiquidityDecisionPoint `json:"first_unusable_cancel,omitempty"`
 	LastPlacementEvaluation *LiquidityDecisionPoint `json:"last_placement_evaluation,omitempty"`
@@ -37,6 +38,7 @@ type BookStateDurations struct {
 type E0LiquidityDiagnostic struct {
 	Evidence                 EvidenceIdentity        `json:"evidence"`
 	MeasurementStartNanos    int64                   `json:"measurement_start_ns"`
+	MeasurementEndNanos      int64                   `json:"measurement_end_ns"`
 	WorldEndNanos            int64                   `json:"world_end_ns"`
 	FirstPermanentEmptyNanos *int64                  `json:"first_permanent_empty_ns,omitempty"`
 	LastTwoSidedEndNanos     *int64                  `json:"last_two_sided_end_ns,omitempty"`
@@ -50,11 +52,12 @@ type E0LiquidityDiagnostic struct {
 // DiagnoseE0LiquidityEvidence reconstructs exchange book-state durations and
 // maker decisions from retained evidence. It does not substitute for strict
 // economic replay or infer why a maker selected a quote rule.
-func DiagnoseE0LiquidityEvidence(input io.Reader, identity EvidenceIdentity, measurementStartNanos, tickSize int64) (E0LiquidityDiagnostic, error) {
-	if measurementStartNanos < 0 || tickSize <= 0 {
+func DiagnoseE0LiquidityEvidence(input io.Reader, identity EvidenceIdentity, window MeasurementWindow, tickSize int64) (E0LiquidityDiagnostic, error) {
+	if window.StartAt < 0 || window.EndAt <= window.StartAt || tickSize <= 0 {
 		return E0LiquidityDiagnostic{}, errors.New("repeated spot: invalid liquidity diagnostic contract")
 	}
-	result := E0LiquidityDiagnostic{Evidence: identity, MeasurementStartNanos: measurementStartNanos}
+	result := E0LiquidityDiagnostic{Evidence: identity, MeasurementStartNanos: window.StartAt,
+		MeasurementEndNanos: window.EndAt}
 	makers := make(map[uint64]*MakerLiquidityActions)
 	var series *publicBookSeries
 	worldEnded := false
@@ -67,7 +70,7 @@ func DiagnoseE0LiquidityEvidence(input io.Reader, identity EvidenceIdentity, mea
 			series = newPublicBookSeries(event.Timestamp, tickSize)
 			result.FirstPermanentEmptyNanos = int64Pointer(event.Timestamp)
 		case event.Source == "control" && event.Name == "world_run_end":
-			if series == nil || worldEnded || event.Timestamp < measurementStartNanos {
+			if series == nil || worldEnded || event.Timestamp != window.EndAt {
 				return errors.New("repeated spot: invalid world end in diagnostic")
 			}
 			if err := series.accrue(event.Timestamp); err != nil {
@@ -135,13 +138,16 @@ func DiagnoseE0LiquidityEvidence(input io.Reader, identity EvidenceIdentity, mea
 			}
 			maker := makers[decision.ActorID]
 			if maker == nil {
-				maker = &MakerLiquidityActions{ActorID: decision.ActorID, BeforeMeasurement: make(map[string]int64), DuringMeasurement: make(map[string]int64)}
+				maker = &MakerLiquidityActions{ActorID: decision.ActorID, BeforeMeasurement: make(map[string]int64),
+					DuringMeasurement: make(map[string]int64), AfterMeasurement: make(map[string]int64)}
 				makers[decision.ActorID] = maker
 			}
-			if event.Timestamp < measurementStartNanos {
+			if event.Timestamp < window.StartAt {
 				maker.BeforeMeasurement[decision.Action]++
-			} else {
+			} else if event.Timestamp < window.EndAt {
 				maker.DuringMeasurement[decision.Action]++
+			} else {
+				maker.AfterMeasurement[decision.Action]++
 			}
 			point := &LiquidityDecisionPoint{DecisionAtNanos: decision.DecisionAt,
 				LatestBookSourceNanos: decision.LatestBookSourceAt, BestBid: decision.BestBid,

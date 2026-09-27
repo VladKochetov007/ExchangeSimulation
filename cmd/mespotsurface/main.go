@@ -41,7 +41,7 @@ func run() error {
 	for _, cell := range repeatedspot.E0DevelopmentCells() {
 		id := cell.ID()
 		resultPath := filepath.Join(*root, "analysis", id+"-result.json")
-		diagnosticPath := filepath.Join(*root, "analysis", id+"-liquidity-diagnostic-v2.json")
+		diagnosticPath := filepath.Join(*root, "analysis", id+"-liquidity-diagnostic-v3.json")
 		var result repeatedspot.E0AnalyzedResult
 		resultHash, err := readStrictJSON(resultPath, &result)
 		if err != nil {

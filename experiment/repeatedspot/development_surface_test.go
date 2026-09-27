@@ -32,7 +32,7 @@ func syntheticE0SurfaceInputs() []E0CellArtifacts {
 			ManifestFileSHA256: strings.Repeat("b", 64), EvidenceFileSHA256: strings.Repeat("c", 64),
 			EconomicReconstruction: replay},
 			Diagnostic: E0LiquidityDiagnostic{Evidence: evidence, MeasurementStartNanos: window.StartAt,
-				WorldEndNanos: window.EndAt, FirstPermanentEmptyNanos: int64Pointer(0),
+				MeasurementEndNanos: window.EndAt, WorldEndNanos: window.EndAt, FirstPermanentEmptyNanos: int64Pointer(0),
 				BookDurations: BookStateDurations{HorizonNanos: window.EndAt, EmptyNanos: window.EndAt}, Makers: makers},
 			ResultSHA256: strings.Repeat("d", 64), DiagnosticSHA256: strings.Repeat("e", 64)})
 	}

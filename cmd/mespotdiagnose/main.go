@@ -20,10 +20,12 @@ func main() {
 	evidencePath := flag.String("evidence", "", "retained canonical evidence stream")
 	outputPath := flag.String("output", "", "new diagnostic JSON path")
 	measurementStart := flag.Int64("measurement-start-ns", -1, "registered measurement start")
+	measurementEnd := flag.Int64("measurement-end-ns", -1, "exclusive registered measurement end")
 	tickSize := flag.Int64("tick-size", 0, "registered instrument tick size")
 	flag.Parse()
-	if *manifestPath == "" || *resultPath == "" || *evidencePath == "" || *outputPath == "" || *measurementStart < 0 || *tickSize <= 0 || flag.NArg() != 0 {
-		fail(errors.New("required: -manifest -result -evidence -output -measurement-start-ns -tick-size"))
+	if *manifestPath == "" || *resultPath == "" || *evidencePath == "" || *outputPath == "" ||
+		*measurementStart < 0 || *measurementEnd <= *measurementStart || *tickSize <= 0 || flag.NArg() != 0 {
+		fail(errors.New("required: -manifest -result -evidence -output -measurement-start-ns -measurement-end-ns -tick-size"))
 	}
 	manifestRaw, err := os.ReadFile(*manifestPath)
 	if err != nil {
@@ -47,7 +49,8 @@ func main() {
 		result.EvidenceFileSHA256 != manifest.EvidenceFileSHA256 ||
 		result.Identity != manifest.Identity || result.Cell != manifest.Cell ||
 		result.EconomicReconstruction.Evidence != manifest.Evidence ||
-		result.EconomicReconstruction.ContractSHA256 != manifest.ContractSHA256 {
+		result.EconomicReconstruction.ContractSHA256 != manifest.ContractSHA256 ||
+		result.EconomicReconstruction.MeasurementWindow != (repeatedspot.MeasurementWindow{StartAt: *measurementStart, EndAt: *measurementEnd}) {
 		fail(errors.New("strict replay result does not bind the retained manifest and evidence"))
 	}
 	input, err := os.Open(*evidencePath)
@@ -56,7 +59,8 @@ func main() {
 	}
 	defer input.Close()
 	rawHasher := sha256.New()
-	diagnostic, err := repeatedspot.DiagnoseE0LiquidityEvidence(io.TeeReader(input, rawHasher), manifest.Evidence, *measurementStart, *tickSize)
+	diagnostic, err := repeatedspot.DiagnoseE0LiquidityEvidence(io.TeeReader(input, rawHasher), manifest.Evidence,
+		repeatedspot.MeasurementWindow{StartAt: *measurementStart, EndAt: *measurementEnd}, *tickSize)
 	if err != nil {
 		fail(err)
 	}

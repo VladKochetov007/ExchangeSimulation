@@ -110,6 +110,7 @@ func SummarizeE0Development(inputs []E0CellArtifacts) (E0DevelopmentSurface, err
 			replay.InformationAudit == nil || !replay.InformationAudit.Valid ||
 			replay.MeasurementWindow != E0MeasurementWindow() ||
 			input.Diagnostic.MeasurementStartNanos != replay.MeasurementWindow.StartAt ||
+			input.Diagnostic.MeasurementEndNanos != replay.MeasurementWindow.EndAt ||
 			input.Diagnostic.WorldEndNanos != replay.MeasurementWindow.EndAt ||
 			input.Diagnostic.TradeCount != int64(replay.TradeCount) ||
 			!sameBookDurations(input.Diagnostic.BookDurations, replay.Market) {

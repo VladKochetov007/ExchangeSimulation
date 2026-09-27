@@ -38,16 +38,19 @@ func TestDiagnoseE0LiquidityEvidenceTracksFinalEmptyStreakAndMakerGate(t *testin
 	decision(6, "cancel_quotes", 100, 0)
 	bookDelta(7, "BUY", 0)
 	decision(8, "no_usable_quote", 0, 0)
+	decision(10, "no_usable_quote", 0, 0)
 	recorder.Record(10, 0, "control", "world_run_end", "", struct{}{})
 	identity, err := recorder.Finish()
 	if err != nil {
 		t.Fatal(err)
 	}
-	diagnostic, err := DiagnoseE0LiquidityEvidence(bytes.NewReader(stream.Bytes()), identity, 6, 1)
+	window := MeasurementWindow{StartAt: 6, EndAt: 10}
+	diagnostic, err := DiagnoseE0LiquidityEvidence(bytes.NewReader(stream.Bytes()), identity, window, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if diagnostic.BookDurations != (BookStateDurations{HorizonNanos: 10, TwoSidedNanos: 3, BidOnlyNanos: 3, EmptyNanos: 4}) ||
+	if diagnostic.MeasurementEndNanos != 10 ||
+		diagnostic.BookDurations != (BookStateDurations{HorizonNanos: 10, TwoSidedNanos: 3, BidOnlyNanos: 3, EmptyNanos: 4}) ||
 		diagnostic.FirstPermanentEmptyNanos == nil || *diagnostic.FirstPermanentEmptyNanos != 7 ||
 		diagnostic.LastTwoSidedEndNanos == nil || *diagnostic.LastTwoSidedEndNanos != 5 ||
 		diagnostic.TradeCount != 1 || diagnostic.LastTradeNanos == nil || *diagnostic.LastTradeNanos != 4 {
@@ -59,6 +62,7 @@ func TestDiagnoseE0LiquidityEvidenceTracksFinalEmptyStreakAndMakerGate(t *testin
 	maker := diagnostic.Makers[0]
 	if maker.BeforeMeasurement["evaluate_placements"] != 1 ||
 		maker.DuringMeasurement["cancel_quotes"] != 1 || maker.DuringMeasurement["no_usable_quote"] != 1 ||
+		maker.AfterMeasurement["no_usable_quote"] != 1 ||
 		maker.FirstUnusableCancel == nil || maker.FirstUnusableCancel.DecisionAtNanos != 6 ||
 		maker.FirstNoUsableQuote == nil || maker.FirstNoUsableQuote.DecisionAtNanos != 8 ||
 		maker.LastPlacementEvaluation == nil || maker.LastPlacementEvaluation.DecisionAtNanos != 3 {
@@ -66,7 +70,7 @@ func TestDiagnoseE0LiquidityEvidenceTracksFinalEmptyStreakAndMakerGate(t *testin
 	}
 	changed := identity
 	changed.FrameCount++
-	if _, err := DiagnoseE0LiquidityEvidence(bytes.NewReader(stream.Bytes()), changed, 6, 1); err == nil {
+	if _, err := DiagnoseE0LiquidityEvidence(bytes.NewReader(stream.Bytes()), changed, window, 1); err == nil {
 		t.Fatal("incorrect evidence count accepted")
 	}
 }
