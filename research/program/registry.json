@@ -379,7 +379,7 @@
         "run": false,
         "basis": "Owner 2026-09-27 long-run goal authorizes bounded E0/E1/E2 implementation and conditional development, recorded in research/program/longrun-baselines/authorization-20260927.md. E2 runs remain gated on E0 and versioned funding/lifecycle/evidence readiness plus a fixed protocol."
       },
-      "next_action": "The opt-in production public-book source window and canonical replay have a synthetic fixture but are not payment or live-book-fidelity attestations. Next bind the complete venue roster to owned per-client fractional remainders and a finite reserve, implement atomic cash posting and joint N/S risk ordering, then independently reconstruct canonical source/payment evidence and prove exclusive phase ownership. Finite carry lifecycle, E0/E1 priceability and a fixed reviewed E2 protocol remain gates before any economic ME-014 world."
+      "next_action": "Implement and independently review one opt-in production runner composition with exclusive E2 settlement ownership (legacy schedule suppressed only for registered E2 contracts), a scale-aware E2 funding view over delayed actor feeds, contract-ordered post-payment risk preflight, and sealed typed E2_EARLY_STOP outcomes. See readiness-20260927.md and me014-runner-integration-boundary-20261005.md. Preserve legacy defaults. Finite carry lifecycle, E0/E1 priceability and a fixed reviewed E2 protocol remain gates; run=false and no economic world is authorized."
     },
     {
       "id": "ME-015",
