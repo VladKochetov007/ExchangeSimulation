@@ -28,6 +28,7 @@ The prospective contract and selected rate/mark/calendar rules remain unchanged 
 
 On the reviewed source tree:
 
+- Toolchain: `go1.27.0 linux/amd64`.
 - `GOMAXPROCS=4 GOFLAGS=-p=2 go test ./...`: **PASS**, exit 0.
 - `GOMAXPROCS=2 go vet ./...`: **PASS**, exit 0.
 - `GOMAXPROCS=2 go test ./instrument ./exchange ./simulations/multivenue -run 'Funding' -count=1`: **PASS**.
@@ -35,9 +36,9 @@ On the reviewed source tree:
 - `go run ./.agents/skills/market-ecology-research/scripts/validate.go --root .`: **PASS**.
 - `git diff --cached --check`: **PASS**.
 - Initial `GOMAXPROCS=4 GOFLAGS=-p=2 make test` from the dirty source worktree: package tests and the first three integration fixtures passed; the final R2 archive/parity fixture correctly refused the dirty gate worktree, so this attempt exited 2 and is **not** counted as a full `make test` pass.
-- Clean committed-tree `make test`: **PENDING at this record's creation; update only after actual completion**.
+- Clean committed-tree `GOMAXPROCS=4 GOFLAGS=-p=2 make test`: **PASS**, exit 0, on clean source commit `f53abf0010d68c44c46a5ef0f2365c41b85c5913`. The four integration contract/archive fixtures all passed; the printed `sv1dresource` incomplete-command message is an expected negative case within the R2 contract fixture.
 
-The `sv1dresource: measured command was incomplete: exit status 7` line during the R2 contract fixture is an expected negative authorization/completion test, not a simulation or payment run.
+No economic world or payment-run test was launched by these commands.
 
 ## Explicit limits of acceptance
 
