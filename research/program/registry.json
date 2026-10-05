@@ -379,7 +379,7 @@
         "run": false,
         "basis": "Owner 2026-09-27 long-run goal authorizes bounded E0/E1/E2 implementation and conditional development, recorded in research/program/longrun-baselines/authorization-20260927.md. E2 runs remain gated on E0 and versioned funding/lifecycle/evidence readiness plus a fixed protocol."
       },
-      "next_action": "Implement and independently review one opt-in production runner composition with exclusive E2 settlement ownership (legacy schedule suppressed only for registered E2 contracts), a scale-aware E2 funding view over delayed actor feeds, contract-ordered post-payment risk preflight, and sealed typed E2_EARLY_STOP outcomes. See readiness-20260927.md and me014-runner-integration-boundary-20261005.md. Preserve legacy defaults. Finite carry lifecycle, E0/E1 priceability and a fixed reviewed E2 protocol remain gates; run=false and no economic world is authorized."
+      "next_action": "Resolve the missing public funding-replacement extension point: current exchange.AutomationConfig cannot transfer ownership from unconditional legacy settlement, while the repository library rule prohibits adding a library API in this worktree. Do not use an interval workaround or duplicate automation. See readiness-20260927.md and me014-runner-integration-boundary-20261005.md. After an authorized/supported extension exists, complete opt-in runner/feed/risk/typed-stop integration and independent replay. Finite carry lifecycle, E0/E1 priceability and a fixed reviewed E2 protocol remain gates; run=false and no economic world is authorized."
     },
     {
       "id": "ME-015",

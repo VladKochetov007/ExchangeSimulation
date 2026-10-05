@@ -44,11 +44,19 @@ The prospective settlement contract already specifies `E2_EARLY_STOP`, a sorted 
 
 This is missing wiring for an already selected contract, not permission to weaken strict valuation or add a backstop.
 
+### 4. The existing public automation configuration has no funding replacement hook
+
+**Directly established from source:** `exchange.AutomationConfig` supports mark/index, price-update, collateral, liquidation and lifecycle settings, but it exposes no funding-settlement policy or opt-out. `DefaultExchange.StartAutomation` unconditionally registers `CheckAndSettleFunding` in deterministic mode (and starts its legacy settlement loop otherwise). The ordinary `multivenue.Sim.Run` always calls `StartAutomation` for every venue.
+
+Therefore the normal `NewSim`/`Sim.Run` composition cannot currently give E2 exclusive funding ownership using only supported configuration. A very long legacy interval is not an acceptable substitute: it changes a published schedule, leaves the legacy actor view semantically misleading, and does not establish a complete-roster ownership invariant. Reimplementing the exchange's other automation outside `StartAutomation` would duplicate framework behavior and is not a bounded adapter.
+
+**Authority boundary:** The repository instruction for this worktree prohibits adding source/types/logic inside the library and requires extension through existing public composition points. No suitable public funding replacement point exists. I therefore did not edit `exchange/` or `simulation/` to add one. The smallest reasonable future library API, if separately authorized, is an optional injected funding-settlement handler (defaulting exactly to the current legacy handler) with an explicit complete-contract ownership boundary; it must not silently change the default or let an E2 handler coexist with legacy settlement on the same perpetual. That API should be reviewed as a general extension point before the E2 simulation adapter is implemented.
+
 ## Promotion implication
 
 The existing coordinator acceptance remains scoped to source-level joint settlement mechanics. It does not accept E2 runner integration. ME-014 remains `PREPARE`, `run=false`.
 
-The next bounded engineering gate is an opt-in production composition that, as one tested boundary:
+If a supported library extension point is added/authorized, the next bounded engineering gate is an opt-in production composition that, as one tested boundary:
 
 1. freezes and validates the complete deployment roster and calendar set;
 2. gives those E2 contracts exclusive ownership over their funding settlements while leaving legacy mode unchanged;
@@ -58,6 +66,8 @@ The next bounded engineering gate is an opt-in production composition that, as o
 6. seals and independently reconstructs complete, unavailable, shortfall, structural-failure and censored outcomes.
 
 Before implementing this composition, pin its public API and status/output transition tests. Then seek a bounded independent review of the exact integrated candidate. No economic protocol or run becomes authorized merely by passing these mechanical gates.
+
+Until then, E2 production integration is blocked by a specific missing public extension point plus the repository's no-library-edit constraint—not by review-service availability or an unresolved funding convention.
 
 ## Not reviewed or concluded
 
