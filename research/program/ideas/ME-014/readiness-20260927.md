@@ -121,3 +121,34 @@ A bounded read-only Sol-6 source diagnostic of exact candidate `04953a4f4eee59aa
 3. The economic contract already defines `E2_EARLY_STOP` and censored terminal reasons, but the runner callback exposes only error/nil, and the current successful-run output path does not seal that typed valid terminal result. The current venue-risk telemetry also is not the required all-exposed-account post-payment risk preflight.
 
 The next gate is therefore one opt-in `NewSim`/runner composition proving exclusive per-contract funding ownership, scale-aware delayed actor publication, contract-ordered risk preflight and typed valid-stop sealing, with legacy-default regression tests and independent replay. A public-API audit found that `exchange.AutomationConfig` has no funding replacement/disable hook and `StartAutomation` always registers legacy settlement. The worktree's library rule prohibits adding one here; a long-interval workaround or a duplicated automation loop is not acceptable. Thus production integration is blocked pending a separately authorized/maintainer-provided public extension point. This is not an economic amendment. Keep ME-014 `PREPARE`, `run=false`; no economic execution is authorized by this diagnostic.
+
+### Composition recheck — 2026-10-05
+
+A fresh, bounded Sol-6 medium source diagnostic of candidate `1fa38f8b` refined
+the finite-horizon funding point without issuing a promotion verdict. See
+[the full recheck](../../reviews/me014-runner-composition-recheck-20261005.md).
+The existing 28,800-s default legacy interval is longer than the proposed
+8,400-s horizon, so source timing implies no legacy cash settlement during that
+specific world if those values remain pinned. This does **not** establish
+exclusive ownership: the legacy integer-bp rate and relative `NextFunding` view
+are still published, and E2 actors must not consume them. The earlier warning
+against treating the interval as a replacement hook stands; its implication is
+now explicitly horizon-bounded.
+
+The auxiliary typed delayed feed and typed early-stop wrapper are feasible in
+principle using existing composition seams, but are not implemented or
+validated. The critical risk requirement remains unsatisfied: `MarkedAccount`
+accepts a stored perp mark without its source timestamp, `CommitMarkEpoch`
+does not refresh it, and `UpdatePerpPrices` combines mark refresh with
+liquidation. The existing public calls therefore cannot prove an all-exposed
+account read-only preflight followed by liquidation against exactly the same
+fresh marks. The current multivenue builder also does not expose its runner
+callback or the canonical settlement-epoch appender to an external composition.
+
+ME-014 remains `PREPARE`, `run=false`. No economic parameters or outcomes
+changed. Under the repository's no-library-edit constraint, the next bounded
+step is to locate or obtain authorization for a supported out-of-library
+composition owning the joint phase, canonical appender, risk preflight and
+typed stop lifecycle. Do not use an 8-hour interval alone as proof of exclusive
+funding semantics, and do not change the selected risk-mark contract to avoid
+the missing interface.
