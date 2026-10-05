@@ -109,7 +109,7 @@ func replayFundingObservationValid(observation exchange.FundingBookObservation) 
 		return false
 	}
 	if !observation.Available {
-		return observation.Pair == nil && observation.Reason != ""
+		return observation.Pair == nil && exchange.FundingBookUnavailableReason(observation.Reason).Valid()
 	}
 	if observation.Reason != "" || observation.Pair == nil {
 		return false

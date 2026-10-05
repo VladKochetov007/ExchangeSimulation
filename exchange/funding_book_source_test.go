@@ -85,6 +85,20 @@ func TestCaptureFundingBookPairRejectsWrongSourceAndIncompleteBooks(t *testing.T
 				ex.mu.Unlock()
 			}, false},
 		{"one-sided-spot", false, FundingBookPairRequest{"N", "ABC-USD", "ABC-PERP", 20}, nil, true},
+		{"one-sided-spot-off-tick-bid", false, FundingBookPairRequest{"N", "ABC-USD", "ABC-PERP", 20},
+			func(ex *DefaultExchange, _ *fundingSourceClock) {
+				ex.mu.Lock()
+				stricterTick := NewSpotInstrument("ABC-USD", "ABC", "USD", 1, 1, 2, 1)
+				ex.Instruments["ABC-USD"] = stricterTick
+				ex.Books["ABC-USD"].Instrument = stricterTick
+				ex.mu.Unlock()
+			}, false},
+		{"one-sided-spot-future-bid", false, FundingBookPairRequest{"N", "ABC-USD", "ABC-PERP", 20},
+			func(ex *DefaultExchange, _ *fundingSourceClock) {
+				ex.mu.Lock()
+				ex.Books["ABC-USD"].Bids.Best.Head.Timestamp = 30
+				ex.mu.Unlock()
+			}, false},
 		{"same-time-quote", true, FundingBookPairRequest{"N", "ABC-USD", "ABC-PERP", 10},
 			func(_ *DefaultExchange, clock *fundingSourceClock) { clock.now = 10 }, false},
 		{"future-quote", true, FundingBookPairRequest{"N", "ABC-USD", "ABC-PERP", 20},
@@ -93,6 +107,20 @@ func TestCaptureFundingBookPairRejectsWrongSourceAndIncompleteBooks(t *testing.T
 				ex.Books["ABC-USD"].Bids.Best.Head.Timestamp = 30
 				ex.mu.Unlock()
 			}, false},
+		{"one-sided-spot-with-off-tick-perp", false, FundingBookPairRequest{"N", "ABC-USD", "ABC-PERP", 20},
+			func(ex *DefaultExchange, _ *fundingSourceClock) {
+				ex.mu.Lock()
+				stricterTick := NewPerpFutures("ABC-PERP", "ABC", "USD", 1, 1, 2, 1)
+				ex.Instruments["ABC-PERP"] = stricterTick
+				ex.Books["ABC-PERP"].Instrument = stricterTick
+				ex.mu.Unlock()
+			}, false},
+		{"one-sided-spot-with-crossed-perp", false, FundingBookPairRequest{"N", "ABC-USD", "ABC-PERP", 20},
+			func(ex *DefaultExchange, _ *fundingSourceClock) {
+				ex.mu.Lock()
+				ex.Books["ABC-PERP"].Bids.Best.Price = 106
+				ex.mu.Unlock()
+			}, true},
 		{"crossed-spot", true, FundingBookPairRequest{"N", "ABC-USD", "ABC-PERP", 20},
 			func(ex *DefaultExchange, _ *fundingSourceClock) {
 				ex.mu.Lock()

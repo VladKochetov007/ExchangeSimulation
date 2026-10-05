@@ -70,6 +70,9 @@ func (failure *FundingPayerCashShortfall) Error() string {
 // The later exchange adapter must compare the whole snapshot at commit and
 // record both account and finite-reserve movements atomically.
 func PreviewFundingBatch(input FundingBatchInput) (FundingBatchPreview, error) {
+	if input.Terms.NotionalMarkPrice <= 0 {
+		return FundingBatchPreview{}, fmt.Errorf("funding batch: invalid notional mark")
+	}
 	accounts, states, expectedAccrual, err := validateFundingBatchPrior(input)
 	if err != nil {
 		return FundingBatchPreview{}, err
@@ -124,7 +127,7 @@ func PreviewFundingBatch(input FundingBatchInput) (FundingBatchPreview, error) {
 // finite-money identity before any prospective cash result is considered.
 func validateFundingBatchPrior(input FundingBatchInput) ([]FundingBatchAccount, []ScaledFundingAccrual, ScaledFundingAccrual, error) {
 	if input.VenueID == "" || input.Symbol == "" || input.QuoteAsset == "" || input.BasePrecision <= 0 ||
-		input.Terms.NotionalMarkPrice <= 0 ||
+		input.Terms.Rate.UnitsPerBp() <= 0 ||
 		len(input.Accounts) != len(input.RegisteredClientIDs) ||
 		input.InitialRoundingReserve < int64(len(input.RegisteredClientIDs)) ||
 		input.CurrentRoundingReserve < 0 {

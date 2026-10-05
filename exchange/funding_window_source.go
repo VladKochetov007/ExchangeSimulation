@@ -1,7 +1,6 @@
 package exchange
 
 import (
-	"errors"
 	"fmt"
 	"math/big"
 
@@ -10,7 +9,8 @@ import (
 )
 
 // FundingBookPairSource reads one live venue-local pair at the requested
-// pre-instant frontier. The runner, not this interface, owns that frontier.
+// pre-instant frontier. Economic unavailability must be returned as a direct
+// FundingBookUnavailableError; the runner, not this interface, owns the frontier.
 type FundingBookPairSource interface {
 	CaptureFundingBookPair(FundingBookPairRequest) (FundingBookPair, error)
 }
@@ -30,10 +30,13 @@ type FundingWindowSourceConfig struct {
 	SampleCount       int
 }
 
-const FundingBookObservationVersion uint16 = 1
+// Version 2 reserves Reason for FundingBookUnavailableReason codes instead of
+// arbitrary source error text.
+const FundingBookObservationVersion uint16 = 2
 
 // FundingBookObservation is emitted at every configured boundary, including
-// an explicit unavailable observation when a live book has no public pair.
+// an explicit unavailable observation with a versioned reason code when the
+// live public pair is economically unavailable.
 // A missing event is an evidence defect, not an unavailable market price.
 type FundingBookObservation struct {
 	Version       uint16           `json:"version"`
@@ -119,12 +122,13 @@ func (recorder *FundingWindowRecorder) ObserveAt(atNano int64) (FundingSourceRec
 		}
 		observation.Available = true
 		observation.Pair = &pair
-	case errors.Is(err, ErrFundingBookUnavailable):
+	case fundingBookErrorIsUnavailable(err):
 		if pair != (FundingBookPair{}) {
 			recorder.failed = fmt.Errorf("funding source window: unavailable source returned a pair")
 			return FundingSourceRecord{}, recorder.failed
 		}
-		observation.Reason = err.Error()
+		reason, _ := fundingBookUnavailableReason(err)
+		observation.Reason = string(reason)
 	default:
 		recorder.failed = fmt.Errorf("funding source window: source contradiction at %d: %w", atNano, err)
 		return FundingSourceRecord{}, recorder.failed
@@ -145,6 +149,11 @@ func (recorder *FundingWindowRecorder) ObserveAt(atNano int64) (FundingSourceRec
 	}
 	recorder.observed, recorder.lastNano, recorder.lastSeq = true, atNano, seq
 	return cloneFundingSourceRecord(record), nil
+}
+
+func fundingBookErrorIsUnavailable(err error) bool {
+	_, unavailable := fundingBookUnavailableReason(err)
+	return unavailable
 }
 
 // WindowBefore fails on missing capture/evidence, but returns an explicitly

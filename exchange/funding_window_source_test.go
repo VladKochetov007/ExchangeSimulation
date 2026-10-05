@@ -2,6 +2,7 @@ package exchange
 
 import (
 	"errors"
+	"fmt"
 	"reflect"
 	"testing"
 
@@ -88,11 +89,12 @@ func TestFundingWindowRecorderDistinguishesUnavailableFromOmitted(t *testing.T) 
 			recorder, err := NewFundingWindowRecorder(fundingWindowTestConfig(),
 				fundingPairSourceFunc(func(request FundingBookPairRequest) (FundingBookPair, error) {
 					if request.TimestampNano == unavailableAt {
-						return FundingBookPair{}, ErrFundingBookUnavailable
+						return FundingBookPair{}, FundingBookUnavailableError{Reason: FundingBookNoDisplayedSide}
 					}
 					return fundingWindowTestPair(request), nil
 				}), fundingObservationAppendFunc(func(observation FundingBookObservation) (uint64, error) {
-					if observation.TimestampNano == unavailableAt && (observation.Available || observation.Pair != nil || observation.Reason == "") {
+					if observation.TimestampNano == unavailableAt && (observation.Available || observation.Pair != nil ||
+						observation.Reason != string(FundingBookNoDisplayedSide)) {
 						t.Fatalf("unavailable live book was not explicit: %+v", observation)
 					}
 					seq++
@@ -136,6 +138,27 @@ func TestFundingWindowRecorderDistinguishesUnavailableFromOmitted(t *testing.T) 
 	}
 }
 
+func TestFundingWindowRecorderWritesVersionedUnavailableReasonCode(t *testing.T) {
+	var recorded FundingBookObservation
+	recorder, err := NewFundingWindowRecorder(fundingWindowTestConfig(),
+		fundingPairSourceFunc(func(FundingBookPairRequest) (FundingBookPair, error) {
+			return FundingBookPair{}, FundingBookUnavailableError{Reason: FundingBookCrossedOrNonpositivePair}
+		}), fundingObservationAppendFunc(func(observation FundingBookObservation) (uint64, error) {
+			recorded = observation
+			return 1, nil
+		}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := recorder.ObserveAt(20); err != nil {
+		t.Fatal(err)
+	}
+	if recorded.Version != FundingBookObservationVersion || recorded.Available || recorded.Pair != nil ||
+		recorded.Reason != string(FundingBookCrossedOrNonpositivePair) {
+		t.Fatalf("unavailable source reason was not emitted in its canonical schema: %+v", recorded)
+	}
+}
+
 func TestFundingWindowRecorderFailsClosedOnSourceAndEvidenceContradictions(t *testing.T) {
 	for _, test := range []struct {
 		name string
@@ -157,10 +180,19 @@ func TestFundingWindowRecorderFailsClosedOnSourceAndEvidenceContradictions(t *te
 			return pair, nil
 		}},
 		{"stale-pair-on-error", func(request FundingBookPairRequest) (FundingBookPair, error) {
-			return fundingWindowTestPair(request), ErrFundingBookUnavailable
+			return fundingWindowTestPair(request), FundingBookUnavailableError{Reason: FundingBookNoDisplayedSide}
 		}},
 		{"structural-error", func(FundingBookPairRequest) (FundingBookPair, error) {
 			return FundingBookPair{}, errors.New("wrong instrument binding")
+		}},
+		{"wrapped-unavailable-structural-error", func(FundingBookPairRequest) (FundingBookPair, error) {
+			return FundingBookPair{}, fmt.Errorf("tick violation: %w", FundingBookUnavailableError{Reason: FundingBookNoDisplayedSide})
+		}},
+		{"joined-unavailable-structural-error", func(FundingBookPairRequest) (FundingBookPair, error) {
+			return FundingBookPair{}, errors.Join(ErrFundingBookUnavailable, errors.New("tick violation"))
+		}},
+		{"unknown-unavailable-reason", func(FundingBookPairRequest) (FundingBookPair, error) {
+			return FundingBookPair{}, FundingBookUnavailableError{Reason: "TICK_VIOLATION"}
 		}},
 	} {
 		t.Run(test.name, func(t *testing.T) {

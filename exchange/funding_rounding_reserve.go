@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"math"
 	"slices"
+
+	"exchange_sim/instrument"
 )
 
 const FundingReserveEndowmentSource = "E2_ROUNDING_RESERVE_ENDOWMENT"
@@ -11,23 +13,27 @@ const FundingReserveEndowmentSource = "E2_ROUNDING_RESERVE_ENDOWMENT"
 // FundingReserveBalance is a venue-owned balance for one perpetual. It is not
 // fee revenue and cannot be used as credit for an unmatched funding position.
 type FundingReserveBalance struct {
-	Asset             string `json:"asset"`
-	SourceID          string `json:"source_id"`
-	Initial           int64  `json:"initial"`
-	Balance           int64  `json:"balance"`
-	EndowmentEventSeq uint64 `json:"endowment_event_seq"`
+	Asset                     string `json:"asset"`
+	SourceID                  string `json:"source_id"`
+	Initial                   int64  `json:"initial"`
+	Balance                   int64  `json:"balance"`
+	EndowmentEventSeq         uint64 `json:"endowment_event_seq"`
+	EndowmentMovementEventSeq uint64 `json:"endowment_movement_event_seq"`
 }
 
 type FundingReserveEndowment struct {
-	VenueID             string   `json:"venue_id"`
-	PerpSymbol          string   `json:"perp_symbol"`
-	QuoteAsset          string   `json:"quote_asset"`
-	TimestampNano       int64    `json:"timestamp_nano"`
-	AccountCap          int      `json:"account_cap"`
-	RegisteredClientIDs []uint64 `json:"registered_client_ids"`
-	InitialQuoteAtoms   int64    `json:"initial_quote_atoms"`
-	RateUnitsPerBp      int64    `json:"rate_units_per_bp"`
-	SourceID            string   `json:"source_id"`
+	VenueID             string                                 `json:"venue_id"`
+	SpotSymbol          string                                 `json:"spot_symbol"`
+	PerpSymbol          string                                 `json:"perp_symbol"`
+	QuoteAsset          string                                 `json:"quote_asset"`
+	TimestampNano       int64                                  `json:"timestamp_nano"`
+	AccountCap          int                                    `json:"account_cap"`
+	RegisteredClientIDs []uint64                               `json:"registered_client_ids"`
+	InitialQuoteAtoms   int64                                  `json:"initial_quote_atoms"`
+	RateUnitsPerBp      int64                                  `json:"rate_units_per_bp"`
+	SourceID            string                                 `json:"source_id"`
+	Calendar            instrument.FundingCalendar             `json:"calendar"`
+	RateContract        instrument.WindowedFundingRateContract `json:"rate_contract"`
 }
 
 // FundingEndowmentReceipt binds both required records to canonical frame IDs.
@@ -45,10 +51,17 @@ type FundingEndowmentAppender interface {
 }
 
 type fundingOwnedState struct {
-	roster         []uint64
-	basePrecision  int64
-	rateUnitsPerBp int64
-	remainders     map[uint64]ScaledFundingAccrualSnapshot
+	roster            []uint64
+	spotSymbol        string
+	calendar          instrument.FundingCalendar
+	rateContract      instrument.WindowedFundingRateContract
+	basePrecision     int64
+	rateUnitsPerBp    int64
+	remainders        map[uint64]ScaledFundingAccrualSnapshot
+	lastAttemptNano   int64
+	lastAttemptCycle  int64
+	hasAttempt        bool
+	settlementFailure error
 }
 
 // EndowFundingRoundingReserve fixes the complete account roster and records
@@ -56,11 +69,18 @@ type fundingOwnedState struct {
 // construction step, not a funding payment or a way to replenish the reserve.
 func (e *DefaultExchange) EndowFundingRoundingReserve(endowment FundingReserveEndowment, appender FundingEndowmentAppender) error {
 	if e == nil || e.Clock == nil || appender == nil || endowment.VenueID == "" ||
-		endowment.PerpSymbol == "" || endowment.QuoteAsset == "" || endowment.SourceID != FundingReserveEndowmentSource ||
+		endowment.SpotSymbol == "" || endowment.PerpSymbol == "" || endowment.SpotSymbol == endowment.PerpSymbol ||
+		endowment.QuoteAsset == "" || endowment.SourceID != FundingReserveEndowmentSource ||
 		endowment.TimestampNano < 0 || endowment.AccountCap <= 0 ||
 		len(endowment.RegisteredClientIDs) != endowment.AccountCap ||
 		int64(endowment.AccountCap) != endowment.InitialQuoteAtoms || endowment.RateUnitsPerBp <= 0 {
 		return fmt.Errorf("funding reserve: invalid finite endowment, account cap or required journal")
+	}
+	firstSettlementNano, calendarErr := endowment.Calendar.ScheduledAt(1)
+	if calendarErr != nil || firstSettlementNano <= endowment.TimestampNano ||
+		endowment.RateContract.Validate(endowment.Calendar.IntervalSeconds) != nil ||
+		endowment.RateContract.RateUnitsPerBp != endowment.RateUnitsPerBp {
+		return fmt.Errorf("funding reserve: invalid or unbound immutable settlement calendar/rate contract")
 	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -79,10 +99,16 @@ func (e *DefaultExchange) EndowFundingRoundingReserve(endowment FundingReserveEn
 	}
 	perp := e.Instruments[endowment.PerpSymbol]
 	book := e.Books[endowment.PerpSymbol]
+	spot := e.Instruments[endowment.SpotSymbol]
+	spotBook := e.Books[endowment.SpotSymbol]
 	if !fundingInstrumentBindingMatches(perp, book) || book.Symbol != endowment.PerpSymbol ||
 		perp.InstrumentType() != "PERP" || !perp.IsPerp() ||
-		perp.QuoteAsset() != endowment.QuoteAsset || perp.BasePrecision() <= 0 {
-		return fmt.Errorf("funding reserve: perpetual instrument or quote asset is not bound to this venue")
+		perp.QuoteAsset() != endowment.QuoteAsset || perp.BasePrecision() <= 0 ||
+		!fundingInstrumentBindingMatches(spot, spotBook) || spotBook.Symbol != endowment.SpotSymbol ||
+		spot.InstrumentType() != "SPOT" || spot.Symbol() != endowment.SpotSymbol ||
+		spot.BaseAsset() != perp.BaseAsset() || spot.QuoteAsset() != perp.QuoteAsset() ||
+		spot.BasePrecision() != perp.BasePrecision() || spot.QuotePrecision() != perp.QuotePrecision() {
+		return fmt.Errorf("funding reserve: spot/perpetual settlement contract is not bound to this venue")
 	}
 	roster := slices.Clone(endowment.RegisteredClientIDs)
 	slices.Sort(roster)
@@ -125,9 +151,10 @@ func (e *DefaultExchange) EndowFundingRoundingReserve(endowment FundingReserveEn
 		e.fundingEndowmentFailures[endowment.PerpSymbol] = failure
 		return failure
 	}
-	state := &fundingOwnedState{roster: roster, basePrecision: perp.BasePrecision(),
-		rateUnitsPerBp: endowment.RateUnitsPerBp,
-		remainders:     make(map[uint64]ScaledFundingAccrualSnapshot, len(roster))}
+	state := &fundingOwnedState{roster: roster, spotSymbol: endowment.SpotSymbol,
+		calendar: endowment.Calendar, rateContract: endowment.RateContract,
+		basePrecision: perp.BasePrecision(), rateUnitsPerBp: endowment.RateUnitsPerBp,
+		remainders: make(map[uint64]ScaledFundingAccrualSnapshot, len(roster))}
 	for _, clientID := range roster {
 		state.remainders[clientID] = accrual.Snapshot()
 	}
@@ -141,7 +168,7 @@ func (e *DefaultExchange) EndowFundingRoundingReserve(endowment FundingReserveEn
 	e.ExchangeBalance.FundingRoundingReserves[endowment.PerpSymbol] = FundingReserveBalance{
 		Asset: endowment.QuoteAsset, SourceID: endowment.SourceID,
 		Initial: endowment.InitialQuoteAtoms, Balance: endowment.InitialQuoteAtoms,
-		EndowmentEventSeq: receipt.EndowmentEventSeq,
+		EndowmentEventSeq: receipt.EndowmentEventSeq, EndowmentMovementEventSeq: receipt.MovementEventSeq,
 	}
 	// The required journal already contains the 0→K movement. Do not send it
 	// through the optional, errorless venue logger a second time.

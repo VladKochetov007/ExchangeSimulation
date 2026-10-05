@@ -12,6 +12,49 @@ import (
 
 var ErrFundingBookUnavailable = errors.New("funding book price unavailable")
 
+type FundingBookUnavailableReason string
+
+const (
+	FundingBookNoDisplayedSide          FundingBookUnavailableReason = "NO_DISPLAYED_SIDE"
+	FundingBookCrossedOrNonpositivePair FundingBookUnavailableReason = "CROSSED_OR_NONPOSITIVE_DISPLAYED_PAIR"
+)
+
+// FundingBookUnavailableError is an explicit economic missing-book outcome.
+// The recorder accepts this concrete error only when it is returned directly;
+// wrapped errors remain structural source failures.
+type FundingBookUnavailableError struct {
+	Reason FundingBookUnavailableReason
+}
+
+func (failure FundingBookUnavailableError) Error() string {
+	return fmt.Sprintf("%s: %s", ErrFundingBookUnavailable, failure.Reason)
+}
+
+func (failure FundingBookUnavailableError) Is(target error) bool {
+	return target == ErrFundingBookUnavailable && failure.Reason.Valid()
+}
+
+func fundingBookUnavailableReason(err error) (FundingBookUnavailableReason, bool) {
+	switch failure := err.(type) {
+	case FundingBookUnavailableError:
+		return failure.Reason, failure.Reason.Valid()
+	case *FundingBookUnavailableError:
+		if failure != nil {
+			return failure.Reason, failure.Reason.Valid()
+		}
+	}
+	return "", false
+}
+
+func (reason FundingBookUnavailableReason) Valid() bool {
+	switch reason {
+	case FundingBookNoDisplayedSide, FundingBookCrossedOrNonpositivePair:
+		return true
+	default:
+		return false
+	}
+}
+
 type FundingBookPairRequest struct {
 	VenueID       string
 	SpotSymbol    string
@@ -90,16 +133,26 @@ func (e *DefaultExchange) CaptureFundingBookPair(request FundingBookPairRequest)
 		perpBook.Symbol != request.PerpSymbol {
 		return FundingBookPair{}, fmt.Errorf("funding book pair: configured instrument has no matching live book")
 	}
-	spot, err := captureFundingBookTop(spotBook, request.TimestampNano)
-	if err != nil {
-		return FundingBookPair{}, fmt.Errorf("funding book pair %s: %w", request.SpotSymbol, err)
+	spot, spotErr := captureFundingBookTop(spotBook, request.TimestampNano)
+	perp, perpErr := captureFundingBookTop(perpBook, request.TimestampNano)
+	if !fundingTopPricesTickValid(spotInstrument, spot) || !fundingTopPricesTickValid(perpInstrument, perp) {
+		return FundingBookPair{}, fmt.Errorf("funding book pair: displayed quote violates configured instrument tick")
 	}
-	perp, err := captureFundingBookTop(perpBook, request.TimestampNano)
-	if err != nil {
-		return FundingBookPair{}, fmt.Errorf("funding book pair %s: %w", request.PerpSymbol, err)
+	if spotErr != nil {
+		if _, unavailable := fundingBookUnavailableReason(spotErr); !unavailable {
+			return FundingBookPair{}, fmt.Errorf("funding book pair %s: %w", request.SpotSymbol, spotErr)
+		}
 	}
-	if !fundingTopPricesAdmitted(spotInstrument, spot) || !fundingTopPricesAdmitted(perpInstrument, perp) {
-		return FundingBookPair{}, fmt.Errorf("funding book pair: live quote violates configured instrument price domain")
+	if perpErr != nil {
+		if _, unavailable := fundingBookUnavailableReason(perpErr); !unavailable {
+			return FundingBookPair{}, fmt.Errorf("funding book pair %s: %w", request.PerpSymbol, perpErr)
+		}
+	}
+	if spotErr != nil {
+		return FundingBookPair{}, spotErr
+	}
+	if perpErr != nil {
+		return FundingBookPair{}, perpErr
 	}
 	return FundingBookPair{
 		VenueID: request.VenueID, TimestampNano: request.TimestampNano,
@@ -124,32 +177,46 @@ func fundingInstrumentBindingMatches(configured Instrument, book *OrderBook) boo
 	return reflect.DeepEqual(configured, book.Instrument)
 }
 
-func fundingTopPricesAdmitted(inst Instrument, top FundingBookTop) bool {
-	return inst.ValidatePrice(top.Bid.Price) && inst.ValidatePrice(top.Ask.Price)
+func fundingTopPricesTickValid(inst Instrument, top FundingBookTop) bool {
+	for _, quote := range [...]FundingVisibleQuote{top.Bid, top.Ask} {
+		if quote.Price > 0 && !inst.ValidatePrice(quote.Price) {
+			return false
+		}
+	}
+	return true
 }
 
 func captureFundingBookTop(book *OrderBook, atNano int64) (FundingBookTop, error) {
-	if book.Bids == nil || book.Asks == nil {
-		return FundingBookTop{}, ErrFundingBookUnavailable
+	var bestBid, bestAsk *Limit
+	if book.Bids != nil {
+		bestBid = bestFundingDisplayedLevel(book.Bids)
 	}
-	bestBid := bestFundingDisplayedLevel(book.Bids)
-	bestAsk := bestFundingDisplayedLevel(book.Asks)
+	if book.Asks != nil {
+		bestAsk = bestFundingDisplayedLevel(book.Asks)
+	}
+	top := FundingBookTop{Symbol: book.Symbol}
+	if bestBid != nil {
+		bid, err := captureFundingVisibleQuote(bestBid, atNano)
+		if err != nil {
+			return FundingBookTop{}, err
+		}
+		top.Bid = bid
+	}
+	if bestAsk != nil {
+		ask, err := captureFundingVisibleQuote(bestAsk, atNano)
+		if err != nil {
+			return FundingBookTop{}, err
+		}
+		top.Ask = ask
+	}
 	if bestBid == nil || bestAsk == nil {
-		return FundingBookTop{}, ErrFundingBookUnavailable
+		return top, FundingBookUnavailableError{Reason: FundingBookNoDisplayedSide}
 	}
 	if bestBid.Price <= 0 || bestAsk.Price <= 0 || bestBid.Price > bestAsk.Price {
-		return FundingBookTop{}, fmt.Errorf("%w: non-positive or crossed best prices", ErrFundingBookUnavailable)
+		return top, FundingBookUnavailableError{Reason: FundingBookCrossedOrNonpositivePair}
 	}
-	bid, err := captureFundingVisibleQuote(bestBid, atNano)
-	if err != nil {
-		return FundingBookTop{}, err
-	}
-	ask, err := captureFundingVisibleQuote(bestAsk, atNano)
-	if err != nil {
-		return FundingBookTop{}, err
-	}
-	return FundingBookTop{Symbol: book.Symbol, Bid: bid, Ask: ask,
-		MidPrice: types.Midpoint(bid.Price, ask.Price)}, nil
+	top.MidPrice = types.Midpoint(top.Bid.Price, top.Ask.Price)
+	return top, nil
 }
 
 func bestFundingDisplayedLevel(side *Book) *Limit {
@@ -164,7 +231,7 @@ func bestFundingDisplayedLevel(side *Book) *Limit {
 func captureFundingVisibleQuote(limit *Limit, atNano int64) (FundingVisibleQuote, error) {
 	visible := visibleQty(limit)
 	if visible <= 0 {
-		return FundingVisibleQuote{}, fmt.Errorf("%w: no displayed best-level depth", ErrFundingBookUnavailable)
+		return FundingVisibleQuote{}, fmt.Errorf("funding book pair: selected best level has no displayed depth")
 	}
 	oldest := int64(math.MaxInt64)
 	for order := limit.Head; order != nil; order = order.Next {
@@ -183,7 +250,7 @@ func captureFundingVisibleQuote(limit *Limit, atNano int64) (FundingVisibleQuote
 		}
 	}
 	if oldest == math.MaxInt64 {
-		return FundingVisibleQuote{}, fmt.Errorf("%w: displayed depth has no visible source order", ErrFundingBookUnavailable)
+		return FundingVisibleQuote{}, fmt.Errorf("funding book pair: displayed depth has no visible source order")
 	}
 	return FundingVisibleQuote{Price: limit.Price, VisibleQty: visible,
 		OldestVisibleOrderAcceptedAtNano: oldest, OldestVisibleOrderAgeNano: atNano - oldest}, nil

@@ -41,7 +41,7 @@ func TestFundingSourceObservationUsesActualCanonicalFrameSequence(t *testing.T) 
 		FirstBoundaryNano: 20, SampleSpacingNano: 1, SampleCount: 2,
 	}, fundingTestPairSource(func(request exchange.FundingBookPairRequest) (exchange.FundingBookPair, error) {
 		if request.TimestampNano == 21 {
-			return exchange.FundingBookPair{}, exchange.ErrFundingBookUnavailable
+			return exchange.FundingBookPair{}, exchange.FundingBookUnavailableError{Reason: exchange.FundingBookNoDisplayedSide}
 		}
 		return fundingTestPublicPair(request), nil
 	}), logger)
@@ -95,7 +95,7 @@ func TestFundingSourceObservationUsesActualCanonicalFrameSequence(t *testing.T) 
 	}
 	if len(globalSeq) != 3 || globalSeq[0] <= 1 ||
 		!reflect.DeepEqual(globalSeq, []uint64{retained[0].EventSeq, retained[1].EventSeq, retained[2].EventSeq}) ||
-		decoded[1].Available || decoded[1].Reason == "" || decoded[1].Pair != nil {
+		decoded[1].Available || decoded[1].Reason != string(exchange.FundingBookNoDisplayedSide) || decoded[1].Pair != nil {
 		t.Fatalf("global sequence or explicit unavailable observation lost: seq=%v records=%+v", globalSeq, decoded)
 	}
 	replayed, err := ReplayFundingSourceObservations(bytes.NewReader(output.Bytes()), exchange.FundingWindowSourceConfig{
@@ -146,6 +146,20 @@ func TestFundingSourceReplayRejectsMissingReorderedAndContradictoryEvents(t *tes
 		}, wantErr: true},
 		{name: "unknown-version", times: []int64{20, 21, 22}, mutate: func(observation *exchange.FundingBookObservation) {
 			observation.Version++
+		}, wantErr: true},
+		{name: "valid-unavailable-reason", times: []int64{20, 21, 22}, mutate: func(observation *exchange.FundingBookObservation) {
+			if observation.TimestampNano == 21 {
+				observation.Available = false
+				observation.Pair = nil
+				observation.Reason = string(exchange.FundingBookCrossedOrNonpositivePair)
+			}
+		}},
+		{name: "unknown-unavailable-reason", times: []int64{20, 21, 22}, mutate: func(observation *exchange.FundingBookObservation) {
+			if observation.TimestampNano == 21 {
+				observation.Available = false
+				observation.Pair = nil
+				observation.Reason = "TICK_VIOLATION"
+			}
 		}, wantErr: true},
 		{name: "wrong-route", times: []int64{20, 21, 22}, route: "general.jsonl", wantErr: true},
 	} {

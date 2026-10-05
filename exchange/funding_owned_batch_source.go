@@ -22,16 +22,28 @@ func (e *DefaultExchange) CaptureOwnedFundingBatchInput(request FundingAccountSn
 }
 
 func (e *DefaultExchange) captureOwnedFundingBatchInputLocked(request FundingAccountSnapshotRequest, terms instrument.FundingSettlementTerms) (FundingBatchInput, error) {
+	if terms.Rate.UnitsPerBp() <= 0 || terms.NotionalMarkPrice <= 0 {
+		return FundingBatchInput{}, fmt.Errorf("owned funding batch: invalid settlement terms")
+	}
+	input, err := e.captureOwnedFundingBatchStateLocked(request, terms.Rate.UnitsPerBp())
+	if err != nil {
+		return FundingBatchInput{}, err
+	}
+	input.Terms = terms
+	return input, nil
+}
+
+func (e *DefaultExchange) captureOwnedFundingBatchStateLocked(request FundingAccountSnapshotRequest, rateUnitsPerBp int64) (FundingBatchInput, error) {
 	if e.ExchangeBalance == nil || e.Clock == nil || request.VenueID == "" || request.PerpSymbol == "" || request.TimestampNano < 0 {
 		return FundingBatchInput{}, fmt.Errorf("owned funding batch: missing venue ledger, clock or request identity")
 	}
 	owned := e.fundingStates[request.PerpSymbol]
 	reserve, hasReserve := e.ExchangeBalance.FundingRoundingReserves[request.PerpSymbol]
-	if owned == nil || !hasReserve || e.fundingEndowmentFailures[request.PerpSymbol] != nil ||
+	if owned == nil || !hasReserve || e.fundingEndowmentFailures[request.PerpSymbol] != nil || owned.settlementFailure != nil ||
 		len(owned.roster) == 0 || len(owned.remainders) != len(owned.roster) ||
-		owned.basePrecision <= 0 || owned.rateUnitsPerBp <= 0 ||
-		terms.Rate.UnitsPerBp() != owned.rateUnitsPerBp || terms.NotionalMarkPrice <= 0 ||
+		owned.basePrecision <= 0 || owned.rateUnitsPerBp <= 0 || rateUnitsPerBp != owned.rateUnitsPerBp ||
 		reserve.SourceID != FundingReserveEndowmentSource || reserve.EndowmentEventSeq == 0 ||
+		reserve.EndowmentMovementEventSeq <= reserve.EndowmentEventSeq ||
 		reserve.Initial != int64(len(owned.roster)) || reserve.Balance < 0 {
 		return FundingBatchInput{}, fmt.Errorf("owned funding batch: missing or inconsistent finite source, rate scale or reserve")
 	}
@@ -48,16 +60,23 @@ func (e *DefaultExchange) captureOwnedFundingBatchInputLocked(request FundingAcc
 	if !slices.Equal(registered, owned.roster) {
 		return FundingBatchInput{}, fmt.Errorf("owned funding batch: requested roster is not the endowed roster")
 	}
+	rate, err := instrument.NewQuantizedFundingRate(0, owned.rateUnitsPerBp)
+	if err != nil {
+		return FundingBatchInput{}, fmt.Errorf("owned funding batch: invalid rate precision: %w", err)
+	}
 	result := FundingBatchInput{
 		VenueID: request.VenueID, Symbol: request.PerpSymbol,
 		QuoteAsset: reserve.Asset, BasePrecision: owned.basePrecision,
-		Terms: terms, RegisteredClientIDs: slices.Clone(owned.roster),
+		Terms: instrument.FundingSettlementTerms{Rate: rate}, RegisteredClientIDs: slices.Clone(owned.roster),
 		InitialRoundingReserve: reserve.Initial, CurrentRoundingReserve: reserve.Balance,
 		Accounts: make([]FundingBatchAccount, 0, len(accounts.Accounts)),
 	}
 	for index, account := range accounts.Accounts {
 		if account.ClientID != owned.roster[index] {
 			return FundingBatchInput{}, fmt.Errorf("owned funding batch: source account ordering changed")
+		}
+		if e.Clients[account.ClientID].PerpBalances == nil {
+			return FundingBatchInput{}, fmt.Errorf("owned funding batch: client %d has no perpetual cash wallet", account.ClientID)
 		}
 		fraction, present := owned.remainders[account.ClientID]
 		if !present {

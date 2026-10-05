@@ -102,12 +102,19 @@ type WindowedFundingRateContract struct {
 	RateUnitsPerBp           int64
 }
 
-func (contract WindowedFundingRateContract) RateAt(settlementNano, intervalSeconds int64, samples []FundingWindowSample) (QuantizedFundingRate, error) {
+func (contract WindowedFundingRateContract) Validate(intervalSeconds int64) error {
 	if contract.SampleCount <= 0 || contract.SampleSpacingNano <= 0 ||
 		contract.PremiumWeightDenominator <= 0 || contract.MaxAbsRateBps < 0 ||
 		contract.NormalizationSeconds <= 0 || contract.RateUnitsPerBp <= 0 ||
-		intervalSeconds <= 0 || settlementNano < 0 || len(samples) != contract.SampleCount {
-		return QuantizedFundingRate{}, fmt.Errorf("windowed funding: invalid contract, interval or sample count")
+		intervalSeconds <= 0 {
+		return fmt.Errorf("windowed funding: invalid contract or interval")
+	}
+	return nil
+}
+
+func (contract WindowedFundingRateContract) RateAt(settlementNano, intervalSeconds int64, samples []FundingWindowSample) (QuantizedFundingRate, error) {
+	if err := contract.Validate(intervalSeconds); err != nil || settlementNano < 0 || len(samples) != contract.SampleCount {
+		return QuantizedFundingRate{}, fmt.Errorf("windowed funding: invalid contract, settlement time or sample count")
 	}
 	premiumSum := new(big.Rat)
 	for index, sample := range samples {

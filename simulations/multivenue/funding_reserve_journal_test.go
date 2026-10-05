@@ -12,10 +12,12 @@ import (
 	"reflect"
 	"sync"
 	"testing"
+	"time"
 
 	"exchange_sim/analysis"
 	"exchange_sim/evstream"
 	"exchange_sim/exchange"
+	"exchange_sim/instrument"
 )
 
 type fundingEndowmentClock struct{}
@@ -48,6 +50,7 @@ func reserveJournalExchange(t *testing.T) *exchange.DefaultExchange {
 	t.Helper()
 	ex := exchange.NewExchangeWithConfig(exchange.ExchangeConfig{ID: "N", Clock: fundingEndowmentClock{}})
 	t.Cleanup(ex.Shutdown)
+	ex.AddInstrument(exchange.NewSpotInstrument("ABC-USD", "ABC", "USD", 1, 1, 1, 1))
 	ex.AddInstrument(exchange.NewPerpFutures("ABC-PERP", "ABC", "USD", 1, 1, 1, 1))
 	for clientID := uint64(1); clientID <= 2; clientID++ {
 		ex.ConnectNewClient(clientID, nil, &exchange.FixedFee{})
@@ -57,9 +60,13 @@ func reserveJournalExchange(t *testing.T) *exchange.DefaultExchange {
 
 func fundingReserveJournalFixture() (exchange.FundingReserveEndowment, exchange.VenueBalanceEvent) {
 	endowment := exchange.FundingReserveEndowment{
-		VenueID: "N", PerpSymbol: "ABC-PERP", QuoteAsset: "USD", TimestampNano: 0,
+		VenueID: "N", SpotSymbol: "ABC-USD", PerpSymbol: "ABC-PERP", QuoteAsset: "USD", TimestampNano: 0,
 		AccountCap: 2, RegisteredClientIDs: []uint64{1, 2}, InitialQuoteAtoms: 2,
 		RateUnitsPerBp: 1_000_000, SourceID: exchange.FundingReserveEndowmentSource,
+		Calendar: instrument.FundingCalendar{EpochNano: 0, IntervalSeconds: 300},
+		RateContract: instrument.WindowedFundingRateContract{SampleCount: 2,
+			SampleSpacingNano: int64(time.Second), PremiumWeightDenominator: 1,
+			MaxAbsRateBps: 75, NormalizationSeconds: 28_800, RateUnitsPerBp: 1_000_000},
 	}
 	movement := exchange.VenueBalanceEvent{
 		Timestamp: 0, Sequence: 1, Bucket: exchange.VenueFundingRoundingReserve,

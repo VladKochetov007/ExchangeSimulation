@@ -4,6 +4,8 @@ import (
 	"errors"
 	"reflect"
 	"testing"
+
+	"exchange_sim/instrument"
 )
 
 type fundingEndowmentAppendFunc func(FundingReserveEndowment, VenueBalanceEvent) (FundingEndowmentReceipt, error)
@@ -14,9 +16,14 @@ func (appendEndowment fundingEndowmentAppendFunc) AppendFundingEndowment(event F
 
 func fundingReserveTestEndowment() FundingReserveEndowment {
 	return FundingReserveEndowment{VenueID: "N", PerpSymbol: "ABC-PERP", QuoteAsset: "USD",
-		TimestampNano: 10, AccountCap: 4, RegisteredClientIDs: []uint64{4, 2, 1, 3},
+		SpotSymbol: "ABC-USD", TimestampNano: 10, AccountCap: 4, RegisteredClientIDs: []uint64{4, 2, 1, 3},
 		InitialQuoteAtoms: 4, RateUnitsPerBp: 1_000_000,
-		SourceID: "E2_ROUNDING_RESERVE_ENDOWMENT"}
+		SourceID: "E2_ROUNDING_RESERVE_ENDOWMENT",
+		Calendar: instrument.FundingCalendar{EpochNano: 10, IntervalSeconds: 300},
+		RateContract: instrument.WindowedFundingRateContract{SampleCount: 60,
+			SampleSpacingNano: 1_000_000_000, PremiumWeightNumerator: 1,
+			PremiumWeightDenominator: 1, MaxAbsRateBps: 75,
+			NormalizationSeconds: 28_800, RateUnitsPerBp: 1_000_000}}
 }
 
 func TestFundingReserveEndowmentIsFiniteExternalMoneyNotFeeRevenue(t *testing.T) {
@@ -39,7 +46,8 @@ func TestFundingReserveEndowmentIsFiniteExternalMoneyNotFeeRevenue(t *testing.T)
 		t.Fatal(err)
 	}
 	reserve := ex.ExchangeBalance.FundingRoundingReserves["ABC-PERP"]
-	if reserve != (FundingReserveBalance{Asset: "USD", SourceID: endowment.SourceID, Initial: 4, Balance: 4, EndowmentEventSeq: 17}) ||
+	if reserve != (FundingReserveBalance{Asset: "USD", SourceID: endowment.SourceID, Initial: 4, Balance: 4,
+		EndowmentEventSeq: 17, EndowmentMovementEventSeq: 18}) ||
 		ex.ExchangeBalance.FeeRevenue["USD"] != 0 || ex.ExchangeBalance.InsuranceFund["USD"] != 0 ||
 		ex.VenueBalanceSequenceForReport() != 1 || appended != 1 ||
 		len(ex.fundingStates["ABC-PERP"].remainders) != 4 {
@@ -67,6 +75,7 @@ func TestFundingReserveEndowmentAtConstructionTimeZero(t *testing.T) {
 	clock := &fundingSourceClock{now: 0}
 	ex := NewExchangeWithConfig(ExchangeConfig{ID: "N", Clock: clock})
 	t.Cleanup(ex.Shutdown)
+	ex.AddInstrument(NewSpotInstrument("ABC-USD", "ABC", "USD", 1, 1, 1, 1))
 	ex.AddInstrument(NewPerpFutures("ABC-PERP", "ABC", "USD", 1, 1, 1, 1))
 	for clientID := uint64(1); clientID <= 4; clientID++ {
 		ex.ConnectNewClient(clientID, nil, &FixedFee{})
@@ -97,6 +106,9 @@ func TestFundingReserveEndowmentRejectsUnderfundingAndJournalFailure(t *testing.
 		{"incomplete-roster", func(event *FundingReserveEndowment) { event.RegisteredClientIDs[0] = 99 }, nil, false, false},
 		{"missing-source", func(event *FundingReserveEndowment) { event.SourceID = "" }, nil, false, false},
 		{"undeclared-source", func(event *FundingReserveEndowment) { event.SourceID = "OTHER" }, nil, false, false},
+		{"rate-precision-not-endowed", func(event *FundingReserveEndowment) { event.RateContract.RateUnitsPerBp = 10 }, nil, false, false},
+		{"invalid-calendar", func(event *FundingReserveEndowment) { event.Calendar.PhaseSeconds = event.Calendar.IntervalSeconds }, nil, false, false},
+		{"unbound-spot", func(event *FundingReserveEndowment) { event.SpotSymbol = "OTHER-USD" }, nil, false, false},
 		{"journal-failure", nil, wantWriterError, false, false},
 		{"zero-canonical-sequence", nil, nil, true, false},
 		{"reversed-canonical-sequence", nil, nil, false, true},
