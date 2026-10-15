@@ -32,12 +32,13 @@ deterministic callback and no interleaving state mutation, a consumer can:
 
 The fixture also checks that a mismatched trigger mark does not produce a
 liquidation-check event and that an unpriceable second venue prevents all venue
-sweeps. The runner control now invokes that failing two-venue preflight at the
-second step boundary: both venue phases run at the initial time, the callback
-records their pump counts at the later failure, and neither phase pumps again
-after the error. It also verifies shutdown at that later simulated timestamp.
-A separate control verifies generic registered-stop finalization at the
-initial clock.
+sweeps. The runner control intentionally skips preflight at the initial
+timestamp, then invokes the failing two-venue preflight at the first
+post-advance boundary (the second observed timestamp, after the first
+`Advance`). It records that each mount's phase-pump method was called at the
+initial timestamp and that neither count increases after the later callback
+fails. It also verifies shutdown at that later simulated timestamp. A separate
+control verifies generic registered-stop finalization at the initial clock.
 
 This answers only “can these public methods be sequenced by an external
 consumer?” It does not establish that this mark policy is economically correct,
@@ -108,8 +109,11 @@ but the second critique correctly found it only covered one unpriceable venue
 at the initial timestamp. The current follow-up now covers a failed two-venue
 preflight at the next step boundary. The scheduler-frontier and
 concurrent-mutation limitations remain. Neither reviewer assessed funding
-economics or approved ME-014; the current follow-up awaits bounded review of
-its exact successor commit.
+economics or approved ME-014. In a focused follow-up on commit
+`2bf34850e83467746cd5b17831743b5d00bdc291`, the Sol-6 medium reviewer confirmed
+that this specific test-coverage gap is closed. It noted the timing precision
+above and that the test counters establish pump calls, not completed venue
+work. The review does not extend to production readiness.
 
 ## Validation and limits
 
@@ -126,16 +130,13 @@ dirty worktree because its parity gate requires a clean checkout; the new
 fixture and note were still untracked. This failed attempt is preserved as a
 failed gate, not a pass.
 
-After commit `59dca4a02a8aadc69dd72172c93fcc8286578d47`,
+After commit `2bf34850e83467746cd5b17831743b5d00bdc291`,
 `GOMAXPROCS=2 make test` ran from a clean worktree and returned exit code 0.
 `go test ./...` and all four integrated-long-run contract/archive scripts
 passed; Go's valid package test cache was used where applicable. The R2
 contract script's `sv1dresource: measured command was incomplete: exit status
 7` line is its expected fail-closed fixture, followed by the script's pass
-result. This verifies software contracts only, not ME-014 readiness. The
-follow-up two-venue/stepped-boundary test is a subsequent source change: its
-focused and targeted race tests pass, but the full `make test` gate must be
-repeated clean after its commit.
+result. This verifies software contracts only, not ME-014 readiness.
 
 Not tested: production mark/index derivation; funding calculations or posting;
 fractional remainder and finite reserve accounting; live settlement positions;
