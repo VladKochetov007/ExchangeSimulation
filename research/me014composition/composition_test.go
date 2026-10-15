@@ -56,7 +56,11 @@ type preparedExposure struct {
 
 func makeExposureFixture(t *testing.T, venueID string, spots []spotFixture, perps []perpFixtureSpec, positions []positionFixture) *exposureFixture {
 	t.Helper()
-	clock := simulation.NewSimulatedClock(int64(time.Hour))
+	return makeExposureFixtureAtClock(t, venueID, spots, perps, positions, simulation.NewSimulatedClock(int64(time.Hour)))
+}
+
+func makeExposureFixtureAtClock(t *testing.T, venueID string, spots []spotFixture, perps []perpFixtureSpec, positions []positionFixture, clock *simulation.SimulatedClock) *exposureFixture {
+	t.Helper()
 	market := exchange.NewExchangeWithConfig(exchange.ExchangeConfig{
 		ID:                                   venueID,
 		Clock:                                clock,
@@ -293,31 +297,47 @@ func TestUnavailableVenuePreflightPreventsEveryVenueSweep(t *testing.T) {
 	}
 }
 
-func TestRunnerStopsBeforeVenuePhaseWhenLocalMidPreflightFails(t *testing.T) {
-	venue := makeLiquidatableVenue(t, "N", false)
-	counted := &countingVenue{DefaultExchange: venue.market}
-	runner := simulation.NewRunner(venue.market.Clock, simulation.RunnerConfig{
+func TestRunnerStopsBeforeVenuePhasesAtSteppedBoundaryOnMultiVenuePreflightFailure(t *testing.T) {
+	startTimestamp := int64(time.Hour)
+	clock := simulation.NewSimulatedClock(startTimestamp)
+	priceable := makeLiquidatableVenueAtClock(t, "N", true, clock)
+	unpriceable := makeLiquidatableVenueAtClock(t, "S", false, clock)
+	north := &countingVenue{DefaultExchange: priceable.market}
+	south := &countingVenue{DefaultExchange: unpriceable.market}
+	stopTimestamp := startTimestamp + int64(time.Second)
+	var preflightTimestamp int64
+	var phasePumpsAtFailure [2]int
+	runner := simulation.NewRunner(clock, simulation.RunnerConfig{
 		Iterations: 1, Step: time.Second, DeterministicPhases: true,
-		BeforeTimestampPhase: func(int64) error {
-			return runLocalMidRiskBoundary(venue)
+		BeforeTimestampPhase: func(atNano int64) error {
+			if atNano != stopTimestamp {
+				return nil
+			}
+			preflightTimestamp = atNano
+			phasePumpsAtFailure = [2]int{north.phasePumps, south.phasePumps}
+			return runLocalMidRiskBoundary(priceable, unpriceable)
 		},
 	})
-	runner.AddMount(&simulation.Mount{Market: counted})
+	runner.AddMount(&simulation.Mount{Market: north})
+	runner.AddMount(&simulation.Mount{Market: south})
 	var finalizedAt int64
-	runner.SetShutdownHook(func() { finalizedAt = venue.market.Clock.NowUnixNano() })
+	runner.SetShutdownHook(func() { finalizedAt = clock.NowUnixNano() })
 
 	err := runner.Run(context.Background())
 	if err == nil {
-		t.Fatal("runner accepted a risk preflight without a two-sided local mark")
+		t.Fatal("runner accepted a multi-venue risk preflight without a two-sided local mark")
 	}
-	if counted.phasePumps != 0 {
-		t.Fatalf("same-time venue phases pumped %d times after preflight failure", counted.phasePumps)
+	if preflightTimestamp != stopTimestamp || phasePumpsAtFailure[0] == 0 || phasePumpsAtFailure[1] == 0 {
+		t.Fatalf("later preflight timestamp=%d, pump counts at failure=%v", preflightTimestamp, phasePumpsAtFailure)
 	}
-	if got := countEvents(venue.log.events, "liquidation_check"); got != 0 {
-		t.Fatalf("preflight failure produced %d liquidation checks", got)
+	if north.phasePumps != phasePumpsAtFailure[0] || south.phasePumps != phasePumpsAtFailure[1] {
+		t.Fatalf("venue phases continued after failed preflight: at failure=%v after stop=[%d %d]", phasePumpsAtFailure, north.phasePumps, south.phasePumps)
 	}
-	if finalizedAt != venue.market.Clock.NowUnixNano() || finalizedAt != int64(time.Hour) {
-		t.Fatalf("shutdown finalization time=%d clock=%d, want actual stop time %d", finalizedAt, venue.market.Clock.NowUnixNano(), int64(time.Hour))
+	if countEvents(priceable.log.events, "liquidation_check") != 0 || countEvents(unpriceable.log.events, "liquidation_check") != 0 {
+		t.Fatal("multi-venue preflight failure produced a liquidation check")
+	}
+	if finalizedAt != clock.NowUnixNano() || finalizedAt != stopTimestamp {
+		t.Fatalf("shutdown finalization time=%d clock=%d, want actual stop time %d", finalizedAt, clock.NowUnixNano(), stopTimestamp)
 	}
 }
 
@@ -360,12 +380,17 @@ func (v *countingVenue) PumpDeterministicPhase() bool {
 }
 
 func makeLiquidatableVenue(t *testing.T, venueID string, twoSided bool) *exposureFixture {
+	return makeLiquidatableVenueAtClock(t, venueID, twoSided, simulation.NewSimulatedClock(int64(time.Hour)))
+}
+
+func makeLiquidatableVenueAtClock(t *testing.T, venueID string, twoSided bool, clock *simulation.SimulatedClock) *exposureFixture {
+	t.Helper()
 	spots := []spotFixture{{symbol: "ABC/USD", base: "ABC", bid: 99, ask: 101, hasAsk: twoSided}}
-	return makeExposureFixture(t, venueID, spots, []perpFixtureSpec{
+	return makeExposureFixtureAtClock(t, venueID, spots, []perpFixtureSpec{
 		{symbol: "ABC-PERP", base: "ABC", underlyingSymbol: "ABC/USD"},
 	}, []positionFixture{
 		{clientID: 1, symbol: "ABC-PERP", quantity: 1, entry: 100, side: exchange.Buy},
-	})
+	}, clock)
 }
 
 func countEvents(events []recordedEvent, name string) int {

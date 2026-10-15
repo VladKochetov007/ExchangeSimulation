@@ -11,7 +11,8 @@ venue phase if the preflight fails?
 
 The probe is based on source commit
 `d654d323e777505c7d64cac065d29fa288cc926e`, tree
-`3f70580785b1d5754dee509dc6d7bcccbbf6e9c8`. The test is an external consumer package at
+`3f70580785b1d5754dee509dc6d7bcccbbf6e9c8`. The test is an external
+consumer package at
 [`composition_test.go`](../../../me014composition/composition_test.go), not a
 change to library source.
 
@@ -30,11 +31,13 @@ deterministic callback and no interleaving state mutation, a consumer can:
    using the matching trigger mark.
 
 The fixture also checks that a mismatched trigger mark does not produce a
-liquidation-check event, that an unpriceable second venue prevents all venue
-sweeps, and that wiring the failing local-mid preflight into
-`BeforeTimestampPhase` stops the runner before same-time venue phases. A
-separate control verifies generic registered-stop finalization at the actual
-clock.
+liquidation-check event and that an unpriceable second venue prevents all venue
+sweeps. The runner control now invokes that failing two-venue preflight at the
+second step boundary: both venue phases run at the initial time, the callback
+records their pump counts at the later failure, and neither phase pumps again
+after the error. It also verifies shutdown at that later simulated timestamp.
+A separate control verifies generic registered-stop finalization at the
+initial clock.
 
 This answers only “can these public methods be sequenced by an external
 consumer?” It does not establish that this mark policy is economically correct,
@@ -67,9 +70,8 @@ fixed-protocol gates.
 ## Independent critique
 
 A fresh read-only Sol-6 medium critic reviewed the core fixture and relevant
-source on the pinned tree. That review preceded the later runner-integration
-test; it agreed that the **narrow API-composability claim survives**, while
-identifying these limitations:
+source on the pinned tree. It agreed that the **narrow API-composability claim
+survives**, while identifying these limitations:
 
 - The fixture chooses the underlying spot midpoint and assigns it as both the
   perp index and mark. Production `UpdatePerpPrices` may resolve a declared
@@ -95,7 +97,19 @@ identifying these limitations:
   must also be excluded. This fixture has no scheduler and tests none of those
   timing conditions.
 
-The critique did not review funding economics or approve ME-014.
+A second read-only Sol-6 medium critique reviewed commit
+`59dca4a02a8aadc69dd72172c93fcc8286578d47`. The request had a mistyped full
+hash, but the reviewer confirmed the checkout's exact HEAD and its short prefix
+matched the requested target. It confirmed the mark-source, per-venue commit,
+non-interleaving, scheduler frontier and API-composition limitations above.
+The first critique had noted that the then-separate generic runner-stop test did
+not mount the preflight. The next fixture combined the preflight and runner,
+but the second critique correctly found it only covered one unpriceable venue
+at the initial timestamp. The current follow-up now covers a failed two-venue
+preflight at the next step boundary. The scheduler-frontier and
+concurrent-mutation limitations remain. Neither reviewer assessed funding
+economics or approved ME-014; the current follow-up awaits bounded review of
+its exact successor commit.
 
 ## Validation and limits
 
@@ -105,12 +119,23 @@ Observed checks on the pinned source:
 - `GOMAXPROCS=2 go test -race ./research/me014composition ./exchange ./simulation -run 'TestConsumerCanCompose|TestUnavailableVenue|TestRunnerStopsBeforeVenue|TestRunnerStop|TestBeforeTimestampPhase' -count=1` — passed.
 - `GOMAXPROCS=2 go vet ./research/me014composition` — passed.
 
-The captured full `make test` attempt returned exit code 2. `go test ./...` and
-the integrated-long-run contract, R2 contract, and non-R2 archive scripts
-passed. The final R2 archive/parity script rejected the dirty worktree because
-its parity gate requires a clean checkout; the new fixture and note were still
-untracked at that point. This is a failed gate attempt, not a pass. The full
-gate must be repeated from the committed clean candidate before promotion.
+The captured full `make test` attempt on the uncommitted worktree returned exit
+code 2. `go test ./...` and the integrated-long-run contract, R2 contract, and
+non-R2 archive scripts passed. The final R2 archive/parity script rejected the
+dirty worktree because its parity gate requires a clean checkout; the new
+fixture and note were still untracked. This failed attempt is preserved as a
+failed gate, not a pass.
+
+After commit `59dca4a02a8aadc69dd72172c93fcc8286578d47`,
+`GOMAXPROCS=2 make test` ran from a clean worktree and returned exit code 0.
+`go test ./...` and all four integrated-long-run contract/archive scripts
+passed; Go's valid package test cache was used where applicable. The R2
+contract script's `sv1dresource: measured command was incomplete: exit status
+7` line is its expected fail-closed fixture, followed by the script's pass
+result. This verifies software contracts only, not ME-014 readiness. The
+follow-up two-venue/stepped-boundary test is a subsequent source change: its
+focused and targeted race tests pass, but the full `make test` gate must be
+repeated clean after its commit.
 
 Not tested: production mark/index derivation; funding calculations or posting;
 fractional remainder and finite reserve accounting; live settlement positions;
