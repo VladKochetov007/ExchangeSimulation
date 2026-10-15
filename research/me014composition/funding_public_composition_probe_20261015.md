@@ -43,12 +43,13 @@ The current legacy `SettleFunding` / `CheckAndSettleFunding` path remains distin
 
 ## Independent check and validation
 
-- Fresh Sol-6 medium reviewer Bernoulli: **ACCEPT**, limited to arithmetic/accounting accuracy and claim boundaries. The reviewer checked the actual external test, preview implementation, and legacy funding path; found no must-fix issue; did not run tests or simulations.
+- Fresh Sol-6 medium reviewer Bernoulli: **ACCEPT**, limited to arithmetic/accounting accuracy and claim boundaries. The reviewer inspected this two-file diff against baseline `a9dcd1f`; that exact content is commit `c3d1fee806f5361a77dede5c4ad865d659e041fb`. The reviewer checked the external test, preview implementation, and legacy funding path; found no must-fix issue; did not run tests or simulations.
 - `GOMAXPROCS=2 go test -race ./research/me014composition -count=1`: passed.
 - `GOMAXPROCS=2 go vet ./research/me014composition`: passed.
 - `GOMAXPROCS=2 go test ./...`: passed, exit 0. The exact candidate test was included; most unrelated package results were cached.
 - `git diff --check`: passed.
-- The full `make test` gate remains pending until this exact candidate is committed, because its retained-archive/parity scripts reject a dirty worktree. No economic worlds or holdouts were run or inspected.
+- `GOMAXPROCS=2 GOFLAGS=-p=2 make test` on clean commit `c3d1fee806f5361a77dede5c4ad865d659e041fb`: passed, exit 0. This included all Go package tests and integrated-long-run, R2, and archive contract scripts. The printed `sv1dresource ... exit status 7` is the contract's expected incomplete-measurement negative fixture; the enclosing script and overall gate passed.
+- No economic worlds or holdouts were run or inspected.
 
 ## Decision
 
